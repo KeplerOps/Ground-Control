@@ -2,11 +2,12 @@
 
 import os
 import json
+import argparse
 from jira import JIRA
 
 JIRA_URL = os.environ.get("JIRA_URL", "")
 BOARD_ID = os.environ.get("JIRA_PROJECT", "")
-OUTPUT_DIR = "tickets"
+DEFAULT_OUTPUT_DIR = "tickets"
 
 # Authentication: typically via an API token
 # To create an API token: https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/
@@ -99,7 +100,7 @@ def create_ticket_directory(issue, jira, parent_dir=None):
     dir_name = dir_name.strip('. ')
     
     # Use parent directory if provided, otherwise use OUTPUT_DIR
-    base_dir = parent_dir if parent_dir else OUTPUT_DIR
+    base_dir = parent_dir if parent_dir else DEFAULT_OUTPUT_DIR
     issue_dir = os.path.join(base_dir, dir_name)
     os.makedirs(issue_dir, exist_ok=True)
 
@@ -169,7 +170,57 @@ def create_ticket_directory(issue, jira, parent_dir=None):
 
     return issue_dir
 
+def check_directory(directory):
+    """Check if directory exists and is empty, create if missing."""
+    if os.path.exists(directory):
+        if os.path.isdir(directory):
+            if os.listdir(directory):
+                raise ValueError(
+                    f"Output directory '{directory}' exists and is not empty.\n"
+                    "Please specify a different directory or remove the existing content."
+                )
+        else:
+            raise ValueError(
+                f"'{directory}' exists but is not a directory.\n"
+                "Please specify a different path."
+            )
+    else:
+        os.makedirs(directory)
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Sync JIRA tickets to local filesystem with hierarchy."
+    )
+    parser.add_argument(
+        "-o", "--output",
+        default=DEFAULT_OUTPUT_DIR,
+        help=f"Output directory (default: {DEFAULT_OUTPUT_DIR})"
+    )
+    parser.add_argument(
+        "ticket",
+        nargs="?",
+        help="Specific ticket to fetch (e.g., SECOPS-123). If not provided, fetches all tickets."
+    )
+    parser.add_argument(
+        "-r", "--recursive",
+        action="store_true",
+        help="When fetching a specific ticket, also fetch its children recursively"
+    )
+    return parser.parse_args()
+
 def main():
+    # Parse command line arguments
+    args = parse_args()
+    output_dir = args.output
+
+    # Check and prepare output directory
+    try:
+        check_directory(output_dir)
+    except ValueError as e:
+        print(f"Error: {e}")
+        return 1
+
     # Check for credentials
     print(f"Debug: Reading environment variables...")
     print(f"JIRA_USERNAME: {os.environ.get('JIRA_USERNAME', 'not set')}")
@@ -178,7 +229,7 @@ def main():
     if USERNAME == "<your-email>" or API_TOKEN == "<your-api-token>":
         print("Error: Please set JIRA_USERNAME and JIRA_API_TOKEN environment variables")
         print("Visit: https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/")
-        return
+        return 1
 
     # Connect to Jira
     jira = JIRA(
@@ -186,16 +237,26 @@ def main():
         basic_auth=(USERNAME, API_TOKEN)
     )
 
-    # Build JQL query:
-    # 1. All Initiatives and Epics
-    # 2. Stories/Tasks that have parents
-    # 3. Open Stories/Tasks without parents
-    jql = f"""project = {BOARD_ID} AND type != Sub-task AND (
-        issuetype in (Initiative, Epic) OR
-        parent is not empty OR
-        "Epic Link" is not empty OR
-        (issuetype not in (Initiative, Epic) AND statusCategory != Done AND status != Cancelled)
-    )"""
+    # Build JQL query based on arguments
+    if args.ticket:
+        if args.recursive:
+            # Get the ticket and all its children
+            jql = f"""project = {BOARD_ID} AND (
+                key = {args.ticket} OR
+                parent = {args.ticket} OR
+                "Epic Link" = {args.ticket}
+            )"""
+        else:
+            # Get just the specific ticket
+            jql = f"project = {BOARD_ID} AND key = {args.ticket}"
+    else:
+        # Default behavior: get all tickets with hierarchy rules
+        jql = f"""project = {BOARD_ID} AND type != Sub-task AND (
+            issuetype in (Initiative, Epic) OR
+            parent is not empty OR
+            "Epic Link" is not empty OR
+            (issuetype not in (Initiative, Epic) AND statusCategory != Done AND status != Cancelled)
+        )"""
 
     # Collect all issues (paging through results)
     start_at = 0
@@ -218,8 +279,8 @@ def main():
             break
 
     # Create output directory and unassigned directory
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    unassigned_dir = os.path.join(OUTPUT_DIR, "0-UNASSIGNED")
+    os.makedirs(output_dir, exist_ok=True)
+    unassigned_dir = os.path.join(output_dir, "0-UNASSIGNED")
     os.makedirs(unassigned_dir, exist_ok=True)
     
     # Sort issues by type to ensure proper hierarchy
@@ -259,11 +320,13 @@ def main():
         else:
             issue_dirs[issue.key] = create_ticket_directory(issue, jira, unassigned_dir)
 
-    print(f"Synced {len(all_issues)} open issues into '{OUTPUT_DIR}/'")
+    print(f"Synced {len(all_issues)} open issues into '{output_dir}/'")
     print(f"- Initiatives: {len(initiatives)}")
     print(f"- Epics: {len(epics)}")
     print(f"- Stories/Tasks: {len(others)}")
     print("Tickets are organized in a hierarchy based on their relationships")
 
+    return 0
+
 if __name__ == "__main__":
-    main()
+    exit(main())
