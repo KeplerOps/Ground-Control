@@ -36,7 +36,7 @@ def cleanup_directory(directory):
             else:
                 os.remove(item_path)
 
-def get_issue_relationships(issue):
+def get_issue_relationships(issue, jira):
     """Get parent and children relationships for an issue."""
     relationships = {
         "parent": None,
@@ -55,7 +55,7 @@ def get_issue_relationships(issue):
                 pass
     
     # Get parent (could be epic link or initiative)
-    if hasattr(issue.fields, 'parent'):
+    if hasattr(issue.fields, 'parent') and issue.fields.parent is not None:
         parent = issue.fields.parent
         relationships["parent"] = {
             "key": parent.key,
@@ -63,9 +63,10 @@ def get_issue_relationships(issue):
         }
     elif hasattr(issue.fields, 'customfield_10014') and issue.fields.customfield_10014:  # Epic link field
         epic_key = issue.fields.customfield_10014
+        epic = jira.issue(epic_key)
         relationships["parent"] = {
             "key": epic_key,
-            "type": "Epic"
+            "type": epic.fields.issuetype.name
         }
 
     return relationships
@@ -105,7 +106,7 @@ def create_ticket_directory(issue, jira, parent_dir=None):
     os.makedirs(issue_dir, exist_ok=True)
 
     # Get relationships
-    relationships = get_issue_relationships(issue)
+    relationships = get_issue_relationships(issue, jira)
 
     # Build metadata
     metadata = {
@@ -306,7 +307,7 @@ def main():
 
     # Second: Create epics under their initiatives
     for issue in epics:
-        relationships = get_issue_relationships(issue)
+        relationships = get_issue_relationships(issue, jira)
         if relationships["parent"] and relationships["parent"]["key"] in issue_dirs:
             issue_dirs[issue.key] = create_ticket_directory(issue, jira, issue_dirs[relationships["parent"]["key"]])
         else:
@@ -314,7 +315,7 @@ def main():
 
     # Finally: Create stories/tasks under their epics or in unassigned
     for issue in others:
-        relationships = get_issue_relationships(issue)
+        relationships = get_issue_relationships(issue, jira)
         if relationships["parent"] and relationships["parent"]["key"] in issue_dirs:
             issue_dirs[issue.key] = create_ticket_directory(issue, jira, issue_dirs[relationships["parent"]["key"]])
         else:
