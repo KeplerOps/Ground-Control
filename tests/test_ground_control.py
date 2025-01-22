@@ -9,6 +9,8 @@ from ground_control.main import (
     get_issue_relationships,
     create_ticket_directory,
     parse_args,
+    cleanup_directory,
+    main,
 )
 
 def test_sanitize_filename():
@@ -192,3 +194,137 @@ def test_parse_args():
         args = parse_args()
         assert args.ticket == "SECOPS-123"
         assert args.recursive 
+
+def test_cleanup_directory(tmp_path):
+    """Test directory cleanup functionality."""
+    # Create test directory structure
+    test_dir = tmp_path / "test_cleanup"
+    test_dir.mkdir()
+    
+    # Create some files
+    (test_dir / "file1.txt").write_text("content1")
+    (test_dir / "file2.txt").write_text("content2")
+    
+    # Create a subdirectory with files
+    subdir = test_dir / "subdir"
+    subdir.mkdir()
+    (subdir / "file3.txt").write_text("content3")
+    
+    # Run cleanup
+    cleanup_directory(str(test_dir))
+    
+    # Verify directory is empty
+    assert os.path.exists(test_dir)
+    assert len(os.listdir(test_dir)) == 0
+
+def test_create_ticket_directory_long_summary(tmp_path):
+    """Test ticket directory creation with long summary."""
+    # Mock JIRA issue with long summary
+    issue = Mock()
+    issue.key = "SECOPS-123"
+    issue.id = "10000"
+    issue.fields.issuetype.name = "Story"
+    issue.fields.status.name = "In Progress"
+    issue.fields.summary = "This is a very long summary that should be truncated because it exceeds fifty characters"
+    issue.fields.reporter = "John Doe"
+    issue.fields.assignee = None  # Test None assignee
+    issue.fields.updated = "2024-01-22T12:34:56"
+    issue.fields.description = "Test description"
+    
+    # Mock JIRA client
+    jira = Mock()
+    jira.comments.return_value = []  # Test no comments
+    
+    # Create ticket directory
+    with patch('ground_control.main.get_issue_relationships') as mock_get_rels:
+        mock_get_rels.return_value = {"parent": None, "children": []}
+        dir_path = create_ticket_directory(issue, jira, tmp_path)
+    
+    # Verify directory name is truncated
+    dir_name = os.path.basename(dir_path)
+    assert len(dir_name) < 100  # Reasonable length
+    assert dir_name.startswith("STORY-SECOPS-123-This is a very long summary that")
+    assert dir_name.endswith("...")
+
+@patch('ground_control.main.JIRA')
+@patch('ground_control.main.USERNAME', 'test@example.com')
+@patch('ground_control.main.API_TOKEN', 'test-token')
+@patch('ground_control.main.JIRA_URL', 'https://jira.example.com')
+@patch('ground_control.main.BOARD_ID', 'SECOPS')
+def test_main_jira_connection(mock_jira_class, *_):
+    """Test main function's JIRA connection and error handling."""
+    # Mock environment variables
+    env_vars = {
+        "JIRA_URL": "https://jira.example.com",
+        "JIRA_PROJECT": "SECOPS",
+        "JIRA_USERNAME": "test@example.com",
+        "JIRA_API_TOKEN": "test-token"
+    }
+    
+    with patch.dict(os.environ, env_vars, clear=True), \
+         patch('sys.argv', ['ground-control', '-o', 'test_output']), \
+         patch('ground_control.main.check_directory'), \
+         patch('ground_control.main.cleanup_directory'):
+        
+        # Mock JIRA client and search results
+        mock_jira_instance = Mock()
+        mock_jira_class.return_value = mock_jira_instance
+        
+        # Mock issues of different types
+        initiative = Mock()
+        initiative.fields = Mock()
+        initiative.fields.issuetype = Mock()
+        initiative.fields.issuetype.name = "Initiative"
+        initiative.key = "SECOPS-1"
+        
+        epic = Mock()
+        epic.fields = Mock()
+        epic.fields.issuetype = Mock()
+        epic.fields.issuetype.name = "Epic"
+        epic.key = "SECOPS-2"
+        
+        story = Mock()
+        story.fields = Mock()
+        story.fields.issuetype = Mock()
+        story.fields.issuetype.name = "Story"
+        story.key = "SECOPS-3"
+        
+        # Set up mock search results
+        mock_jira_instance.search_issues.return_value = [initiative, epic, story]
+        
+        # Run main
+        with patch('ground_control.main.create_ticket_directory') as mock_create_dir:
+            mock_create_dir.return_value = "test_dir"
+            exit_code = main()
+        
+        # Verify JIRA client creation
+        mock_jira_class.assert_called_once_with(
+            server="https://jira.example.com",
+            basic_auth=("test@example.com", "test-token")
+        )
+        
+        # Verify issue search
+        mock_jira_instance.search_issues.assert_called()
+        
+        # Verify exit code
+        assert exit_code == 0
+
+@patch('ground_control.main.JIRA')
+def test_main_missing_credentials(mock_jira_class):
+    """Test main function with missing credentials."""
+    # Mock environment variables with missing credentials
+    env_vars = {
+        "JIRA_URL": "https://jira.example.com",
+        "JIRA_PROJECT": "SECOPS",
+        "JIRA_USERNAME": "<your-email>",  # Default value
+        "JIRA_API_TOKEN": "<your-api-token>"  # Default value
+    }
+    
+    with patch.dict(os.environ, env_vars), \
+         patch('sys.argv', ['ground-control']):
+        exit_code = main()
+        
+        # Should exit with error
+        assert exit_code == 1
+        # JIRA client should not be created
+        mock_jira_class.assert_not_called() 

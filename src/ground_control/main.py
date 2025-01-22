@@ -89,16 +89,11 @@ def create_ticket_directory(issue, jira, parent_dir=None):
     type_prefix = get_type_prefix(issue.fields.issuetype.name)
     
     # Create directory name with type prefix, key and truncated summary
-    summary = issue.fields.summary
+    summary = sanitize_filename(issue.fields.summary)
     if len(summary) > 50:  # Truncate long summaries
         summary = summary[:47] + "..."
     
     dir_name = f"{type_prefix}-{issue.key}-{summary}"
-    # Replace invalid characters
-    invalid_chars = '<>:"/\\|?*'
-    for c in invalid_chars:
-        dir_name = dir_name.replace(c, '_')
-    dir_name = dir_name.strip('. ')
     
     # Use parent directory if provided, otherwise use OUTPUT_DIR
     base_dir = parent_dir if parent_dir else DEFAULT_OUTPUT_DIR
