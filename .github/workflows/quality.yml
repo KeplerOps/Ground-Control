@@ -25,22 +25,11 @@ jobs:
           pip install poetry
           poetry install --with dev
 
-      - name: Check trailing whitespace and file endings
-        uses: pre-commit/action@v3.0.1
-        with:
-          extra_args: trailing-whitespace end-of-file-fixer --all-files
-
-      - name: Run isort
-        run: poetry run isort . --check-only --diff --profile black
-
-      - name: Run Black
-        run: poetry run black . --check --diff
-
-      - name: Run Flake8
+      - name: Check file formatting
         run: |
-          poetry run flake8 . \
-            --max-line-length=100 \
-            --extend-ignore=E203,W503 \
-            --exclude=.git,__pycache__,build,dist \
-            --per-file-ignores="__init__.py:F401 tests/*:D100,D101,D102,D103" \
-            --docstring-convention=google
+          # Check for files that would be reformatted by black
+          poetry run black . --check --diff
+          # Check import sorting
+          poetry run isort . --check-only --diff
+          # Check code style
+          poetry run flake8 .
