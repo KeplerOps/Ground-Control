@@ -3,7 +3,7 @@ requires = ['setuptools>=42']
 build-backend = 'setuptools.build_meta'
 
 [tool.poetry]
-name = "ground-control"
+name = "grndctl"
 version = "1.0.0"
 description = "A tool for syncing Jira tickets with local files"
 authors = ["Brad Edwards <j.bradley.edwards@gmail.com>"]
@@ -22,7 +22,7 @@ flake8 = "^7.1.1"
 bandit = "^1.8.2"
 
 [tool.poetry.scripts]
-ground-control = "ground_control.main:main"
+gctl = "ground_control.main:main"
 
 [tool.black]
 line-length = 100

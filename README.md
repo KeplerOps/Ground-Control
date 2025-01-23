@@ -29,14 +29,14 @@ poetry install
 
 ```bash
 # Download all tickets
-poetry run ground-control
+poetry run grndctl
 
 # Download a specific ticket
-poetry run ground-control PROJ-123
+poetry run grndctl PROJ-123
 
 # Download a ticket and its children
-poetry run ground-control PROJ-123 -r
+poetry run grndctl PROJ-123 -r
 
 # Use a different output directory
-poetry run ground-control -o /path/to/dir
+poetry run grndctl -o /path/to/dir
 ```
