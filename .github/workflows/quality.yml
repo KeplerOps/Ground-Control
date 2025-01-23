@@ -1,0 +1,35 @@
+name: Quality Checks
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+          poetry install --with dev
+
+      - name: Check file formatting
+        run: |
+          # Check for files that would be reformatted by black
+          poetry run black . --check --diff
+          # Check import sorting
+          poetry run isort . --check-only --diff
+          # Check code style
+          poetry run flake8 .
