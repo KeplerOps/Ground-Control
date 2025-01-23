@@ -4,7 +4,7 @@ build-backend = 'setuptools.build_meta'
 
 [tool.poetry]
 name = "grndctl"
-version = "1.0.0"
+version = "1.0.1"
 description = "A tool for syncing Jira tickets with local files"
 authors = ["Brad Edwards <j.bradley.edwards@gmail.com>"]
 
