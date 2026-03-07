@@ -1,5 +1,8 @@
 # Ground Control — Open IT Risk Management Platform
 
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=KeplerOps_Ground-Control&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=KeplerOps_Ground-Control)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Ground Control is an open, self-hostable IT Risk Management (ITRM) platform
 designed to replace proprietary GRC tools like AuditBoard ITRM. It provides a
 modern, API-first, plugin-extensible system for managing IT risk assessments,
@@ -9,7 +12,7 @@ such as SOX ITGC, SOC 2, ISO 27001, NIST CSF/800-53, COBIT, and PCI-DSS.
 ## Key Principles
 
 - **Open & Self-Hostable** — Deploy on-prem, in your cloud, or use a managed instance.
-- **API-First** — Every capability is available through a versioned REST + GraphQL API.
+- **API-First** — Every capability is available through a versioned REST API.
 - **Agent-Ready** — First-class support for AI agents performing assessments.
 - **Plugin Architecture** — Extend with custom frameworks, integrations, and workflows.
 - **Artifact-Centric** — Documents, evidence, and work products are first-class objects with full lineage.
@@ -25,7 +28,7 @@ such as SOX ITGC, SOC 2, ISO 27001, NIST CSF/800-53, COBIT, and PCI-DSS.
 | [Use Cases (UML)](docs/user-stories/USE_CASES.md) | UML use case diagrams and descriptions |
 | [Architecture](docs/architecture/ARCHITECTURE.md) | System architecture, component diagrams, data flow |
 | [Data Model](docs/architecture/DATA_MODEL.md) | Entity-relationship model and storage design |
-| [API Specification](docs/api/API_SPEC.md) | REST & GraphQL API design and plugin architecture |
+| [API Specification](docs/api/API_SPEC.md) | REST API design and plugin architecture |
 | [Deployment & SSO](docs/deployment/DEPLOYMENT.md) | Deployment topologies, SSO configuration, operations |
 
 ## License
