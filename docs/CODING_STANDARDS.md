@@ -301,7 +301,7 @@ Every error response includes `request_id` for correlation.
 - Linter: `ruff check`
 - Type checker: `mypy --strict`
 - All functions have type annotations. No `Any` unless unavoidable (and commented why).
-- Line length: 99 characters.
+- Line length: 100 characters.
 - Imports: sorted by `ruff` (isort-compatible).
 - Docstrings: only on public API boundaries (use case functions, service classes). Not on every method. Code should be self-explanatory.
 

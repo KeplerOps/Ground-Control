@@ -30,3 +30,4 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | [006](006-multi-tenancy-strategy.md) | Multi-Tenancy Strategy (Shared Schema Default) | Accepted |
 | [007](007-agent-first-design.md) | Agent-First Design (AI Agents as First-Class Actors) | Accepted |
 | [008](008-clean-architecture.md) | Clean Architecture (API / Domain / Infrastructure) | Accepted |
+| [009](009-coding-standards.md) | Coding Standards and Tooling | Accepted |

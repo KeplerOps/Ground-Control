@@ -29,7 +29,7 @@ docs/                         # Design documentation
 **Read `docs/CODING_STANDARDS.md` before writing any code.** Key rules:
 
 ### Python
-- Formatter/Linter: `ruff` (line length 99)
+- Formatter/Linter: `ruff` (line length 100)
 - Type checker: `mypy --strict`
 - All public functions require type annotations
 - Google-style docstrings on public API boundaries only
