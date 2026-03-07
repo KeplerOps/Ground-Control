@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-03-07
+
+### Added
+
+- ADR framework with MADR template (`architecture/adrs/000-template.md`)
+- ADR index (`architecture/adrs/README.md`)
+- Initial ADRs for foundational decisions:
+  - ADR-001: Python 3.12+ with FastAPI for backend
+  - ADR-002: PostgreSQL 16+ as primary database
+  - ADR-003: API-first design (REST)
+  - ADR-004: Plugin architecture for extensibility
+  - ADR-005: Event-driven architecture with domain events
+  - ADR-006: Multi-tenancy strategy (shared schema default)
+  - ADR-007: Agent-first design (AI agents as first-class actors)
+  - ADR-008: Clean architecture (API / Domain / Infrastructure layers)
+
 ## [0.3.0] - 2026-03-07
 
 ### Added
