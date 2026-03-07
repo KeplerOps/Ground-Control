@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-03-07
+
+### Added
+
+- `backend/pyproject.toml` with ruff (line length 100, Python 3.12, security/typing/style rules) and mypy strict config
+- `CONTRIBUTING.md` documenting coding standards, architecture rules, branch strategy, and testing conventions
+- ADR-009: Coding Standards and Tooling
+
+### Changed
+
+- Line length updated from 99 to 100 in CODING_STANDARDS.md, .editorconfig, and CLAUDE.md
+
 ## [0.4.0] - 2026-03-07
 
 ### Added
