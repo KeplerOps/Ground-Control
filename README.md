@@ -30,4 +30,4 @@ such as SOX ITGC, SOC 2, ISO 27001, NIST CSF/800-53, COBIT, and PCI-DSS.
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

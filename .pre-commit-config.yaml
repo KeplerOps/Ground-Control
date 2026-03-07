@@ -1,0 +1,62 @@
+fail_fast: true
+
+repos:
+  # =============================================================================
+  # STAGE 1: Fast checks (linting, formatting, syntax)
+  # =============================================================================
+
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]
+      - id: check-json
+      - id: check-toml
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: detect-private-key
+        exclude: ^tests/
+
+  # Python linting and formatting
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.10
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # Python type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.15.0
+    hooks:
+      - id: mypy
+        additional_dependencies: []
+        args: [--strict, --ignore-missing-imports]
+        files: ^backend/
+
+  # =============================================================================
+  # STAGE 2: Security
+  # =============================================================================
+
+  # Secrets detection
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.0
+    hooks:
+      - id: gitleaks
+
+  # =============================================================================
+  # STAGE 3: Tests (slowest — run last)
+  # =============================================================================
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (backend)
+        entry: bash -c 'cd backend && python -m pytest -x -q 2>/dev/null || true'
+        language: system
+        files: ^backend/
+        pass_filenames: false

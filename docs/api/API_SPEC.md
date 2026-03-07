@@ -66,27 +66,17 @@ Authorization: ApiKey <key>
 
 ```json
 {
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "type": "risk",
-    "attributes": {
-      "ref_id": "RISK-001",
-      "title": "Unauthorized access to production database",
-      "category": "access_management",
-      "status": "open",
-      "inherent_likelihood": 4,
-      "inherent_impact": 5,
-      "inherent_score": 20,
-      "created_at": "2026-03-01T10:00:00Z",
-      "updated_at": "2026-03-07T14:30:00Z"
-    },
-    "relationships": {
-      "owner": { "id": "...", "type": "user" },
-      "controls": [
-        { "id": "...", "type": "control" }
-      ]
-    }
-  }
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "ref_id": "RISK-001",
+  "title": "Unauthorized access to production database",
+  "category": "access_management",
+  "status": "open",
+  "inherent_likelihood": 4,
+  "inherent_impact": 5,
+  "inherent_score": 20,
+  "owner_id": "...",
+  "created_at": "2026-03-01T10:00:00Z",
+  "updated_at": "2026-03-07T14:30:00Z"
 }
 ```
 
@@ -94,7 +84,7 @@ Authorization: ApiKey <key>
 
 ```json
 {
-  "data": [ ... ],
+  "items": [ ... ],
   "meta": {
     "total": 142,
     "page": 1,
@@ -146,6 +136,22 @@ Authorization: ApiKey <key>
 | 429 | Too Many Requests (rate limited) |
 | 500 | Internal Server Error |
 
+### 3.4 PATCH Semantics
+
+PATCH requests use JSON Merge Patch ([RFC 7396](https://tools.ietf.org/html/rfc7396)). Send only the fields to update:
+
+```
+PATCH /api/v1/risks/{id}
+Content-Type: application/merge-patch+json
+
+{
+  "status": "mitigated",
+  "residual_likelihood": 2
+}
+```
+
+Fields not included in the request body are left unchanged. Set a field to `null` to clear it.
+
 ---
 
 ## 4. Core API Endpoints
@@ -159,7 +165,8 @@ Authorization: ApiKey <key>
 | GET | `/api/v1/risks/{id}` | Get a risk by ID |
 | PUT | `/api/v1/risks/{id}` | Replace a risk |
 | PATCH | `/api/v1/risks/{id}` | Partial update a risk |
-| DELETE | `/api/v1/risks/{id}` | Archive a risk |
+| POST | `/api/v1/risks/{id}/archive` | Archive a risk (soft-delete) |
+| DELETE | `/api/v1/risks/{id}` | Delete a risk (hard-delete, admin only) |
 | GET | `/api/v1/risks/{id}/treatments` | List treatment plans for a risk |
 | POST | `/api/v1/risks/{id}/treatments` | Create a treatment plan |
 | GET | `/api/v1/risks/{id}/controls` | List linked controls |
@@ -180,7 +187,8 @@ GET /api/v1/risks?category=access_management&status=open&inherent_score[gte]=15&
 | GET | `/api/v1/controls/{id}` | Get a control |
 | PUT | `/api/v1/controls/{id}` | Replace a control |
 | PATCH | `/api/v1/controls/{id}` | Partial update |
-| DELETE | `/api/v1/controls/{id}` | Retire a control |
+| POST | `/api/v1/controls/{id}/retire` | Retire a control |
+| DELETE | `/api/v1/controls/{id}` | Delete a control (hard-delete, admin only) |
 | GET | `/api/v1/controls/{id}/mappings` | List framework mappings |
 | POST | `/api/v1/controls/{id}/mappings` | Add a framework mapping |
 | DELETE | `/api/v1/controls/{id}/mappings/{mapping_id}` | Remove mapping |
@@ -331,62 +339,7 @@ GET /api/v1/risks?category=access_management&status=open&inherent_score[gte]=15&
 
 ## 5. GraphQL API
 
-Available at `POST /graphql`. Example queries:
-
-### 5.1 Nested Control Query
-
-```graphql
-query {
-  controls(filter: { framework: "SOX_ITGC", effectiveness: "ineffective" }) {
-    id
-    refId
-    title
-    effectivenessRating
-    owner { displayName email }
-    frameworkMappings {
-      framework { name }
-      requirement { refId title }
-    }
-    latestTestResult {
-      conclusion
-      completedAt
-      agentProduced
-      steps { conclusion actualResult }
-    }
-    findings(status: OPEN) {
-      title
-      classification
-      riskRating
-      remediation { status targetDate }
-    }
-  }
-}
-```
-
-### 5.2 Risk Dashboard Query
-
-```graphql
-query {
-  riskDashboard(period: "2026-Q1") {
-    heatMap {
-      likelihood
-      impact
-      count
-      risks { id title }
-    }
-    topRisks(limit: 10) {
-      id title inherentScore residualScore trend
-    }
-    treatmentStatus {
-      planned inProgress completed
-    }
-    appetiteBreaches {
-      risk { id title }
-      exceedanceAmount
-    }
-  }
-}
-```
+Deferred. The REST API with `include`, `fields`, and filter parameters covers current query needs. GraphQL may be added in a future version for complex relational queries.
 
 ---
 
@@ -433,7 +386,6 @@ POST /api/v1/webhooks
 | Authenticated user | 1000 req/min |
 | Agent | 500 req/min |
 | API key (service account) | 2000 req/min |
-| Unauthenticated | 60 req/min |
 
 Rate limit headers:
 ```
@@ -474,7 +426,7 @@ version: 1.2.0
 type: evidence_collector
 author: Ground Control Community
 description: Collects evidence from AWS Config, SecurityHub, and CloudTrail
-license: Apache-2.0
+license: MIT
 
 requires:
   ground_control: ">=0.4.0"
@@ -584,7 +536,6 @@ Install → Configure → Enable → Running → Disable → Uninstall
 | Mechanism | Description |
 |---|---|
 | **Process isolation** | Plugins run in separate processes (default for Python plugins) |
-| **WASM sandbox** | Optional: compile plugin to WASM for stricter isolation |
 | **Scoped SDK** | Plugin SDK only exposes permitted operations based on declared permissions |
 | **Resource limits** | CPU time, memory, and API call rate limits per plugin |
 | **Audit trail** | All plugin actions logged with plugin identity |

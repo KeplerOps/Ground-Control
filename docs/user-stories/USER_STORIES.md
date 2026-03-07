@@ -9,7 +9,7 @@ Stories are grouped by epic and reference personas from the PRD.
 
 ## Epic 1: Risk Management
 
-### US-1.1 — Maintain Risk Register
+### US-1.1 — Maintain Risk Register [MVP]
 **As** Riley (IT Risk Manager),
 **I want** to create, view, edit, and archive IT risks in a centralized register,
 **So that** the organization has a single source of truth for its IT risk landscape.
@@ -67,13 +67,13 @@ Stories are grouped by epic and reference personas from the PRD.
 - [ ] Dashboard shows: risk heat map, top 10 risks, trend over last 4 quarters, treatment plan status
 - [ ] Can filter by business unit, category, assessment period
 - [ ] Can export dashboard as PDF for board reporting
-- [ ] Dashboard refreshes in real-time as data changes
+- [ ] Dashboard data refreshes on page load
 
 ---
 
 ## Epic 2: Control Management
 
-### US-2.1 — Maintain Control Catalog
+### US-2.1 — Maintain Control Catalog [MVP]
 **As** Avery (Internal Auditor),
 **I want** to maintain a catalog of IT controls with standard attributes,
 **So that** controls are consistently documented and testable.
@@ -113,7 +113,7 @@ Stories are grouped by epic and reference personas from the PRD.
 
 ## Epic 3: Assessment & Testing
 
-### US-3.1 — Plan Assessment Campaign
+### US-3.1 — Plan Assessment Campaign [MVP]
 **As** Avery,
 **I want** to create an assessment campaign that defines scope, timeline, and team assignments,
 **So that** testing work is organized and tracked.
@@ -125,7 +125,7 @@ Stories are grouped by epic and reference personas from the PRD.
 - [ ] Can set milestones (fieldwork start, fieldwork end, review deadline, final report)
 - [ ] Calendar view shows all campaigns and milestones
 
-### US-3.2 — Execute Test Procedures
+### US-3.2 — Execute Test Procedures [MVP]
 **As** Avery,
 **I want** to execute test procedures against a control and record results step by step,
 **So that** testing is thorough, consistent, and documented.
@@ -180,7 +180,7 @@ Stories are grouped by epic and reference personas from the PRD.
 
 ## Epic 4: Evidence & Artifact Management
 
-### US-4.1 — Upload and Manage Artifacts
+### US-4.1 — Upload and Manage Artifacts [MVP]
 **As** Jordan (Control Owner),
 **I want** to upload files as evidence and have them securely stored with version tracking,
 **So that** evidence is preserved with integrity for audit purposes.
@@ -192,7 +192,7 @@ Stories are grouped by epic and reference personas from the PRD.
 - [ ] Can tag artifacts with metadata (type, period, control, system)
 - [ ] Can preview common file types in-browser (PDF, images, text, spreadsheets)
 
-### US-4.2 — Link Evidence to Entities
+### US-4.2 — Link Evidence to Entities [MVP]
 **As** Avery,
 **I want** to link an artifact to one or more controls, test steps, risks, or findings,
 **So that** evidence relationships are explicit and traceable.
@@ -231,7 +231,7 @@ Stories are grouped by epic and reference personas from the PRD.
 
 ## Epic 5: Findings & Remediation
 
-### US-5.1 — Record Findings
+### US-5.1 — Record Findings [MVP]
 **As** Avery,
 **I want** to create findings when control testing identifies deficiencies,
 **So that** gaps are formally documented and tracked to remediation.
@@ -288,7 +288,7 @@ Stories are grouped by epic and reference personas from the PRD.
 **So that** I can answer specific questions about the risk and control data.
 
 **Acceptance Criteria:**
-- [ ] Report builder UI with selectable entities (risks, controls, findings, assessments)
+- [ ] Report view with selectable entities, filters, and export (risks, controls, findings, assessments)
 - [ ] Can add filters, sort, group, and aggregate
 - [ ] Can save reports as templates for reuse
 - [ ] Export to CSV, Excel, PDF
@@ -321,7 +321,7 @@ Stories are grouped by epic and reference personas from the PRD.
 - [ ] Can enforce SSO (disable local password login)
 - [ ] JIT (just-in-time) provisioning creates user accounts on first SSO login
 
-### US-7.2 — Manage Users and Roles
+### US-7.2 — Manage Users and Roles [MVP]
 **As** Sam,
 **I want** to manage users, groups, and role assignments with fine-grained permissions,
 **So that** users only access what they need.

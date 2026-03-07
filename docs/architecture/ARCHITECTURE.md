@@ -43,12 +43,12 @@
 ┌─────────────────────────────────────────────────────────────────────┐
 │                     APPLICATION LAYER                                │
 │                                                                     │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
-│  │  REST API Server  │  │ GraphQL Server   │  │  Webhook Ingress │  │
-│  │  (OpenAPI 3.1)    │  │                  │  │                  │  │
-│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘  │
-│           │                     │                      │            │
-│           ▼                     ▼                      ▼            │
+│  ┌──────────────────┐                        ┌──────────────────┐  │
+│  │  REST API Server  │                        │  Webhook Ingress │  │
+│  │  (OpenAPI 3.1)    │                        │                  │  │
+│  └────────┬─────────┘                        └────────┬─────────┘  │
+│           │                                            │            │
+│           ▼                                            ▼            │
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │                    DOMAIN SERVICE LAYER                      │   │
 │  │                                                             │   │
@@ -88,7 +88,7 @@
 │                                                                     │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐  │
 │  │  PostgreSQL   │  │  Object Store │  │  Search Index            │  │
-│  │  (Primary DB) │  │  (S3/MinIO)   │  │  (Meilisearch/Typesense)│  │
+│  │  (Primary DB) │  │  (S3/MinIO)   │  │  (Search (PG tsvector)) │  │
 │  └──────────────┘  └──────────────┘  └──────────────────────────┘  │
 │  ┌──────────────┐  ┌──────────────┐                                │
 │  │  Redis/Valkey │  │  Audit Log   │                                │
@@ -107,7 +107,7 @@ The API gateway is the single entry point for all clients. Responsibilities:
 - **Authentication** — Validates JWT access tokens (issued by Auth Service)
 - **Rate Limiting** — Per-tenant and per-client throttling
 - **CORS** — Configurable origin policies
-- **Request Routing** — Routes to REST, GraphQL, or Webhook handlers
+- **Request Routing** — Routes to REST or Webhook handlers
 - **TLS Termination** — TLS 1.3 for all external connections
 
 Technology: Nginx/Envoy/Caddy (configurable) or cloud-native (ALB/Cloud Run).
@@ -134,43 +134,9 @@ OpenAPI 3.1 specification. Versioned at `/api/v1/`. Resources:
 
 All endpoints support: pagination, filtering, sorting, field selection, and `include` for related entities.
 
-### 3.3 GraphQL Server
-
-Optional GraphQL endpoint at `/graphql` for complex relational queries (e.g., "give me all controls mapped to SOX with their latest test results and linked findings"). Shares the same domain services as REST.
-
-### 3.4 Domain Services
+### 3.3 Domain Services
 
 Each service encapsulates a bounded context:
-
-```plantuml
-@startuml
-package "Domain Services" {
-
-  [Risk Service] as RS
-  [Control Service] as CS
-  [Assessment Service] as AS
-  [Evidence Service] as ES
-  [Finding Service] as FS
-  [Report Service] as RPS
-  [Workflow Service] as WS
-  [Agent Service] as AGS
-  [Auth Service] as AUS
-  [Tenant Service] as TS
-  [Plugin Service] as PS
-
-  RS --> CS : "risks link to controls"
-  CS --> AS : "controls tested in assessments"
-  AS --> ES : "assessments reference evidence"
-  AS --> FS : "assessments produce findings"
-  FS --> WS : "findings follow workflows"
-  AGS --> AS : "agents execute assessments"
-  PS --> CS : "plugins add frameworks"
-  PS --> ES : "plugins collect evidence"
-}
-@enduml
-```
-
-**Service responsibilities:**
 
 | Service | Responsibility |
 |---|---|
@@ -186,7 +152,7 @@ package "Domain Services" {
 | **Tenant Service** | Tenant lifecycle, isolation, configuration, resource limits |
 | **Plugin Service** | Plugin lifecycle, sandboxing, configuration, hook registration |
 
-### 3.5 Event Bus
+### 3.4 Event Bus
 
 Internal event bus for decoupling domain services. Supports:
 
@@ -208,7 +174,7 @@ Internal event bus for decoupling domain services. Supports:
 | `agent.result_submitted` | Agent Service | Workflow (route to review) |
 | `plugin.installed` | Plugin Service | Tenant Service |
 
-### 3.6 Plugin Runtime
+### 3.5 Plugin Runtime
 
 Plugins extend Ground Control without modifying core code.
 
@@ -218,8 +184,8 @@ Plugins extend Ground Control without modifying core code.
 │                                                │
 │  ┌──────────────────┐  ┌───────────────────┐   │
 │  │ Plugin Sandbox    │  │ Plugin Registry   │   │
-│  │ (Process Isolation│  │ (Catalog, Versions│   │
-│  │  or WASM)         │  │  Signatures)      │   │
+│  │ (Process Isolation)│ │ (Catalog, Versions│   │
+│  │                    │  │  Signatures)      │   │
 │  └──────────────────┘  └───────────────────┘   │
 │                                                │
 │  Plugin API Surface:                           │
@@ -231,9 +197,7 @@ Plugins extend Ground Control without modifying core code.
 │  └── Access scoped data via Plugin SDK         │
 │                                                │
 │  Security:                                     │
-│  ├── Signed packages (Ed25519)                 │
 │  ├── Declared permission scopes                │
-│  ├── Resource limits (CPU, memory, API calls)  │
 │  └── Audit logging of plugin actions           │
 └────────────────────────────────────────────────┘
 ```
@@ -249,14 +213,14 @@ Plugins extend Ground Control without modifying core code.
 | **Report Plugin** | Custom report templates or formats | Board report, regulator format |
 | **Agent Plugin** | Agent capabilities (scoring models, analyzers) | FAIR quantitative scoring |
 
-### 3.7 Data & Storage Layer
+### 3.6 Data & Storage Layer
 
 | Store | Technology | Purpose |
 |---|---|---|
 | **Primary Database** | PostgreSQL 16+ | All structured data, JSONB for flexible attributes |
 | **Object Store** | S3-compatible (S3, MinIO, GCS) | Evidence artifacts, report exports, attachments |
 | **Cache / Queue** | Redis or Valkey | Session cache, rate limit counters, background job queue |
-| **Search Index** | Meilisearch or Typesense | Full-text search across risks, controls, evidence, findings |
+| **Search Index** | PostgreSQL tsvector (built-in); optional Meilisearch for scale | Full-text search across risks, controls, evidence, findings |
 | **Audit Log** | PostgreSQL (append-only table) or external (immutable ledger) | Compliance audit trail |
 
 ---
@@ -316,9 +280,9 @@ For small teams or evaluation:
 │  │ GC App   │  │PostgreSQL│  │  MinIO   │ │
 │  │ (API+UI) │  │          │  │          │ │
 │  └──────────┘  └──────────┘  └──────────┘ │
-│  ┌──────────┐  ┌──────────┐               │
-│  │  Redis   │  │Meilisearch│              │
-│  └──────────┘  └──────────┘               │
+│  ┌──────────┐                              │
+│  │  Redis   │                              │
+│  └──────────┘                              │
 │                                            │
 │  Reverse Proxy: Caddy (auto TLS)          │
 └────────────────────────────────────────────┘
@@ -346,8 +310,8 @@ For production and multi-tenant:
 │                    │   or RDS)   │     └─────────────┘         │
 │                    └─────────────┘                              │
 │                    ┌─────────────┐     ┌─────────────┐         │
-│                    │  MinIO /    │     │ Meilisearch │         │
-│                    │  S3         │     │             │         │
+│                    │  MinIO /    │     │ (optional:  │         │
+│                    │  S3         │     │ Meilisearch)│         │
 │                    └─────────────┘     └─────────────┘         │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐   │
@@ -433,18 +397,18 @@ Layer 6 — Supply:      Signed plugins, dependency scanning, SBOM generation
 |---|---|---|
 | **Language** | Python 3.12+ (API), TypeScript (UI) | Strong ecosystem, AI/ML libraries, broad talent pool |
 | **API Framework** | FastAPI | Async, OpenAPI auto-generation, Pydantic validation |
-| **GraphQL** | Strawberry | Python-native, type-safe, integrates with FastAPI |
 | **Web UI** | React + TypeScript | Component ecosystem, SSR capable, agent dashboard |
 | **UI Framework** | Shadcn/ui + Tailwind CSS | Accessible, customizable, modern |
 | **Database** | PostgreSQL 16+ | JSONB, full-text search, row-level security, proven |
 | **ORM** | SQLAlchemy 2.0 + Alembic | Async support, migrations, mature |
 | **Object Storage** | S3-compatible (MinIO for self-host) | Universal API, cost-effective, scalable |
 | **Cache/Queue** | Redis or Valkey | Fast, versatile, stream support for job queues |
-| **Search** | Meilisearch | Fast, typo-tolerant, easy to host, great UX |
+| **Search** | PostgreSQL tsvector (built-in); Meilisearch optional | Built-in full-text search; external index available for scale |
 | **Background Jobs** | ARQ (Redis-backed) or Celery | Reliable async task execution |
 | **Containerization** | Docker + Docker Compose | Universal deployment format |
 | **Orchestration** | Kubernetes (Helm chart) | Production scaling, managed K8s on all clouds |
 | **CI/CD** | GitHub Actions | Widely adopted, free for open source |
+| **MCP Tooling** | rocq-mcp (Coq proofs), AWS MCP (infrastructure) | AI-assisted development: proof checking, cloud operations |
 | **Testing** | pytest + Playwright | Unit/integration + E2E |
 
 ---
@@ -457,25 +421,25 @@ Layer 6 — Supply:      Signed plugins, dependency scanning, SBOM generation
 - **Worker processes** — Scale independently based on job queue depth
 - **PostgreSQL** — Read replicas for reporting; connection pooling (PgBouncer)
 - **Object storage** — Inherently scalable (S3/MinIO)
-- **Search** — Meilisearch clusters or multiple shards
+- **Search** — PostgreSQL tsvector built-in; optional Meilisearch for scale
 
 ### 8.2 Multi-Tenancy Models
 
 | Model | Isolation | Complexity | Use Case |
 |---|---|---|---|
 | **Shared schema** (tenant_id column) | Logical | Low | SaaS, small tenants |
-| **Schema per tenant** | Strong logical | Medium | Regulated industries |
-| **Database per tenant** | Physical | High | High-security, large enterprises |
 
-All models are supported; configurable at deployment time.
+Additional isolation models (schema-per-tenant, database-per-tenant) can be added when needed.
 
 ### 8.3 Performance Targets
 
-| Operation | Target |
-|---|---|
-| API CRUD (single entity) | p95 < 100ms |
-| API list with filters | p95 < 200ms |
-| Report generation (standard) | p95 < 5s |
-| Full-text search | p95 < 50ms |
-| File upload (100MB) | p95 < 10s |
-| Agent result submission | p95 < 150ms |
+Targets align with PRD Section 7 (Non-Functional Requirements). Internal stretch goals are noted where tighter than the PRD requirement.
+
+| Operation | PRD Requirement | Stretch Target |
+|---|---|---|
+| API CRUD (single entity) | p95 < 200ms | p95 < 100ms |
+| API list with filters | p95 < 200ms | — |
+| Report generation (standard) | p95 < 2s | — |
+| Full-text search | — | p95 < 50ms |
+| File upload (100MB) | — | p95 < 10s |
+| Agent result submission | — | p95 < 150ms |

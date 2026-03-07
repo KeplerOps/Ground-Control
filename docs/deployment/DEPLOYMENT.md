@@ -12,7 +12,6 @@
 | **Docker Compose** | Small teams, evaluation, development | Low | Vertical only |
 | **Kubernetes (Helm)** | Production, multi-tenant, enterprise | Medium | Horizontal |
 | **Cloud Managed** | Teams preferring managed infrastructure | Medium | Auto-scaling |
-| **Single Binary** | Minimal deployments, air-gapped networks | Lowest | Vertical only |
 
 ---
 
@@ -67,14 +66,12 @@ services:
       S3_BUCKET: gc-artifacts
       S3_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       S3_SECRET_KEY: ${MINIO_SECRET_KEY}
-      SEARCH_URL: http://meilisearch:7700
       SECRET_KEY: ${SECRET_KEY}
       ALLOWED_ORIGINS: https://gc.example.com
     depends_on:
       - db
       - redis
       - minio
-      - meilisearch
 
   worker:
     image: ghcr.io/keplerops/ground-control:latest
@@ -108,13 +105,6 @@ services:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
 
-  meilisearch:
-    image: getmeili/meilisearch:latest
-    volumes:
-      - searchdata:/meili_data
-    environment:
-      MEILI_MASTER_KEY: ${SEARCH_KEY}
-
   caddy:
     image: caddy:2-alpine
     ports:
@@ -128,7 +118,6 @@ volumes:
   pgdata:
   redisdata:
   miniodata:
-  searchdata:
   caddydata:
 ```
 
@@ -156,9 +145,6 @@ DB_PASSWORD=change-me
 # --- Object Storage ---
 MINIO_ACCESS_KEY=gc-access-key
 MINIO_SECRET_KEY=change-me
-
-# --- Search ---
-SEARCH_KEY=change-me
 
 # --- SSO (optional) ---
 SSO_PROVIDER=                # saml or oidc
@@ -268,13 +254,6 @@ minio:
   persistence:
     size: 100Gi
 
-meilisearch:
-  enabled: true
-  auth:
-    existingSecret: gc-secrets
-  persistence:
-    size: 10Gi
-
 # External database (instead of bundled)
 # externalDatabase:
 #   host: my-rds-instance.region.rds.amazonaws.com
@@ -331,7 +310,6 @@ monitoring:
 │  │ gc-worker          │     │ ├── PostgreSQL (or external RDS) │ │
 │  │ (2 replicas)       │     │ ├── Redis                       │ │
 │  └───────────────────┘     │ ├── MinIO (or external S3)      │ │
-│                             │ └── Meilisearch                 │ │
 │  ┌───────────────────┐     └──────────────────────────────────┘ │
 │  │ CronJob:           │                                          │
 │  │ gc-scheduled-tasks │     ┌──────────────────────────────────┐ │
@@ -739,3 +717,17 @@ docker compose pull  # with previous image tag in docker-compose.yml
 docker compose up -d
 docker compose exec app gc-migrate downgrade -1
 ```
+
+---
+
+## 11. AI-Assisted Development Tooling
+
+Ground Control development uses MCP (Model Context Protocol) servers for AI-assisted workflows:
+
+| MCP Server | Purpose | Phase |
+|---|---|---|
+| **rocq-mcp** | Interactive Coq/Rocq proof development and type checking | 0 |
+| **AWS MCP** | AWS infrastructure management and deployment | 0 |
+| **GC Ops MCP** | Local dev operations (Docker, migrations, logs, test data) | 11 |
+
+See issue #006b for setup instructions.

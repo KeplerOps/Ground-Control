@@ -198,6 +198,21 @@ CREATE INDEX idx_controls_tenant_type ON controls(tenant_id, control_type);
 CREATE INDEX idx_controls_tenant_owner ON controls(tenant_id, owner_id);
 ```
 
+### 2.5a Risk-Control Mapping
+
+```sql
+-- Many-to-many: Risks ↔ Controls
+CREATE TABLE risk_control_mappings (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    risk_id         UUID NOT NULL REFERENCES risks(id),
+    control_id      UUID NOT NULL REFERENCES controls(id),
+    mapping_note    TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (risk_id, control_id)
+);
+```
+
 ### 2.6 Framework & Requirements
 
 ```sql
@@ -378,20 +393,51 @@ CREATE TABLE artifacts (
 CREATE INDEX idx_artifacts_tenant ON artifacts(tenant_id);
 CREATE INDEX idx_artifacts_hash ON artifacts(sha256_hash);
 
--- Many-to-many: Artifacts ↔ any entity
-CREATE TABLE artifact_links (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+-- Typed link tables for artifact associations (enforces FK integrity)
+CREATE TABLE artifact_risk_links (
     artifact_id     UUID NOT NULL REFERENCES artifacts(id),
-    entity_type     TEXT NOT NULL,             -- risk, control, test_procedure, test_step, finding
-    entity_id       UUID NOT NULL,
-    context_note    TEXT,                      -- why this evidence is relevant
+    risk_id         UUID NOT NULL REFERENCES risks(id),
+    context_note    TEXT,
     linked_by       UUID NOT NULL REFERENCES users(id),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    UNIQUE (artifact_id, entity_type, entity_id)
+    PRIMARY KEY (artifact_id, risk_id)
 );
 
-CREATE INDEX idx_artifact_links_entity ON artifact_links(entity_type, entity_id);
+CREATE TABLE artifact_control_links (
+    artifact_id     UUID NOT NULL REFERENCES artifacts(id),
+    control_id      UUID NOT NULL REFERENCES controls(id),
+    context_note    TEXT,
+    linked_by       UUID NOT NULL REFERENCES users(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (artifact_id, control_id)
+);
+
+CREATE TABLE artifact_procedure_links (
+    artifact_id     UUID NOT NULL REFERENCES artifacts(id),
+    procedure_id    UUID NOT NULL REFERENCES test_procedures(id),
+    context_note    TEXT,
+    linked_by       UUID NOT NULL REFERENCES users(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (artifact_id, procedure_id)
+);
+
+CREATE TABLE artifact_step_links (
+    artifact_id     UUID NOT NULL REFERENCES artifacts(id),
+    step_id         UUID NOT NULL REFERENCES test_steps(id),
+    context_note    TEXT,
+    linked_by       UUID NOT NULL REFERENCES users(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (artifact_id, step_id)
+);
+
+CREATE TABLE artifact_finding_links (
+    artifact_id     UUID NOT NULL REFERENCES artifacts(id),
+    finding_id      UUID NOT NULL REFERENCES findings(id),
+    context_note    TEXT,
+    linked_by       UUID NOT NULL REFERENCES users(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (artifact_id, finding_id)
+);
 ```
 
 ### 2.11 Evidence Request
@@ -610,19 +656,36 @@ CREATE TABLE plugins (
 ### 2.19 Notification & Comment
 
 ```sql
+-- Base comments table with typed foreign keys per entity
+-- Each entity type gets its own nullable FK column; exactly one must be set.
 CREATE TABLE comments (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL REFERENCES tenants(id),
-    entity_type     TEXT NOT NULL,
-    entity_id       UUID NOT NULL,
-    parent_id       UUID REFERENCES comments(id),  -- for threading
+    risk_id         UUID REFERENCES risks(id),
+    control_id      UUID REFERENCES controls(id),
+    finding_id      UUID REFERENCES findings(id),
+    procedure_id    UUID REFERENCES test_procedures(id),
+    campaign_id     UUID REFERENCES assessment_campaigns(id),
+    parent_id       UUID REFERENCES comments(id),
     author_id       UUID NOT NULL REFERENCES users(id),
     body            TEXT NOT NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT exactly_one_entity CHECK (
+        (CASE WHEN risk_id IS NOT NULL THEN 1 ELSE 0 END +
+         CASE WHEN control_id IS NOT NULL THEN 1 ELSE 0 END +
+         CASE WHEN finding_id IS NOT NULL THEN 1 ELSE 0 END +
+         CASE WHEN procedure_id IS NOT NULL THEN 1 ELSE 0 END +
+         CASE WHEN campaign_id IS NOT NULL THEN 1 ELSE 0 END) = 1
+    )
 );
 
-CREATE INDEX idx_comments_entity ON comments(entity_type, entity_id);
+CREATE INDEX idx_comments_risk ON comments(risk_id) WHERE risk_id IS NOT NULL;
+CREATE INDEX idx_comments_control ON comments(control_id) WHERE control_id IS NOT NULL;
+CREATE INDEX idx_comments_finding ON comments(finding_id) WHERE finding_id IS NOT NULL;
+CREATE INDEX idx_comments_procedure ON comments(procedure_id) WHERE procedure_id IS NOT NULL;
+CREATE INDEX idx_comments_campaign ON comments(campaign_id) WHERE campaign_id IS NOT NULL;
 
 CREATE TABLE notifications (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -647,7 +710,7 @@ CREATE INDEX idx_notifications_user ON notifications(user_id, is_read, created_a
 ```
 Tenant          1──*  User, Risk, Control, Assessment Campaign, Finding, Artifact, Agent, Plugin
 User            *──*  Role (via user_roles)
-Risk            *──*  Control (via risk_control_mappings — optional)
+Risk            *──*  Control (via risk_control_mappings)
 Risk            1──*  Risk Treatment
 Control         *──*  Framework Requirement (via control_framework_mappings)
 Control         *──1  CCL Entry (optional reference)
@@ -656,11 +719,11 @@ Framework       1──*  Framework Requirement
 Assessment      1──*  Test Procedure
 Test Procedure  1──*  Test Step
 Test Procedure  *──1  Control
-Artifact        *──*  Any Entity (via artifact_links, polymorphic)
+Artifact        *──*  Risk, Control, Test Procedure, Test Step, Finding (via typed link tables)
 Finding         *──1  Campaign, Control, Test Procedure
 Finding         1──*  Remediation Plan
 Remediation Plan 1──* Remediation Action
-Comment         *──1  Any Entity (polymorphic)
+Comment         *──1  Risk | Control | Finding | Test Procedure | Campaign (via nullable FKs with CHECK constraint)
 Audit Log       *──1  Any Entity (polymorphic, append-only)
 ```
 
@@ -689,7 +752,9 @@ CREATE POLICY tenant_isolation ON risks
 - Pre-signed URLs for direct browser upload/download (bypass API server for large files).
 - Lifecycle policies handle retention (move to Glacier/cold after retention window).
 
-### 4.3 Search Index — Meilisearch
+### 4.3 Search Index
+
+PostgreSQL `tsvector` is used for full-text search, with an optional external search engine (e.g., Meilisearch, Elasticsearch) for scale.
 
 Indexed entities:
 - Risks (title, description, category, tags)
@@ -705,6 +770,27 @@ Cached objects:
 - Dashboard aggregations (TTL: 60s)
 - Taxonomy lookups (TTL: 300s)
 - Rate limit counters
+
+### 4.5 Automatic Timestamps
+
+All tables with `updated_at` columns use a shared trigger:
+
+```sql
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Applied to every table with updated_at, e.g.:
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON risks
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON controls
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+-- ... (applied to all entities with updated_at)
+```
 
 ---
 

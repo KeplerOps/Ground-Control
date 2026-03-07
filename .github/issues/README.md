@@ -6,7 +6,7 @@ This directory contains all implementation issues organized by phase. Each issue
 
 | Phase | Name | Issues | PRD Alignment | Priority |
 |---|---|---|---|---|
-| **0** | Project Bootstrap & Engineering Foundation | 001–025 | Pre-v0.1 | P0 |
+| **0** | Project Bootstrap & Engineering Foundation | 001–025 (+006b, 023b) | Pre-v0.1 | P0 |
 | **1** | Core Data Model & Persistence | 026–040 | v0.1 | P0 |
 | **2** | API Foundation & Auth | 041–055 | v0.1 | P0 |
 | **3** | Authorization & Identity | 056–063 | v0.1–v0.2 | P0 |
@@ -30,13 +30,14 @@ These issues establish patterns used throughout the entire codebase:
 | **Coding Standards** | #003, #007, #008, #009 | Ruff, mypy, ESLint, pre-commit |
 | **Architecture as Code** | #002, #024 | ADRs, C4 models, import-linter |
 | **Policy as Code** | #025, #057 | Authorization policies as testable artifacts |
-| **Formal Verification** | #023 | icontract, CrossHair, Hypothesis, deal |
+| **Formal Verification** | #023, #023b | icontract, Hypothesis (Python); Coq/Rocq proofs for critical invariants |
 | **Structured Logging** | #018 | structlog, JSON, context propagation |
 | **Exception Handling** | #017 | Typed hierarchy, HTTP mapping, scrubbing |
 | **Audit Logging** | #039 | Append-only, hash-chained, tamper-proof |
 | **Configuration** | #019 | pydantic-settings, fail-fast validation |
 | **Base Schemas** | #020 | API envelope, pagination, error format |
 | **CI/CD Security** | #012–#016 | SonarQube, SAST, DAST, OpenANT, deps |
+| **MCP Dev Tooling** | #006b | rocq-mcp (Coq proofs), AWS MCP (infra), custom ops MCP (deferred) |
 
 ## Design Document References
 
@@ -49,6 +50,7 @@ These issues establish patterns used throughout the entire codebase:
 | User Stories | `docs/user-stories/USER_STORIES.md` | #044–#050, #064–#077 |
 | Use Cases | `docs/user-stories/USE_CASES.md` | #044–#050, #064–#077 |
 | Deployment | `docs/deployment/DEPLOYMENT.md` | #006, #119–#124 |
+| Coding Standards | `docs/CODING_STANDARDS.md` | #001–#025 |
 
 ## User Story Coverage
 
@@ -84,6 +86,7 @@ These issues establish patterns used throughout the entire codebase:
 | SAST | Semgrep + Bandit | #013 |
 | DAST | OWASP ZAP | #014 |
 | AI Security | OpenANT (Knostic) | #015 |
-| Formal Verification | icontract + CrossHair + deal | #023 |
+| Formal Verification | Hypothesis (Python), Coq/Rocq (proofs) | #023, #023b |
+| MCP Servers | rocq-mcp, AWS MCP (official) | #006b |
 | Containerization | Docker + Docker Compose | #011, #119 |
 | Orchestration | Kubernetes (Helm) | #120 |

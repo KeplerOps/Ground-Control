@@ -18,13 +18,16 @@ Establish performance benchmarks, run load tests, and optimize to meet the perfo
 
 - [ ] Load testing setup (Locust or k6):
   - Scenarios: CRUD operations, search, report generation, concurrent users
-  - Target: 500+ simultaneous users
-- [ ] Benchmark against targets:
-  - API CRUD: p95 < 100ms
+  - Verify horizontal scaling under concurrent load
+- [ ] Benchmark against PRD requirements (mandatory):
+  - API CRUD (single entity): p95 < 200ms
   - API list with filters: p95 < 200ms
-  - Report generation: p95 < 5s
+  - Report generation: p95 < 2s
+- [ ] Benchmark stretch targets (architecture spec):
+  - API CRUD (single entity): p95 < 100ms
   - Full-text search: p95 < 50ms
   - File upload 100MB: p95 < 10s
+  - Agent result submission: p95 < 150ms
 - [ ] Database optimization: query analysis, index tuning, connection pooling (PgBouncer)
 - [ ] Caching strategy verification (Redis TTLs, cache hit rates)
 - [ ] Performance CI check: regression detection on key endpoints

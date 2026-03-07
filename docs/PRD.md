@@ -36,9 +36,9 @@ Organizations using AuditBoard ITRM and similar tools face recurring pain points
 
 ### 1.2 Vision
 
-> A single platform where every IT risk, control, and piece of evidence lives in
-> one place with full lineage — accessible to humans and agents alike, deployable
-> anywhere, and extensible by anyone.
+Ground Control consolidates IT risks, controls, and evidence into a single
+system with full lineage, accessible to both humans and AI agents, self-hostable,
+and extensible via plugins.
 
 ---
 
@@ -88,7 +88,7 @@ Organizations using AuditBoard ITRM and similar tools face recurring pain points
 | CIS Controls v8 | Full — safeguards mapped to implementation groups |
 | GDPR (Article 32+) | Supplemental — data protection controls overlay |
 | HIPAA Security Rule | Supplemental — administrative, physical, technical safeguards |
-| Custom Frameworks | Plugin-based — bring your own framework via YAML/JSON definition |
+| Custom Frameworks | User-defined frameworks loaded via plugin |
 
 **Cross-Framework Mapping:** The platform maintains a unified Common Control
 Library (CCL). Each common control maps to one or more framework-specific
@@ -169,17 +169,15 @@ requirements, enabling "test once, comply many" workflows.
 
 - **Executive Dashboards** — Risk posture, control health, assessment progress,
   finding trends.
-- **Board Reports** — One-click generation of board-ready PDF/PPTX summaries.
-- **Custom Reports** — Report builder with drag-and-drop fields, filters, and
-  groupings. Export to PDF, Excel, CSV.
+- **Board Reports** — Generate PDF summary reports.
+- **Custom Reports** — Filterable, exportable report views.
 - **Scheduled Reports** — Email delivery on configurable schedules.
 - **API-Driven Analytics** — All report data available via API for BI tool
   integration (Tableau, Power BI, Looker).
 
 ### 4.7 Workflow & Collaboration
 
-- **Review Workflows** — Multi-level review and approval chains (preparer →
-  reviewer → approver). Configurable per entity type.
+- **Review Workflows** — Configurable review chains (e.g., preparer → reviewer → approver).
 - **Notifications** — In-app, email, Slack/Teams webhooks. Configurable per
   user and per event type.
 - **Comments & Annotations** — Threaded comments on any entity. @-mention
@@ -195,16 +193,6 @@ requirements, enabling "test once, comply many" workflows.
 
 Agents are first-class actors in Ground Control. They authenticate via API keys
 or OAuth2 client credentials and interact through the same API as humans.
-
-```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Human User  │────▶│  Ground Control  │◀────│  AI Agent       │
-│  (Browser)   │     │  API Gateway     │     │  (API Client)   │
-└─────────────┘     └──────────────────┘     └─────────────────┘
-                           │                        │
-                    Same API surface          Agent audit trail
-                    Same permissions model    Provenance metadata
-```
 
 ### 5.2 Agent Capabilities
 
@@ -279,9 +267,9 @@ All templates are versionable, exportable, and shareable between tenants.
 
 | Requirement | Target |
 |---|---|
-| **Availability** | 99.9% uptime (self-hosted SLA depends on operator) |
+| **Availability** | No single points of failure in the application layer; infrastructure HA depends on deployment topology |
 | **Response Time** | API p95 < 200ms for CRUD operations; < 2s for reports |
-| **Concurrent Users** | Support 500+ simultaneous users per tenant |
+| **Concurrent Users** | Design for horizontal scaling; no hard-coded concurrency limits |
 | **Data Encryption** | AES-256 at rest, TLS 1.3 in transit |
 | **Audit Logging** | Immutable audit log for every state change |
 | **Multi-Tenancy** | Full tenant isolation (schema-per-tenant or DB-per-tenant) |
@@ -324,12 +312,11 @@ All templates are versionable, exportable, and shareable between tenants.
 
 | Metric | Target |
 |---|---|
-| Time to complete an assessment cycle | 40% reduction vs. AuditBoard baseline |
-| Evidence collection time | 60% reduction via automated collection |
-| Cross-framework coverage from single test | 3+ frameworks per common control |
-| Agent-performed test procedures | 30% of routine tests automated in Year 1 |
-| User satisfaction (NPS) | > 50 |
-| API adoption | 80% of workflows accessible via API in v1.0 |
+| API coverage | All core workflows (risk, control, assessment, evidence, finding) accessible via API at v0.1 |
+| Agent automation | At least one end-to-end agent workflow (test procedure execution) functional at v0.4 |
+| Cross-framework mapping | CCL supports SOX ITGC, SOC 2, and ISO 27001 with shared controls at v0.3 |
+| Self-host deployment | Single-command Docker Compose deployment with < 15 minutes to first login |
+| Test coverage | Backend unit test coverage > 80%; all API endpoints have integration tests |
 
 ---
 
@@ -342,6 +329,7 @@ All templates are versionable, exportable, and shareable between tenants.
 - Local auth + OIDC SSO
 - File-based artifact storage
 - SQLite/PostgreSQL backend
+- MCP server integration (rocq-mcp for formal proofs, AWS MCP for infrastructure)
 
 ### v0.2 — Collaboration
 - Review workflows and approval chains
@@ -364,11 +352,10 @@ All templates are versionable, exportable, and shareable between tenants.
 - Executive dashboards
 - Custom report builder
 - Scheduled report delivery
-- GraphQL API
 
 ### v1.0 — Production Ready
 - Multi-tenancy
-- Plugin marketplace
+- Plugin system (install from local packages)
 - Full RBAC with ABAC policies
 - Kubernetes Helm chart and Docker Compose
 - Comprehensive documentation and certification guide
@@ -387,22 +374,7 @@ All templates are versionable, exportable, and shareable between tenants.
 
 ---
 
-## Appendix A: Competitive Landscape
-
-| Capability | AuditBoard | ServiceNow GRC | Archer | Ground Control |
-|---|---|---|---|---|
-| Self-Hostable | No | Limited | Yes | Yes |
-| Open Source | No | No | No | Yes |
-| API-First | Partial | Partial | Partial | Yes |
-| Agent Support | No | No | No | Yes |
-| Plugin System | No | Scoped Apps | Custom Content | Yes |
-| Cross-Framework Mapping | Limited | Yes | Yes | Yes |
-| Evidence Automation | Limited | Yes | Limited | Yes |
-| Pricing Model | Per-seat | Per-seat | Per-seat | Free / Support |
-
----
-
-## Appendix B: Glossary
+## Appendix A: Glossary
 
 | Term | Definition |
 |---|---|
