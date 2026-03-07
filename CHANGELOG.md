@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-03-07
+
+### Added
+
+- `backend/pyproject.toml` with full dependency declarations (FastAPI, SQLAlchemy, Pydantic, structlog, etc.) and optional dependency groups (dev, test, docs)
+- `backend/src/ground_control/__init__.py` with `__version__`
+- `backend/src/ground_control/py.typed` PEP 561 marker for typed package
+- `backend/tests/conftest.py` shared test fixtures stub
+- Root `Makefile` with common commands (install, lint, format, test, dev, clean)
+- `uv` support with `pip` fallback in Makefile
+
 ## [0.5.0] - 2026-03-07
 
 ### Added
