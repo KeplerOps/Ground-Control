@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-03-07
+
+### Added
+
+- `backend/tests/unit/test_package.py` package importability and version test
+- CI: Python 3.12 setup, uv install, and pytest coverage in SonarCloud workflow
+
+### Fixed
+
+- SonarCloud quality gate failure: configured `sonar.sources`, `sonar.tests`, and coverage report path
+- SonarCloud now receives coverage XML from pytest-cov
+
 ## [0.6.0] - 2026-03-07
 
 ### Added
