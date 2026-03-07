@@ -19,6 +19,43 @@ such as SOX ITGC, SOC 2, ISO 27001, NIST CSF/800-53, COBIT, and PCI-DSS.
 - **Common Language** — Shared taxonomy and reusable control/risk libraries across the org.
 - **Flexible SSO** — SAML 2.0, OIDC, SCIM provisioning out of the box.
 
+## Repository Structure
+
+```
+Ground-Control/
+├── backend/                  # Python backend (FastAPI)
+│   ├── src/ground_control/   # Application source code
+│   │   ├── api/              # Route handlers (v1/)
+│   │   ├── domain/           # Domain models & services
+│   │   ├── infrastructure/   # DB, S3, cache, search adapters
+│   │   ├── schemas/          # Pydantic request/response schemas
+│   │   ├── middleware/       # Tenant, auth, logging, request-id
+│   │   ├── events/           # Domain event bus
+│   │   ├── exceptions/       # Shared exception hierarchy
+│   │   ├── logging/          # Structured logging setup
+│   │   └── plugins/          # Plugin runtime
+│   ├── tests/                # Unit, integration, and e2e tests
+│   └── migrations/           # Alembic database migrations
+├── frontend/                 # React + TypeScript + Vite
+│   ├── src/
+│   └── public/
+├── sdks/                     # Agent SDKs
+│   ├── python/
+│   └── typescript/
+├── plugins/                  # Built-in plugins
+│   ├── frameworks/           # Framework definitions
+│   └── integrations/         # Integration plugins
+├── deploy/                   # Deployment artifacts
+│   ├── docker/
+│   ├── helm/
+│   └── terraform/
+├── architecture/             # Architecture artifacts
+│   ├── adrs/                 # Architecture Decision Records
+│   ├── c4/                   # C4/Structurizr models
+│   └── policies/             # Policy-as-code (Rego/YAML)
+└── docs/                     # Design documentation
+```
+
 ## Documentation
 
 | Document | Description |
@@ -30,6 +67,7 @@ such as SOX ITGC, SOC 2, ISO 27001, NIST CSF/800-53, COBIT, and PCI-DSS.
 | [Data Model](docs/architecture/DATA_MODEL.md) | Entity-relationship model and storage design |
 | [API Specification](docs/api/API_SPEC.md) | REST API design and plugin architecture |
 | [Deployment & SSO](docs/deployment/DEPLOYMENT.md) | Deployment topologies, SSO configuration, operations |
+| [Coding Standards](docs/CODING_STANDARDS.md) | Code style, architecture rules, testing conventions |
 
 ## License
 

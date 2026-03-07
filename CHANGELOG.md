@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-07
+
+### Added
+
+- Monorepo directory structure: backend, frontend, sdks, plugins, deploy, architecture
+- `CLAUDE.md` with AI-assisted development conventions
+- `.editorconfig` for consistent whitespace across Python, TypeScript, YAML, Markdown
+- GitHub issue templates (bug report, feature request)
+- GitHub pull request template with coding standards checklist
+- Placeholder `__init__.py` and `.gitkeep` files for all directories
+- Repository structure overview in README.md
+- Node.js / frontend entries in `.gitignore`
+
 ## [0.2.0] - 2026-03-07
 
 ### Added
