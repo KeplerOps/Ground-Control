@@ -17,7 +17,7 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --execute) DRY_RUN=false; shift ;;
     --phase) PHASE_FILTER="$2"; shift 2 ;;
-    *) echo "Unknown arg: $1"; exit 1 ;;
+    *) echo "Unknown arg: $1" >&2; exit 1 ;;
   esac
 done
 
@@ -27,7 +27,7 @@ SKIPPED=0
 FAILED=0
 
 if [[ ! -d "$ISSUE_DIR" ]]; then
-  echo "Error: $ISSUE_DIR not found. Run from repo root."
+  echo "Error: $ISSUE_DIR not found. Run from repo root." >&2
   exit 1
 fi
 
@@ -58,13 +58,15 @@ done < <(grep -rh '^priority:' "$ISSUE_DIR" | sed 's/^priority: *//')
 
 # Label colors by category
 label_color() {
-  case "$1" in
+  local name="$1"
+  case "$name" in
     phase-*)    echo "0e8a16" ;;  # green
     P0)         echo "b60205" ;;  # red
     P1)         echo "d93f0b" ;;  # orange
     P2)         echo "fbca04" ;;  # yellow
     *)          echo "c5def5" ;;  # light blue
   esac
+  return 0
 }
 
 # Fetch existing labels
