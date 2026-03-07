@@ -173,7 +173,32 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# IDE
 .vscode
 .VSCodeCounter
+.idea/
+*.swp
+*.swo
+*~
 
+# Node.js
+node_modules/
+dist/
+.parcel-cache/
+.next/
+.nuxt/
+.turbo/
+
+# Vite
+*.local
+
+# Environment files
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local files
 tickets
