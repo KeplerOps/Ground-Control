@@ -19,7 +19,7 @@ We evaluated: REST, GraphQL, gRPC, and hybrid approaches.
 Adopt a REST-first API design with OpenAPI 3.1 specification.
 
 - All endpoints follow REST conventions under `/api/v1/`
-- OpenAPI schema is auto-generated from FastAPI/Pydantic models
+- OpenAPI schema is auto-generated from django-ninja/Pydantic models
 - Flat JSON responses (no deep nesting) with optional `include` parameter for related entities
 - PATCH uses RFC 7396 (JSON Merge Patch) for partial updates
 - Pagination via cursor-based tokens for stable iteration

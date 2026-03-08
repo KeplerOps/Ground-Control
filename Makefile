@@ -29,7 +29,7 @@ test-cov: ## Run pytest with coverage
 	cd backend && pytest --cov=ground_control --cov-report=term-missing
 
 dev: ## Start development server
-	cd backend && uvicorn ground_control.main:app --reload --host 0.0.0.0 --port 8000
+	cd backend && python manage.py runserver 0.0.0.0:8000
 
 clean: ## Remove build artifacts and caches
 	find backend -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

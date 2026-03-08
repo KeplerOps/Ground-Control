@@ -396,15 +396,15 @@ Layer 6 — Supply:      Signed plugins, dependency scanning, SBOM generation
 | Layer | Technology | Rationale |
 |---|---|---|
 | **Language** | Python 3.12+ (API), TypeScript (UI) | Strong ecosystem, AI/ML libraries, broad talent pool |
-| **API Framework** | FastAPI | Async, OpenAPI auto-generation, Pydantic validation |
+| **API Framework** | Django + django-ninja | Batteries-included, OpenAPI auto-generation, Pydantic validation |
 | **Web UI** | React + TypeScript | Component ecosystem, SSR capable, agent dashboard |
 | **UI Framework** | Shadcn/ui + Tailwind CSS | Accessible, customizable, modern |
 | **Database** | PostgreSQL 16+ | JSONB, full-text search, row-level security, proven |
-| **ORM** | SQLAlchemy 2.0 + Alembic | Async support, migrations, mature |
+| **ORM** | Django ORM | Built-in migrations, battle-tested, admin integration |
 | **Object Storage** | S3-compatible (MinIO for self-host) | Universal API, cost-effective, scalable |
 | **Cache/Queue** | Redis or Valkey | Fast, versatile, stream support for job queues |
 | **Search** | PostgreSQL tsvector (built-in); Meilisearch optional | Built-in full-text search; external index available for scale |
-| **Background Jobs** | ARQ (Redis-backed) or Celery | Reliable async task execution |
+| **Background Jobs** | django-q2 (Redis-backed) | Reliable async task execution, Django integration |
 | **Containerization** | Docker + Docker Compose | Universal deployment format |
 | **Orchestration** | Kubernetes (Helm chart) | Production scaling, managed K8s on all clouds |
 | **CI/CD** | GitHub Actions | Widely adopted, free for open source |

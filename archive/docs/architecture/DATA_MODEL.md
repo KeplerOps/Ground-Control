@@ -796,7 +796,7 @@ CREATE TRIGGER set_updated_at BEFORE UPDATE ON controls
 
 ## 5. Migration Strategy
 
-All schema changes managed via **Alembic** migrations with:
+All schema changes managed via **Django** migrations with:
 - Forward and rollback scripts for every migration
 - Data migrations for taxonomy or framework updates
 - Zero-downtime migration patterns (add column → backfill → add constraint)
