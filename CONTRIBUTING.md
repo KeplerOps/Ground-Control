@@ -61,7 +61,7 @@ The dependency rule is enforced by `import-linter` in CI:
 api/ -> domain/ <- infrastructure/
 ```
 
-- `domain/` has **zero** framework imports (no FastAPI, no SQLAlchemy)
+- `domain/` has **zero** framework imports beyond Django models (no views, no URL routing)
 - `api/` depends on `domain/` and `schemas/` — never imports `infrastructure/`
 - `infrastructure/` implements interfaces defined in `domain/`
 

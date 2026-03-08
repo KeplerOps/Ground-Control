@@ -22,7 +22,7 @@ Use PostgreSQL 16+ as the sole primary database.
 - JSONB columns for flexible/extensible attributes without schema migrations
 - Built-in tsvector/tsquery for full-text search (avoids Elasticsearch dependency for small deployments)
 - Append-only audit log with hash chains for tamper detection
-- Mature ecosystem with SQLAlchemy 2.0 async support
+- Mature ecosystem with Django ORM and django-tenants support
 - Optional upgrade path to Citus for horizontal sharding
 
 ## Consequences

@@ -22,7 +22,7 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | ADR | Title | Status |
 |-----|-------|--------|
 | [000](000-template.md) | ADR Template | — |
-| [001](001-python-fastapi-backend.md) | Python 3.12+ with FastAPI for Backend | Accepted |
+| [001](001-python-fastapi-backend.md) | Python 3.12+ with FastAPI for Backend | Superseded by ADR-010 |
 | [002](002-postgresql-primary-database.md) | PostgreSQL 16+ as Primary Database | Accepted |
 | [003](003-api-first-design.md) | API-First Design (REST) | Accepted |
 | [004](004-plugin-architecture.md) | Plugin Architecture for Extensibility | Accepted |
@@ -31,3 +31,4 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | [007](007-agent-first-design.md) | Agent-First Design (AI Agents as First-Class Actors) | Accepted |
 | [008](008-clean-architecture.md) | Clean Architecture (API / Domain / Infrastructure) | Accepted |
 | [009](009-coding-standards.md) | Coding Standards and Tooling | Accepted |
+| [010](010-evaluate-django-framework.md) | Switch to Django + django-ninja (Supersedes ADR-001) | Accepted |

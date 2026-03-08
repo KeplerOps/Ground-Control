@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-03-08
+
+### Changed
+
+- Switch backend framework from FastAPI to Django + django-ninja (ADR-010 supersedes ADR-001)
+- Replace SQLAlchemy + Alembic with Django ORM and built-in migrations
+- Replace manual auth stack (python-jose, passlib) with Django auth + django-oauth-toolkit
+- Update `backend/pyproject.toml` dependencies for Django ecosystem
+- Update CODING_STANDARDS.md, ARCHITECTURE.md, CONTRIBUTING.md for Django references
+
+### Added
+
+- ADR-010: Evaluate Django framework — documents rationale for switching
+- Django project structure: settings (base, test), urls.py, asgi.py, wsgi.py, manage.py
+- django-tenants for multi-tenancy, django-auditlog for audit trail, django-storages for S3
+- django-q2 for background task processing
+- pytest-django and django-stubs in dev dependencies
+
 ## [0.6.1] - 2026-03-07
 
 ### Added

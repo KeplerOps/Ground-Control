@@ -23,7 +23,7 @@ such as SOX ITGC, SOC 2, ISO 27001, NIST CSF/800-53, COBIT, and PCI-DSS.
 
 ```
 Ground-Control/
-├── backend/                  # Python backend (FastAPI)
+├── backend/                  # Python backend (Django)
 │   ├── src/ground_control/   # Application source code
 │   │   ├── api/              # Route handlers (v1/)
 │   │   ├── domain/           # Domain models & services
@@ -35,7 +35,7 @@ Ground-Control/
 │   │   ├── logging/          # Structured logging setup
 │   │   └── plugins/          # Plugin runtime
 │   ├── tests/                # Unit, integration, and e2e tests
-│   └── migrations/           # Alembic database migrations
+│   └── migrations/           # Django database migrations
 ├── frontend/                 # React + TypeScript + Vite
 │   ├── src/
 │   └── public/
