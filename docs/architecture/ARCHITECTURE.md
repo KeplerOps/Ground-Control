@@ -68,7 +68,7 @@ django-q2 is configured with Redis as the broker. Worker runs via `python manage
 
 ## What Exists vs. What Doesn't
 
-**Exists:** Django project skeleton, settings, docker-compose dev environment, django-ninja API mount (empty), Makefile, CI (ruff, mypy, pytest, SonarCloud).
+**Exists:** Django project skeleton, settings, docker-compose dev environment, django-ninja API (with shared exception handler), structured logging, Makefile, CI (ruff, mypy, pytest, SonarCloud).
 
 **Does not exist yet:** Domain models, API endpoints, business logic, auth flows, frontend, search, object storage integration, production deployment.
 
