@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-03-08
+
+### Added
+
+- ADR-013: Java/Spring Boot Backend Rewrite — documents pivot from Python 3.12/Django to Java 21/Spring Boot 3.4 with JML/OpenJML contracts, jqwik property testing, and KeY formal proofs
+- ADR-012: Formal Methods Development Process — Specification-Driven Development (SDD) methodology with assurance levels L0-L3, updated for Java toolchain
+
+### Changed
+
+- ADR-001 (Django backend), ADR-003 (icontract), ADR-004 (Python toolchain) marked as superseded by ADR-013
+- ADR-012 tool references updated: icontract → JML, CrossHair → OpenJML ESC, Hypothesis → jqwik, Rocq/Coq → KeY
+
 ## [0.16.0] - 2026-03-08
 
 ### Added
