@@ -147,9 +147,9 @@ class TestExceptionHandler:
         exc = NotFoundError("User 42 not found")
         response = handle_ground_control_error(request, exc)
         body = json.loads(response.content)
-        assert body["error_code"] == "not_found"
-        assert body["message"] == "User 42 not found"
-        assert body["detail"] is None
+        assert body["error"]["code"] == "not_found"
+        assert body["error"]["message"] == "User 42 not found"
+        assert body["error"]["detail"] is None
 
     def test_response_body_with_detail(self, rf: RequestFactory) -> None:
         request = rf.get("/")
@@ -157,4 +157,4 @@ class TestExceptionHandler:
         exc = DomainValidationError("Invalid input", detail=detail)
         response = handle_ground_control_error(request, exc)
         body = json.loads(response.content)
-        assert body["detail"] == detail
+        assert body["error"]["detail"] == detail

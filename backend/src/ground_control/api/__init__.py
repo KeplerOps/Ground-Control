@@ -39,8 +39,10 @@ def handle_ground_control_error(request: HttpRequest, exc: GroundControlError) -
             status = _STATUS_MAP[cls]
             break
     body: dict[str, Any] = {
-        "error_code": exc.error_code,
-        "message": exc.message,
-        "detail": exc.detail,
+        "error": {
+            "code": exc.error_code,
+            "message": exc.message,
+            "detail": exc.detail,
+        },
     }
     return api.create_response(request, body, status=status)
