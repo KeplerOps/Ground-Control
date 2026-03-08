@@ -25,7 +25,7 @@ The `docker-compose.yml` in the project root runs infrastructure only. Django ru
 
 | Service | Image | Port | Purpose |
 |---------|-------|------|---------|
-| `db` | `postgres:16` | 5432 | Primary database |
+| `db` | `apache/age:release_PG16_1.6.0` | 5432 | Primary database (PostgreSQL 16 + Apache AGE 1.6.0) |
 | `redis` | `redis:7` | 6379 | Cache and task queue |
 
 PostgreSQL data persists in the `gc-postgres-data` named volume.

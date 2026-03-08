@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Docker Compose dev environment with PostgreSQL 16 and Redis 7
+- Docker Compose dev environment with PostgreSQL 16 (Apache AGE 1.6.0) and Redis 7
 - `.env.example` documenting all `GC_` environment variables
 - Makefile `up` and `down` targets for managing Docker Compose services
+- ADR-005: Apache AGE for graph database capabilities (chose over Neo4j for operational simplicity)
 
 ### Changed
 

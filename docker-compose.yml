@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16
+    image: apache/age:release_PG16_1.6.0
     environment:
       POSTGRES_DB: ground_control
       POSTGRES_USER: gc
