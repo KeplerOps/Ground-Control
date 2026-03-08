@@ -82,6 +82,10 @@ no_implicit_optional = true
 check_untyped_defs = true
 plugins = ["mypy_django_plugin.main"]
 
+[[tool.mypy.overrides]]
+module = "ground_control.settings.base"
+warn_unused_ignores = false
+
 [tool.django-stubs]
 django_settings_module = "ground_control.settings.base"
 

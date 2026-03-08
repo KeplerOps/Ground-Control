@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-03-08
+
+### Added
+
+- CI pipeline (`.github/workflows/ci.yml`): lint, typecheck, and test jobs run in parallel on push/PR to `main`/`dev`
+
+### Fixed
+
+- Mypy override for `settings.base` — `# type: ignore[misc]` needed for pre-commit per-file check but flagged as unused in full-project check
+
 ## [0.10.0] - 2026-03-08
 
 ### Added
