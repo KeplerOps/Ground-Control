@@ -40,6 +40,7 @@ python manage.py runserver 0.0.0.0:8000
 | `make install` | Create venv and install dependencies |
 | `make lint` | Run ruff + mypy |
 | `make test` | Run pytest |
+| `make docker-build` | Build production Docker image |
 | `make help` | Show all targets |
 
 ## Branch Strategy

@@ -52,6 +52,50 @@ All settings use the `GC_` prefix. See `.env.example`.
 | `make lint` | `ruff check` + `mypy` |
 | `make format` | `ruff format` |
 | `make test` | `pytest` |
+| `make docker-build` | Build production Docker image |
+
+## Production Docker Image
+
+The backend ships as a multi-stage Docker image (`backend/Dockerfile`):
+
+- **Builder stage**: installs dependencies with `uv`, collects static files
+- **Runtime stage**: minimal `python:3.12-slim`, runs as non-root user `gc` (UID 1000)
+- **WSGI server**: gunicorn with 4 workers on port 8000
+
+### Build locally
+
+```bash
+make docker-build
+# or directly:
+docker build -t ghcr.io/keplerops/ground-control:latest backend/
+```
+
+### Run locally
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e GC_SECRET_KEY=change-me \
+  -e GC_DATABASE_URL=postgres://user:pass@host:5432/ground_control \
+  ghcr.io/keplerops/ground-control:latest
+```
+
+Migrations are **not** baked into the image. Run them as a separate init step:
+
+```bash
+docker run --rm \
+  -e GC_SECRET_KEY=change-me \
+  -e GC_DATABASE_URL=postgres://user:pass@host:5432/ground_control \
+  ghcr.io/keplerops/ground-control:latest \
+  python manage.py migrate
+```
+
+### CI/CD
+
+The `docker.yml` GitHub Actions workflow automatically builds and pushes to GHCR on:
+- Push to `main`
+- Semver tags (`v*`)
+
+CI (lint, typecheck, tests) must pass before the image is built.
 
 ## Resetting
 

@@ -27,11 +27,13 @@ Ground-Control/
 │   ├── adrs/                 # Architecture Decision Records
 │   └── design/               # Index to archived design specs
 ├── archive/                  # Pre-pivot docs, tools, old ADRs
+├── .github/workflows/        # CI + Docker build/publish to GHCR
 ├── docs/                     # Operational documentation
 │   ├── architecture/         # Current architecture
 │   ├── deployment/           # Dev environment setup
 │   └── CODING_STANDARDS.md
-└── docker-compose.yml        # Dev services (PostgreSQL + AGE, Redis)
+├── docker-compose.yml        # Dev services (PostgreSQL + AGE, Redis)
+└── Makefile                  # Common commands (install, lint, test, docker-build)
 ```
 
 ## Documentation
@@ -47,7 +49,7 @@ Ground-Control/
 
 ## Status
 
-Pre-alpha. Django project skeleton with django-ninja API mount. No domain models, API endpoints, or business logic yet. See [CHANGELOG.md](CHANGELOG.md).
+Pre-alpha. Django project skeleton with django-ninja API mount, production Dockerfile, and GHCR publishing. No domain models, API endpoints, or business logic yet. See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
