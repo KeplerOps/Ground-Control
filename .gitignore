@@ -200,5 +200,10 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Archive tool caches/output
+archive/tools/strictdoc/output/
+archive/tools/issue-graph/.issue_cache.json
+archive/tools/issue-graph/graph.json
+
 # Local files
 tickets

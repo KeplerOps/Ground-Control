@@ -32,3 +32,4 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | [008](008-clean-architecture.md) | Clean Architecture (API / Domain / Infrastructure) | Accepted |
 | [009](009-coding-standards.md) | Coding Standards and Tooling | Accepted |
 | [010](010-evaluate-django-framework.md) | Switch to Django + django-ninja (Supersedes ADR-001) | Accepted |
+| [011](011-requirements-data-model.md) | Requirements Data Model | Accepted |
