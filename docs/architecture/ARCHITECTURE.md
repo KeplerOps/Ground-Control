@@ -6,7 +6,7 @@
 |-----------|-----------|
 | Language | Python 3.12+ |
 | Framework | Django 5.x + django-ninja |
-| Database | PostgreSQL 16 |
+| Database | PostgreSQL 16 + Apache AGE 1.6.0 (graph) |
 | Cache / Queue | Redis 7 (via django-q2) |
 | Audit trail | django-auditlog |
 | Object storage | django-storages (S3-compatible) |

@@ -26,5 +26,6 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | [002](002-postgresql-database.md) | PostgreSQL as Primary Database | Accepted |
 | [003](003-design-by-contract.md) | Design by Contract with icontract | Accepted |
 | [004](004-code-quality-toolchain.md) | Code Quality Toolchain | Accepted |
+| [005](005-apache-age-graph.md) | Apache AGE for Graph Database Capabilities | Accepted |
 
 Prior ADRs from the old project frame are archived in `archive/architecture/adrs/`.

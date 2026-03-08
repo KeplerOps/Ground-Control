@@ -9,7 +9,7 @@ Ground Control is neurosymbolic constraint infrastructure, dogfooded on itself. 
 
 ```bash
 cp .env.example .env
-make up                            # PostgreSQL 16 + Redis 7
+make up                            # PostgreSQL 16 (Apache AGE) + Redis 7
 make install                       # Python dependencies
 cd backend && . .venv/bin/activate
 python manage.py migrate
@@ -31,7 +31,7 @@ Ground-Control/
 │   ├── architecture/         # Current architecture
 │   ├── deployment/           # Dev environment setup
 │   └── CODING_STANDARDS.md
-└── docker-compose.yml        # Dev services (PostgreSQL, Redis)
+└── docker-compose.yml        # Dev services (PostgreSQL + AGE, Redis)
 ```
 
 ## Documentation
