@@ -1,11 +1,12 @@
 """Base Django settings for Ground Control."""
 
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings
 
 
-class GroundControlSettings(BaseSettings):
+class GroundControlSettings(BaseSettings):  # type: ignore[misc]
     """Application settings loaded from environment variables."""
 
     secret_key: str = "insecure-change-me-in-production"  # noqa: S105
@@ -27,8 +28,7 @@ DEBUG = env.debug
 
 ALLOWED_HOSTS: list[str] = ["*"] if DEBUG else []
 
-SHARED_APPS: list[str] = [
-    "django_tenants",
+INSTALLED_APPS: list[str] = [
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -36,25 +36,15 @@ SHARED_APPS: list[str] = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "auditlog",
+    "django_structlog",
     "ninja",
-    "oauth2_provider",
     "storages",
     "django_q",
 ]
 
-TENANT_APPS: list[str] = [
-    "django.contrib.auth",
-    "django.contrib.contenttypes",
-    "ground_control.domain",
-]
-
-INSTALLED_APPS = list(SHARED_APPS) + [
-    app for app in TENANT_APPS if app not in SHARED_APPS
-]
-
 MIDDLEWARE = [
-    "django_tenants.middleware.main.TenantMainMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "django_structlog.middlewares.RequestMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -84,16 +74,17 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "ground_control.wsgi.application"
 
+_db_url = urlparse(env.database_url)
 DATABASES = {
     "default": {
-        "ENGINE": "django_tenants.postgresql_backend",
-        "NAME": "ground_control",
-        "HOST": "localhost",
-        "PORT": "5432",
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": _db_url.path.lstrip("/"),
+        "USER": _db_url.username or "",
+        "PASSWORD": _db_url.password or "",
+        "HOST": _db_url.hostname or "localhost",
+        "PORT": str(_db_url.port or 5432),
     },
 }
-
-DATABASE_ROUTERS = ("django_tenants.routers.TenantSyncRouter",)
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -108,12 +99,9 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-# django-tenants
-TENANT_MODEL = "domain.Tenant"
-TENANT_DOMAIN_MODEL = "domain.Domain"
 
 # django-q2
 Q_CLUSTER = {
@@ -124,7 +112,14 @@ Q_CLUSTER = {
     "redis": env.redis_url,
 }
 
-# structlog
+# structlog — configure early so all subsequent imports get structured logging.
+# ``configure()`` sets up structlog processors and routes stdlib logging through
+# structlog's ProcessorFormatter. The LOGGING dict below is deliberately minimal:
+# the real configuration lives in ``ground_control.logging.configure()``.
+from ground_control.logging import configure as _configure_logging  # noqa: E402
+
+_configure_logging(debug=DEBUG)
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

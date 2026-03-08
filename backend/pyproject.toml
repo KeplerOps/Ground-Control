@@ -23,10 +23,10 @@ dependencies = [
     "django",
     "django-auditlog",
     "django-ninja",
-    "django-oauth-toolkit",
     "django-q2",
     "django-storages[s3]",
-    "django-tenants",
+    "django-structlog",
+    "gunicorn",
     "icontract",
     "psycopg[binary]",
     "pydantic",
@@ -84,6 +84,20 @@ no_implicit_optional = true
 check_untyped_defs = true
 plugins = ["mypy_django_plugin.main"]
 
+[[tool.mypy.overrides]]
+module = "ground_control.settings.base"
+warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+module = "ninja.*"
+ignore_missing_imports = true
+warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_decorators = false
+warn_unused_ignores = false
+
 [tool.django-stubs]
 django_settings_module = "ground_control.settings.base"
 
@@ -91,23 +105,19 @@ django_settings_module = "ground_control.settings.base"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-asyncio_mode = "auto"
 addopts = "-ra -q --strict-markers"
 DJANGO_SETTINGS_MODULE = "ground_control.settings.test"
 
 [dependency-groups]
 dev = [
     "crosshair-tool",
-    "deal",
     "django-stubs",
     "factory-boy",
     "hypothesis",
     "mypy",
     "pre-commit",
     "pytest",
-    "pytest-asyncio",
     "pytest-cov",
     "pytest-django",
-    "respx",
     "ruff",
 ]

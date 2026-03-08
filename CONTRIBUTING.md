@@ -2,10 +2,46 @@
 
 ## Getting Started
 
-1. Fork and clone the repository
-2. Create a feature branch from `dev`: `git checkout -b feature/your-feature`
-3. Make your changes
-4. Push and open a PR against `dev`
+### Prerequisites
+
+- Python 3.12+
+- Docker Engine 24+ and Docker Compose v2
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+
+### Local Development Setup
+
+```bash
+# 1. Clone and branch
+git clone https://github.com/KeplerOps/Ground-Control.git
+cd Ground-Control
+git checkout -b feature/your-feature dev
+
+# 2. Start PostgreSQL and Redis
+cp .env.example .env
+make up
+
+# 3. Install Python dependencies
+make install
+
+# 4. Run migrations and start the server
+cd backend && . .venv/bin/activate
+python manage.py migrate
+python manage.py runserver 0.0.0.0:8000
+# Or from the project root: make dev
+```
+
+### Useful Makefile Targets
+
+| Target | Description |
+|--------|-------------|
+| `make up` | Start Docker Compose services (PostgreSQL, Redis) |
+| `make down` | Stop Docker Compose services |
+| `make dev` | Start Django development server |
+| `make install` | Create venv and install dependencies |
+| `make lint` | Run ruff + mypy |
+| `make test` | Run pytest |
+| `make docker-build` | Build production Docker image |
+| `make help` | Show all targets |
 
 ## Branch Strategy
 

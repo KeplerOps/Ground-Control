@@ -45,7 +45,7 @@ Requirement states (draft, active, deprecated, archived) are a simple linear pro
 
 ### 5. Audit via django-auditlog (No django-simple-history)
 
-`django-auditlog` is already installed and wired up (see ADR-010). All new models register with it. No reason to add a second audit library.
+`django-auditlog` is already installed and wired up (see ADR-001). All new models register with it. No reason to add a second audit library.
 
 ### 6. AGE as Query Layer, ORM as Source of Truth
 

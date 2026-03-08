@@ -158,7 +158,7 @@ class RequirementImport(models.Model):
 
 ### The Problem
 
-All five models live in one Django app and share a database. Without discipline, any code can `Requirement.objects.create()` or `TraceabilityLink.objects.filter()` from anywhere, and the "clean architecture" from ADR-008 becomes fiction.
+All five models live in one Django app and share a database. Without discipline, any code can `Requirement.objects.create()` or `TraceabilityLink.objects.filter()` from anywhere, and the "clean architecture" becomes fiction.
 
 ### The Solution: Write Ownership, Read Freedom
 
@@ -212,9 +212,9 @@ Splitting into `requirements`, `traceability`, `sync` apps would give DB-level s
 
 Service-layer ownership gives us the decoupling benefits where they matter (mutation paths, testing, reasoning about side effects) without the overhead of multiple apps.
 
-### Pragmatic Note on ADR-008
+### Pragmatic Note on Clean Architecture
 
-ADR-008 says the domain layer should have "zero framework imports." With Django, the models *are* the framework — `models.Model`, `UUIDField`, `ForeignKey` are all Django. This is the known tradeoff of choosing Django (ADR-010): we get batteries-included at the cost of framework coupling in the domain layer. The service layer pattern mitigates this by keeping *business logic* in services that are testable without the database (pass in model instances, mock querysets), even though the models themselves are Django-coupled.
+The clean architecture principle says the domain layer should have "zero framework imports." With Django, the models *are* the framework — `models.Model`, `UUIDField`, `ForeignKey` are all Django. This is the known tradeoff of choosing Django (ADR-001): we get batteries-included at the cost of framework coupling in the domain layer. The service layer pattern mitigates this by keeping *business logic* in services that are testable without the database (pass in model instances, mock querysets), even though the models themselves are Django-coupled.
 
 ## Key Patterns
 
@@ -285,7 +285,7 @@ class GitHubClient:
 ## References
 
 - [ADR-011: Requirements Data Model](../adrs/011-requirements-data-model.md)
-- [ADR-010: Django + django-ninja](../adrs/010-evaluate-django-framework.md)
-- [ADR-008: Clean Architecture](../adrs/008-clean-architecture.md)
+- [ADR-001: Django + django-ninja](../adrs/001-django-backend.md)
+- [ADR-005: Apache AGE](../adrs/005-apache-age-graph.md)
 - Archived StrictDoc file: `archive/docs/requirements/project.sdoc`
 - Archived issue-graph tool: `archive/tools/issue-graph/issue_graph.py`

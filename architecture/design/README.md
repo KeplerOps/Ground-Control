@@ -1,8 +1,14 @@
-# Design Documentation
+# Design Specifications
 
-This directory contains design notes and technical specifications for Ground Control's major features and systems.
+Pre-pivot design artifacts are archived in `archive/docs/`. See:
 
-Detailed notes live in [`../notes/`](../notes/) and are linked from here. For formal architectural decisions, see the [ADRs](../adrs/README.md).
+- `archive/docs/requirements/project.sdoc` — product requirements (replaces PRD)
+- `archive/docs/api/API_SPEC.md` — target API design
+- `archive/docs/architecture/DATA_MODEL.md` — target data model
+- `archive/docs/user-stories/USER_STORIES.md` — user stories
+- `archive/docs/user-stories/USE_CASES.md` — use case descriptions
+
+For architecture decisions, see [ADRs](../adrs/).
 
 ## Design Notes Index
 
