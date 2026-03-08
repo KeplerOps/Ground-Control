@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-03-08
+
+### Added
+
+- Structured logging with structlog and django-structlog (closes #162)
+- JSON log output in production, colored console in development (based on DEBUG)
+- Automatic request context binding (request_id, ip, user_id) via django-structlog middleware
+- Service identity fields (service.name, service.version) in all log entries
+- Standard library logging routed through structlog for unified output
+
+### Removed
+
+- Custom `RequestIdMiddleware` (replaced by django-structlog's `RequestMiddleware`)
+
 ## [0.11.0] - 2026-03-08
 
 ### Added

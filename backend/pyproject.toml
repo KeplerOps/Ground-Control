@@ -25,6 +25,7 @@ dependencies = [
     "django-ninja",
     "django-q2",
     "django-storages[s3]",
+    "django-structlog",
     "icontract",
     "psycopg[binary]",
     "pydantic",

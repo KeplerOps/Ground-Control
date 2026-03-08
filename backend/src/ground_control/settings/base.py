@@ -36,6 +36,7 @@ INSTALLED_APPS: list[str] = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "auditlog",
+    "django_structlog",
     "ninja",
     "storages",
     "django_q",
@@ -43,6 +44,7 @@ INSTALLED_APPS: list[str] = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "django_structlog.middlewares.RequestMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -109,7 +111,14 @@ Q_CLUSTER = {
     "redis": env.redis_url,
 }
 
-# structlog
+# structlog — configure early so all subsequent imports get structured logging.
+# ``configure()`` sets up structlog processors and routes stdlib logging through
+# structlog's ProcessorFormatter. The LOGGING dict below is deliberately minimal:
+# the real configuration lives in ``ground_control.logging.configure()``.
+from ground_control.logging import configure as _configure_logging  # noqa: E402
+
+_configure_logging(debug=DEBUG)
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
