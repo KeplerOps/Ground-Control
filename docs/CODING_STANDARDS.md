@@ -55,6 +55,65 @@ Enforced by `import-linter` in CI.
 | Constants | `UPPER_SNAKE_CASE` | `MAX_RETRY_COUNT` |
 | Private | `_leading_underscore` | `_validate_score()` |
 
+## Schemas & Response Format
+
+All project schemas inherit from `BaseSchema` (`ground_control.schemas.base`), which extends `ninja.Schema` and provides a single point for future shared configuration.
+
+**Naming convention:** `FooIn` for input schemas, `FooOut` for output schemas.
+
+### Success responses
+
+Single-resource endpoints return flat data (no envelope wrapper) — this is django-ninja idiomatic:
+
+```python
+@router.get("/{id}", response=RiskOut)
+def get_risk(request, id: int) -> Risk:
+    return Risk.objects.get(id=id)
+```
+
+### Paginated responses
+
+List endpoints use `GroundControlPagination`, which produces:
+
+```json
+{
+  "items": [...],
+  "meta": {
+    "total_count": 100,
+    "page": 1,
+    "per_page": 20,
+    "total_pages": 5
+  }
+}
+```
+
+Usage:
+
+```python
+from ground_control.schemas import GroundControlPagination
+
+@router.get("/", response=list[RiskOut])
+@paginate(GroundControlPagination)
+def list_risks(request):
+    return Risk.objects.all()
+```
+
+### Error responses
+
+All errors use the nested format:
+
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "User 42 not found",
+    "detail": null
+  }
+}
+```
+
+The `code` field is a machine-readable identifier (e.g. `not_found`, `validation_error`). The `message` field is a human-readable description. The `detail` field is an optional dictionary with extra structured information.
+
 ## Exceptions
 
 All application exceptions inherit from `GroundControlError` in `exceptions/`. Domain layer raises these. The `NinjaAPI` exception handler in `api/__init__.py` maps them to HTTP responses.

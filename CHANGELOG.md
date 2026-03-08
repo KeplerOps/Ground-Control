@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-03-08
+
+### Added
+
+- `BaseSchema` base class for all project schemas (closes #164)
+- `GroundControlPagination` with `PageMeta` for consistent paginated responses
+- Nested error response format: `{"error": {"code": ..., "message": ..., "detail": ...}}`
+- Schemas & Response Format section in CODING_STANDARDS.md
+
+### Changed
+
+- Error responses now use nested `{"error": {...}}` format (breaking API change, no consumers)
+- Replaced `ErrorResponse` schema with `ErrorDetail` + `ErrorEnvelope`
+
 ## [0.13.0] - 2026-03-08
 
 ### Added

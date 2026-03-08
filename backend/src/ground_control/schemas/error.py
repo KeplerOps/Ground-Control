@@ -1,13 +1,19 @@
-"""Error response schema for structured API error responses."""
+"""Error response schemas for structured API error responses."""
 
 from typing import Any
 
-from ninja import Schema
+from ground_control.schemas.base import BaseSchema
 
 
-class ErrorResponse(Schema):
-    """Standard error response body returned by exception handlers."""
+class ErrorDetail(BaseSchema):
+    """Inner error payload with machine-readable code and human-readable message."""
 
-    error_code: str
+    code: str
     message: str
     detail: dict[str, Any] | None = None
+
+
+class ErrorEnvelope(BaseSchema):
+    """Top-level error response: ``{"error": {"code": ..., "message": ..., "detail": ...}}``."""
+
+    error: ErrorDetail
