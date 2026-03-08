@@ -23,10 +23,8 @@ dependencies = [
     "django",
     "django-auditlog",
     "django-ninja",
-    "django-oauth-toolkit",
     "django-q2",
     "django-storages[s3]",
-    "django-tenants",
     "icontract",
     "psycopg[binary]",
     "pydantic",
@@ -91,23 +89,19 @@ django_settings_module = "ground_control.settings.base"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-asyncio_mode = "auto"
 addopts = "-ra -q --strict-markers"
 DJANGO_SETTINGS_MODULE = "ground_control.settings.test"
 
 [dependency-groups]
 dev = [
     "crosshair-tool",
-    "deal",
     "django-stubs",
     "factory-boy",
     "hypothesis",
     "mypy",
     "pre-commit",
     "pytest",
-    "pytest-asyncio",
     "pytest-cov",
     "pytest-django",
-    "respx",
     "ruff",
 ]

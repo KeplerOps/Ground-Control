@@ -1,0 +1,1471 @@
+[DOCUMENT]
+TITLE: Ground Control — Product Requirements
+UID: GC-PRD
+
+[GRAMMAR]
+ELEMENTS:
+- TAG: TEXT
+  FIELDS:
+  - TITLE: UID
+    TYPE: String
+    REQUIRED: False
+  - TITLE: STATEMENT
+    TYPE: String
+    REQUIRED: True
+- TAG: REQUIREMENT
+  FIELDS:
+  - TITLE: UID
+    TYPE: String
+    REQUIRED: True
+  - TITLE: TITLE
+    TYPE: String
+    REQUIRED: True
+  - TITLE: STATEMENT
+    TYPE: String
+    REQUIRED: True
+  - TITLE: COMMENT
+    TYPE: String
+    REQUIRED: False
+  RELATIONS:
+  - TYPE: Parent
+  - TYPE: File
+
+[TEXT]
+STATEMENT: >>>
+Ground Control is an open, self-hostable IT Risk Management (ITRM) platform
+that replaces proprietary GRC tools (AuditBoard ITRM, ServiceNow GRC, Archer).
+First deployment target is on-prem single-tenant.
+
+Each requirement traces to one or more GitHub issues. Wave ordering is
+validated by the issue-graph tooling (tools/issue-graph/).
+
+Guiding principles:
+
+- Guardrails before code. Formal methods, CI scanning, architecture tests constrain coding agents before any domain code is written.
+- Design contracts first, then write code that satisfies them.
+- On-prem single-tenant first.
+- Django-native first.
+- Frontend and backend in parallel once API contracts are defined.
+<<<
+
+[[SECTION]]
+TITLE: Wave 0 — Foundation, CI, and Quality Gates
+
+[TEXT]
+STATEMENT: >>>
+Everything needed before a single line of domain code gets written.
+Dev environment, full CI pipeline with all scanning, formal methods
+infrastructure, design-by-contract, architecture constraints.
+The guardrails ARE the foundation.
+<<<
+
+[REQUIREMENT]
+UID: W0-DEV-ENV
+TITLE: Development environment and project scaffold
+STATEMENT: >>>
+Set up devcontainer, Docker Compose dev profile, pre-commit hooks,
+editor settings, and pydantic-settings configuration management.
+<<<
+COMMENT: GitHub issues: #19, #20, #32
+
+[REQUIREMENT]
+UID: W0-ADR
+TITLE: Architecture Decision Record framework
+STATEMENT: >>>
+Maintain ADR framework for documenting architectural decisions.
+Rewrite existing ADRs to remove stale FastAPI references.
+<<<
+COMMENT: GitHub issues: #14
+
+[REQUIREMENT]
+UID: W0-CI-QUALITY
+TITLE: CI pipeline — code quality gates
+STATEMENT: >>>
+Linting, formatting, type checking, and test runner in CI.
+All must pass before any code merges.
+<<<
+COMMENT: GitHub issues: #21, #22, #23
+
+[REQUIREMENT]
+UID: W0-CI-BUILD
+TITLE: CI pipeline — build and publish
+STATEMENT: >>>
+Docker image build and publishing pipeline.
+SonarQube integration for continuous code quality.
+<<<
+COMMENT: GitHub issues: #24, #25
+
+[REQUIREMENT]
+UID: W0-CI-SECURITY
+TITLE: CI pipeline — security scanning
+STATEMENT: >>>
+SAST (Semgrep + Bandit), DAST (OWASP ZAP), AI vulnerability scanning
+(OpenANT), and dependency/license scanning. Independent feedback loops
+that catch problems before they ship.
+<<<
+COMMENT: GitHub issues: #26, #27, #28, #29
+
+[REQUIREMENT]
+UID: W0-FORMAL-METHODS
+TITLE: Formal methods infrastructure
+STATEMENT: >>>
+Set up Rocq/Coq proof infrastructure with initial proof targets.
+Set up design-by-contract (icontract) and symbolic execution (crosshair).
+Define contracts and proof obligations BEFORE domain code exists —
+the contracts specify correctness, the code satisfies them.
+<<<
+COMMENT: GitHub issues: #36, #37
+
+[REQUIREMENT]
+UID: W0-ARCH-AS-CODE
+TITLE: Architecture as code and architecture tests
+STATEMENT: >>>
+C4 model for system architecture. PyTestArch fitness functions
+enforcing layer boundaries (models cannot import views, domain
+cannot import infrastructure, etc.). Tests run in CI on every commit.
+Structural constraints defined before any layers are built.
+<<<
+COMMENT: GitHub issues: #38
+
+[REQUIREMENT]
+UID: W0-POLICY-AS-CODE
+TITLE: Authorization policy specification
+STATEMENT: >>>
+Define the permission model (roles, groups, per-model permissions)
+as a testable specification using Django permissions and groups.
+Policy defined as data, tested in CI, enforced by Django auth.
+<<<
+COMMENT: GitHub issues: #39
+
+[REQUIREMENT]
+UID: W0-MCP
+TITLE: MCP servers for AI-assisted development
+STATEMENT: >>>
+Configure MCP servers (Rocq, AWS, ops) to support formal verification
+workflow and AI-assisted development.
+<<<
+COMMENT: GitHub issues: #18
+
+[REQUIREMENT]
+UID: W0-DEPLOY
+TITLE: Docker Compose production profile and observability
+STATEMENT: >>>
+Docker Compose production profile for on-prem deployment.
+Health endpoints, Prometheus metrics, Grafana dashboards.
+Observable from day one.
+<<<
+COMMENT: GitHub issues: #133, #135
+
+[REQUIREMENT]
+UID: W0-ENCRYPTION
+TITLE: Data encryption at rest and in transit
+STATEMENT: >>>
+AES-256 encryption at rest for all stored data and artifacts.
+TLS 1.3 for all data in transit.
+<<<
+COMMENT: GitHub issues: #133 (acceptance criteria)
+
+[REQUIREMENT]
+UID: W0-AVAILABILITY
+TITLE: High availability
+STATEMENT: >>>
+No single points of failure in the application layer.
+Infrastructure HA depends on deployment topology.
+<<<
+COMMENT: GitHub issues: #133 (acceptance criteria)
+
+[REQUIREMENT]
+UID: W0-I18N
+TITLE: Internationalization
+STATEMENT: >>>
+UTF-8 throughout. UI string externalization for i18n.
+<<<
+COMMENT: GitHub issues: #151
+
+[[/SECTION]]
+
+[[SECTION]]
+TITLE: Wave 1 — Core Django Setup
+
+[TEXT]
+STATEMENT: >>>
+Django auth, permissions, base schemas, logging — the cross-cutting
+concerns that all domain code depends on. Written against the contracts
+defined in Wave 0.
+<<<
+
+[REQUIREMENT]
+UID: W1-EXCEPTIONS
+TITLE: Shared exception hierarchy
+STATEMENT: >>>
+Define application exception classes for use across all Django apps.
+<<<
+COMMENT: GitHub issues: #30
+RELATIONS:
+- TYPE: Parent
+  VALUE: W0-ARCH-AS-CODE
+
+[REQUIREMENT]
+UID: W1-LOGGING
+TITLE: Structured logging framework
+STATEMENT: >>>
+Configure structlog for structured JSON logging across all components.
+<<<
+COMMENT: GitHub issues: #31
+
+[REQUIREMENT]
+UID: W1-SCHEMAS
+TITLE: Base Pydantic schemas and API response envelope
+STATEMENT: >>>
+Define base Schema classes for django-ninja: paginated lists, error
+responses, success envelopes, audit field mixins.
+<<<
+COMMENT: GitHub issues: #33
+RELATIONS:
+- TYPE: Parent
+  VALUE: W0-ARCH-AS-CODE
+
+[REQUIREMENT]
+UID: W1-AUTH
+TITLE: User model and local authentication
+STATEMENT: >>>
+Django User model (custom or extended). Local authentication using
+Django auth backend. Session-based auth for UI, API keys for agents.
+<<<
+COMMENT: GitHub issues: #41, #65
+RELATIONS:
+- TYPE: Parent
+  VALUE: W0-POLICY-AS-CODE
+
+[REQUIREMENT]
+UID: W1-PERMISSIONS
+TITLE: Role and permission model
+STATEMENT: >>>
+Django groups and permissions. Default groups: Admin, Risk Manager,
+Control Owner, Auditor, Viewer. Permissions assigned per model.
+<<<
+COMMENT: GitHub issues: #42
+RELATIONS:
+- TYPE: Parent
+  VALUE: W0-POLICY-AS-CODE
+- TYPE: Parent
+  VALUE: W0-CI-BUILD
+
+[REQUIREMENT]
+UID: W1-AUDIT
+TITLE: Audit log with append-only enforcement
+STATEMENT: >>>
+Configure django-auditlog for all model changes. Append-only
+enforcement — no deletion of audit records.
+<<<
+COMMENT: GitHub issues: #53
+
+[REQUIREMENT]
+UID: W1-API-STRUCTURE
+TITLE: API versioning and router structure
+STATEMENT: >>>
+django-ninja router structure with API versioning. Standard URL
+patterns and endpoint conventions.
+<<<
+COMMENT: GitHub issues: #57
+RELATIONS:
+- TYPE: Parent
+  VALUE: W0-ARCH-AS-CODE
+
+[REQUIREMENT]
+UID: W1-JWT
+TITLE: JWT token management
+STATEMENT: >>>
+JWT access and refresh token management for API authentication.
+<<<
+COMMENT: GitHub issues: #66
+
+[REQUIREMENT]
+UID: W1-TENANT
+TITLE: Tenant model and row-level security
+STATEMENT: >>>
+Tenant model with row-level security for data isolation.
+<<<
+COMMENT: GitHub issues: #40
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-PERMISSIONS
+
+[REQUIREMENT]
+UID: W1-TENANT-MIDDLEWARE
+TITLE: Tenant context middleware
+STATEMENT: >>>
+Request middleware for tenant identification and context injection.
+<<<
+COMMENT: GitHub issues: #56
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-TENANT
+- TYPE: Parent
+  VALUE: W0-MCP
+
+[[/SECTION]]
+
+[[SECTION]]
+TITLE: Wave 2 — Domain Models
+
+[TEXT]
+STATEMENT: >>>
+The actual ITRM entities — Django models, migrations, admin registration.
+Contracts and architecture tests from Wave 0 validate these as they're built.
+All issues need body text rewritten for Django ORM (not SQLAlchemy/Alembic).
+<<<
+
+[REQUIREMENT]
+UID: W2-RISK
+TITLE: Risk entity
+STATEMENT: >>>
+Django model for risks: risk register, categories, likelihood/impact
+scales, risk appetite thresholds. Admin registration. Migrations.
+<<<
+COMMENT: GitHub issues: #43
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-SCHEMAS
+
+[REQUIREMENT]
+UID: W2-CONTROL
+TITLE: Control entity
+STATEMENT: >>>
+Django model for controls: objective, description, type, nature,
+frequency, owner. Admin registration. Migrations.
+<<<
+COMMENT: GitHub issues: #44
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-SCHEMAS
+
+[REQUIREMENT]
+UID: W2-FRAMEWORK
+TITLE: Framework and requirements entities
+STATEMENT: >>>
+Django models for compliance frameworks and their requirements.
+Many-to-many mapping between controls and framework requirements.
+<<<
+COMMENT: GitHub issues: #45
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-SCHEMAS
+
+[REQUIREMENT]
+UID: W2-CCL
+TITLE: Common Control Library entity
+STATEMENT: >>>
+Django model for reusable common controls mapped across frameworks.
+<<<
+COMMENT: GitHub issues: #46
+RELATIONS:
+- TYPE: Parent
+  VALUE: W2-FRAMEWORK
+
+[REQUIREMENT]
+UID: W2-ASSESSMENT
+TITLE: Assessment campaign entity
+STATEMENT: >>>
+Django model for assessment campaigns: time-boxed assessment cycles
+with configurable scoring.
+<<<
+COMMENT: GitHub issues: #47
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-SCHEMAS
+
+[REQUIREMENT]
+UID: W2-TEST-PROC
+TITLE: Test procedure and test steps entities
+STATEMENT: >>>
+Django models for test procedures and individual test steps with
+expected/actual results and evidence references.
+<<<
+COMMENT: GitHub issues: #48
+RELATIONS:
+- TYPE: Parent
+  VALUE: W2-ASSESSMENT
+
+[REQUIREMENT]
+UID: W2-ARTIFACT
+TITLE: Artifact (evidence) entity and storage abstraction
+STATEMENT: >>>
+Django model for evidence artifacts with django-storages backend
+for S3/MinIO. File metadata, versioning, tagging.
+<<<
+COMMENT: GitHub issues: #49
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-SCHEMAS
+
+[REQUIREMENT]
+UID: W2-FINDING
+TITLE: Finding entity
+STATEMENT: >>>
+Django model for findings: deficiency classification, severity,
+lifecycle states.
+<<<
+COMMENT: GitHub issues: #50
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-SCHEMAS
+
+[REQUIREMENT]
+UID: W2-REMEDIATION
+TITLE: Remediation plan and actions entities
+STATEMENT: >>>
+Django models for remediation plans: action items, owners, due dates,
+evidence of remediation.
+<<<
+COMMENT: GitHub issues: #51
+RELATIONS:
+- TYPE: Parent
+  VALUE: W2-FINDING
+
+[REQUIREMENT]
+UID: W2-TAXONOMY
+TITLE: Taxonomy configuration entity
+STATEMENT: >>>
+Django model for configurable taxonomy: risk categories, control types,
+assessment methodologies.
+<<<
+COMMENT: GitHub issues: #52
+RELATIONS:
+- TYPE: Parent
+  VALUE: W0-DEV-ENV
+- TYPE: Parent
+  VALUE: W1-SCHEMAS
+
+[REQUIREMENT]
+UID: W2-COMMENTS
+TITLE: Comment and notification entities
+STATEMENT: >>>
+Django models for comments on any entity and in-app notifications.
+<<<
+COMMENT: GitHub issues: #54
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-SCHEMAS
+
+[REQUIREMENT]
+UID: W2-CONTROL-EFFECTIVENESS
+TITLE: Control effectiveness rating
+STATEMENT: >>>
+Configurable rating scales for control effectiveness with
+evidence-based justification.
+<<<
+COMMENT: GitHub issues: #44 (acceptance criteria)
+
+[REQUIREMENT]
+UID: W2-WORKPAPERS
+TITLE: Workpapers
+STATEMENT: >>>
+Structured workpaper documents with sections, findings, and
+review sign-off chains.
+<<<
+COMMENT: GitHub issues: #152
+RELATIONS:
+- TYPE: Parent
+  VALUE: W2-ASSESSMENT
+
+[REQUIREMENT]
+UID: W2-MAX-ARTIFACT-SIZE
+TITLE: Maximum artifact file size
+STATEMENT: >>>
+500 MB per file, configurable.
+<<<
+COMMENT: GitHub issues: #49 (acceptance criteria)
+
+[[/SECTION]]
+
+[[SECTION]]
+TITLE: Wave 3 — API Endpoints
+
+[TEXT]
+STATEMENT: >>>
+django-ninja endpoints for all domain models. Auth middleware.
+<<<
+
+[REQUIREMENT]
+UID: W3-RISK-API
+TITLE: Risk API endpoints
+STATEMENT: >>>
+CRUD endpoints for risks via django-ninja.
+<<<
+COMMENT: GitHub issues: #58
+RELATIONS:
+- TYPE: Parent
+  VALUE: W2-RISK
+- TYPE: Parent
+  VALUE: W1-AUTH
+- TYPE: Parent
+  VALUE: W0-DEV-ENV
+- TYPE: Parent
+  VALUE: W0-CI-SECURITY
+
+[REQUIREMENT]
+UID: W3-CONTROL-API
+TITLE: Control API endpoints
+STATEMENT: >>>
+CRUD endpoints for controls via django-ninja.
+<<<
+COMMENT: GitHub issues: #59
+RELATIONS:
+- TYPE: Parent
+  VALUE: W2-CONTROL
+- TYPE: Parent
+  VALUE: W1-LOGGING
+- TYPE: Parent
+  VALUE: W1-EXCEPTIONS
+
+[REQUIREMENT]
+UID: W3-ASSESSMENT-API
+TITLE: Assessment and test procedure API endpoints
+STATEMENT: >>>
+CRUD endpoints for assessments, test procedures, and test steps.
+<<<
+COMMENT: GitHub issues: #60
+RELATIONS:
+- TYPE: Parent
+  VALUE: W2-ASSESSMENT
+
+[REQUIREMENT]
+UID: W3-ARTIFACT-API
+TITLE: Artifact/evidence API endpoints
+STATEMENT: >>>
+Upload, download, link, and manage evidence artifacts.
+<<<
+COMMENT: GitHub issues: #61
+RELATIONS:
+- TYPE: Parent
+  VALUE: W2-ARTIFACT
+
+[REQUIREMENT]
+UID: W3-FINDING-API
+TITLE: Finding and remediation API endpoints
+STATEMENT: >>>
+CRUD endpoints for findings and remediation plans.
+<<<
+COMMENT: GitHub issues: #62
+RELATIONS:
+- TYPE: Parent
+  VALUE: W2-FINDING
+
+[REQUIREMENT]
+UID: W3-MISC-API
+TITLE: Taxonomy, audit log, and search API endpoints
+STATEMENT: >>>
+API endpoints for taxonomy config, audit log queries, and search.
+<<<
+COMMENT: GitHub issues: #63
+RELATIONS:
+- TYPE: Parent
+  VALUE: W2-TAXONOMY
+
+[REQUIREMENT]
+UID: W3-EVIDENCE-REQ-API
+TITLE: Evidence request API endpoints
+STATEMENT: >>>
+API for sending structured evidence requests to control owners.
+<<<
+COMMENT: GitHub issues: #64
+RELATIONS:
+- TYPE: Parent
+  VALUE: W2-ARTIFACT
+
+[REQUIREMENT]
+UID: W3-OIDC
+TITLE: OIDC authentication integration
+STATEMENT: >>>
+OpenID Connect authentication for SSO.
+<<<
+COMMENT: GitHub issues: #67
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-AUTH
+
+[REQUIREMENT]
+UID: W3-API-KEYS
+TITLE: API key authentication
+STATEMENT: >>>
+API key auth for programmatic access and agent authentication.
+Simpler than OAuth2, sufficient for v0.1.
+<<<
+COMMENT: GitHub issues: #68
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-AUTH
+
+[REQUIREMENT]
+UID: W3-OPENAPI
+TITLE: OpenAPI specification validation and documentation
+STATEMENT: >>>
+django-ninja auto-generates OpenAPI 3.1 spec. Validate and publish.
+<<<
+COMMENT: GitHub issues: #69
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-API-STRUCTURE
+
+[REQUIREMENT]
+UID: W3-AUTH-MIDDLEWARE
+TITLE: Authorization middleware and decorators
+STATEMENT: >>>
+Django middleware enforcing permissions on API endpoints.
+<<<
+COMMENT: GitHub issues: #72
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-PERMISSIONS
+- TYPE: Parent
+  VALUE: W1-API-STRUCTURE
+- TYPE: Parent
+  VALUE: W1-TENANT-MIDDLEWARE
+
+[REQUIREMENT]
+UID: W3-USER-MGMT-API
+TITLE: User and role management API
+STATEMENT: >>>
+API endpoints for managing users, groups, and role assignments.
+<<<
+COMMENT: GitHub issues: #77
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-PERMISSIONS
+
+[REQUIREMENT]
+UID: W3-RBAC-ENGINE
+TITLE: RBAC engine with permission resolution
+STATEMENT: >>>
+Role-based access control engine with permission resolution.
+<<<
+COMMENT: GitHub issues: #70
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-PERMISSIONS
+- TYPE: Parent
+  VALUE: W0-CI-BUILD
+- TYPE: Parent
+  VALUE: W0-CI-SECURITY
+
+[REQUIREMENT]
+UID: W3-ABAC-ENGINE
+TITLE: ABAC policy engine
+STATEMENT: >>>
+Attribute-based access control policy engine.
+<<<
+COMMENT: GitHub issues: #71
+RELATIONS:
+- TYPE: Parent
+  VALUE: W3-RBAC-ENGINE
+- TYPE: Parent
+  VALUE: W0-CI-BUILD
+
+[REQUIREMENT]
+UID: W3-SAML
+TITLE: SAML 2.0 SSO integration
+STATEMENT: >>>
+SP-initiated and IdP-initiated SAML 2.0 SSO.
+<<<
+COMMENT: GitHub issues: #73
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-AUTH
+
+[REQUIREMENT]
+UID: W3-OAUTH2-AGENTS
+TITLE: OAuth2 client credentials flow for agents
+STATEMENT: >>>
+OAuth2 client credentials for machine-to-machine agent authentication.
+<<<
+COMMENT: GitHub issues: #74
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-AUTH
+
+[REQUIREMENT]
+UID: W3-SCIM
+TITLE: SCIM 2.0 provisioning endpoints
+STATEMENT: >>>
+Automated user and group provisioning and de-provisioning via SCIM 2.0.
+<<<
+COMMENT: GitHub issues: #75
+RELATIONS:
+- TYPE: Parent
+  VALUE: W3-USER-MGMT-API
+
+[REQUIREMENT]
+UID: W3-MFA
+TITLE: MFA support (TOTP and WebAuthn)
+STATEMENT: >>>
+Multi-factor authentication with TOTP and WebAuthn support for local accounts.
+<<<
+COMMENT: GitHub issues: #76
+RELATIONS:
+- TYPE: Parent
+  VALUE: W1-AUTH
+
+[[/SECTION]]
+
+[[SECTION]]
+TITLE: Wave 4 — Business Logic
+
+[TEXT]
+STATEMENT: >>>
+Scoring, workflows, state machines, evidence management — the business
+logic that makes Ground Control an ITRM tool, not just a CRUD app.
+<<<
+
+[REQUIREMENT]
+UID: W4-RISK-SCORING
+TITLE: Risk scoring engine
+STATEMENT: >>>
+Pluggable risk scoring models. Default: 5x5 inherent/residual matrix.
+<<<
+COMMENT: GitHub issues: #78
+RELATIONS:
+- TYPE: Parent
+  VALUE: W3-RISK-API
+
+[REQUIREMENT]
+UID: W4-RISK-CAMPAIGN
+TITLE: Risk assessment campaign workflow
+STATEMENT: >>>
+End-to-end workflow for risk assessment campaigns.
+<<<
+COMMENT: GitHub issues: #79
+RELATIONS:
+- TYPE: Parent
+  VALUE: W3-ASSESSMENT-API
+
+[REQUIREMENT]
+UID: W4-RISK-TREATMENT
+TITLE: Risk treatment plan management
+STATEMENT: >>>
+Accept, mitigate, transfer, avoid — with linked actions and owners.
+<<<
+COMMENT: GitHub issues: #80
+RELATIONS:
+- TYPE: Parent
+  VALUE: W3-RISK-API
+
+[REQUIREMENT]
+UID: W4-RISK-CONTROL-LINK
+TITLE: Risk-control linkage
+STATEMENT: >>>
+Many-to-many linkage between risks and controls.
+<<<
+COMMENT: GitHub issues: #81
+RELATIONS:
+- TYPE: Parent
+  VALUE: W3-RISK-API
+
+[REQUIREMENT]
+UID: W4-CONTROL-CATALOG
+TITLE: Control catalog management
+STATEMENT: >>>
+Service layer for managing the control catalog.
+<<<
+COMMENT: GitHub issues: #82
+RELATIONS:
+- TYPE: Parent
+  VALUE: W3-CONTROL-API
+
+[REQUIREMENT]
+UID: W4-FRAMEWORK-MAPPING
+TITLE: Control-framework mapping and gap analysis
+STATEMENT: >>>
+Many-to-many mapping engine. Gap analysis: which framework requirements
+lack mapped controls.
+<<<
+COMMENT: GitHub issues: #83
+RELATIONS:
+- TYPE: Parent
+  VALUE: W3-CONTROL-API
+
+[REQUIREMENT]
+UID: W4-ASSESSMENT-SM
+TITLE: Assessment campaign state machine
+STATEMENT: >>>
+State machine: Draft → Planned → In Progress → Review → Closed.
+<<<
+COMMENT: GitHub issues: #84
+RELATIONS:
+- TYPE: Parent
+  VALUE: W3-ASSESSMENT-API
+- TYPE: Parent
+  VALUE: W0-CI-QUALITY
+
+[REQUIREMENT]
+UID: W4-TEST-EXECUTION
+TITLE: Test procedure execution engine
+STATEMENT: >>>
+Execute test procedures, record results per step, link evidence.
+<<<
+COMMENT: GitHub issues: #85
+RELATIONS:
+- TYPE: Parent
+  VALUE: W3-ASSESSMENT-API
+
+[REQUIREMENT]
+UID: W4-EVIDENCE-UPLOAD
+TITLE: Evidence upload and S3 storage
+STATEMENT: >>>
+Evidence upload via django-storages to S3/MinIO backend.
+<<<
+COMMENT: GitHub issues: #87
+RELATIONS:
+- TYPE: Parent
+  VALUE: W3-ARTIFACT-API
+
+[REQUIREMENT]
+UID: W4-EVIDENCE-LINKING
+TITLE: Evidence linking and evidence requests
+STATEMENT: >>>
+Link artifacts to controls, risks, test steps, findings.
+Structured evidence requests with deadlines.
+<<<
+COMMENT: GitHub issues: #88
+RELATIONS:
+- TYPE: Parent
+  VALUE: W3-EVIDENCE-REQ-API
+
+[REQUIREMENT]
+UID: W4-FINDING-LIFECYCLE
+TITLE: Finding lifecycle and deficiency classification
+STATEMENT: >>>
+Finding state machine: Draft → Open → Remediation → Validation → Closed.
+SOX deficiency classification.
+<<<
+COMMENT: GitHub issues: #90
+RELATIONS:
+- TYPE: Parent
+  VALUE: W3-FINDING-API
+
+[REQUIREMENT]
+UID: W4-BACKGROUND-JOBS
+TITLE: Background job processing
+STATEMENT: >>>
+django-q2 for background task processing via Redis.
+<<<
+COMMENT: GitHub issues: #93
+
+[REQUIREMENT]
+UID: W4-SAMPLING
+TITLE: Sampling methodology
+STATEMENT: >>>
+Configurable sampling methodologies (statistical, judgmental,
+haphazard) with sample-size calculators.
+<<<
+COMMENT: GitHub issues: #86
+RELATIONS:
+- TYPE: Parent
+  VALUE: W4-TEST-EXECUTION
+
+[REQUIREMENT]
+UID: W4-EVIDENCE-LINEAGE
+TITLE: Evidence lineage and chain of custody
+STATEMENT: >>>
+Full chain of custody: who uploaded, when, which assessment it was
+used in, who reviewed it, hash integrity verification.
+<<<
+COMMENT: GitHub issues: #89
+RELATIONS:
+- TYPE: Parent
+  VALUE: W4-EVIDENCE-LINKING
+
+[REQUIREMENT]
+UID: W4-BULK-IMPORT-EXPORT
+TITLE: Bulk import and export (CSV, JSON)
+STATEMENT: >>>
+Bulk import and export of risks, controls, findings in CSV and JSON formats.
+<<<
+COMMENT: GitHub issues: #91
+
+[REQUIREMENT]
+UID: W4-EVENT-BUS
+TITLE: Domain event bus
+STATEMENT: >>>
+In-process and async domain event bus for decoupled communication
+between components.
+<<<
+COMMENT: GitHub issues: #92
+
+[REQUIREMENT]
+UID: W4-WORKFLOW-ENGINE
+TITLE: Workflow engine (configurable state machines)
+STATEMENT: >>>
+Configurable state machine engine for custom workflows beyond
+the built-in assessment lifecycle.
+<<<
+COMMENT: GitHub issues: #94
+
+[REQUIREMENT]
+UID: W4-REVIEW-WORKFLOWS
+TITLE: Review workflows
+STATEMENT: >>>
+Configurable review chains: preparer, reviewer, approver.
+Applied to assessments, findings, workpapers, and evidence.
+<<<
+COMMENT: GitHub issues: #153
+
+[REQUIREMENT]
+UID: W4-ISSUE-AGGREGATION
+TITLE: Issue aggregation
+STATEMENT: >>>
+Roll up findings from multiple assessments into a unified
+issues view with risk ratings.
+<<<
+COMMENT: GitHub issues: #154
+RELATIONS:
+- TYPE: Parent
+  VALUE: W4-FINDING-LIFECYCLE
+
+[REQUIREMENT]
+UID: W4-TASK-ASSIGNMENT
+TITLE: Task assignment and SLA tracking
+STATEMENT: >>>
+Assign any work item to users or groups with due dates and SLA tracking.
+<<<
+COMMENT: GitHub issues: #98
+
+[REQUIREMENT]
+UID: W4-RETENTION-POLICIES
+TITLE: Evidence retention policies
+STATEMENT: >>>
+Configurable per-assessment or global retention windows with
+automated archival and deletion.
+<<<
+COMMENT: GitHub issues: #155
+RELATIONS:
+- TYPE: Parent
+  VALUE: W4-EVIDENCE-LINKING
+
+[REQUIREMENT]
+UID: W4-CONTINUOUS-MONITORING
+TITLE: Continuous risk monitoring
+STATEMENT: >>>
+Ingest risk indicators from external sources (vulnerability scanners,
+cloud posture tools) via API and plugins.
+<<<
+COMMENT: GitHub issues: #156
+
+[[/SECTION]]
+
+[[SECTION]]
+TITLE: Wave 5 — Framework Definitions and Seed Data
+
+[TEXT]
+STATEMENT: >>>
+The compliance content that makes the tool useful. SOX and SOC 2 first.
+<<<
+
+[REQUIREMENT]
+UID: W5-FRAMEWORK-LOADER
+TITLE: Framework plugin loader
+STATEMENT: >>>
+YAML/JSON loader for compliance framework definitions.
+<<<
+COMMENT: GitHub issues: #99
+RELATIONS:
+- TYPE: Parent
+  VALUE: W4-FRAMEWORK-MAPPING
+
+[REQUIREMENT]
+UID: W5-SOX
+TITLE: SOX ITGC framework definition
+STATEMENT: >>>
+SOX ITGC control objectives, test procedures, walkthroughs,
+deficiency classification.
+<<<
+COMMENT: GitHub issues: #100
+RELATIONS:
+- TYPE: Parent
+  VALUE: W5-FRAMEWORK-LOADER
+- TYPE: Parent
+  VALUE: W4-TEST-EXECUTION
+
+[REQUIREMENT]
+UID: W5-SOC2
+TITLE: SOC 2 Trust Services framework definition
+STATEMENT: >>>
+SOC 2 Trust Services Criteria with pre-built control mappings.
+<<<
+COMMENT: GitHub issues: #101
+RELATIONS:
+- TYPE: Parent
+  VALUE: W5-FRAMEWORK-LOADER
+
+[REQUIREMENT]
+UID: W5-ISO27001
+TITLE: ISO 27001 framework definition
+STATEMENT: >>>
+ISO 27001:2022 Annex A controls with pre-built mappings.
+<<<
+COMMENT: GitHub issues: #102
+RELATIONS:
+- TYPE: Parent
+  VALUE: W5-FRAMEWORK-LOADER
+
+[REQUIREMENT]
+UID: W5-NIST
+TITLE: NIST CSF and 800-53 framework definitions
+STATEMENT: >>>
+NIST Cybersecurity Framework and NIST 800-53 control families
+with cross-framework mappings.
+<<<
+COMMENT: GitHub issues: #103
+RELATIONS:
+- TYPE: Parent
+  VALUE: W5-FRAMEWORK-LOADER
+
+[REQUIREMENT]
+UID: W5-PCI-CIS
+TITLE: PCI-DSS and CIS framework definitions
+STATEMENT: >>>
+PCI-DSS v4.0 requirements and CIS Controls v8 with mappings.
+<<<
+COMMENT: GitHub issues: #104
+RELATIONS:
+- TYPE: Parent
+  VALUE: W5-FRAMEWORK-LOADER
+
+[REQUIREMENT]
+UID: W5-CCL-SEED
+TITLE: Common Control Library seed data
+STATEMENT: >>>
+Initial set of common controls mapped across SOX and SOC 2.
+<<<
+COMMENT: GitHub issues: #105
+RELATIONS:
+- TYPE: Parent
+  VALUE: W5-SOX
+
+[REQUIREMENT]
+UID: W5-TEMPLATES
+TITLE: Template library
+STATEMENT: >>>
+Templates for assessments, test procedures, and workpapers.
+<<<
+COMMENT: GitHub issues: #106
+RELATIONS:
+- TYPE: Parent
+  VALUE: W4-ASSESSMENT-SM
+
+[[/SECTION]]
+
+[[SECTION]]
+TITLE: Wave 6 — Frontend
+
+[TEXT]
+STATEMENT: >>>
+Can start in parallel with Wave 3 once API contracts are defined.
+<<<
+
+[REQUIREMENT]
+UID: W6-SCAFFOLD
+TITLE: Frontend scaffold and component library
+STATEMENT: >>>
+React + TypeScript + Vite scaffold. UI component library and
+application shell.
+<<<
+COMMENT: GitHub issues: #17, #118
+
+[REQUIREMENT]
+UID: W6-AUTH-PAGES
+TITLE: Authentication pages
+STATEMENT: >>>
+Login, SSO, password management views.
+<<<
+COMMENT: GitHub issues: #119
+RELATIONS:
+- TYPE: Parent
+  VALUE: W6-SCAFFOLD
+
+[REQUIREMENT]
+UID: W6-RISK-VIEWS
+TITLE: Risk management views
+STATEMENT: >>>
+Risk register, heat maps, risk detail, scoring.
+<<<
+COMMENT: GitHub issues: #120
+RELATIONS:
+- TYPE: Parent
+  VALUE: W6-SCAFFOLD
+
+[REQUIREMENT]
+UID: W6-CONTROL-VIEWS
+TITLE: Control management and framework mapping views
+STATEMENT: >>>
+Control catalog, framework mapping, gap analysis views.
+<<<
+COMMENT: GitHub issues: #121
+RELATIONS:
+- TYPE: Parent
+  VALUE: W6-SCAFFOLD
+
+[REQUIREMENT]
+UID: W6-ASSESSMENT-VIEWS
+TITLE: Assessment, testing, and workpaper views
+STATEMENT: >>>
+Assessment campaigns, test execution, workpaper views.
+<<<
+COMMENT: GitHub issues: #122
+RELATIONS:
+- TYPE: Parent
+  VALUE: W6-SCAFFOLD
+
+[REQUIREMENT]
+UID: W6-EVIDENCE-VIEWS
+TITLE: Evidence management views
+STATEMENT: >>>
+Evidence upload, linking, request management views.
+<<<
+COMMENT: GitHub issues: #123
+RELATIONS:
+- TYPE: Parent
+  VALUE: W6-SCAFFOLD
+
+[REQUIREMENT]
+UID: W6-FINDING-VIEWS
+TITLE: Findings and remediation views
+STATEMENT: >>>
+Finding lifecycle, remediation tracking views.
+<<<
+COMMENT: GitHub issues: #124
+RELATIONS:
+- TYPE: Parent
+  VALUE: W6-SCAFFOLD
+
+[REQUIREMENT]
+UID: W6-ADMIN-VIEWS
+TITLE: Admin pages
+STATEMENT: >>>
+Users, roles, SSO config, plugins, audit log, taxonomy admin.
+<<<
+COMMENT: GitHub issues: #125
+RELATIONS:
+- TYPE: Parent
+  VALUE: W6-SCAFFOLD
+
+[REQUIREMENT]
+UID: W6-DASHBOARD-VIEWS
+TITLE: Dashboard and reporting views
+STATEMENT: >>>
+Executive dashboards, risk posture, control health, assessment progress.
+<<<
+COMMENT: GitHub issues: #126
+RELATIONS:
+- TYPE: Parent
+  VALUE: W6-SCAFFOLD
+
+[REQUIREMENT]
+UID: W6-ACCESSIBILITY
+TITLE: WCAG 2.1 AA accessibility compliance
+STATEMENT: >>>
+All frontend views meet WCAG 2.1 AA. Keyboard navigation, screen
+reader support, color contrast, ARIA attributes.
+<<<
+COMMENT: GitHub issues: #127
+RELATIONS:
+- TYPE: Parent
+  VALUE: W6-SCAFFOLD
+
+[[/SECTION]]
+
+[[SECTION]]
+TITLE: Wave 7 — Notifications and Integrations
+
+[TEXT]
+STATEMENT: >>>
+Only after core CRUD works end-to-end.
+<<<
+
+[REQUIREMENT]
+UID: W7-NOTIFICATIONS
+TITLE: Notification system
+STATEMENT: >>>
+In-app and email notifications.
+<<<
+COMMENT: GitHub issues: #95
+
+[REQUIREMENT]
+UID: W7-WEBHOOKS
+TITLE: Outbound webhook system
+STATEMENT: >>>
+Configurable outbound webhooks for integration.
+<<<
+COMMENT: GitHub issues: #96
+
+[REQUIREMENT]
+UID: W7-DASHBOARD-APIS
+TITLE: Dashboard data aggregation APIs
+STATEMENT: >>>
+Backend APIs for dashboard data aggregation and trends.
+<<<
+COMMENT: GitHub issues: #115
+
+[REQUIREMENT]
+UID: W7-REPORTS
+TITLE: Report generation engine
+STATEMENT: >>>
+Generate PDF, PPTX, and Excel reports.
+<<<
+COMMENT: GitHub issues: #116
+
+[REQUIREMENT]
+UID: W7-CHAT-INTEGRATIONS
+TITLE: Slack and Teams integrations
+STATEMENT: >>>
+Slack and Microsoft Teams integrations for notifications,
+approvals, and evidence requests.
+<<<
+COMMENT: GitHub issues: #97
+
+[REQUIREMENT]
+UID: W7-SCHEDULED-REPORTS
+TITLE: Scheduled reports and GraphQL API
+STATEMENT: >>>
+Scheduled report generation and delivery. GraphQL API for
+flexible custom reporting and dashboard queries.
+<<<
+COMMENT: GitHub issues: #117
+
+[REQUIREMENT]
+UID: W7-SEARCH
+TITLE: Full-text search engine
+STATEMENT: >>>
+Meilisearch integration for full-text search across risks,
+controls, findings, evidence, and comments.
+<<<
+COMMENT: GitHub issues: #114
+
+[[/SECTION]]
+
+[[SECTION]]
+TITLE: Wave 8 — Agents
+
+[TEXT]
+STATEMENT: >>>
+Only after the platform works for humans.
+<<<
+
+[REQUIREMENT]
+UID: W8-AGENT-REG
+TITLE: Agent registration and lifecycle management
+STATEMENT: >>>
+Register AI agents, manage lifecycle, assign capabilities.
+<<<
+COMMENT: GitHub issues: #107
+
+[REQUIREMENT]
+UID: W8-AGENT-API
+TITLE: Agent assignment and result submission
+STATEMENT: >>>
+Agents retrieve assignments and submit structured results via API.
+<<<
+COMMENT: GitHub issues: #108
+RELATIONS:
+- TYPE: Parent
+  VALUE: W8-AGENT-REG
+
+[REQUIREMENT]
+UID: W8-AGENT-PROVENANCE
+TITLE: Agent provenance tracking
+STATEMENT: >>>
+Full provenance: agent ID, model, prompt hash, timestamp for every
+agent action.
+<<<
+COMMENT: GitHub issues: #109
+RELATIONS:
+- TYPE: Parent
+  VALUE: W8-AGENT-REG
+
+[REQUIREMENT]
+UID: W8-AGENT-SDK
+TITLE: Agent SDK — Python
+STATEMENT: >>>
+Python SDK for building agents that interact with Ground Control.
+<<<
+COMMENT: GitHub issues: #110
+RELATIONS:
+- TYPE: Parent
+  VALUE: W8-AGENT-API
+
+[REQUIREMENT]
+UID: W8-EVIDENCE-COLLECTION
+TITLE: Automated evidence collection interface
+STATEMENT: >>>
+Plugin interface for agents to collect evidence from external systems.
+<<<
+COMMENT: GitHub issues: #112
+RELATIONS:
+- TYPE: Parent
+  VALUE: W8-AGENT-API
+
+[REQUIREMENT]
+UID: W8-AGENT-SDK-TS
+TITLE: Agent SDK — TypeScript
+STATEMENT: >>>
+TypeScript SDK for building agents that interact with Ground Control.
+<<<
+COMMENT: GitHub issues: #111
+RELATIONS:
+- TYPE: Parent
+  VALUE: W8-AGENT-API
+
+[REQUIREMENT]
+UID: W8-AI-CONTROL-MAPPING
+TITLE: AI-assisted control mapping
+STATEMENT: >>>
+AI agent that suggests control-to-framework mappings based on
+control descriptions and framework requirement text.
+<<<
+COMMENT: GitHub issues: #113
+RELATIONS:
+- TYPE: Parent
+  VALUE: W8-AGENT-REG
+
+[REQUIREMENT]
+UID: W8-AGENT-MONITORING
+TITLE: Agent continuous monitoring
+STATEMENT: >>>
+Monitor agent health, track agent task completion rates, alert
+on agent failures or anomalies.
+<<<
+COMMENT: GitHub issues: #157
+RELATIONS:
+- TYPE: Parent
+  VALUE: W8-AGENT-REG
+
+[REQUIREMENT]
+UID: W8-PLUGIN-RUNTIME
+TITLE: Plugin runtime and sandboxing
+STATEMENT: >>>
+Plugin runtime with sandboxed execution environment.
+<<<
+COMMENT: GitHub issues: #128
+RELATIONS:
+- TYPE: Parent
+  VALUE: W8-AGENT-REG
+
+[REQUIREMENT]
+UID: W8-PLUGIN-SDK
+TITLE: Plugin SDK and marketplace
+STATEMENT: >>>
+SDK for building plugins and marketplace for discovering and
+installing community plugins.
+<<<
+COMMENT: GitHub issues: #129
+RELATIONS:
+- TYPE: Parent
+  VALUE: W8-PLUGIN-RUNTIME
+
+[REQUIREMENT]
+UID: W8-PLUGIN-MGMT
+TITLE: Plugin management and lifecycle
+STATEMENT: >>>
+Install, configure, enable/disable, and upgrade plugins.
+Version compatibility checking.
+<<<
+COMMENT: GitHub issues: #130
+RELATIONS:
+- TYPE: Parent
+  VALUE: W8-PLUGIN-RUNTIME
+
+[[/SECTION]]
+
+[[SECTION]]
+TITLE: Wave 9 — Hardening and Operations
+
+[TEXT]
+STATEMENT: >>>
+Before going to production at client sites.
+<<<
+
+[REQUIREMENT]
+UID: W9-SECURITY
+TITLE: Security hardening and penetration test remediation
+STATEMENT: >>>
+Security hardening pass and remediation of pentest findings.
+<<<
+COMMENT: GitHub issues: #137
+
+[REQUIREMENT]
+UID: W9-BACKUP
+TITLE: Backup and disaster recovery
+STATEMENT: >>>
+PostgreSQL backup (WAL + pg_dump), S3 backup, recovery procedures.
+RPO < 1 hour, RTO < 4 hours.
+<<<
+COMMENT: GitHub issues: #138
+
+[REQUIREMENT]
+UID: W9-PERF
+TITLE: Performance benchmarking and optimization
+STATEMENT: >>>
+Load testing, query optimization, caching strategy.
+<<<
+COMMENT: GitHub issues: #136
+
+[REQUIREMENT]
+UID: W9-E2E
+TITLE: End-to-end test suite
+STATEMENT: >>>
+Playwright E2E tests covering critical user workflows.
+<<<
+COMMENT: GitHub issues: #140
+
+[REQUIREMENT]
+UID: W9-DOCS
+TITLE: Documentation site
+STATEMENT: >>>
+API reference, user guide, admin guide, agent SDK guide.
+Hosted on GitHub Pages.
+<<<
+COMMENT: GitHub issues: #141
+
+[REQUIREMENT]
+UID: W9-K8S
+TITLE: Kubernetes Helm chart
+STATEMENT: >>>
+Helm chart for Kubernetes deployment with configurable
+replicas, resource limits, and ingress.
+<<<
+COMMENT: GitHub issues: #134
+
+[REQUIREMENT]
+UID: W9-IMPORT-EXPORT
+TITLE: Third-party tool import/export
+STATEMENT: >>>
+Import from and export to third-party GRC tools (AuditBoard,
+ServiceNow GRC, Archer).
+<<<
+COMMENT: GitHub issues: #139
+
+[REQUIREMENT]
+UID: W9-MULTI-TENANT-RLS
+TITLE: Multi-tenancy row-level security
+STATEMENT: >>>
+Row-level security enforcement for multi-tenant deployments.
+tenant_id on all models with automatic filtering.
+<<<
+COMMENT: GitHub issues: #131
+RELATIONS:
+- TYPE: Parent
+  VALUE: W0-CI-SECURITY
+
+[REQUIREMENT]
+UID: W9-SCHEMA-PER-TENANT
+TITLE: Schema-per-tenant isolation
+STATEMENT: >>>
+Schema-per-tenant isolation option using django-tenants for
+deployments requiring stronger data separation.
+<<<
+COMMENT: GitHub issues: #132
+RELATIONS:
+- TYPE: Parent
+  VALUE: W9-MULTI-TENANT-RLS
+
+[[/SECTION]]
