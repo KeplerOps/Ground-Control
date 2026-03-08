@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-03-08
+
+### Added
+
+- Shared exception hierarchy in `ground_control.exceptions` (closes #163)
+- `GroundControlError` base with `NotFoundError`, `DomainValidationError`, `AuthenticationError`, `AuthorizationError`, `ConflictError`
+- django-ninja exception handler mapping domain exceptions to HTTP status codes
+- `ErrorResponse` Pydantic schema for structured API error responses
+
+### Changed
+
+- Moved `NinjaAPI` instance from `urls.py` to `ground_control.api` for cleaner separation
+
 ## [0.12.0] - 2026-03-08
 
 ### Added

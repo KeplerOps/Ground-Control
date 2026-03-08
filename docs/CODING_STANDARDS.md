@@ -57,9 +57,20 @@ Enforced by `import-linter` in CI.
 
 ## Exceptions
 
-All application exceptions inherit from a base hierarchy in `exceptions/`. Domain layer raises these. API layer maps them to HTTP responses via middleware.
+All application exceptions inherit from `GroundControlError` in `exceptions/`. Domain layer raises these. The `NinjaAPI` exception handler in `api/__init__.py` maps them to HTTP responses.
 
-- Never raise `HTTPException` from the domain layer
+| Exception | Default `error_code` | HTTP Status |
+|-----------|---------------------|-------------|
+| `NotFoundError` | `not_found` | 404 |
+| `DomainValidationError` | `validation_error` | 422 |
+| `AuthenticationError` | `authentication_error` | 401 |
+| `AuthorizationError` | `authorization_error` | 403 |
+| `ConflictError` | `conflict` | 409 |
+| `GroundControlError` (fallback) | `ground_control_error` | 500 |
+
+Subclasses of a mapped exception inherit the parent's status code (MRO lookup). `DomainValidationError` is named to avoid collision with `django.core.exceptions.ValidationError`.
+
+- Never raise HTTP-specific exceptions from the domain layer
 - Never catch `Exception` broadly
 - Wrap external library exceptions in `infrastructure/`
 
