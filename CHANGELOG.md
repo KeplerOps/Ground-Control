@@ -7,10 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.0] - 2026-03-08
 
+### Added
+
+- Fresh ADR framework with template (`architecture/adrs/000-template.md`) and clean index
+- ADR-001: Python 3.12+ with Django and django-ninja for Backend
+- ADR-002: PostgreSQL as Primary Database
+- ADR-003: Design by Contract with icontract
+- ADR-004: Code Quality Toolchain
+- Restored `docs/CODING_STANDARDS.md` from archive
+- 7 new phase-0 bootstrap issues (#158–#164) for getting Django deployment-ready
+
 ### Changed
 
 - Project pivot: Ground Control reframed from ITRM platform to neurosymbolic constraint infrastructure, dogfooded on itself
 - Archived pre-pivot work into `archive/` (docs, tools, architecture ADRs)
+- ADR numbering reset — old ADRs (001–010) archived, new series starts at 001
+
+### Fixed
+
+- Django settings: removed references to `django_tenants` and `oauth2_provider` (not in dependencies, caused `ModuleNotFoundError` on startup)
+- Django settings: switched database engine from `django_tenants.postgresql_backend` to `django.db.backends.postgresql`
+- `manage.py check` now passes
 
 ### Removed
 
@@ -18,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/` moved to `archive/docs/` (personas, glossary, requirements, roadmap, coding standards, user stories, API/deployment docs)
 - `tools/` moved to `archive/tools/` (issue-graph, strictdoc)
 - `architecture/` moved to `archive/architecture/` (ADRs, C4 diagrams, policies)
+- `django_tenants` config from settings (SHARED_APPS/TENANT_APPS pattern, TenantMainMiddleware, TenantSyncRouter, TENANT_MODEL/TENANT_DOMAIN_MODEL)
+- `oauth2_provider` from INSTALLED_APPS
 
 ## [0.8.0] - 2026-03-08
 
