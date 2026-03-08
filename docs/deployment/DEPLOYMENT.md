@@ -9,33 +9,19 @@
 ## Setup
 
 ```bash
-# Clone the repository
 git clone https://github.com/KeplerOps/Ground-Control.git
 cd Ground-Control
-
-# Copy environment template and edit as needed
 cp .env.example .env
-
-# Start PostgreSQL 16 and Redis 7
 make up
-
-# Install Python dependencies
 make install
-
-# Activate the virtualenv
 cd backend && . .venv/bin/activate
-
-# Run database migrations
 python manage.py migrate
-
-# Start the development server
 python manage.py runserver 0.0.0.0:8000
-# Or from the project root: make dev
 ```
 
 ## Docker Compose Services
 
-The `docker-compose.yml` in the project root runs infrastructure services only. The Django app runs on the host.
+The `docker-compose.yml` in the project root runs infrastructure only. Django runs on the host.
 
 | Service | Image | Port | Purpose |
 |---------|-------|------|---------|
@@ -46,7 +32,7 @@ PostgreSQL data persists in the `gc-postgres-data` named volume.
 
 ## Environment Variables
 
-All application settings use the `GC_` prefix. See `.env.example` for defaults.
+All settings use the `GC_` prefix. See `.env.example`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -67,12 +53,9 @@ All application settings use the `GC_` prefix. See `.env.example` for defaults.
 | `make format` | `ruff format` |
 | `make test` | `pytest` |
 
-## Stopping and Resetting
+## Resetting
 
 ```bash
-# Stop services (data preserved)
-make down
-
-# Stop services and delete all data
-docker compose down -v
+make down              # stop services, keep data
+docker compose down -v # stop services, delete all data
 ```

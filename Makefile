@@ -1,4 +1,4 @@
-.PHONY: install lint format test dev clean
+.PHONY: install lint format test dev clean up down
 
 # Use uv if available, fall back to pip
 UV := $(shell command -v uv 2>/dev/null)
@@ -30,6 +30,12 @@ test-cov: ## Run pytest with coverage
 
 dev: ## Start development server
 	cd backend && python manage.py runserver 0.0.0.0:8000
+
+up: ## Start Docker Compose services (PostgreSQL, Redis)
+	docker compose up -d
+
+down: ## Stop Docker Compose services
+	docker compose down
 
 clean: ## Remove build artifacts and caches
 	find backend -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
