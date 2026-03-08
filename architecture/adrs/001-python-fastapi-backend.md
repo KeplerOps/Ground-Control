@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR-010](010-evaluate-django-framework.md)
 
 ## Date
 

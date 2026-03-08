@@ -12,16 +12,18 @@ Ground-Control/
 │   └── src/ground_control/
 │       ├── api/              # Route handlers only. No business logic.
 │       ├── domain/           # Entities, value objects, service interfaces, use cases
-│       ├── infrastructure/   # SQLAlchemy repos, S3 client, Redis, external APIs
+│       ├── infrastructure/   # External adapters: S3 client, Redis, external APIs
 │       ├── schemas/          # Pydantic request/response models (shared across API layer)
 │       ├── middleware/       # Tenant resolution, auth, request-id, logging context
 │       ├── events/           # Domain event bus, event types, handlers
 │       ├── exceptions/       # Exception hierarchy (shared across all layers)
 │       ├── logging/          # Structured logging setup (shared across all layers)
-│       ├── config.py         # pydantic-settings, fail-fast validation
-│       └── main.py           # FastAPI app composition
+│       ├── settings/          # Django settings (base, dev, prod, test)
+│       ├── urls.py            # Root URL config (django-ninja API)
+│       ├── asgi.py            # ASGI entry point
+│       └── wsgi.py            # WSGI entry point
 │   ├── tests/
-│   └── migrations/           # Alembic
+│   └── manage.py              # Django management script
 ├── frontend/
 ├── sdks/
 ├── plugins/
@@ -43,9 +45,9 @@ api/ → domain/ ← infrastructure/
      events/ (shared event types)
 ```
 
-- `domain/` has ZERO imports from `api/`, `infrastructure/`, FastAPI, SQLAlchemy, or any framework.
+- `domain/` has ZERO imports from `api/`, `infrastructure/`, Django views, or any framework (except `django.db.models` for model definitions).
 - `api/` depends on `domain/` (use cases) and `schemas/` (request/response models). Never imports from `infrastructure/`.
-- `infrastructure/` implements interfaces defined in `domain/`. Depends on `domain/` and external libraries (SQLAlchemy, boto3, etc.).
+- `infrastructure/` implements interfaces defined in `domain/`. Depends on `domain/` and external libraries (boto3, redis, etc.).
 - `schemas/`, `exceptions/`, `logging/`, `events/` are cross-cutting — importable by any layer.
 - `config.py` is importable by any layer. It's the single source of truth for all configuration.
 
@@ -89,7 +91,7 @@ Rules:
 - API layer maps exceptions to HTTP responses via a single exception handler middleware.
 - Never catch `Exception` broadly. Catch specific types.
 - Never swallow exceptions silently. Log and re-raise, or handle explicitly.
-- External library exceptions (SQLAlchemy, boto3) are caught in `infrastructure/` and wrapped in `GroundControlError` subclasses.
+- External library exceptions (boto3, redis, etc.) are caught in `infrastructure/` and wrapped in `GroundControlError` subclasses.
 
 ### 3.2 Structured Logging
 
@@ -163,7 +165,7 @@ Rules:
 - Every API endpoint uses explicit `Create`, `Read`, `Update` schema variants. No reuse of the same model for input and output.
 - Validation (field ranges, patterns, enums) lives in the schema, not in the use case.
 - Use `Field()` for constraints. Use `Annotated` types for reusable patterns.
-- Never expose SQLAlchemy models directly in API responses.
+- Never expose Django model instances directly in API responses.
 
 ### 3.5 Tenant Context
 
@@ -190,7 +192,7 @@ Every request gets a unique `request_id` (set by middleware). It propagates thro
 
 ## 4. Domain Layer Rules
 
-- Domain entities are plain Python classes or dataclasses. Not SQLAlchemy models.
+- Domain entities are Django models (in `domain/`) with business logic. Infrastructure adapters wrap external services.
 - Use cases are single-purpose functions or classes. One use case per business operation.
 - Use case signature: takes primitive types or domain entities, returns domain entities or DTOs. Never takes a `Request` object or returns a `Response`.
 - Repository interfaces are abstract classes defined in `domain/`. Implementations live in `infrastructure/`.
@@ -216,8 +218,8 @@ class RiskService:
 
 - Route handlers are thin. They parse the request, call a use case, and format the response.
 - No business logic in route handlers. If you're writing an `if` that isn't about HTTP concerns, it belongs in the domain layer.
-- Use dependency injection (FastAPI's `Depends()`) for services, repos, and current user.
-- All routes return Pydantic schemas, never dicts or SQLAlchemy models.
+- Use django-ninja's dependency injection for services, repos, and current user.
+- All routes return Pydantic schemas, never dicts or Django model instances.
 
 ```python
 # api/v1/risks.py
@@ -237,7 +239,7 @@ async def create_risk(
 
 ## 6. Infrastructure Layer Rules
 
-- Repository implementations use SQLAlchemy 2.0 async style.
+- Repository implementations use Django ORM querysets.
 - Every repository method takes `tenant_id` as a parameter (defense in depth alongside RLS).
 - External service clients (S3, Redis, SMTP) are wrapped in thin adapter classes.
 - Adapter classes implement interfaces from `domain/`. They are swappable in tests.
@@ -276,7 +278,7 @@ tests/
 ```
 Layer           | Catches                        | Raises
 ----------------|-------------------------------|---------------------------
-infrastructure/ | SQLAlchemy, boto3, redis-py    | GroundControlError subtypes
+infrastructure/ | boto3, redis-py, external APIs | GroundControlError subtypes
 domain/         | Nothing (or domain errors)     | GroundControlError subtypes
 api/            | GroundControlError subtypes    | HTTPException (via handler)
 middleware      | All unhandled exceptions        | 500 with request_id
