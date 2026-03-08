@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-03-08
+
+### Added
+
+- Docker Compose dev environment with PostgreSQL 16 and Redis 7
+- `.env.example` documenting all `GC_` environment variables
+- Makefile `up` and `down` targets for managing Docker Compose services
+
+### Changed
+
+- Parse `GC_DATABASE_URL` dynamically into Django `DATABASES` setting (was hardcoded)
+- Rewrite all operational docs to reflect actual codebase state (remove aspirational content)
+- Rewrite DEPLOYMENT.md as dev environment setup guide
+- Rewrite ARCHITECTURE.md to document current stack and project structure
+- Trim CODING_STANDARDS.md to enforceable rules only
+- Rewrite README.md: accurate structure, status section, links to correct paths
+- Update CONTRIBUTING.md with local dev setup instructions
+
 ## [0.9.0] - 2026-03-08
 
 ### Added

@@ -1,6 +1,7 @@
 """Base Django settings for Ground Control."""
 
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings
 
@@ -71,12 +72,15 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "ground_control.wsgi.application"
 
+_db_url = urlparse(env.database_url)
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "ground_control",
-        "HOST": "localhost",
-        "PORT": "5432",
+        "NAME": _db_url.path.lstrip("/"),
+        "USER": _db_url.username or "",
+        "PASSWORD": _db_url.password or "",
+        "HOST": _db_url.hostname or "localhost",
+        "PORT": str(_db_url.port or 5432),
     },
 }
 
