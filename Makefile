@@ -1,4 +1,4 @@
-.PHONY: install lint format test dev clean up down
+.PHONY: install lint format test dev clean up down docker-build
 
 # Use uv if available, fall back to pip
 UV := $(shell command -v uv 2>/dev/null)
@@ -36,6 +36,9 @@ up: ## Start Docker Compose services (PostgreSQL, Redis)
 
 down: ## Stop Docker Compose services
 	docker compose down
+
+docker-build: ## Build backend Docker image
+	docker build -t ghcr.io/keplerops/ground-control:latest backend/
 
 clean: ## Remove build artifacts and caches
 	find backend -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
