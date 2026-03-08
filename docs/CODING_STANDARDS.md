@@ -8,7 +8,7 @@ backend/src/ground_control/
 ├── domain/           # Django models, services, use case functions
 ├── infrastructure/   # External adapters (S3, Redis, external APIs)
 ├── schemas/          # Pydantic request/response models
-├── middleware/        # Auth, request-id
+├── middleware/        # Custom middleware
 ├── events/           # Domain event bus and handlers
 ├── exceptions/       # Exception hierarchy
 ├── logging/          # Structured logging setup
@@ -65,16 +65,51 @@ All application exceptions inherit from a base hierarchy in `exceptions/`. Domai
 
 ## Logging
 
-Use `structlog` with semantic event names:
+Use `structlog` with semantic event names. The configuration lives in
+`ground_control/logging/__init__.py` and is activated at settings import time.
+Request context is provided by `django-structlog` middleware.
 
 ```python
 import structlog
+
 logger = structlog.get_logger()
-logger.info("risk_created", risk_id=risk.id, tenant_id=tenant_id)
+
+# Simple event
+logger.info("risk_created", risk_id=risk.id)
+
+# Bind context once, carry through the call chain
+logger = logger.bind(tenant_id=tenant.id, actor_id=user.id)
+logger.warning("score_above_threshold", risk_id=risk.id, score=95)
 ```
 
+**Output format** is selected by the `DEBUG` setting:
+
+| Environment | `DEBUG` | Format |
+|-------------|---------|--------|
+| Development | `True`  | Colored console (human-readable) |
+| Production  | `False` | JSON lines (machine-parseable) |
+
+**Automatic context**: `django-structlog`'s `RequestMiddleware` automatically
+binds the following fields to every log entry within an HTTP request:
+
+| Field | Source |
+|-------|--------|
+| `request_id` | `X-Request-ID` header or auto-generated UUID |
+| `ip` | Client IP address |
+| `user_id` | Authenticated user ID (when available) |
+
+**Service identity**: Every log entry includes `service.name` and
+`service.version` fields, following
+[OpenTelemetry Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/).
+When adding custom bindings, prefer OTel semantic convention attribute names
+where applicable.
+
+**Rules**:
+
+- No `print()` — use `structlog`
 - Never log secrets, tokens, passwords, or PII
 - Always include `tenant_id` and `actor_id` when available
+- Use semantic event names (`risk_created`, not `"Created a new risk"`)
 
 ## Testing
 

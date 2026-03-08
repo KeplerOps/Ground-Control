@@ -56,7 +56,13 @@ repos:
     hooks:
       - id: pytest
         name: pytest (backend)
-        entry: bash -c 'cd backend && python -m pytest -x -q 2>/dev/null || true'
+        entry: bash -c 'cd backend && python -m pytest -x -q'
+        language: system
+        files: ^backend/
+        pass_filenames: false
+      - id: coverage
+        name: coverage (backend >= 80%)
+        entry: bash -c 'cd backend && python -m pytest --cov=ground_control --cov-fail-under=80 -q'
         language: system
         files: ^backend/
         pass_filenames: false
