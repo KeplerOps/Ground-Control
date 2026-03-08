@@ -9,3 +9,9 @@ Pre-pivot design artifacts are archived in `archive/docs/`. See:
 - `archive/docs/user-stories/USE_CASES.md` — use case descriptions
 
 For architecture decisions, see [ADRs](../adrs/).
+
+## Design Notes Index
+
+| Document | Phase | Description |
+|----------|-------|-------------|
+| [Phase 1: Requirements Management](../notes/phase1-requirements-design.md) | 1 | Data model, app structure, key patterns for the requirements management system |

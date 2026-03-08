@@ -27,5 +27,6 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | [003](003-design-by-contract.md) | Design by Contract with icontract | Accepted |
 | [004](004-code-quality-toolchain.md) | Code Quality Toolchain | Accepted |
 | [005](005-apache-age-graph.md) | Apache AGE for Graph Database Capabilities | Accepted |
+| [011](011-requirements-data-model.md) | Requirements Data Model | Accepted |
 
 Prior ADRs from the old project frame are archived in `archive/architecture/adrs/`.
