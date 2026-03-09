@@ -83,34 +83,34 @@ public class RequirementService {
         return requirementRepository.save(requirement);
     }
 
-    // @ requires id != null;
-    // @ requires newStatus != null;
-    // @ ensures \result.getStatus() == newStatus;
-    // @ signals (NotFoundException e) !requirementRepository.existsById(id);
-    // @ signals (DomainValidationException e) !\old(getById(id)).getStatus().canTransitionTo(newStatus);
+    /*@ requires id != null;
+    @ requires newStatus != null;
+    @ ensures \result.getStatus() == newStatus;
+    @ signals (NotFoundException e) !requirementRepository.existsById(id);
+    @ signals (DomainValidationException e) !\old(getById(id)).getStatus().canTransitionTo(newStatus); @*/
     public Requirement transitionStatus(UUID id, Status newStatus) {
         var requirement = getById(id);
         requirement.transitionStatus(newStatus);
         return requirementRepository.save(requirement);
     }
 
-    // @ requires id != null;
-    // @ ensures \result.getStatus() == Status.ARCHIVED;
-    // @ ensures \result.getArchivedAt() != null;
-    // @ signals (NotFoundException e) !requirementRepository.existsById(id);
-    // @ signals (DomainValidationException e) !\old(getById(id)).getStatus().canTransitionTo(Status.ARCHIVED);
+    /*@ requires id != null;
+    @ ensures \result.getStatus() == Status.ARCHIVED;
+    @ ensures \result.getArchivedAt() != null;
+    @ signals (NotFoundException e) !requirementRepository.existsById(id);
+    @ signals (DomainValidationException e) !\old(getById(id)).getStatus().canTransitionTo(Status.ARCHIVED); @*/
     public Requirement archive(UUID id) {
         var requirement = getById(id);
         requirement.archive();
         return requirementRepository.save(requirement);
     }
 
-    // @ requires sourceId != null && targetId != null && relationType != null;
-    // @ requires !sourceId.equals(targetId);
-    // @ ensures \result != null;
-    // @ signals (NotFoundException e) !requirementRepository.existsById(sourceId)
-    // @                             || !requirementRepository.existsById(targetId);
-    // @ signals (DomainValidationException e) sourceId.equals(targetId);
+    /*@ requires sourceId != null && targetId != null && relationType != null;
+    @ requires !sourceId.equals(targetId);
+    @ ensures \result != null;
+    @ signals (NotFoundException e) !requirementRepository.existsById(sourceId)
+    @                             || !requirementRepository.existsById(targetId);
+    @ signals (DomainValidationException e) sourceId.equals(targetId); @*/
     public RequirementRelation createRelation(UUID sourceId, UUID targetId, RelationType relationType) {
         if (sourceId.equals(targetId)) {
             throw new DomainValidationException("A requirement cannot relate to itself");

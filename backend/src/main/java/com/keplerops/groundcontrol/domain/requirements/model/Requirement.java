@@ -30,7 +30,7 @@ import org.hibernate.envers.Audited;
 @Table(name = "requirement")
 public class Requirement {
 
-    // @ public invariant archivedAt == null || status == Status.ARCHIVED;
+    /*@ public invariant archivedAt == null || status == Status.ARCHIVED; @*/
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -96,9 +96,9 @@ public class Requirement {
     /**
      * Transition the requirement to a new lifecycle status.
      */
-    // @ requires newStatus != null;
-    // @ requires status.canTransitionTo(newStatus);
-    // @ ensures status == newStatus;
+    /*@ requires newStatus != null;
+    @ requires status.canTransitionTo(newStatus);
+    @ ensures status == newStatus; @*/
     public void transitionStatus(/*@ non_null @*/ Status newStatus) {
         if (!status.canTransitionTo(newStatus)) {
             throw new DomainValidationException(
@@ -113,9 +113,9 @@ public class Requirement {
      * Soft-delete this requirement by transitioning to ARCHIVED.
      * Idempotent if already archived.
      */
-    // @ requires status == Status.ARCHIVED || status.canTransitionTo(Status.ARCHIVED);
-    // @ ensures status == Status.ARCHIVED;
-    // @ ensures archivedAt != null || \old(status) == Status.ARCHIVED;
+    /*@ requires status == Status.ARCHIVED || status.canTransitionTo(Status.ARCHIVED);
+    @ ensures status == Status.ARCHIVED;
+    @ ensures archivedAt != null || \old(status) == Status.ARCHIVED; @*/
     public void archive() {
         if (this.status == Status.ARCHIVED) {
             return;

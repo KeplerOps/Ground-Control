@@ -56,11 +56,11 @@ public class RequirementRelation {
         // JPA
     }
 
-    // @ requires source != null && target != null && relationType != null;
-    // @ requires !source.getId().equals(target.getId());
-    // @ ensures this.source == source;
-    // @ ensures this.target == target;
-    // @ ensures this.relationType == relationType;
+    /*@ requires source != null && target != null && relationType != null;
+    @ requires !source.getId().equals(target.getId());
+    @ ensures this.source == source;
+    @ ensures this.target == target;
+    @ ensures this.relationType == relationType; @*/
     public RequirementRelation(Requirement source, Requirement target, RelationType relationType) {
         if (source.getId() != null && source.getId().equals(target.getId())) {
             throw new DomainValidationException("A requirement cannot relate to itself");

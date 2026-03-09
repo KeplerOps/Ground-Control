@@ -11,6 +11,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+@SuppressWarnings("java:S2187") // Tests are in @Nested inner classes
 class RequirementTest {
 
     private static Requirement createRequirement(String uid) {

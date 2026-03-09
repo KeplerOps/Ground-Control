@@ -19,7 +19,7 @@ public record ErrorResponse(ErrorBody error) {
         return new ErrorResponse(new ErrorBody(code, message, null));
     }
 
-    public static ErrorResponse of(String code, String message, Map<String, Object> detail) {
-        return new ErrorResponse(new ErrorBody(code, message, detail));
+    public static ErrorResponse of(String code, String message, Map<String, ?> detail) {
+        return new ErrorResponse(new ErrorBody(code, message, Map.copyOf(detail)));
     }
 }

@@ -25,14 +25,14 @@ public enum Status {
             DEPRECATED, Set.of(ARCHIVED),
             ARCHIVED, Set.of()));
 
-    // @ ensures \result != null;
-    // @ ensures VALID_TRANSITIONS.containsKey(this) ==> \result.equals(VALID_TRANSITIONS.get(this));
+    /*@ ensures \result != null;
+    @ ensures VALID_TRANSITIONS.containsKey(this) ==> \result.equals(VALID_TRANSITIONS.get(this)); @*/
     public Set<Status> validTargets() {
         return VALID_TRANSITIONS.getOrDefault(this, Set.of());
     }
 
-    // @ requires target != null;
-    // @ ensures \result <==> validTargets().contains(target);
+    /*@ requires target != null;
+    @ ensures \result <==> validTargets().contains(target); @*/
     public boolean canTransitionTo(Status target) {
         return validTargets().contains(target);
     }

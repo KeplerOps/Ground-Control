@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - CI: `gradle-wrapper.jar` was excluded by `*.jar` gitignore rule overriding the earlier negation — reordered rules so the negation comes after `*.jar` and uses `**/` glob to match `backend/` path
+- SonarQube S125: converted JML `// @` annotations to `/*@ ... @*/` block comment syntax across all L1/L2 files to avoid false "commented-out code" detection
+- SonarQube S1948: `DomainValidationException.detail` field changed from `Map<String, Object>` to `Map<String, Serializable>` (exception is Serializable)
+- SonarQube S2187: suppressed false positive on `RequirementTest` (tests are in `@Nested` inner classes)
+- SpotBugs EI_EXPOSE_REP: `DomainValidationException.getDetail()` now returns defensive copy via `Map.copyOf()`
 
 ## [0.21.1] - 2026-03-09
 
