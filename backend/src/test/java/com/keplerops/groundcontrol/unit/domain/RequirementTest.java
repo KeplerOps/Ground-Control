@@ -154,6 +154,24 @@ class RequirementTest {
     }
 
     @Nested
+    class Accessors {
+
+        @Test
+        void settersAndGettersCoverAllFields() {
+            var req = createRequirement("REQ-001");
+            req.setStatement("new statement");
+            assertThat(req.getStatement()).isEqualTo("new statement");
+            req.setRationale("some rationale");
+            assertThat(req.getRationale()).isEqualTo("some rationale");
+            req.setWave(3);
+            assertThat(req.getWave()).isEqualTo(3);
+            assertThat(req.getCreatedAt()).isNull(); // not persisted
+            assertThat(req.getUpdatedAt()).isNull();
+            assertThat(req.toString()).isEqualTo("REQ-001");
+        }
+    }
+
+    @Nested
     class Relations {
 
         @Test
@@ -175,6 +193,21 @@ class RequirementTest {
             assertThat(rel.getSource()).isEqualTo(source);
             assertThat(rel.getTarget()).isEqualTo(target);
             assertThat(rel.getRelationType()).isEqualTo(RelationType.DEPENDS_ON);
+        }
+
+        @Test
+        void relationAccessorsCoverAllFields() {
+            var source = createRequirement("REQ-001");
+            var target = createRequirement("REQ-002");
+            setId(source, UUID.randomUUID());
+            setId(target, UUID.randomUUID());
+            var rel = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
+            assertThat(rel.getId()).isNull(); // not persisted
+            assertThat(rel.getCreatedAt()).isNull();
+            assertThat(rel.getDescription()).isEmpty();
+            rel.setDescription("some desc");
+            assertThat(rel.getDescription()).isEqualTo("some desc");
+            assertThat(rel.toString()).contains("REQ-001").contains("REQ-002").contains("DEPENDS_ON");
         }
     }
 }

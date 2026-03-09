@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rewrote `docs/architecture/ARCHITECTURE.md` for current stack and mission (was Python/Django)
 - Updated `README.md` mission statement to reflect verification orchestration + graph traceability
 
+### Added
+
+- `RequirementControllerTest`: `@WebMvcTest` unit tests covering all 9 controller endpoints, exception handler (404/409/422/401/403/500), and DTO mapping
+- `RequestLoggingFilterTest`: unit tests for MDC request_id binding
+- `ExceptionHierarchyTest`: unit tests for AuthenticationException, AuthorizationException, GroundControlException cause constructor
+- Entity accessor coverage for Requirement and RequirementRelation (toString, getDescription, setDescription, getWave, getCreatedAt, getUpdatedAt)
+
 ### Fixed
 
 - CI: `gradle-wrapper.jar` was excluded by `*.jar` gitignore rule overriding the earlier negation — reordered rules so the negation comes after `*.jar` and uses `**/` glob to match `backend/` path
