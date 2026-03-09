@@ -36,20 +36,28 @@ Ground Control uses a phased approach to formal methods rigor. During **pre-alph
 
 ### JML contracts (when writing L1+ code)
 
-JML annotations live in comments (`// @` prefix).
+JML annotations use block comment syntax (`/*@ @*/`). Do not use `// @` — it is not valid JML and OpenJML will not parse it.
 
 ```java
-// @ requires newStatus != null;
-// @ requires status.canTransitionTo(newStatus);
-// @ ensures status == newStatus;
+/*@ requires newStatus != null;
+  @ requires status.canTransitionTo(newStatus);
+  @ ensures status == newStatus; @*/
 public void transitionStatus(Status newStatus) { ... }
 ```
 
-- `// @ requires` for preconditions
-- `// @ ensures` for postconditions
-- `// @ public invariant` for class invariants
+For method modifiers (`pure`, `non_null`), use inline annotations:
+
+```java
+public /*@ pure @*/ Set<Status> validTargets() { ... }
+```
+
+- `/*@ requires @*/` for preconditions
+- `/*@ ensures @*/` for postconditions
+- `/*@ public invariant @*/` for class invariants
+- `/*@ pure @*/` on methods called from JML expressions
+- `/*@ spec_public @*/` on private fields referenced in public specs
 - Keep conditions simple and side-effect-free
-- Existing JML contracts in the codebase are retained as documentation even without strict test enforcement
+- Files with JML annotations need `@SuppressWarnings("java:S125")` to suppress SonarQube false positives (except files in ESC scope that use only inline annotations)
 
 ### Post-alpha target
 

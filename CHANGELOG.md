@@ -25,7 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - CI: `gradle-wrapper.jar` was excluded by `*.jar` gitignore rule overriding the earlier negation — reordered rules so the negation comes after `*.jar` and uses `**/` glob to match `backend/` path
-- SonarQube S125: converted JML `// @` annotations to `/*@ ... @*/` block comment syntax and added `@SuppressWarnings("java:S125")` to classes with JML contracts (Requirement, RequirementRelation, RequirementService, Status)
+- All JML annotations converted from `// @` (invalid, never parsed by OpenJML) to `/*@ ... @*/` block comment syntax (valid JML). Added `@SuppressWarnings("java:S125")` to out-of-ESC-scope classes with JML contracts
+- Status.java: replaced `EnumMap` transition table with `switch` expression for OpenJML ESC compatibility (EnumMap specs incomplete in OpenJML). Added `/*@ pure @*/` on both methods, `/*@ ensures \result != null @*/` on `validTargets()`, `/*@ requires target != null @*/` on `canTransitionTo()`. All contracts verified by Z3
+- CODING_STANDARDS.md: updated JML section to document `/*@ @*/` block syntax, inline modifiers (`pure`, `spec_public`), and SonarQube S125 suppression
 - SonarQube S1948: `DomainValidationException.detail` field changed from `Map<String, Object>` to `Map<String, Serializable>` (exception is Serializable)
 - SonarQube S2187: suppressed false positive on `RequirementTest` (tests are in `@Nested` inner classes)
 - SpotBugs EI_EXPOSE_REP: `DomainValidationException.getDetail()` now returns defensive copy via `Map.copyOf()`
