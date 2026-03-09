@@ -28,6 +28,7 @@ import org.hibernate.envers.Audited;
 @Entity
 @Audited
 @Table(name = "requirement")
+@SuppressWarnings("java:S125") // JML contract annotations are intentional, not dead code
 public class Requirement {
 
     /*@ public invariant archivedAt == null || status == Status.ARCHIVED; @*/

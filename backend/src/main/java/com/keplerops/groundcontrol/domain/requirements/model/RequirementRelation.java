@@ -27,6 +27,7 @@ import org.hibernate.envers.Audited;
 @Table(
         name = "requirement_relation",
         uniqueConstraints = @UniqueConstraint(columnNames = {"source_id", "target_id", "relation_type"}))
+@SuppressWarnings("java:S125") // JML contract annotations are intentional, not dead code
 public class RequirementRelation {
 
     @Id

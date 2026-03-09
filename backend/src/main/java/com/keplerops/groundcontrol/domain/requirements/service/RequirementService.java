@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @Transactional
+@SuppressWarnings("java:S125") // JML contract annotations are intentional, not dead code
 public class RequirementService {
 
     private final RequirementRepository requirementRepository;

@@ -13,6 +13,7 @@ import java.util.Set;
  *                  └──────────────────►
  * </pre>
  */
+@SuppressWarnings("java:S125") // JML contract annotations are intentional, not dead code
 public enum Status {
     DRAFT,
     ACTIVE,
