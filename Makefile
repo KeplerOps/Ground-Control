@@ -1,35 +1,42 @@
-.PHONY: install lint format test dev clean up down docker-build
+.PHONY: rapid build test test-cov format lint check integration verify dev clean up down docker-build
 
-# Use uv if available, fall back to pip
-UV := $(shell command -v uv 2>/dev/null)
-ifdef UV
-    PIP_INSTALL = uv pip install
-    VENV_CREATE = uv venv
-else
-    PIP_INSTALL = pip install
-    VENV_CREATE = python3 -m venv
-endif
+# --- Rapid dev loop (< 5s) ---
 
-install: ## Create venv and install dependencies
-	cd backend && $(VENV_CREATE) .venv && \
-	. .venv/bin/activate && \
-	$(PIP_INSTALL) -e ".[dev]"
+rapid: ## Format + compile, no tests or static analysis
+	cd backend && ./gradlew spotlessApply compileJava -Pquick
 
-lint: ## Run ruff check + mypy
-	cd backend && ruff check src/ tests/
-	cd backend && mypy src/
+# --- Standard ---
 
-format: ## Run ruff format
-	cd backend && ruff format src/ tests/
+build: ## Build the project (no tests)
+	cd backend && ./gradlew build -x test -Pquick
 
-test: ## Run pytest
-	cd backend && pytest
+test: ## Run unit tests (no static analysis)
+	cd backend && ./gradlew test -Pquick
 
-test-cov: ## Run pytest with coverage
-	cd backend && pytest --cov=ground_control --cov-report=term-missing
+test-cov: ## Run tests with coverage report
+	cd backend && ./gradlew test jacocoTestReport
+
+format: ## Format code with Spotless
+	cd backend && ./gradlew spotlessApply
+
+lint: ## Check formatting
+	cd backend && ./gradlew spotlessCheck
+
+# --- Full verification (CI-equivalent) ---
+
+check: ## Full build + tests + static analysis + coverage
+	cd backend && ./gradlew check
+
+integration: ## Integration tests (Testcontainers)
+	cd backend && ./gradlew integrationTest
+
+verify: ## Full CI-equivalent verification
+	cd backend && ./gradlew check integrationTest openjmlEsc
+
+# --- Infrastructure ---
 
 dev: ## Start development server
-	cd backend && python manage.py runserver 0.0.0.0:8000
+	cd backend && ./gradlew bootRun
 
 up: ## Start Docker Compose services (PostgreSQL, Redis)
 	docker compose up -d
@@ -40,13 +47,8 @@ down: ## Stop Docker Compose services
 docker-build: ## Build backend Docker image
 	docker build -t ghcr.io/keplerops/ground-control:latest backend/
 
-clean: ## Remove build artifacts and caches
-	find backend -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find backend -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
-	find backend -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true
-	find backend -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
-	find backend -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
-	rm -rf backend/.venv
+clean: ## Remove build artifacts
+	cd backend && ./gradlew clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \

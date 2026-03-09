@@ -5,17 +5,102 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.1] - 2026-03-09
+
+### Changed
+
+- Inner dev loop optimized: `make rapid` (format + compile, ~1s warm) for edit-compile cycles
+- Added `-Pquick` Gradle property to disable Error Prone, SpotBugs, and Checkstyle for fast iteration
+- Added `rapid` Gradle task (format + compile, no tests or static analysis)
+- Pre-commit: switched `spotlessCheck --no-daemon` to `spotlessApply` (auto-fix), upgraded test hook to full `./gradlew check` (CI-equivalent), dropped `--no-daemon` to keep daemon warm
+- Makefile: added `rapid`, `check`, `integration`, `verify` targets; `build`/`test` use `-Pquick`
+- CLAUDE.md: `make rapid` is now the primary inner loop command
+- CODING_STANDARDS.md: pre-alpha workflow step 4 uses `make rapid`; Git & CI section documents pre-commit runs full check
+
+## [0.21.0] - 2026-03-09
+
+### Added
+
+- ADR-014: Pluggable Verification Architecture — separates internal dogfooding (JML/OpenJML) from platform verification capabilities (polyglot, multi-prover). Introduces VerificationResult domain entity, TLA+ for design-level verification, and verifier adapter pattern
+- TLA+ adopted for design-level verification of state machines, DAG invariants, and materialization consistency
+
+### Changed
+
+- ADR-011: Updated from Django to Java/Spring Boot implementation details (per ADR-013). Core decisions unchanged. TraceabilityLink artifact types now include TLA+ specs and verification results
+- ADR-002: Updated from Django ORM/psycopg/django-tenants to Hibernate/Spring Data JPA/Flyway
+- ADR-012: Reframed assurance levels as universal methodology (not JML-specific). Added TLA+ at L2. Added ADR-014 reference. **Default assurance level lowered to L0 for pre-alpha** — contracts only on state transitions and security boundaries, one test per behavior, no two-tests-per-contract requirement. Full L1-default SDD workflow deferred to beta
+- Phase 1 design notes rewritten for Java: JPA entities, Spring services, JML contracts, EnumMap state machine, Envers auditing, command records
+- CODING_STANDARDS.md: Pre-alpha workflow (implementation-first, contracts where they prevent silent corruption, one test per behavior). Coverage threshold stays at 30%. Post-alpha targets documented
+- CLAUDE.md: Added pre-alpha development philosophy
+
+## [0.20.0] - 2026-03-09
+
+### Added
+
+- Flyway migrations V003-V005: Envers audit tables (`revinfo`, `requirement_audit`, `requirement_relation_audit`)
+- `RequirementService` with 9 methods: create, getById, getByUid, update, transitionStatus, archive, createRelation, getRelations, list. JML contracts on state-transition methods (L1: transitionStatus, archive, createRelation); retained as documentation on CRUD methods (L0)
+- `CreateRequirementCommand` and `UpdateRequirementCommand` records
+- `RequirementController` REST controller with 9 endpoints under `/api/v1/requirements`
+- API DTOs: `RequirementRequest`, `RequirementResponse`, `StatusTransitionRequest`, `RelationRequest`, `RelationResponse`
+- `MethodArgumentNotValidException` handler in `GlobalExceptionHandler` for Jakarta Bean Validation errors (422)
+- OpenJML ESC integration: `gradle/openjml.gradle.kts` with `downloadOpenJml`, `openjmlEsc`, `openjmlRac` tasks — verifies state machine contracts via Z3 solver
+- SpotBugs static analysis with exclusions for JPA entities, test code, and constructor-throw patterns
+- Error Prone compiler plugin for additional compile-time bug detection
+- Checkstyle for naming conventions and coding patterns (complements Spotless formatting)
+- JaCoCo coverage verification thresholds wired into `check` task
+- Testcontainers base class (`BaseIntegrationTest`) with singleton PostgreSQL 16 container
+- `MigrationSmokeTest`: verifies Flyway V001-V005 ran, audit tables exist, Hibernate validates
+- `RequirementServiceIntegrationTest`: 7 tests covering CRUD, Envers audit trail, conflict/validation errors
+- `RequirementControllerIntegrationTest`: 13 MockMvc tests covering all endpoints, error envelopes (404/409/422)
+- `RequirementServiceTest`: 20 Mockito unit tests (happy-path + violation for all 9 service contracts)
+- ArchUnit rules: controllers must not access repositories, controllers must not import entities, services must reside in `..service..` packages
+- OpenJML ESC Scoping section in CODING_STANDARDS.md with design guidelines for ESC-verifiable code
+- CI: `integration` job (Testcontainers, no external DB service), `verify` job (OpenJML ESC)
+- SonarCloud workflow updated to run both unit and integration tests for combined coverage
+
+### Changed
+
+- Exception hierarchy moved from `domain/requirements/exception/` to `domain/exception/` (shared across all domain areas)
+- CI workflow: removed standalone `architecture` job (ArchUnit runs as part of `check`), removed external Postgres service (Testcontainers manages its own)
+- Testcontainers upgraded from 1.20.4 to 1.21.1 (Docker 29+ API version compatibility)
+- ADR-012 "Tool Integration" section updated with actual OpenJML commands, scope limitations, and known issues
+
 ## [0.19.0] - 2026-03-08
 
 ### Added
 
 - ADR-013: Java/Spring Boot Backend Rewrite — documents pivot from Python 3.12/Django to Java 21/Spring Boot 3.4 with JML/OpenJML contracts, jqwik property testing, and KeY formal proofs
 - ADR-012: Formal Methods Development Process — Specification-Driven Development (SDD) methodology with assurance levels L0-L3, updated for Java toolchain
+- Java 21 / Spring Boot 3.4 / Gradle (Kotlin DSL) project scaffold in `backend/`
+- `Requirement` and `RequirementRelation` JPA entities with JML contract annotations and Hibernate Envers auditing
+- `Status` enum with hand-rolled `EnumMap` transition table (DRAFT -> ACTIVE -> DEPRECATED -> ARCHIVED)
+- `RequirementType`, `Priority`, `RelationType` domain enums
+- Exception hierarchy: `GroundControlException` base with `NotFoundException`, `DomainValidationException`, `AuthenticationException`, `AuthorizationException`, `ConflictException`
+- `GlobalExceptionHandler` (`@RestControllerAdvice`) mapping exceptions to `{"error": {...}}` JSON envelope
+- `RequestLoggingFilter` for MDC `request_id` binding
+- Spring Data JPA repositories for `Requirement` and `RequirementRelation`
+- Flyway migrations V001 (requirement table) and V002 (requirement_relation table)
+- `logback-spring.xml` with console (dev) and JSON/Logstash (prod) output
+- 22 tests: JUnit 5 unit tests (13), jqwik property tests (3), ArchUnit architecture rules (4), structural transition table tests (5), smoke test (1)
+- ArchUnit rules enforcing `api/ -> domain/ <- infrastructure/` dependency rule
+- Spotless + Palantir Java Format for code formatting
+- JaCoCo for test coverage reporting
+- Springdoc-OpenAPI for API documentation generation
 
 ### Changed
 
+- Backend rewritten from Python 3.12/Django to Java 21/Spring Boot 3.4 with Gradle (Kotlin DSL)
 - ADR-001 (Django backend), ADR-003 (icontract), ADR-004 (Python toolchain) marked as superseded by ADR-013
 - ADR-012 tool references updated: icontract → JML, CrossHair → OpenJML ESC, Hypothesis → jqwik, Rocq/Coq → KeY
+- CI workflow rewritten for Gradle (build, test, architecture jobs)
+- Makefile updated for Gradle commands
+- Dockerfile rewritten as multi-stage JDK 21 build
+- CODING_STANDARDS.md rewritten for Java conventions
+- CLAUDE.md updated with Java build commands
+
+### Removed
+
+- Python backend code (pyproject.toml, Django settings, manage.py, all Python source)
 
 ## [0.16.0] - 2026-03-08
 

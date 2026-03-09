@@ -14,89 +14,140 @@ Ground Control requires a **process** governing when and how to apply formal met
 
 Industry precedent from Amazon s2n (specification-driven TLS), SPARK Ada, Dafny, and Frama-C demonstrates that **Specification-Driven Development (SDD)** — writing formal specifications before implementation — catches design errors earlier and at lower cost than test-after workflows.
 
-This ADR codifies an SDD methodology for Ground Control. The process and assurance levels are language-agnostic; the tooling section reflects the current Java/Spring Boot stack (ADR-013).
+This ADR codifies an SDD methodology for Ground Control. The process and assurance levels are **language-agnostic methodology** — the level definitions (L0-L3) apply universally regardless of target language. The tooling section reflects the current Java/Spring Boot stack (ADR-013) used for Ground Control's own code. ADR-014 generalizes the tooling to a pluggable verification architecture for the platform's polyglot output.
+
+### Default Level Rationale
+
+#### Pre-alpha (current): L0 default
+
+During pre-alpha, the default assurance level is **L0 (Standard)**. The goal is development velocity — getting the platform's differentiating features (graph-based traceability, verification orchestration) built and working. The real cost of higher assurance levels is not writing contracts or tests but **waiting for tests to run**, which blocks the rapid iteration loop needed when the architecture is still taking shape.
+
+Escalate above L0 only when the code genuinely demands it:
+- **L1** for state transitions, security boundaries, and methods with non-obvious preconditions that would cause silent corruption if violated
+- **L2** for the state machine and DAG operations (these have already proven their value via jqwik)
+
+JML contracts already present in the codebase are retained — they serve as documentation even without strict test-per-contract enforcement.
+
+#### Post-alpha target: L1 default
+
+Once the platform's core features are operational and the CI pipeline can run verification autonomously, the default will rise to L1. The rationale for L1-as-default remains sound:
+
+1. **Contracts are near-zero cost for an LLM.** Writing `// @ requires x != null;` takes one line.
+2. **Contracts catch LLM drift.** A second specification channel — if the implementation doesn't satisfy the contract, the build fails.
+3. **"Adoption friction" doesn't exist.** An AI agent follows the process it's given.
+4. **The cost of a missed contract is higher than the cost of writing one** — once the machinery is running.
+
+The transition from L0-default to L1-default will be a deliberate decision documented in a follow-up ADR when the platform reaches beta.
 
 ## Decision
 
 ### SDD Workflow
 
-The core development loop for contracted code is:
+The core development loop for all L1+ code is:
 
-1. **Spec** — Write JML contracts (`requires`, `ensures`, `invariant`) that express the behavioral intent.
-2. **Test** — Write a failing test that exercises the contract (both happy-path and contract-violation).
-3. **Code** — Implement the method body to satisfy the contracts and pass the test.
-4. **Verify** — Run OpenJML ESC (static checking) and jqwik (property-based) to search for violations.
+1. **Classify** — Determine the assurance level before writing any code (see decision table below).
+2. **Spec** — Write JML contracts (`requires`, `ensures`, `invariant`) that express the behavioral intent.
+3. **Test** — Write a failing test that exercises the contract (both happy-path and contract-violation).
+4. **Code** — Implement the method body to satisfy the contracts and pass the test.
+5. **Verify** — Run `./gradlew check` (compilation + OpenJML + tests + Spotless + ArchUnit).
 
 This is "TDD for invariants": contracts are the failing specification, implementation satisfies them. Contracts and tests are complementary — contracts define *what must always hold*, tests verify *specific scenarios*.
 
 ### Assurance Levels
 
-Not all code warrants the same rigor. An escalation ladder prevents over-engineering:
-
 | Level | Name | Scope | Tools |
 |-------|------|-------|-------|
-| 0 | Standard | Utils, config, controllers, glue code | `javac` + JUnit 5 |
-| 1 | Contracted | Domain models, state machines, business rules | + JML `requires`/`ensures`/`invariant` via OpenJML RAC |
-| 2 | Property-Verified | Core invariants, DAG operations, security boundaries | + jqwik + OpenJML ESC |
+| 0 | Standard | **Pre-alpha default.** All code unless escalated by the decision table below | `javac` + JUnit 5 |
+| 1 | Contracted | State transitions, security boundaries, methods with non-obvious preconditions that cause silent corruption | + JML `requires`/`ensures`/`invariant` |
+| 2 | Property-Verified | State machines, transition tables, DAG operations | + jqwik + TLA+ design specs (ADR-014) |
 | 3 | Formally Specified | Tenant isolation, access control, audit (future) | + KeY proofs (Isabelle/HOL secondary) |
 
-Level 0 is the explicit default. Contracts are earned, not mandated.
+**Pre-alpha default is L0.** Escalate to L1 for code where a missed precondition causes silent corruption. Escalate to L2 for state machines and graph operations. See "Default Level Rationale" above for the planned transition to L1-default at beta.
+
+### Level Decision Table
+
+Apply these rules in order. Use the first match.
+
+| If you are writing... | Level |
+|-----------------------|-------|
+| A state machine, transition table, or workflow | **L2** |
+| DAG operations (cycle detection, topological sort, reachability) | **L2** |
+| Security boundary logic (auth checks, permission guards) | **L1** |
+| A domain model method where invalid input causes silent data corruption | **L1** |
+| Everything else | **L0** |
+
+When in doubt, use L0 during pre-alpha. The bar rises at beta.
 
 ### Current Code Classification
 
-| Code | Current Level | Target Level | Notes |
-|------|--------------|--------------|-------|
-| `domain/requirements/model/Requirement.java` | L1 (has `requires`) | L2 | Adding `ensures` + `invariant` + jqwik |
-| `domain/requirements/model/RequirementRelation.java` | L1 (has `requires`) | L1 (sufficient) | Self-loop prevention only |
-| `domain/requirements/state/Status.java` (transition table) | L1 (structural test) | L2 | Adding jqwik property tests |
-| `domain/requirements/exception/` | L0 | L0 | Data carriers only |
-| `api/` | L0 | L0 | Thin handler layer |
-| `infrastructure/`, `shared/` | L0 | L0 | Configuration and adapters |
+| Code | Level | Notes |
+|------|-------|-------|
+| `domain/requirements/model/Requirement.java` | L2 | State machine + cross-field invariant (`archivedAt`/`status`) |
+| `domain/requirements/model/RequirementRelation.java` | L1 | Self-loop prevention precondition |
+| `domain/requirements/state/Status.java` | L2 | Transition table with jqwik property tests |
+| `domain/exception/` | L0 | Data carriers only |
+| `api/GlobalExceptionHandler` | L0 | Mapping layer, no domain logic |
+| `api/ErrorResponse` | L0 | Record (DTO) |
+| `shared/logging/RequestLoggingFilter` | L0 | Glue code |
+| `infrastructure/` | L0 | Adapter layer |
 
-### Triage Guide
+### Triage Guide (pre-alpha)
 
-**ALWAYS contract (L1+):**
-- State machine transitions
-- Domain model invariants (e.g., "archivedAt only set when status is ARCHIVED")
+**L2 (property tests + design specs):**
+- State machine transitions and transition tables
+- Graph/DAG operations
+
+**L1 (contracts on critical paths):**
 - Security boundaries (authentication, authorization checks)
-- Data integrity rules that cross multiple fields
+- Domain model methods where invalid input causes silent data corruption (e.g., status/archivedAt invariant)
 
-**SOMETIMES contract:**
-- Complex business rules with non-obvious edge cases
-- Methods with preconditions that callers might violate
-- Code paths where silent corruption is worse than a crash
-
-**NEVER contract:**
-- Simple getters/setters with no invariants
-- Spring configuration classes
-- Test code
-- Glue code (controller routing, filter registration)
+**L0 (everything else):**
+- Services, repositories, controllers, configuration, DTOs, glue code
+- One test per significant behavior is sufficient — no two-tests-per-contract requirement during pre-alpha
 
 ### Tool Integration
 
-- **OpenJML ESC in CI**: Runs static checking on `src/main/java/.../domain/` after tests pass. Blocking — failures prevent merge.
-- **OpenJML RAC**: Runtime assertion checking enabled in test and dev profiles. JML annotations in source are checked at runtime via `-javaagent`.
-- **jqwik**: Property-based tests tagged `@Tag("slow")`. Run in CI, skippable locally via Gradle task filtering.
-- **KeY** (future): Formal proofs for L3 code. Deferred until L1 and L2 coverage is established.
+**OpenJML ESC** (Extended Static Checking) — integrated in Phase 2B:
+- Version: OpenJML 21-0.21 (JDK 21 series)
+- Gradle tasks: `./gradlew downloadOpenJml` (fetches binary), `./gradlew openjmlEsc` (runs Z3 prover)
+- Defined in: `backend/gradle/openjml.gradle.kts`, applied from `build.gradle.kts`
+- Scope: `domain/requirements/state/` only (pure enums with no framework annotations)
+- Gradle up-to-date checking: skips when source files haven't changed (~1s no-op)
+- **Known limitations**: OpenJML's bundled `CharSequence.jml` spec has invariant bugs that cause false positives on classes with `String` constructor parameters. JPA entities fail due to Hibernate's no-arg constructor leaving fields `null`. These classes remain at L1 (contract + test pairs). See `docs/CODING_STANDARDS.md` "OpenJML ESC Scoping" for design guidelines.
+
+**OpenJML RAC** (Runtime Assertion Checking):
+- Gradle task: `./gradlew openjmlRac` (compiles domain code with embedded assertions to `build/classes/rac`)
+- Scope: full `domain/` package
+- Status: task defined, not yet wired into test execution
+
+**jqwik**: Property-based tests tagged `@Tag("slow")`. Run in CI, skippable locally via Gradle task filtering.
+
+**TLA+** (design-level verification) — adopted per ADR-014:
+- TLC model checker for exhaustive state space exploration
+- Specs in `specs/tla/` (versioned with code)
+- Scope: state machines, DAG invariants, materialization consistency, traceability completeness
+- Complements code-level verification (JML/OpenJML) with design-level verification
+- Higher ROI than expanding OpenJML ESC to additional classes
+
+**KeY** (future): Formal proofs for L3 code. Deferred until L1 and L2 coverage is established.
 
 ### Drift Detection
 
-Every contract needs:
-1. A **happy-path test** confirming the contracted behavior works.
-2. A **contract-violation test** confirming the contract rejects invalid inputs.
-3. **OpenJML ESC re-verification** on every PR (automated via CI).
-4. **Structural property tests** verifying meta-properties of specification tables (e.g., "every Status enum value has a VALID_TRANSITIONS entry").
+During pre-alpha, the drift detection bar is relaxed:
 
-If a contract is added without corresponding tests, it is dead specification — no better than a comment.
+1. **L1+ contracts should have at least one test** covering the contracted behavior. The strict two-tests-per-contract rule (happy-path + violation) applies post-alpha.
+2. **OpenJML ESC re-verification** runs in CI on the `state/` package.
+3. **L2 property tests** (jqwik) run in CI, tagged `@Tag("slow")` so they can be skipped locally for fast iteration.
+
+Existing JML contracts without tests are acceptable during pre-alpha — they still serve as documentation. The post-alpha process will require test coverage for all contracts.
 
 ### Relationship to TDD
 
-SDD does not replace TDD. It extends it:
+SDD extends TDD by adding contracts as a specification layer:
 
 - **TDD**: "Write a failing test, then make it pass."
-- **SDD**: "Write a failing contract, write a test that exercises it, then make both pass."
-
-Contracts capture universal invariants ("this must always hold"). Tests capture specific scenarios ("when I do X, Y happens"). Both are needed.
+- **SDD (post-alpha)**: "Write a failing contract, write a test that exercises it, then make both pass."
+- **Pre-alpha**: Write code, add contracts where they prevent silent corruption, write tests for significant behaviors. Pragmatism over ceremony.
 
 ## Consequences
 
@@ -104,7 +155,8 @@ Contracts capture universal invariants ("this must always hold"). Tests capture 
 
 - Bugs surface at contract boundaries with clear error messages, not as downstream corruption
 - Spec-first catches design errors before code is written
-- Assurance levels prevent over-engineering — Level 0 is the default
+- L1 default ensures contracts are written as a matter of course, not as an afterthought
+- AI-generated code is validated against a second specification channel (contracts), catching implementation drift
 - OpenJML ESC finds contract violations statically, without running the code
 - JML contracts serve as executable documentation
 - Single annotation language (JML) spans L1 through L3 — no tool-boundary translation
@@ -112,11 +164,15 @@ Contracts capture universal invariants ("this must always hold"). Tests capture 
 ### Negative
 
 - CI time increases with OpenJML ESC verification
-- Learning curve for developers unfamiliar with JML, DbC, and SDD
+- More JML annotations to maintain than with an L0 default
 - jqwik property tests are slower than example-based JUnit tests
 
 ### Risks
 
 - OpenJML + Hibernate proxies: JPA entity proxies may interfere with JML runtime checks. Mitigated by scoping RAC to domain logic methods, not framework-generated code.
-- Adoption friction: developers may resist writing contracts first. Mitigated by clear triage guide and assurance levels — most code stays at Level 0.
-- Over-contracting: enthusiasm may lead to contracts on trivial code. Mitigated by "contracts are earned, not mandated" principle and code review.
+- Over-contracting L0 code: enthusiasm may lead to contracts on configuration or DTOs. Mitigated by explicit L0 classification in the decision table — if it matches an L0 rule, do not contract it.
+
+## Related ADRs
+
+- **ADR-013** (Java/Spring Boot Backend Rewrite) — Current tool names (JML, OpenJML, jqwik, KeY) for Ground Control's own code.
+- **ADR-014** (Pluggable Verification Architecture) — Generalizes assurance levels from JML-specific to pluggable. The methodology defined here is universal; the tools per level depend on the target language. Adds TLA+ at L2 for design-level verification.

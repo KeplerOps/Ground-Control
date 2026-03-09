@@ -14,29 +14,20 @@ repos:
       - id: check-yaml
         args: [--unsafe]
       - id: check-json
-      - id: check-toml
       - id: check-added-large-files
         args: [--maxkb=500]
       - id: check-merge-conflict
       - id: detect-private-key
-        exclude: ^tests/
+        exclude: ^backend/src/test/
 
-  # Python linting and formatting
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.10
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
-
-  # Python type checking (uses project venv so pyproject.toml overrides and stubs apply)
+  # Java formatting (Spotless via Gradle — auto-fix mode)
   - repo: local
     hooks:
-      - id: mypy
-        name: mypy (backend)
-        entry: bash -c 'cd backend && .venv/bin/python -m mypy src/'
+      - id: spotless
+        name: spotless (Java auto-format)
+        entry: bash -c 'cd backend && ./gradlew spotlessApply -q'
         language: system
-        files: ^backend/
+        files: ^backend/.*\.java$
         pass_filenames: false
 
   # =============================================================================
@@ -50,20 +41,14 @@ repos:
       - id: gitleaks
 
   # =============================================================================
-  # STAGE 3: Tests (slowest — run last)
+  # STAGE 3: Full verification (CI-equivalent)
   # =============================================================================
 
   - repo: local
     hooks:
-      - id: pytest
-        name: pytest (backend)
-        entry: bash -c 'cd backend && .venv/bin/python -m pytest -x -q'
-        language: system
-        files: ^backend/
-        pass_filenames: false
-      - id: coverage
-        name: coverage (backend >= 80%)
-        entry: bash -c 'cd backend && .venv/bin/python -m pytest --cov=ground_control --cov-fail-under=80 -q'
+      - id: gradle-check
+        name: gradle check (build + test + static analysis + coverage)
+        entry: bash -c 'cd backend && ./gradlew check -q'
         language: system
         files: ^backend/
         pass_filenames: false

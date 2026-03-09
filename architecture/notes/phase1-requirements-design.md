@@ -1,4 +1,4 @@
-# Phase 1: Requirements Management System — Design Notes
+# Phase 1: Requirements Management System -- Design Notes
 
 ## Overview
 
@@ -6,41 +6,53 @@ Phase 1 introduces the first domain models in Ground Control. The requirements m
 
 See [ADR-011](../adrs/011-requirements-data-model.md) for the formal decision record.
 
-## App Structure
+## Package Structure
 
 ```
-backend/src/ground_control/domain/requirements/
-    __init__.py
-    apps.py              # AppConfig (label="requirements")
-    choices.py           # Enums: status, type, priority, relation_type, etc.
-    models.py            # Requirement, RequirementRelation, TraceabilityLink,
-                         #   GitHubIssueSync, RequirementImport
-    admin.py             # Django admin registration
-    parsers/
-        __init__.py
-        sdoc.py          # StrictDoc parser (adapted from archive/tools/issue-graph/)
-    services/
-        __init__.py
-        requirement_service.py  # Owns: Requirement, RequirementRelation
-        traceability_service.py # Owns: TraceabilityLink
-        sync_service.py         # Owns: GitHubIssueSync
-        import_service.py       # Owns: RequirementImport; orchestrates imports
-        analysis.py             # Read-only: cycles, orphans, coverage, impact
-    management/
-        commands/
-            import_sdoc.py        # StrictDoc import
-            sync_github_issues.py # GitHub issue batch sync
-            sync_age_graph.py     # AGE graph materialization
+backend/src/main/java/com/keplerops/groundcontrol/
+    domain/
+        requirements/
+            model/
+                Requirement.java           # @Entity + JML contracts + @Audited
+                RequirementRelation.java   # @Entity + JML contracts + @Audited
+            state/
+                Status.java                # Enum + EnumMap transition table
+                RequirementType.java       # FUNCTIONAL, NON_FUNCTIONAL, CONSTRAINT, INTERFACE
+                Priority.java             # MUST, SHOULD, COULD, WONT
+                RelationType.java         # PARENT, DEPENDS_ON, REFINES, CONFLICTS, SUPERSEDES, RELATED
+            service/
+                RequirementService.java    # Write-owner of Requirement + RequirementRelation
+                CreateRequirementCommand.java  # Immutable command record
+                UpdateRequirementCommand.java  # Immutable command record
+            repository/
+                RequirementRepository.java           # Spring Data JPA
+                RequirementRelationRepository.java   # Spring Data JPA
+        exception/                         # Shared across all domain areas
+            GroundControlException.java
+            NotFoundException.java
+            DomainValidationException.java
+            AuthenticationException.java
+            AuthorizationException.java
+            ConflictException.java
+    api/
+        requirements/
+            RequirementController.java     # @RestController (planned)
+            RequirementRequest.java        # Request DTO record (planned)
+            RequirementResponse.java       # Response DTO record (planned)
+            StatusTransitionRequest.java   # (planned)
+            RelationRequest.java           # (planned)
+            RelationResponse.java          # (planned)
+        GlobalExceptionHandler.java        # @RestControllerAdvice
+        ErrorResponse.java                 # {"error": {"code", "message", "detail"}}
+    infrastructure/
+        age/
+            AgeGraphService.java           # AGE Cypher via JdbcTemplate (planned)
+    shared/
+        logging/
+            RequestLoggingFilter.java      # MDC: request_id
 ```
 
-Infrastructure layer (shared, not requirements-specific):
-```
-backend/src/ground_control/infrastructure/
-    github/
-        client.py        # Thin wrapper around `gh api` CLI
-    age/
-        graph_service.py # AgeGraphService: Cypher wrapper, materialization
-```
+Future domain areas (verification, risks, controls) follow the same structure under `domain/`.
 
 ## Data Model Detail
 
@@ -48,142 +60,143 @@ backend/src/ground_control/infrastructure/
 
 The core entity. Human-readable `uid` is the external identifier (used in API paths). Internal `id` is a UUID for database operations.
 
-```python
-class Requirement(models.Model):
-    id              = UUIDField(primary_key=True, default=uuid4)
-    uid             = CharField(max_length=50, unique=True)      # "W2-RISK", "REQ-001"
-    title           = CharField(max_length=255)
-    statement       = TextField()
-    rationale       = TextField(blank=True, default="")
-    requirement_type = CharField(choices=RequirementType)        # functional, non_functional, constraint, interface
-    priority        = CharField(choices=Priority)                # must, should, could, wont (MoSCoW)
-    status          = CharField(choices=Status, default="draft") # draft, active, deprecated, archived
-    wave            = IntegerField(null=True, blank=True)        # sdoc import compat
-    tags            = ArrayField(TextField(), default=list)
-    custom_fields   = JSONField(default=dict)
-    created_at      = DateTimeField(auto_now_add=True)
-    updated_at      = DateTimeField(auto_now=True)
-    archived_at     = DateTimeField(null=True, blank=True)       # soft delete
+```java
+@Entity
+@Audited
+@Table(name = "requirement")
+public class Requirement {
+
+    // @ public invariant archivedAt == null || status == Status.ARCHIVED;
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID id;
+
+    @Column(unique = true, nullable = false, length = 50)
+    private String uid;         // "W2-RISK", "REQ-001"
+
+    @Column(nullable = false)
+    private String title;
+
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String statement;
+
+    @Column(columnDefinition = "TEXT")
+    private String rationale = "";
+
+    @Enumerated(EnumType.STRING)
+    private RequirementType requirementType = RequirementType.FUNCTIONAL;
+
+    @Enumerated(EnumType.STRING)
+    private Priority priority = Priority.MUST;
+
+    @Enumerated(EnumType.STRING)
+    private Status status = Status.DRAFT;
+
+    private Integer wave;
+    private Instant createdAt;   // set on @PrePersist
+    private Instant updatedAt;   // set on @PreUpdate
+    private Instant archivedAt;  // soft delete
+}
 ```
 
-**Status transitions** (enforced via icontract):
-- `draft` -> `active`
-- `active` -> `deprecated`
-- `active` -> `archived` (soft delete)
-- `deprecated` -> `archived`
-- No transitions out of `archived`
-- No backward transitions (e.g., `active` -> `draft`)
+**Status transitions** (enforced via JML contracts on `transitionStatus()`):
+- DRAFT -> ACTIVE
+- ACTIVE -> DEPRECATED
+- ACTIVE -> ARCHIVED (soft delete)
+- DEPRECATED -> ARCHIVED
+- No transitions out of ARCHIVED
+- No backward transitions
 
-**Soft delete**: Setting `archived_at` to a timestamp. Default manager excludes archived records. A separate `all_objects` manager includes them.
+**Soft delete**: Setting `archivedAt` to a timestamp. Default queries should filter on `archivedAt IS NULL`.
 
 ### RequirementRelation
 
 DAG edges. A requirement can have multiple parents (refines two higher-level requirements) and multiple children.
 
-```python
-class RequirementRelation(models.Model):
-    id            = UUIDField(primary_key=True, default=uuid4)
-    source        = ForeignKey(Requirement, related_name="outgoing_relations")
-    target        = ForeignKey(Requirement, related_name="incoming_relations")
-    relation_type = CharField(choices=RelationType)  # parent, depends_on, refines, conflicts, supersedes, related
-    description   = TextField(blank=True, default="")
-    created_at    = DateTimeField(auto_now_add=True)
+```java
+@Entity
+@Audited
+@Table(name = "requirement_relation",
+       uniqueConstraints = @UniqueConstraint(
+           columns = {"source_id", "target_id", "relation_type"}))
+public class RequirementRelation {
 
-    class Meta:
-        unique_together = [("source", "target", "relation_type")]
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID id;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "source_id")
+    private Requirement source;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "target_id")
+    private Requirement target;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private RelationType relationType;
+
+    @Column(columnDefinition = "TEXT")
+    private String description = "";
+
+    private Instant createdAt;   // set on @PrePersist
+}
 ```
 
-**Validation**: `source != target` (no self-loops). Cycle detection is an analysis-time check, not a save-time constraint (too expensive for real-time validation).
+**Validation**: `source != target` (no self-loops), enforced in `RequirementService.createRelation()`. Cycle detection is an analysis-time check, not a save-time constraint (too expensive for real-time validation).
 
-### TraceabilityLink
+### TraceabilityLink (planned)
 
-Connects requirements to external artifacts. The `artifact_identifier` uses a typed prefix convention:
-- `github:#42` — GitHub issue
-- `file:backend/src/ground_control/models.py` — code file
-- `adr:011` — architecture decision record
-- `test:backend/tests/unit/test_foo.py` — test file
-- `config:docker-compose.yml` — configuration file
+Connects requirements to external artifacts. The `artifactIdentifier` uses a typed prefix convention:
+- `github:#42` -- GitHub issue
+- `file:backend/src/.../Requirement.java` -- code file
+- `adr:011` -- architecture decision record
+- `test:backend/src/test/.../RequirementTest.java` -- test file
+- `tla:specs/tla/RequirementStateMachine.tla` -- TLA+ specification
+- `proof:verification/results/access-control.json` -- verification result
 
-```python
-class TraceabilityLink(models.Model):
-    id                  = UUIDField(primary_key=True, default=uuid4)
-    requirement         = ForeignKey(Requirement, related_name="traceability_links")
-    artifact_type       = CharField(choices=ArtifactType)   # github_issue, code_file, adr, config, policy, test, documentation
-    artifact_identifier = CharField(max_length=500)
-    artifact_url        = URLField(blank=True, default="")
-    artifact_title      = CharField(max_length=255, blank=True, default="")
-    link_type           = CharField(choices=LinkType)       # implements, tests, documents, constrains
-    sync_status         = CharField(choices=SyncStatus, default="synced")  # synced, stale, broken
-    last_synced_at      = DateTimeField(null=True, blank=True)
-    created_at          = DateTimeField(auto_now_add=True)
-    updated_at          = DateTimeField(auto_now=True)
-```
+See [ADR-011](../adrs/011-requirements-data-model.md#traceabilitylink-planned) for the full field list.
 
-### GitHubIssueSync
+### GitHubIssueSync (planned)
 
-Cached mirror of GitHub issue data. Updated by the `sync_github_issues` management command.
+Cached mirror of GitHub issue data. Updated by the sync service. See [ADR-011](../adrs/011-requirements-data-model.md#githubissuesync-planned) for the full field list.
 
-```python
-class GitHubIssueSync(models.Model):
-    id               = UUIDField(primary_key=True, default=uuid4)
-    issue_number     = IntegerField(unique=True)
-    issue_title      = CharField(max_length=500)
-    issue_state      = CharField(choices=IssueState)     # open, closed
-    issue_labels     = JSONField(default=list)            # ["phase-1", "requirements"]
-    issue_body       = TextField(default="")
-    issue_url        = URLField()
-    phase            = IntegerField(null=True, blank=True)
-    priority_label   = CharField(max_length=10, blank=True, default="")
-    cross_references = JSONField(default=list)            # [42, 53, 101]
-    last_fetched_at  = DateTimeField()
-    created_at       = DateTimeField(auto_now_add=True)
-    updated_at       = DateTimeField(auto_now=True)
-```
+### RequirementImport (planned)
 
-### RequirementImport
-
-Audit trail for each import/sync operation.
-
-```python
-class RequirementImport(models.Model):
-    id          = UUIDField(primary_key=True, default=uuid4)
-    source_type = CharField(choices=ImportSourceType)   # strictdoc, github, manual
-    source_file = CharField(max_length=500, blank=True, default="")
-    imported_at = DateTimeField(auto_now_add=True)
-    stats       = JSONField(default=dict)               # {"created": 10, "updated": 5, "skipped": 2}
-    errors      = JSONField(default=list)               # [{"uid": "REQ-001", "error": "..."}]
-```
+Audit trail for each import/sync operation. See [ADR-011](../adrs/011-requirements-data-model.md#requirementimport-planned) for the full field list.
 
 ## Service Layer Architecture
 
 ### The Problem
 
-All five models live in one Django app and share a database. Without discipline, any code can `Requirement.objects.create()` or `TraceabilityLink.objects.filter()` from anywhere, and the "clean architecture" becomes fiction.
+All entities share a database and Spring context. Without discipline, any component can inject any repository and mutate any entity, and the "clean architecture" becomes fiction.
 
 ### The Solution: Write Ownership, Read Freedom
 
-Each model has exactly **one owning service** that is the sole writer. Other services may read (via ORM querysets) but never mutate another service's models directly. Cross-service mutations go through the owning service's public interface.
+Each entity has exactly **one owning service** that is the sole writer. Other services may read (via repository queries) but never mutate another service's entities. Cross-service mutations go through the owning service's public interface.
 
 ```
-                        API Layer (api/requirements.py)
-                              │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
+                    API Layer (RequirementController)
+                              |
+              +---------------+---------------+
+              v               v               v
      RequirementService  TraceabilityService  SyncService
        (writes)            (writes)           (writes)
-     ┌──────────┐      ┌──────────────┐   ┌──────────────┐
-     │Requirement│      │Traceability- │   │GitHubIssue-  │
-     │Requirement│      │  Link        │   │  Sync        │
-     │ Relation  │      └──────────────┘   └──────────────┘
-     └──────────┘
+     +------------+    +--------------+   +--------------+
+     |Requirement |    |Traceability- |   |GitHubIssue-  |
+     |Requirement |    |  Link        |   |  Sync        |
+     | Relation   |    +--------------+   +--------------+
+     +------------+
                     AnalysisService (reads all, writes none)
-                    ImportService → orchestrates other services
+                    ImportService -> orchestrates other services
 ```
 
 ### Ownership Table
 
-| Model | Owning Service | Allowed Readers |
-|-------|---------------|-----------------|
+| Entity | Owning Service | Allowed Readers |
+|--------|---------------|-----------------|
 | Requirement | RequirementService | all |
 | RequirementRelation | RequirementService | AnalysisService |
 | TraceabilityLink | TraceabilityService | AnalysisService, SyncService |
@@ -192,69 +205,116 @@ Each model has exactly **one owning service** that is the sole writer. Other ser
 
 ### Rules
 
-1. **One writer per model.** `SyncService` never calls `Requirement.objects.create()`. If it needs a Requirement, it calls `RequirementService.get_or_create_by_uid()`.
+1. **One writer per entity.** `SyncService` never calls `requirementRepository.save()`. If it needs a Requirement, it calls `RequirementService.getByUid()`.
 
-2. **Services expose a public interface, not querysets.** A service method returns model instances or dataclasses — callers don't chain `.filter().select_related()` across ownership boundaries.
+2. **Services expose a public interface, not repositories.** A service method returns entities or records -- callers don't chain repository queries across ownership boundaries.
 
-3. **Orchestration lives in management commands or API views, not in services.** The `import_sdoc` command calls `RequirementService.create()`, then `RequirementService.create_relation()`, then `TraceabilityService.create_link()` — it's the coordinator. Services don't call each other horizontally.
+3. **Orchestration lives in controllers or application services, not in domain services.** The import flow calls `RequirementService.create()`, then `RequirementService.createRelation()`, then `TraceabilityService.createLink()` -- it's the coordinator. Domain services don't call each other horizontally.
 
-4. **AnalysisService is read-only.** It queries across all models but mutates nothing. This is safe because reads don't create coupling — only writes do.
+4. **AnalysisService is read-only.** It queries across all repositories but mutates nothing. This is safe because reads don't create coupling -- only writes do.
 
-5. **No Django signals for cross-service communication.** Signals create invisible coupling. If service A needs to react to service B's writes, make it explicit: the management command or API view calls both services in sequence.
+5. **No Spring events for cross-service communication.** Events create invisible coupling. If service A needs to react to service B's writes, make it explicit: the controller or orchestration service calls both services in sequence.
 
-### Why Not Separate Django Apps?
+### Transactional Boundaries
 
-Splitting into `requirements`, `traceability`, `sync` apps would give DB-level separation via different migration histories and `app_label` namespaces. But:
+- `@Transactional` on the service class (default for all methods)
+- `@Transactional(readOnly = true)` on read-only methods (enables Hibernate query optimizations)
+- Controllers are not transactional -- the service boundary is the transaction boundary
+- Orchestration across services uses the default propagation (`REQUIRED`) so all calls within one controller action share a transaction
 
-- **Foreign keys still cross apps** — `TraceabilityLink.requirement` is a FK to `Requirement` regardless of which app owns it. Django handles cross-app FKs fine, but it doesn't add real decoupling.
-- **Migration ordering gets painful** — cross-app FKs create migration dependencies that Django resolves, but developers must reason about.
-- **Premature split** — we have 5 models. Splitting into 3+ apps creates overhead without benefit. If the domain grows to 15+ models with clearly independent lifecycles, revisit.
+### Why Not Separate Packages?
 
-Service-layer ownership gives us the decoupling benefits where they matter (mutation paths, testing, reasoning about side effects) without the overhead of multiple apps.
+Splitting into separate top-level packages (`requirements`, `traceability`, `sync`) would give clearer boundaries. But:
 
-### Pragmatic Note on Clean Architecture
+- **Foreign keys still cross packages** -- `TraceabilityLink.requirement` is a FK to `Requirement` regardless of which package owns it.
+- **Migration ordering gets painful** -- cross-package FKs create Flyway ordering dependencies.
+- **Premature split** -- we have 5 entities. Splitting into 3+ packages creates overhead without benefit. If the domain grows to 15+ entities with clearly independent lifecycles, revisit.
 
-The clean architecture principle says the domain layer should have "zero framework imports." With Django, the models *are* the framework — `models.Model`, `UUIDField`, `ForeignKey` are all Django. This is the known tradeoff of choosing Django (ADR-001): we get batteries-included at the cost of framework coupling in the domain layer. The service layer pattern mitigates this by keeping *business logic* in services that are testable without the database (pass in model instances, mock querysets), even though the models themselves are Django-coupled.
+Service-layer ownership gives us the decoupling benefits where they matter (mutation paths, testing, reasoning about side effects) without the overhead of premature splitting.
 
 ## Key Patterns
 
-### icontract Preconditions
+### JML Contracts
 
-Status transitions use icontract `@require` decorators on a `transition_status()` method:
+Status transitions use JML `requires`/`ensures` annotations:
 
-```python
-VALID_TRANSITIONS = {
-    "draft": {"active"},
-    "active": {"deprecated", "archived"},
-    "deprecated": {"archived"},
-    "archived": set(),
+```java
+// @ requires newStatus != null;
+// @ requires status.canTransitionTo(newStatus);
+// @ ensures status == newStatus;
+public void transitionStatus(/*@ non_null @*/ Status newStatus) {
+    if (!status.canTransitionTo(newStatus)) {
+        throw new DomainValidationException(
+            "Cannot transition from " + status + " to " + newStatus,
+            "invalid_status_transition",
+            Map.of("current_status", status.name(),
+                   "target_status", newStatus.name()));
+    }
+    this.status = newStatus;
 }
-
-@require(lambda self, new_status: new_status in VALID_TRANSITIONS.get(self.status, set()))
-def transition_status(self, new_status: str) -> None:
-    ...
 ```
 
-### Soft Delete Pattern
+Every JML contract has a corresponding happy-path test and violation test. See [CODING_STANDARDS.md](../../docs/CODING_STANDARDS.md) for the full SDD workflow.
 
-```python
-class RequirementManager(models.Manager):
-    def get_queryset(self):
-        return super().get_queryset().filter(archived_at__isnull=True)
+### EnumMap State Machine
 
-class Requirement(models.Model):
-    objects = RequirementManager()          # default: excludes archived
-    all_objects = models.Manager()          # includes archived
+```java
+public enum Status {
+    DRAFT, ACTIVE, DEPRECATED, ARCHIVED;
+
+    private static final EnumMap<Status, Set<Status>> VALID_TRANSITIONS =
+        new EnumMap<>(Map.of(
+            DRAFT,      Set.of(ACTIVE),
+            ACTIVE,     Set.of(DEPRECATED, ARCHIVED),
+            DEPRECATED, Set.of(ARCHIVED),
+            ARCHIVED,   Set.of()));
+
+    public Set<Status> validTargets() {
+        return VALID_TRANSITIONS.getOrDefault(this, Set.of());
+    }
+
+    public boolean canTransitionTo(Status target) {
+        return validTargets().contains(target);
+    }
+}
 ```
 
-### AGE Graph Materialization
+Verified by jqwik property tests (every enum value has a transition entry, terminal states have no outgoing transitions, valid transitions change status, invalid transitions are rejected) and structural tests.
+
+### Hibernate Envers Auditing
+
+All domain entities are annotated with `@Audited`. Envers automatically maintains:
+- `revinfo` table (revision ID + timestamp, using `revinfo_seq` sequence)
+- `requirement_audit` table (all columns + `rev` FK + `revtype`)
+- `requirement_relation_audit` table (same pattern, no referential integrity to requirement)
+
+Flyway migrations V003-V005 create these tables. Audit tables use Envers default column names (`rev`, `revtype`).
+
+### Command Records
+
+Service mutations use immutable command records:
+
+```java
+public record CreateRequirementCommand(
+    String uid,
+    String title,
+    String statement,
+    String rationale,
+    RequirementType requirementType,
+    Priority priority,
+    Integer wave
+) {}
+```
+
+This separates the API representation (request DTOs with `@NotBlank` validation) from the domain mutation interface (commands). Controllers map: request -> command -> service call -> entity -> response.
+
+### AGE Graph Materialization (planned)
 
 AGE is a read-only projection. The materialization flow:
 
-1. Management command `sync_age_graph` runs
-2. `AgeGraphService.materialize_graph()` iterates all Requirement and RequirementRelation records
-3. Creates Cypher `MERGE` statements for nodes and edges
-4. Executes via raw SQL through Django's `connection.cursor()`
+1. `AgeGraphService.materializeGraph()` iterates all Requirement and RequirementRelation records via JPA
+2. Creates Cypher `MERGE` statements for nodes and edges
+3. Executes via `JdbcTemplate` raw SQL (AGE has no JDBC driver -- raw SQL is the access pattern)
 
 Graph schema:
 ```cypher
@@ -265,27 +325,13 @@ Graph schema:
 [:PARENT], [:DEPENDS_ON], [:REFINES], [:CONFLICTS], [:SUPERSEDES], [:RELATED]
 ```
 
-### GitHub Client
-
-Thin wrapper — no abstraction beyond what's needed:
-
-```python
-class GitHubClient:
-    def __init__(self, repo: str = "KeplerOps/Ground-Control"):
-        self.repo = repo
-
-    def fetch_issues(self, state: str = "all") -> list[dict]:
-        result = subprocess.run(
-            ["gh", "api", f"repos/{self.repo}/issues", "--paginate", "-q", ".[]"],
-            capture_output=True, text=True, check=True,
-        )
-        return json.loads(f"[{result.stdout}]")  # paginated output needs array wrapping
-```
+Future: VerificationResult nodes and TraceabilityLink edges will also be materialized into the graph, enabling cross-cutting queries like "show all requirements where verification has not achieved L2" (see [ADR-014](../adrs/014-pluggable-verification-architecture.md)).
 
 ## References
 
 - [ADR-011: Requirements Data Model](../adrs/011-requirements-data-model.md)
-- [ADR-001: Django + django-ninja](../adrs/001-django-backend.md)
+- [ADR-013: Java/Spring Boot Backend Rewrite](../adrs/013-java-spring-boot-rewrite.md)
 - [ADR-005: Apache AGE](../adrs/005-apache-age-graph.md)
+- [ADR-014: Pluggable Verification Architecture](../adrs/014-pluggable-verification-architecture.md)
 - Archived StrictDoc file: `archive/docs/requirements/project.sdoc`
 - Archived issue-graph tool: `archive/tools/issue-graph/issue_graph.py`

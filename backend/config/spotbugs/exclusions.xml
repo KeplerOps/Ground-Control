@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!-- Exclude JPA metamodel generated classes -->
+    <Match>
+        <Class name="~.*_$" />
+    </Match>
+
+    <!-- Exclude test code -->
+    <Match>
+        <Source name="~.*Test\.java" />
+    </Match>
+    <Match>
+        <Source name="~.*Tests\.java" />
+    </Match>
+
+    <!-- JPA entities use mutable fields by design -->
+    <Match>
+        <Package name="~com\.keplerops\.groundcontrol\.domain\..*\.model" />
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
+    </Match>
+
+    <!-- Records expose fields via accessors by design -->
+    <Match>
+        <Package name="~com\.keplerops\.groundcontrol\.api.*" />
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
+    </Match>
+
+    <!-- Constructors that validate inputs and throw are by-design -->
+    <Match>
+        <Package name="~com\.keplerops\.groundcontrol\.domain\.exception" />
+        <Bug pattern="CT_CONSTRUCTOR_THROW" />
+    </Match>
+    <Match>
+        <Package name="~com\.keplerops\.groundcontrol\.domain\..*\.model" />
+        <Bug pattern="CT_CONSTRUCTOR_THROW" />
+    </Match>
+</FindBugsFilter>
