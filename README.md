@@ -3,7 +3,11 @@
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=KeplerOps_Ground-Control&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=KeplerOps_Ground-Control)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Neurosymbolic constraint infrastructure, dogfooded on itself. Java 21 / Spring Boot 3.4 backend with JML contracts, PostgreSQL + Apache AGE, Redis. Pre-alpha.
+Verification-aware software lifecycle orchestrator with graph-native artifact traceability. Java 21 / Spring Boot 3.4, PostgreSQL + Apache AGE, JML/OpenJML contracts. Pre-alpha.
+
+## What is Ground Control?
+
+Ground Control manages requirements, traces artifacts across the development lifecycle, and integrates formal verification tools to ensure correctness. It uses a graph-native data model (PostgreSQL + Apache AGE) to connect requirements, code, tests, and verification results into a queryable traceability graph. Ground Control dogfoods its own verification infrastructure on itself.
 
 ## Quick Start
 

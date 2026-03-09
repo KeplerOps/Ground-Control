@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-03-09
+
+### Changed
+
+- Removed JML contracts from 6 L0 CRUD methods in RequirementService per ADR-012 pre-alpha policy (L0 = working code + tests, no contracts). L1 contracts retained on transitionStatus, archive, createRelation
+- Removed `VERIFIES` from `RelationType` enum — "verifies" is an artifact-to-requirement relationship belonging on `TraceabilityLink.LinkType` (Phase 1C, ADR-014), not a requirement-to-requirement edge
+- Rewrote `CONTRIBUTING.md` for Java 21 / Spring Boot 3.4 / Gradle (was Python/Django)
+- Rewrote `docs/architecture/ARCHITECTURE.md` for current stack and mission (was Python/Django)
+- Updated `README.md` mission statement to reflect verification orchestration + graph traceability
+
 ## [0.21.1] - 2026-03-09
 
 ### Changed

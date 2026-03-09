@@ -29,11 +29,6 @@ public class RequirementService {
         this.relationRepository = relationRepository;
     }
 
-    // @ requires command != null;
-    // @ requires command.uid() != null && !command.uid().isBlank();
-    // @ ensures \result != null;
-    // @ ensures \result.getStatus() == Status.DRAFT;
-    // @ signals (ConflictException e) requirementRepository.existsByUid(command.uid());
     public Requirement create(CreateRequirementCommand command) {
         if (requirementRepository.existsByUid(command.uid())) {
             throw new ConflictException("Requirement with UID '" + command.uid() + "' already exists");
@@ -53,9 +48,6 @@ public class RequirementService {
         return requirementRepository.save(requirement);
     }
 
-    // @ requires id != null;
-    // @ ensures \result != null;
-    // @ signals (NotFoundException e) !requirementRepository.existsById(id);
     @Transactional(readOnly = true)
     public Requirement getById(UUID id) {
         return requirementRepository
@@ -63,9 +55,6 @@ public class RequirementService {
                 .orElseThrow(() -> new NotFoundException("Requirement not found: " + id));
     }
 
-    // @ requires uid != null && !uid.isBlank();
-    // @ ensures \result != null;
-    // @ signals (NotFoundException e) requirementRepository.findByUid(uid).isEmpty();
     @Transactional(readOnly = true)
     public Requirement getByUid(String uid) {
         return requirementRepository
@@ -73,10 +62,6 @@ public class RequirementService {
                 .orElseThrow(() -> new NotFoundException("Requirement not found: " + uid));
     }
 
-    // @ requires id != null;
-    // @ requires command != null;
-    // @ ensures \result != null;
-    // @ signals (NotFoundException e) !requirementRepository.existsById(id);
     public Requirement update(UUID id, UpdateRequirementCommand command) {
         var requirement = getById(id);
         if (command.title() != null) {
@@ -136,8 +121,6 @@ public class RequirementService {
         return relationRepository.save(relation);
     }
 
-    // @ requires requirementId != null;
-    // @ ensures \result != null;
     @Transactional(readOnly = true)
     public List<RequirementRelation> getRelations(UUID requirementId) {
         // Verify requirement exists
@@ -148,7 +131,6 @@ public class RequirementService {
         return outgoing;
     }
 
-    // @ ensures \result != null;
     @Transactional(readOnly = true)
     public Page<Requirement> list(Pageable pageable) {
         return requirementRepository.findAll(pageable);
