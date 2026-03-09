@@ -22,11 +22,14 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | ADR | Title | Status |
 |-----|-------|--------|
 | [000](000-template.md) | ADR Template | — |
-| [001](001-django-backend.md) | Python 3.12+ with Django and django-ninja for Backend | Accepted |
+| [001](001-django-backend.md) | Python 3.12+ with Django and django-ninja for Backend | Superseded by ADR-013 |
 | [002](002-postgresql-database.md) | PostgreSQL as Primary Database | Accepted |
-| [003](003-design-by-contract.md) | Design by Contract with icontract | Accepted |
-| [004](004-code-quality-toolchain.md) | Code Quality Toolchain | Accepted |
+| [003](003-design-by-contract.md) | Design by Contract with icontract | Superseded by ADR-013 |
+| [004](004-code-quality-toolchain.md) | Code Quality Toolchain | Superseded by ADR-013 |
 | [005](005-apache-age-graph.md) | Apache AGE for Graph Database Capabilities | Accepted |
 | [011](011-requirements-data-model.md) | Requirements Data Model | Accepted |
+| [012](012-formal-methods-process.md) | Formal Methods Development Process | Accepted |
+| [013](013-java-spring-boot-rewrite.md) | Java/Spring Boot Backend Rewrite | Accepted |
+| [014](014-pluggable-verification-architecture.md) | Pluggable Verification Architecture | Accepted |
 
 Prior ADRs from the old project frame are archived in `archive/architecture/adrs/`.

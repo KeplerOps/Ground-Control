@@ -8,13 +8,17 @@ Accepted
 
 2026-03-08
 
+## Revision
+
+2026-03-09 — Implementation details updated to reflect ADR-013 (Java/Spring Boot rewrite). Core decisions unchanged.
+
 ## Context
 
-Ground Control needs a requirements management system to replace the archived StrictDoc tool and issue-graph tool with in-app functionality. This is the first domain code — the domain layer (`backend/src/ground_control/domain/`) is currently empty.
+Ground Control needs a requirements management system to replace the archived StrictDoc tool and issue-graph tool with in-app functionality. This is the first domain code.
 
 The system must:
 
-- Model requirements with human-readable UIDs, parent/child DAG relations, and traceability to external artifacts (GitHub issues, code files, ADRs, configs, tests)
+- Model requirements with human-readable UIDs, parent/child DAG relations, and traceability to external artifacts (GitHub issues, code files, ADRs, configs, tests, TLA+ specs, verification results)
 - Sync with GitHub issues for cross-referencing and label-based metadata
 - Support graph traversal for impact analysis and coverage gap detection
 - Import existing requirements from the archived StrictDoc `project.sdoc` file (~145 requirements)
@@ -29,64 +33,172 @@ Key constraints:
 
 ### 1. UUID Primary Keys
 
-All domain models use `UUIDField` primary keys (`default=uuid4`). This is consistent with the archived DATA_MODEL.md and is better for API exposure (no sequential ID enumeration) and distributed systems (no central sequence coordination).
+All domain entities use UUID primary keys via JPA `@GeneratedValue(strategy = GenerationType.UUID)`. Better for API exposure (no sequential ID enumeration) and distributed systems (no central sequence coordination).
 
-### 2. Django App Structure
+### 2. Package Structure
 
-Create `ground_control.domain.requirements` as a standalone Django app with its own `models.py`, `admin.py`, `apps.py`, and `choices.py`. Future domain areas (risks, controls, assessments) follow the same pattern, keeping concerns cleanly separated under `ground_control.domain.`*.
+The requirements domain lives under `com.keplerops.groundcontrol.domain.requirements`:
 
-### 3. DAG Relations via Through-Model (No django-mptt/treebeard)
+```
+domain/requirements/
+    model/           # JPA entities: Requirement, RequirementRelation
+    state/           # Enums: Status, RequirementType, Priority, RelationType
+    service/         # RequirementService (write-owner), command records
+    repository/      # Spring Data JPA interfaces
+```
 
-Requirements form a DAG, not a tree. Tree libraries like django-mptt and django-treebeard cannot model multiple parents. Instead, a `RequirementRelation` through-model stores typed edges (parent, depends_on, refines, conflicts, supersedes, related) with a unique constraint on `(source, target, relation_type)`.
+Future domain areas (verification, risks, controls) follow the same pattern under `domain/`. Shared exception classes live in `domain/exception/`.
 
-### 4. Simple Status Machine (No django-fsm)
+### 3. DAG Relations via Junction Entity
 
-Requirement states (draft, active, deprecated, archived) are a simple linear progression with few valid transitions. `CharField` with `icontract` preconditions is sufficient — django-fsm's overhead is not justified for 4 states.
+Requirements form a DAG, not a tree. Tree libraries cannot model multiple parents. A `RequirementRelation` JPA entity stores typed edges (parent, depends_on, refines, conflicts, supersedes, related) with a unique constraint on `(source_id, target_id, relation_type)`.
 
-### 5. Audit via django-auditlog (No django-simple-history)
+### 4. Simple Status Machine
 
-`django-auditlog` is already installed and wired up (see ADR-001). All new models register with it. No reason to add a second audit library.
+Requirement states (DRAFT, ACTIVE, DEPRECATED, ARCHIVED) are governed by an `EnumMap<Status, Set<Status>>` transition table with JML contract preconditions on `transitionStatus()`. Four states with few valid transitions do not justify a state machine library.
 
-### 6. AGE as Query Layer, ORM as Source of Truth
+### 5. Audit via Hibernate Envers
 
-All CRUD operations go through Django ORM models. Apache AGE is a **read-only query layer** materialized from ORM data:
+All entities are annotated with `@Audited` (Hibernate Envers). Envers automatically maintains audit tables (`requirement_audit`, `requirement_relation_audit`) and a `revinfo` table. Flyway migrations V003-V005 create the audit schema.
 
-- A `sync_age_graph` management command materializes `Requirement` nodes and typed relation edges
-- Graph traversal queries (impact analysis, dependency chains, path finding) use Cypher via raw SQL
-- Core analysis functions (cycle detection, orphan detection, coverage gaps) also work via ORM for environments without AGE
+### 6. AGE as Query Layer, JPA as Source of Truth
+
+All CRUD operations go through Spring Data JPA repositories. Apache AGE is a **read-only query layer** materialized from JPA data:
+
+- A materialization service syncs `Requirement` nodes and typed relation edges to AGE
+- Graph traversal queries (impact analysis, dependency chains, path finding) use Cypher via `JdbcTemplate`
+- Core analysis functions (cycle detection, orphan detection, coverage gaps) also work via JPA for environments without AGE
 - This avoids dual-write consistency issues and keeps AGE optional
 
-### 7. GitHub Sync via `gh` CLI (No Webhooks)
+### 7. GitHub Sync via `gh` CLI
 
-Batch import of GitHub issues via a management command that shells out to `gh api`. This reuses parsing logic from the archived `issue_graph.py` tool. No new Python dependencies, no webhook infrastructure. Sufficient for the dogfooding use case.
+Batch import of GitHub issues via a scheduled service or command that calls `gh api`. No webhook infrastructure. Sufficient for the dogfooding use case.
 
 ### 8. Service Layer Write Ownership
 
-All five models live in one Django app, but mutations are governed by service-layer ownership: each model has exactly one service that may write to it. Other services may read via ORM querysets but never mutate directly. This gives us decoupling where it matters (mutation paths, testability, reasoning about side effects) without the overhead of splitting into multiple Django apps prematurely.
+All entities in the requirements domain are governed by service-layer ownership: each entity has exactly one service that may write to it. Other services may read via repository queries but never mutate directly.
 
 - `RequirementService` owns `Requirement` and `RequirementRelation`
-- `TraceabilityService` owns `TraceabilityLink`
-- `SyncService` owns `GitHubIssueSync`
-- `ImportService` owns `RequirementImport` and orchestrates cross-service import flows
-- `AnalysisService` is read-only across all models
+- `TraceabilityService` owns `TraceabilityLink` (future)
+- `SyncService` owns `GitHubIssueSync` (future)
+- `ImportService` owns `RequirementImport` and orchestrates cross-service flows (future)
+- `AnalysisService` is read-only across all entities (future)
 
-Management commands and API views act as orchestrators — they call services in sequence but services do not call each other horizontally. No Django signals for cross-service communication.
+Controllers and orchestration components call services in sequence. Services do not call each other horizontally. No Spring events for cross-service communication.
 
 See [Phase 1 design notes](../notes/phase1-requirements-design.md#service-layer-architecture) for the full rationale and rules.
 
 ### Data Model
 
-Five models in `ground_control.domain.requirements`:
+Five entities in the requirements domain (first two implemented, remaining three planned):
 
+| Entity | Purpose | Status |
+|--------|---------|--------|
+| **Requirement** | Core requirement record with lifecycle | Implemented |
+| **RequirementRelation** | DAG edges between requirements | Implemented |
+| **TraceabilityLink** | Links requirements to external artifacts | Planned |
+| **GitHubIssueSync** | Cached GitHub issue data | Planned |
+| **RequirementImport** | Audit trail for bulk imports | Planned |
 
-| Model                   | Purpose                                  | Key Fields                                                                                                          |
-| ----------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **Requirement**         | Core requirement record                  | uid (unique), title, statement, type, priority (MoSCoW), status, wave, tags (ArrayField), custom_fields (JSONField) |
-| **RequirementRelation** | DAG edges between requirements           | source FK, target FK, relation_type, unique_together(source, target, relation_type)                                 |
-| **TraceabilityLink**    | Links requirements to external artifacts | requirement FK, artifact_type, artifact_identifier, link_type, sync_status                                          |
-| **GitHubIssueSync**     | Cached GitHub issue data                 | issue_number (unique), labels (JSON), phase, priority_label, cross_references (JSON)                                |
-| **RequirementImport**   | Audit trail for bulk imports             | source_type, stats (JSON), errors (JSON)                                                                            |
+See also [ADR-014](014-pluggable-verification-architecture.md) for `VerificationResult`, a separate domain entity in `domain/verification/` that connects to requirements via TraceabilityLink.
 
+#### Requirement
+
+| Field | Type | Constraints | Notes |
+|-------|------|-------------|-------|
+| id | UUID | PK, generated | `@GeneratedValue(strategy = UUID)` |
+| uid | String(50) | Unique, not null | Human-readable: "W2-RISK", "REQ-001" |
+| title | String(255) | Not null | |
+| statement | TEXT | Not null | |
+| rationale | TEXT | Default "" | |
+| requirementType | Enum (RequirementType) | Not null, default FUNCTIONAL | functional, non_functional, constraint, interface |
+| priority | Enum (Priority) | Not null, default MUST | must, should, could, wont (MoSCoW) |
+| status | Enum (Status) | Not null, default DRAFT | draft, active, deprecated, archived |
+| wave | Integer | Nullable | StrictDoc import compatibility |
+| createdAt | Instant | Not null, `@PrePersist` | |
+| updatedAt | Instant | Not null, `@PreUpdate` | |
+| archivedAt | Instant | Nullable | Soft delete timestamp |
+
+**JML invariant**: `archivedAt == null || status == Status.ARCHIVED`
+
+**Status transitions** (enforced via JML contracts + EnumMap):
+- DRAFT -> ACTIVE
+- ACTIVE -> DEPRECATED
+- ACTIVE -> ARCHIVED (soft delete)
+- DEPRECATED -> ARCHIVED
+- No transitions out of ARCHIVED
+- No backward transitions
+
+#### RequirementRelation
+
+| Field | Type | Constraints | Notes |
+|-------|------|-------------|-------|
+| id | UUID | PK, generated | |
+| source | FK -> Requirement | Not null | `@ManyToOne` |
+| target | FK -> Requirement | Not null | `@ManyToOne` |
+| relationType | Enum (RelationType) | Not null | parent, depends_on, refines, conflicts, supersedes, related |
+| description | TEXT | Default "" | |
+| createdAt | Instant | Not null, `@PrePersist` | |
+
+**Unique constraint**: `(source_id, target_id, relation_type)`
+**Validation**: `source != target` (no self-loops, enforced in service layer). Cycle detection is an analysis-time check, not a save-time constraint.
+
+#### TraceabilityLink (planned)
+
+Connects requirements to external artifacts. The `artifactIdentifier` uses a typed prefix convention:
+- `github:#42` — GitHub issue
+- `file:backend/src/.../Requirement.java` — code file
+- `adr:011` — architecture decision record
+- `test:backend/src/test/.../RequirementTest.java` — test file
+- `tla:specs/tla/RequirementStateMachine.tla` — TLA+ specification
+- `proof:verification/results/access-control.json` — verification result
+
+| Field | Type | Constraints | Notes |
+|-------|------|-------------|-------|
+| id | UUID | PK, generated | |
+| requirement | FK -> Requirement | Not null | |
+| artifactType | Enum (ArtifactType) | Not null | github_issue, code_file, adr, config, policy, test, spec, proof, documentation |
+| artifactIdentifier | String(500) | Not null | Typed prefix convention |
+| artifactUrl | String(2000) | Default "" | |
+| artifactTitle | String(255) | Default "" | |
+| linkType | Enum (LinkType) | Not null | implements, tests, documents, constrains, verifies |
+| syncStatus | Enum (SyncStatus) | Default SYNCED | synced, stale, broken |
+| lastSyncedAt | Instant | Nullable | |
+| createdAt | Instant | Not null | |
+| updatedAt | Instant | Not null | |
+
+#### GitHubIssueSync (planned)
+
+Cached mirror of GitHub issue data. Updated by the sync service.
+
+| Field | Type | Constraints | Notes |
+|-------|------|-------------|-------|
+| id | UUID | PK, generated | |
+| issueNumber | Integer | Unique | |
+| issueTitle | String(500) | | |
+| issueState | Enum (IssueState) | | open, closed |
+| issueLabels | JSONB | Default [] | |
+| issueBody | TEXT | Default "" | |
+| issueUrl | String(2000) | | |
+| phase | Integer | Nullable | |
+| priorityLabel | String(10) | Default "" | |
+| crossReferences | JSONB | Default [] | |
+| lastFetchedAt | Instant | Not null | |
+| createdAt | Instant | Not null | |
+| updatedAt | Instant | Not null | |
+
+#### RequirementImport (planned)
+
+Audit trail for each import/sync operation.
+
+| Field | Type | Constraints | Notes |
+|-------|------|-------------|-------|
+| id | UUID | PK, generated | |
+| sourceType | Enum (ImportSourceType) | Not null | strictdoc, github, manual |
+| sourceFile | String(500) | Default "" | |
+| importedAt | Instant | Not null | |
+| stats | JSONB | Default {} | `{"created": 10, "updated": 5, "skipped": 2}` |
+| errors | JSONB | Default [] | `[{"uid": "REQ-001", "error": "..."}]` |
 
 ## Consequences
 
@@ -95,19 +207,26 @@ Five models in `ground_control.domain.requirements`:
 - DAG model is more expressive than a tree — accurately represents real requirement relationships
 - UUID PKs are safe for API exposure and future multi-tenant distribution
 - AGE-as-query-layer avoids consistency issues while enabling powerful graph queries
-- No new library dependencies — simpler dependency tree, fewer version conflicts
-- Django app structure scales cleanly to future domain areas
-- StrictDoc import preserves all existing requirement data
-- Service-layer write ownership prevents mutation spaghetti without premature app splitting
+- Envers provides automatic audit trail with minimal configuration
+- Service-layer write ownership prevents mutation spaghetti without premature package splitting
+- TraceabilityLink's typed prefix convention accommodates verification artifacts (TLA+ specs, proof results) alongside code and documentation
 
 ### Negative
 
 - DAG cycle detection must be implemented manually (no library enforcement)
-- AGE sync adds a materialization step that can drift if not run after ORM changes
+- AGE sync adds a materialization step that can drift if not run after JPA changes
 - `gh` CLI batch sync means GitHub data is always slightly stale (no real-time webhooks)
 
 ### Risks
 
-- AGE extension availability varies across PostgreSQL hosting providers (mitigated: core analysis works without AGE via ORM)
-- StrictDoc format may evolve or have edge cases not covered by the parser (mitigated: import is a one-time migration, not ongoing)
-- DAG traversal via ORM adjacency list is O(depth * branching_factor) per query (mitigated: AGE provides O(1)-ish traversal for production use)
+- AGE extension availability varies across PostgreSQL hosting providers (mitigated: core analysis works without AGE via JPA)
+- StrictDoc format may have edge cases not covered by the parser (mitigated: import is a one-time migration)
+- DAG traversal via JPA adjacency list is O(depth x branching_factor) per query (mitigated: AGE provides O(1)-ish traversal for production use)
+
+## Related ADRs
+
+- [ADR-002](002-postgresql-database.md) — PostgreSQL as primary database
+- [ADR-005](005-apache-age-graph.md) — Apache AGE for graph capabilities
+- [ADR-012](012-formal-methods-process.md) — SDD methodology and assurance levels
+- [ADR-013](013-java-spring-boot-rewrite.md) — Java/Spring Boot backend
+- [ADR-014](014-pluggable-verification-architecture.md) — Pluggable verification architecture (VerificationResult as connected artifact)
