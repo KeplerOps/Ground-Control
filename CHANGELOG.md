@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rewrote `docs/architecture/ARCHITECTURE.md` for current stack and mission (was Python/Django)
 - Updated `README.md` mission statement to reflect verification orchestration + graph traceability
 
+### Fixed
+
+- CI: `gradle-wrapper.jar` was excluded by `*.jar` gitignore rule overriding the earlier negation — reordered rules so the negation comes after `*.jar` and uses `**/` glob to match `backend/` path
+
 ## [0.21.1] - 2026-03-09
 
 ### Changed
