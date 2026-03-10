@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.1] - 2026-03-10
+
+### Changed
+
+- `TraceabilityLink`: added unique constraint on `(requirement_id, artifact_type, artifact_identifier, link_type)` in JPA `@Table` annotation and V006 Flyway migration, matching the `RequirementRelation` pattern
+- Test data uses canonical typed artifact identifiers per ADR-011/ADR-014 convention (`file:src/Main.java`, `adr:011`)
+- ADR-011 Section 5: Envers wording reconciled — documents that only business entities (`Requirement`, `RequirementRelation`, `TraceabilityLink`) use `@Audited`; cache and self-auditing tables excluded
+
+### Added
+
+- Envers round-trip integration test for `TraceabilityLink` audit table (V009 migration behavioral verification)
+
+## [0.23.0] - 2026-03-09
+
+### Added
+
+- `TraceabilityLink` JPA entity with `@Audited`, `@ManyToOne` FK to `Requirement`, and sync status tracking
+- `GitHubIssueSync` JPA entity with JSONB fields (`issueLabels`, `crossReferences`) for GitHub issue caching
+- `RequirementImport` JPA entity with JSONB fields (`stats`, `errors`) for import audit trails
+- `ArtifactType`, `LinkType`, `SyncStatus`, `IssueState`, `ImportSourceType` domain enums
+- `TraceabilityLinkRepository`, `GitHubIssueSyncRepository`, `RequirementImportRepository` Spring Data repositories
+- Flyway migrations V006-V009: `traceability_link`, `github_issue_sync`, `requirement_import` tables and `traceability_link_audit` Envers table
+- Unit tests for all three new entities (defaults, construction, accessors)
+- Integration tests for FK persistence, JSONB round-trip (labels, cross-references, stats, errors), and migration smoke test coverage through V009
+
 ## [0.22.0] - 2026-03-09
 
 ### Changed
