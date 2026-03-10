@@ -35,7 +35,7 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                 versions.add(rs.getString("version"));
             }
         }
-        assertThat(versions).containsExactly("001", "002", "003", "004", "005");
+        assertThat(versions).containsExactly("001", "002", "003", "004", "005", "006", "007", "008", "009");
     }
 
     @Test
@@ -50,5 +50,17 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                 .createNativeQuery("SELECT 1 FROM requirement_relation_audit LIMIT 1")
                 .getResultList();
         entityManager.createNativeQuery("SELECT 1 FROM revinfo LIMIT 1").getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM traceability_link LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM github_issue_sync LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM requirement_import LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM traceability_link_audit LIMIT 1")
+                .getResultList();
     }
 }

@@ -59,7 +59,7 @@ Requirement states (DRAFT, ACTIVE, DEPRECATED, ARCHIVED) are governed by an `Enu
 
 ### 5. Audit via Hibernate Envers
 
-All entities are annotated with `@Audited` (Hibernate Envers). Envers automatically maintains audit tables (`requirement_audit`, `requirement_relation_audit`) and a `revinfo` table. Flyway migrations V003-V005 create the audit schema.
+Business entities whose historical state matters to analysis (`Requirement`, `RequirementRelation`, `TraceabilityLink`) are annotated with `@Audited` (Hibernate Envers). Cache tables (`GitHubIssueSync`) and self-auditing records (`RequirementImport`) track their own history without Envers. Flyway migrations V003-V005 and V009 create the audit schema.
 
 ### 6. AGE as Query Layer, JPA as Source of Truth
 
