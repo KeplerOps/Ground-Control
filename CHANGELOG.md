@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-03-11
+
+### Added
+
+- `TraceabilityLink` JPA entity with `@Audited`, `@ManyToOne` FK to `Requirement`, unique constraint on `(requirement_id, artifact_type, artifact_identifier, link_type)`, and sync status tracking
+- `GitHubIssueSync` JPA entity with JSONB fields (`issueLabels`, `crossReferences`) for GitHub issue caching
+- `RequirementImport` JPA entity with JSONB fields (`stats`, `errors`) for import audit trails
+- `ArtifactType`, `LinkType`, `SyncStatus`, `IssueState`, `ImportSourceType` domain enums
+- `TraceabilityLinkRepository`, `GitHubIssueSyncRepository`, `RequirementImportRepository` Spring Data repositories
+- Flyway migrations V006-V009: `traceability_link`, `github_issue_sync`, `requirement_import` tables and `traceability_link_audit` Envers table
+- Unit tests for all three new entities (defaults, construction, accessors)
+- Integration tests for FK persistence, JSONB round-trip, Envers audit trail verification, and migration smoke test coverage through V009
+
+### Changed
+
+- ADR-011 Section 5: clarified Envers auditing applies to business entities only, not cache tables or self-auditing records
+
 ## [0.22.0] - 2026-03-09
 
 ### Changed
