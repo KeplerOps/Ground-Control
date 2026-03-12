@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2026-03-12
+
+### Added
+
+- `RequirementsE2EIntegrationTest`: end-to-end integration test verifying all Phase 1
+  components — migration, StrictDoc import, GitHub sync, CRUD API, analysis, and
+  Envers audit trail (6 ordered test steps)
+- `RequirementsE2EAgeIntegrationTest`: optional AGE E2E test verifying graph
+  materialization and Cypher queries match JPA analysis (`@Tag("age")`)
+- Test fixture `test-requirements.sdoc` (5 requirements, 2 parent relations,
+  5 GitHub issue references, 2 waves)
+
+### Changed
+
+- Phase 1 complete: all acceptance criteria verified end-to-end
+
 ## [0.27.0] - 2026-03-12
 
 ### Added
