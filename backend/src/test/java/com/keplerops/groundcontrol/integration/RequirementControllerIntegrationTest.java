@@ -3,6 +3,7 @@ package com.keplerops.groundcontrol.integration;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -196,5 +197,50 @@ class RequirementControllerIntegrationTest extends BaseIntegrationTest {
                         .content(objectMapper.writeValueAsString(validRequest("REQ-C-013"))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code", is("conflict")));
+    }
+
+    @Test
+    void filteredList_byStatus_returnsFiltered() throws Exception {
+        createAndReturnId("REQ-C-014");
+        var activeId = createAndReturnId("REQ-C-015");
+        mockMvc.perform(post("/api/v1/requirements/" + activeId + "/transition")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"ACTIVE\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/requirements").param("status", "ACTIVE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].uid", is("REQ-C-015")));
+    }
+
+    @Test
+    void filteredList_bySearch_returnsFiltered() throws Exception {
+        createAndReturnId("REQ-C-016");
+
+        mockMvc.perform(get("/api/v1/requirements").param("search", "REQ-C-016"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].uid", is("REQ-C-016")));
+    }
+
+    @Test
+    void deleteRelation_returns204() throws Exception {
+        var sourceId = createAndReturnId("REQ-C-017");
+        var targetId = createAndReturnId("REQ-C-018");
+
+        var body = Map.of("targetId", targetId, "relationType", "DEPENDS_ON");
+        var result = mockMvc.perform(post("/api/v1/requirements/" + sourceId + "/relations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        var relationId = objectMapper
+                .readTree(result.getResponse().getContentAsString())
+                .get("id")
+                .asText();
+
+        mockMvc.perform(delete("/api/v1/requirements/" + sourceId + "/relations/" + relationId))
+                .andExpect(status().isNoContent());
     }
 }

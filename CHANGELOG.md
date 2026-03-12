@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-03-12
+
+### Added
+
+- `TraceabilityService` with `createLink`, `getLinksForRequirement`, `deleteLink` methods
+- `TraceabilityLinkRequest` and `TraceabilityLinkResponse` API DTOs
+- `CreateTraceabilityLinkCommand` and `RequirementFilter` domain records
+- `RequirementSpecifications` utility for dynamic JPA Criteria filtering
+- REST endpoints: `POST/GET/DELETE /{id}/traceability` for traceability link CRUD
+- REST endpoint: `DELETE /{id}/relations/{relationId}` for relation deletion (204)
+- Filtered requirement listing via `GET /api/v1/requirements?status=X&type=X&wave=N&search=text`
+- `TraceabilityServiceTest` unit tests (create, get, delete links)
+- `TraceabilityLinkControllerIntegrationTest` integration tests (CRUD + 404)
+- Unit and integration tests for filtered listing and relation deletion
+
+### Changed
+
+- `RequirementRepository` now extends `JpaSpecificationExecutor<Requirement>` for dynamic filtering
+- `RequirementService.list()` accepts `RequirementFilter` parameter for filtered/searchable listing
+- `RequirementController` accepts `TraceabilityService` as second constructor dependency
+
 ## [0.23.0] - 2026-03-11
 
 ### Added

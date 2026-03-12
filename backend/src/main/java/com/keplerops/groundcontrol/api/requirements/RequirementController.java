@@ -1,20 +1,27 @@
 package com.keplerops.groundcontrol.api.requirements;
 
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
+import com.keplerops.groundcontrol.domain.requirements.service.CreateTraceabilityLinkCommand;
+import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementService;
+import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityService;
 import com.keplerops.groundcontrol.domain.requirements.service.UpdateRequirementCommand;
+import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
+import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -23,9 +30,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class RequirementController {
 
     private final RequirementService requirementService;
+    private final TraceabilityService traceabilityService;
 
-    public RequirementController(RequirementService requirementService) {
+    public RequirementController(RequirementService requirementService, TraceabilityService traceabilityService) {
         this.requirementService = requirementService;
+        this.traceabilityService = traceabilityService;
     }
 
     @PostMapping
@@ -43,8 +52,14 @@ public class RequirementController {
     }
 
     @GetMapping
-    public Page<RequirementResponse> list(Pageable pageable) {
-        return requirementService.list(pageable).map(RequirementResponse::from);
+    public Page<RequirementResponse> list(
+            Pageable pageable,
+            @RequestParam(required = false) Status status,
+            @RequestParam(required = false) RequirementType type,
+            @RequestParam(required = false) Integer wave,
+            @RequestParam(required = false) String search) {
+        var filter = new RequirementFilter(status, type, wave, search);
+        return requirementService.list(pageable, filter).map(RequirementResponse::from);
     }
 
     @GetMapping("/{id}")
@@ -91,5 +106,37 @@ public class RequirementController {
         return requirementService.getRelations(id).stream()
                 .map(RelationResponse::from)
                 .toList();
+    }
+
+    @DeleteMapping("/{id}/relations/{relationId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteRelation(@PathVariable UUID id, @PathVariable UUID relationId) {
+        requirementService.deleteRelation(id, relationId);
+    }
+
+    @GetMapping("/{id}/traceability")
+    public List<TraceabilityLinkResponse> getTraceabilityLinks(@PathVariable UUID id) {
+        return traceabilityService.getLinksForRequirement(id).stream()
+                .map(TraceabilityLinkResponse::from)
+                .toList();
+    }
+
+    @PostMapping("/{id}/traceability")
+    @ResponseStatus(HttpStatus.CREATED)
+    public TraceabilityLinkResponse createTraceabilityLink(
+            @PathVariable UUID id, @Valid @RequestBody TraceabilityLinkRequest request) {
+        var command = new CreateTraceabilityLinkCommand(
+                request.artifactType(),
+                request.artifactIdentifier(),
+                request.artifactUrl(),
+                request.artifactTitle(),
+                request.linkType());
+        return TraceabilityLinkResponse.from(traceabilityService.createLink(id, command));
+    }
+
+    @DeleteMapping("/{id}/traceability/{linkId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteTraceabilityLink(@PathVariable UUID id, @PathVariable UUID linkId) {
+        traceabilityService.deleteLink(linkId);
     }
 }

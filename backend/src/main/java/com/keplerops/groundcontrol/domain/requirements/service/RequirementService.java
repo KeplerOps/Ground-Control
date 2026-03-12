@@ -7,6 +7,7 @@ import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
+import com.keplerops.groundcontrol.domain.requirements.repository.RequirementSpecifications;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import java.util.List;
@@ -133,7 +134,24 @@ public class RequirementService {
     }
 
     @Transactional(readOnly = true)
-    public Page<Requirement> list(Pageable pageable) {
-        return requirementRepository.findAll(pageable);
+    public Page<Requirement> list(Pageable pageable, RequirementFilter filter) {
+        if (filter == null) {
+            return requirementRepository.findAll(pageable);
+        }
+        var spec = RequirementSpecifications.fromFilter(filter);
+        return requirementRepository.findAll(spec, pageable);
+    }
+
+    public void deleteRelation(UUID requirementId, UUID relationId) {
+        var relation = relationRepository
+                .findById(relationId)
+                .orElseThrow(() -> new NotFoundException("Relation not found: " + relationId));
+
+        var sourceId = relation.getSource().getId();
+        var targetId = relation.getTarget().getId();
+        if (!requirementId.equals(sourceId) && !requirementId.equals(targetId)) {
+            throw new NotFoundException("Relation " + relationId + " does not belong to requirement " + requirementId);
+        }
+        relationRepository.delete(relation);
     }
 }

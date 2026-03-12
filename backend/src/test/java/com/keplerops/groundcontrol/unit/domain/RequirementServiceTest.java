@@ -13,6 +13,7 @@ import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
+import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementService;
 import com.keplerops.groundcontrol.domain.requirements.service.UpdateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.state.Priority;
@@ -32,6 +33,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 
 @ExtendWith(MockitoExtension.class)
 class RequirementServiceTest {
@@ -295,17 +297,103 @@ class RequirementServiceTest {
         }
     }
 
+    private static void setRelationId(RequirementRelation rel, UUID id) {
+        try {
+            Field f = RequirementRelation.class.getDeclaredField("id");
+            f.setAccessible(true);
+            f.set(rel, id);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     @Nested
     class ListRequirements {
 
         @Test
-        void returnsPage() {
+        void returnsPageWithNullFilter() {
             var page = new PageImpl<>(List.of(makeRequirement("REQ-001")));
             when(requirementRepository.findAll(any(Pageable.class))).thenReturn(page);
 
-            Page<Requirement> result = service.list(Pageable.unpaged());
+            Page<Requirement> result = service.list(Pageable.unpaged(), null);
             assertThat(result).isNotNull();
             assertThat(result.getContent()).hasSize(1);
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        void returnsFilteredPage() {
+            var page = new PageImpl<>(List.of(makeRequirement("REQ-001")));
+            when(requirementRepository.findAll(any(Specification.class), any(Pageable.class)))
+                    .thenReturn(page);
+
+            var filter = new RequirementFilter(Status.DRAFT, null, null, null);
+            Page<Requirement> result = service.list(Pageable.unpaged(), filter);
+            assertThat(result).isNotNull();
+            assertThat(result.getContent()).hasSize(1);
+        }
+    }
+
+    @Nested
+    class DeleteRelation {
+
+        @Test
+        void deletesRelationAsSource() {
+            var reqId = UUID.randomUUID();
+            var relationId = UUID.randomUUID();
+            var source = makeRequirement("REQ-001");
+            var target = makeRequirement("REQ-002");
+            setId(source, reqId);
+            setId(target, UUID.randomUUID());
+            var relation = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
+            setRelationId(relation, relationId);
+
+            when(relationRepository.findById(relationId)).thenReturn(Optional.of(relation));
+
+            service.deleteRelation(reqId, relationId);
+            org.mockito.Mockito.verify(relationRepository).delete(relation);
+        }
+
+        @Test
+        void deletesRelationAsTarget() {
+            var reqId = UUID.randomUUID();
+            var relationId = UUID.randomUUID();
+            var source = makeRequirement("REQ-001");
+            var target = makeRequirement("REQ-002");
+            setId(source, UUID.randomUUID());
+            setId(target, reqId);
+            var relation = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
+            setRelationId(relation, relationId);
+
+            when(relationRepository.findById(relationId)).thenReturn(Optional.of(relation));
+
+            service.deleteRelation(reqId, relationId);
+            org.mockito.Mockito.verify(relationRepository).delete(relation);
+        }
+
+        @Test
+        void throwsNotFoundForMissingRelation() {
+            var reqId = UUID.randomUUID();
+            var relationId = UUID.randomUUID();
+            when(relationRepository.findById(relationId)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.deleteRelation(reqId, relationId)).isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void throwsNotFoundWhenRelationDoesNotBelongToRequirement() {
+            var reqId = UUID.randomUUID();
+            var relationId = UUID.randomUUID();
+            var source = makeRequirement("REQ-001");
+            var target = makeRequirement("REQ-002");
+            setId(source, UUID.randomUUID());
+            setId(target, UUID.randomUUID());
+            var relation = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
+            setRelationId(relation, relationId);
+
+            when(relationRepository.findById(relationId)).thenReturn(Optional.of(relation));
+
+            assertThatThrownBy(() -> service.deleteRelation(reqId, relationId)).isInstanceOf(NotFoundException.class);
         }
     }
 }

@@ -4,7 +4,10 @@ import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -21,9 +24,15 @@ import com.keplerops.groundcontrol.domain.exception.GroundControlException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
+import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
+import com.keplerops.groundcontrol.domain.requirements.service.CreateTraceabilityLinkCommand;
+import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementService;
+import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityService;
 import com.keplerops.groundcontrol.domain.requirements.service.UpdateRequirementCommand;
+import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
+import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import java.lang.reflect.Field;
@@ -52,6 +61,9 @@ class RequirementControllerTest {
 
     @MockitoBean
     private RequirementService requirementService;
+
+    @MockitoBean
+    private TraceabilityService traceabilityService;
 
     private static Requirement createRequirement(String uid) {
         var req = new Requirement(uid, "Title for " + uid, "Statement for " + uid);
@@ -168,9 +180,25 @@ class RequirementControllerTest {
         @Test
         void returns200WithPagination() throws Exception {
             var req = createRequirement("REQ-001");
-            when(requirementService.list(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(req)));
+            when(requirementService.list(any(Pageable.class), any(RequirementFilter.class)))
+                    .thenReturn(new PageImpl<>(List.of(req)));
 
             mockMvc.perform(get("/api/v1/requirements"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content[0].uid", is("REQ-001")));
+        }
+
+        @Test
+        void returns200WithFilterParams() throws Exception {
+            var req = createRequirement("REQ-001");
+            when(requirementService.list(any(Pageable.class), any(RequirementFilter.class)))
+                    .thenReturn(new PageImpl<>(List.of(req)));
+
+            mockMvc.perform(get("/api/v1/requirements")
+                            .param("status", "DRAFT")
+                            .param("type", "FUNCTIONAL")
+                            .param("wave", "1")
+                            .param("search", "test"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.content[0].uid", is("REQ-001")));
         }
@@ -277,6 +305,82 @@ class RequirementControllerTest {
             mockMvc.perform(get("/api/v1/requirements/" + source.getId() + "/relations"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$[0].relationType", is("DEPENDS_ON")));
+        }
+    }
+
+    @Nested
+    class DeleteRelation {
+
+        @Test
+        void returns204() throws Exception {
+            var reqId = UUID.randomUUID();
+            var relationId = UUID.randomUUID();
+            doNothing().when(requirementService).deleteRelation(reqId, relationId);
+
+            mockMvc.perform(delete("/api/v1/requirements/" + reqId + "/relations/" + relationId))
+                    .andExpect(status().isNoContent());
+        }
+
+        @Test
+        void notFound_returns404() throws Exception {
+            var reqId = UUID.randomUUID();
+            var relationId = UUID.randomUUID();
+            doThrow(new NotFoundException("Not found")).when(requirementService).deleteRelation(reqId, relationId);
+
+            mockMvc.perform(delete("/api/v1/requirements/" + reqId + "/relations/" + relationId))
+                    .andExpect(status().isNotFound());
+        }
+    }
+
+    @Nested
+    class Traceability {
+
+        private static TraceabilityLink createLink(Requirement req) {
+            var link = new TraceabilityLink(req, ArtifactType.GITHUB_ISSUE, "GH-123", LinkType.IMPLEMENTS);
+            setField(link, "id", UUID.randomUUID());
+            setField(link, "createdAt", Instant.now());
+            setField(link, "updatedAt", Instant.now());
+            return link;
+        }
+
+        @Test
+        void getLinks_returns200() throws Exception {
+            var req = createRequirement("REQ-001");
+            var link = createLink(req);
+            when(traceabilityService.getLinksForRequirement(req.getId())).thenReturn(List.of(link));
+
+            mockMvc.perform(get("/api/v1/requirements/" + req.getId() + "/traceability"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[0].artifactType", is("GITHUB_ISSUE")))
+                    .andExpect(jsonPath("$[0].artifactIdentifier", is("GH-123")))
+                    .andExpect(jsonPath("$[0].linkType", is("IMPLEMENTS")));
+        }
+
+        @Test
+        void createLink_returns201() throws Exception {
+            var req = createRequirement("REQ-001");
+            var link = createLink(req);
+            when(traceabilityService.createLink(eq(req.getId()), any(CreateTraceabilityLinkCommand.class)))
+                    .thenReturn(link);
+
+            mockMvc.perform(post("/api/v1/requirements/" + req.getId() + "/traceability")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of(
+                                    "artifactType", "GITHUB_ISSUE",
+                                    "artifactIdentifier", "GH-123",
+                                    "linkType", "IMPLEMENTS"))))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.artifactType", is("GITHUB_ISSUE")));
+        }
+
+        @Test
+        void deleteLink_returns204() throws Exception {
+            var reqId = UUID.randomUUID();
+            var linkId = UUID.randomUUID();
+            doNothing().when(traceabilityService).deleteLink(linkId);
+
+            mockMvc.perform(delete("/api/v1/requirements/" + reqId + "/traceability/" + linkId))
+                    .andExpect(status().isNoContent());
         }
     }
 

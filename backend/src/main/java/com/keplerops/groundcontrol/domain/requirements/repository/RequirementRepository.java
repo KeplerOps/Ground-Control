@@ -4,8 +4,9 @@ import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
-public interface RequirementRepository extends JpaRepository<Requirement, UUID> {
+public interface RequirementRepository extends JpaRepository<Requirement, UUID>, JpaSpecificationExecutor<Requirement> {
 
     Optional<Requirement> findByUid(String uid);
 
