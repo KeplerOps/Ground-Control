@@ -1,0 +1,143 @@
+package com.keplerops.groundcontrol.unit.api;
+
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.is;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.keplerops.groundcontrol.api.admin.AnalysisController;
+import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
+import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
+import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
+import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
+import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
+import java.lang.reflect.Field;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+@WebMvcTest(AnalysisController.class)
+class AnalysisControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockitoBean
+    private AnalysisService analysisService;
+
+    private static Requirement makeRequirement(String uid, UUID id) {
+        var req = new Requirement(uid, "Title for " + uid, "Statement for " + uid);
+        setField(req, "id", id);
+        return req;
+    }
+
+    private static void setField(Object obj, String fieldName, Object value) {
+        try {
+            Field f = obj.getClass().getDeclaredField(fieldName);
+            f.setAccessible(true);
+            f.set(obj, value);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Nested
+    class DetectCycles {
+
+        @Test
+        void returns200() throws Exception {
+            when(analysisService.detectCycles()).thenReturn(List.of(List.of("REQ-A", "REQ-B", "REQ-A")));
+
+            mockMvc.perform(get("/api/v1/analysis/cycles"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$", hasSize(1)))
+                    .andExpect(jsonPath("$[0]", hasSize(3)));
+        }
+    }
+
+    @Nested
+    class FindOrphans {
+
+        @Test
+        void returns200() throws Exception {
+            UUID reqId = UUID.randomUUID();
+            var req = makeRequirement("REQ-ORPHAN", reqId);
+            when(analysisService.findOrphans()).thenReturn(List.of(req));
+
+            mockMvc.perform(get("/api/v1/analysis/orphans"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$", hasSize(1)))
+                    .andExpect(jsonPath("$[0].uid", is("REQ-ORPHAN")));
+        }
+    }
+
+    @Nested
+    class FindCoverageGaps {
+
+        @Test
+        void returns200() throws Exception {
+            UUID reqId = UUID.randomUUID();
+            var req = makeRequirement("REQ-GAP", reqId);
+            when(analysisService.findCoverageGaps(LinkType.TESTS)).thenReturn(List.of(req));
+
+            mockMvc.perform(get("/api/v1/analysis/coverage-gaps").param("linkType", "TESTS"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$", hasSize(1)))
+                    .andExpect(jsonPath("$[0].uid", is("REQ-GAP")));
+        }
+
+        @Test
+        void withMissingLinkType_returns400() throws Exception {
+            mockMvc.perform(get("/api/v1/analysis/coverage-gaps")).andExpect(status().isBadRequest());
+        }
+    }
+
+    @Nested
+    class ImpactAnalysis {
+
+        @Test
+        void returns200() throws Exception {
+            UUID reqId = UUID.randomUUID();
+            var req = makeRequirement("REQ-IMPACT", reqId);
+            when(analysisService.impactAnalysis(any(UUID.class))).thenReturn(Set.of(req));
+
+            mockMvc.perform(get("/api/v1/analysis/impact/" + reqId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$", hasSize(1)))
+                    .andExpect(jsonPath("$[0].uid", is("REQ-IMPACT")));
+        }
+    }
+
+    @Nested
+    class CrossWaveValidation {
+
+        @Test
+        void returns200() throws Exception {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            var a = makeRequirement("REQ-A", aId);
+            a.setWave(3);
+            var b = makeRequirement("REQ-B", bId);
+            b.setWave(1);
+            var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
+            setField(rel, "id", UUID.randomUUID());
+
+            when(analysisService.crossWaveValidation()).thenReturn(List.of(rel));
+
+            mockMvc.perform(get("/api/v1/analysis/cross-wave"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$", hasSize(1)))
+                    .andExpect(jsonPath("$[0].sourceUid", is("REQ-A")))
+                    .andExpect(jsonPath("$[0].targetUid", is("REQ-B")));
+        }
+    }
+}

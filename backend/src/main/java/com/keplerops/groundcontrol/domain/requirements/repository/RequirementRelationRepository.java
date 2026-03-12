@@ -5,6 +5,8 @@ import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface RequirementRelationRepository extends JpaRepository<RequirementRelation, UUID> {
 
@@ -13,4 +15,11 @@ public interface RequirementRelationRepository extends JpaRepository<Requirement
     List<RequirementRelation> findByTargetId(UUID targetId);
 
     boolean existsBySourceIdAndTargetIdAndRelationType(UUID sourceId, UUID targetId, RelationType relationType);
+
+    @Query("SELECT r FROM RequirementRelation r JOIN FETCH r.source JOIN FETCH r.target"
+            + " WHERE r.relationType IN :types")
+    List<RequirementRelation> findAllWithSourceAndTargetByRelationTypeIn(@Param("types") List<RelationType> types);
+
+    @Query("SELECT r FROM RequirementRelation r JOIN FETCH r.source JOIN FETCH r.target")
+    List<RequirementRelation> findAllWithSourceAndTarget();
 }

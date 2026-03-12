@@ -95,7 +95,7 @@ tasks.withType<Test> {
 
 // Unit tests only (fast, no DB)
 tasks.test {
-    useJUnitPlatform { excludeTags("integration") }
+    useJUnitPlatform { excludeTags("integration", "age") }
     finalizedBy(tasks.jacocoTestReport)
 }
 
@@ -103,10 +103,19 @@ tasks.test {
 tasks.register<Test>("integrationTest") {
     description = "Runs integration tests with Testcontainers PostgreSQL"
     group = "verification"
-    useJUnitPlatform { includeTags("integration") }
+    useJUnitPlatform { includeTags("integration"); excludeTags("age") }
     shouldRunAfter(tasks.test)
     jvmArgs("-XX:+EnableDynamicAgentLoading")
     finalizedBy(tasks.jacocoTestReport)
+}
+
+// AGE integration tests (requires Apache AGE Docker image)
+tasks.register<Test>("ageTest") {
+    description = "Runs Apache AGE integration tests"
+    group = "verification"
+    useJUnitPlatform { includeTags("age") }
+    shouldRunAfter(tasks.test)
+    jvmArgs("-XX:+EnableDynamicAgentLoading")
 }
 
 tasks.jacocoTestReport {

@@ -40,6 +40,11 @@ management:
       exposure:
         include: health,info,metrics
 
+groundcontrol:
+  age:
+    enabled: ${GC_AGE_ENABLED:false}
+    graph-name: ${GC_AGE_GRAPH_NAME:requirements}
+
 springdoc:
   api-docs:
     path: /api/openapi.json

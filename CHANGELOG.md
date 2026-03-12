@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-03-12
+
+### Added
+
+- `GraphAlgorithms` pure utility class with `findCycles()` (DFS three-color) and `findReachable()` (BFS) — JML contracts, no Spring dependencies (L2)
+- `AnalysisService` read-only service: cycle detection, orphan detection, coverage gap analysis, transitive impact analysis, cross-wave validation
+- `GraphClient` domain port interface for graph traversal operations (ancestors, descendants, path finding)
+- `AgeGraphService` infrastructure adapter (`@Component`): Apache AGE graph materialization and Cypher queries, optional via `groundcontrol.age.enabled`
+- `AgeConfig` + `AgeProperties` configuration for AGE integration
+- `AnalysisController` REST endpoints: `GET /api/v1/analysis/{cycles,orphans,coverage-gaps,impact/{id},cross-wave}`
+- `GraphController` REST endpoints: `POST /api/v1/admin/graph/materialize`, `GET /api/v1/graph/{ancestors,descendants,paths}`
+- `RequirementSummaryResponse` and `RelationValidationResponse` API DTOs
+- V010 Flyway migration: Apache AGE graph setup with graceful fallback on plain PostgreSQL
+- Unit tests: `AnalysisServiceTest` (14 tests), `AgeGraphServiceTest` (4 tests), `AnalysisControllerTest` (6 tests), `GraphControllerTest` (4 tests)
+- Property tests (L2): `CycleDetectionPropertyTest` (4 properties), `ImpactAnalysisPropertyTest` (3 properties) — jqwik
+- Integration tests: `AnalysisIntegrationTest` (4 tests)
+- AGE integration tests: `BaseAgeIntegrationTest`, `AgeGraphServiceIntegrationTest` (3 tests) — `@Tag("age")`, separate `ageTest` Gradle task
+
+### Changed
+
+- `RequirementRelationRepository`: added `findAllWithSourceAndTargetByRelationTypeIn()` and `findAllWithSourceAndTarget()` with JOIN FETCH for N+1 prevention
+- `TraceabilityLinkRepository`: added `existsByRequirementId()` and `existsByRequirementIdAndLinkType()` for analysis queries
+- `build.gradle.kts`: added `ageTest` task, excluded `@Tag("age")` from `test` and `integrationTest` tasks
+- `application.yml`: added `groundcontrol.age.*` configuration properties
+- `MigrationSmokeTest`: updated expected migration count to include V010
+
 ## [0.26.0] - 2026-03-12
 
 ### Added
