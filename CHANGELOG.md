@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.0] - 2026-03-12
+
+### Added
+
+- Ground Control MCP server (`mcp/ground-control/`): 18 tools wrapping the REST API
+  for native Claude Code integration — requirements CRUD, analysis, StrictDoc import,
+  GitHub sync, and traceability link management
+
 ## [0.28.0] - 2026-03-12
 
 ### Added
