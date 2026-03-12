@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-03-12
+
+### Added
+
+- `GitHubIssueData` domain record for fetched GitHub issue data
+- `GitHubClient` domain port interface for GitHub issue fetching
+- `SyncResult` record for sync operation results with statistics
+- `GitHubIssueSyncService` with `syncGitHubIssues()` method: fetches issues via `GitHubClient`, upserts `GitHubIssueSync` records with parsed labels/phase/priority/cross-references, updates `TraceabilityLink` records with synced metadata, saves audit records
+- `GitHubCliClient` infrastructure adapter (`@Component`): executes `gh issue list` CLI, parses JSON output into `GitHubIssueData` records (first class in `infrastructure/` package)
+- `SyncController` REST endpoint: `POST /api/v1/admin/sync/github?owner=X&repo=Y`
+- `SyncResultResponse` API DTO with `static from()` factory
+- Unit tests: `GitHubIssueSyncServiceTest` (9 tests), `GitHubCliClientTest` (3 tests), `SyncControllerTest` (3 tests)
+- Integration tests: `SyncIntegrationTest` (idempotent sync, creates issue sync records, updates traceability links)
+
+### Changed
+
+- `TraceabilityLinkRepository`: added `findByArtifactType()` for bulk traceability link updates during sync
+- SpotBugs exclusions: added `EI_EXPOSE_REP2` exclusion for `infrastructure` package
+
 ## [0.25.0] - 2026-03-12
 
 ### Added

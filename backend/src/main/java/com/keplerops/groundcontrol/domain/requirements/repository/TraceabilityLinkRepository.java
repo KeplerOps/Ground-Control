@@ -11,6 +11,8 @@ public interface TraceabilityLinkRepository extends JpaRepository<TraceabilityLi
 
     List<TraceabilityLink> findByRequirementId(UUID requirementId);
 
+    List<TraceabilityLink> findByArtifactType(ArtifactType artifactType);
+
     boolean existsByRequirementIdAndArtifactTypeAndArtifactIdentifierAndLinkType(
             UUID requirementId, ArtifactType artifactType, String artifactIdentifier, LinkType linkType);
 }

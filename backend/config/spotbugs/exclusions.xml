@@ -31,6 +31,12 @@
         <Bug pattern="EI_EXPOSE_REP2" />
     </Match>
 
+    <!-- Infrastructure components store injected dependencies by design -->
+    <Match>
+        <Package name="~com\.keplerops\.groundcontrol\.infrastructure\..*" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+
     <!-- Constructors that validate inputs and throw are by-design -->
     <Match>
         <Package name="~com\.keplerops\.groundcontrol\.domain\.exception" />
