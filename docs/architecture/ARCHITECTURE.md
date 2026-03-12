@@ -35,14 +35,18 @@ See [ADR-013](../../architecture/adrs/013-java-spring-boot-rewrite.md) for the J
 backend/src/main/java/com/keplerops/groundcontrol/
 ├── api/                          # REST controllers, DTOs, exception handler
 │   ├── requirements/             # RequirementController, request/response records
+│   ├── admin/                    # ImportController, SyncController, AnalysisController, GraphController
 │   └── GlobalExceptionHandler.java
 ├── domain/                       # Business logic (Spring-web-free)
 │   ├── exception/                # Domain exception hierarchy
 │   └── requirements/
-│       ├── model/                # JPA entities (Requirement, RequirementRelation)
+│       ├── model/                # JPA entities (Requirement, RequirementRelation, TraceabilityLink, GitHubIssueSync, RequirementImport)
 │       ├── repository/           # Spring Data JPA repository interfaces
-│       ├── service/              # RequirementService, command records
-│       └── state/                # Enums (Status, RelationType, Priority, RequirementType)
+│       ├── service/              # RequirementService, TraceabilityService, ImportService, AnalysisService, etc.
+│       └── state/                # Enums (Status, RelationType, ArtifactType, LinkType, etc.)
+├── infrastructure/               # External adapter implementations
+│   ├── age/                      # AgeGraphService (Apache AGE Cypher queries)
+│   └── github/                   # GitHubCliClient (gh CLI adapter)
 ├── shared/
 │   └── logging/                  # RequestLoggingFilter (MDC request_id)
 └── GroundControlApplication.java
@@ -58,7 +62,7 @@ api/ -> domain/ <- infrastructure/
 - `api/` depends on `domain/` — never imports `infrastructure/`
 - `infrastructure/` implements interfaces defined in `domain/`
 
-Enforced at compile time by ArchUnit tests. See [ADR-008](../../architecture/adrs/008-clean-architecture.md).
+Enforced at compile time by ArchUnit tests in `ArchitectureTest.java`.
 
 ## Configuration
 
@@ -71,6 +75,6 @@ Environment variables use the `GC_` prefix (e.g., `GC_DATABASE_URL`, `GC_SERVER_
 
 ## What Exists vs. What Doesn't
 
-**Exists:** Spring Boot application scaffold, Requirement + RequirementRelation domain model with JPA/Envers, RequirementService (9 methods), RequirementController (9 REST endpoints), Status state machine (EnumMap transitions, JML contracts on L1 methods), Flyway migrations (V001-V005), exception hierarchy with GlobalExceptionHandler, ArchUnit architecture tests, OpenJML ESC integration, Spotless/Error Prone/SpotBugs/Checkstyle/JaCoCo, CI pipeline (build + test + integration + verify), production Dockerfile, GHCR publishing.
+**Exists (Phase 1 complete as of v0.28.0):** Spring Boot application scaffold, Requirement + RequirementRelation + TraceabilityLink + GitHubIssueSync + RequirementImport domain model with JPA/Envers, RequirementService (9 methods), TraceabilityService, ImportService (StrictDoc parser + idempotent import), GitHubIssueSyncService (CLI-based GitHub sync), AnalysisService (cycle/orphan/coverage/impact/cross-wave), AgeGraphService (Apache AGE graph materialization + Cypher queries), RequirementController (9 REST endpoints), AnalysisController (5 endpoints), ImportController, SyncController, GraphController, Status state machine (EnumMap transitions, JML contracts on L1 methods), Flyway migrations (V001–V010), exception hierarchy with GlobalExceptionHandler, ArchUnit architecture tests, OpenJML ESC integration, Spotless/Error Prone/SpotBugs/Checkstyle/JaCoCo, CI pipeline (build + test + integration + verify), production Dockerfile, GHCR publishing, E2E integration tests (6-step main + 4-step AGE).
 
-**Does not exist yet:** Traceability links (Phase 1C), verification result tracking, graph queries via Apache AGE, auth flows, frontend, search, multi-tenancy.
+**Does not exist yet:** Verification result tracking, auth flows, frontend, search, multi-tenancy.

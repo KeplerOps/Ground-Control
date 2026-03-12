@@ -134,18 +134,17 @@ All application exceptions must extend `GroundControlException`. This is enforce
 
 ## JML Contract Reference
 
-JML annotations are written as Java comments with `// @` prefix. Spotless reformats `//@ ` to `// @ ` — this is expected and correct.
+JML annotations use block comment syntax (`/*@ @*/`). Do not use `// @` — it is not valid JML and OpenJML will not parse it.
 
 ```java
 // Class invariant — must hold after every public method returns
-// @ public invariant archivedAt == null || status == Status.ARCHIVED;
+/*@ public invariant archivedAt == null || status == Status.ARCHIVED; @*/
 
 // Precondition — must be true when the method is called
-// @ requires newStatus != null;
-// @ requires status.canTransitionTo(newStatus);
-
 // Postcondition — must be true when the method returns
-// @ ensures status == newStatus;
+/*@ requires newStatus != null;
+  @ requires status.canTransitionTo(newStatus);
+  @ ensures status == newStatus; @*/
 
 // Inline non-null annotation
 public void transitionStatus(/*@ non_null @*/ Status newStatus) { ... }

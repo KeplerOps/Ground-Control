@@ -92,7 +92,7 @@ api/ -> domain/ <- infrastructure/
 - `api/` depends on `domain/` — never imports `infrastructure/`
 - `infrastructure/` implements interfaces defined in `domain/`
 
-See [ADR-008](architecture/adrs/008-clean-architecture.md) for rationale.
+Enforced by ArchUnit tests in `ArchitectureTest.java`.
 
 ## Commit Messages
 
@@ -109,16 +109,16 @@ See [ADR-008](architecture/adrs/008-clean-architecture.md) for rationale.
 ## Testing
 
 ```
-backend/src/test/java/
-├── unit/          # Domain logic only. No DB, no HTTP. JUnit 5 + Mockito.
-├── property/      # jqwik property-based tests (state machines, invariants).
+backend/src/test/java/com/keplerops/groundcontrol/
+├── unit/domain/   # Domain logic only. No DB, no Spring context. JUnit 5 + Mockito.
 ├── integration/   # With real PostgreSQL (Testcontainers). Spring Boot test.
+│                  # Tags: @Tag("integration") for standard, @Tag("age") for AGE
 └── architecture/  # ArchUnit rules (layer enforcement, naming).
 ```
 
 - **JUnit 5** for unit and integration tests
-- **jqwik** for property-based testing (state machines, enums)
-- **Testcontainers** for integration tests (PostgreSQL 16)
+- **jqwik** for property-based testing (state machines, enums) — tagged `@Tag("slow")`
+- **Testcontainers** for integration tests (PostgreSQL 16, Apache AGE)
 - **ArchUnit** for architecture rule enforcement
-- Test names describe behavior: `create_shouldThrowConflict_whenUidExists`
-- Tests are independent — no shared mutable state
+- Test names describe behavior: `archiveFromDraftFails`, not `testArchiveMethod`
+- Tests are independent — no shared mutable state (except ordered E2E tests using `@TestInstance(PER_CLASS)`)

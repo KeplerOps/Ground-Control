@@ -47,7 +47,7 @@ Ground-Control/
 
 ## Status
 
-Pre-alpha. Spring Boot scaffold with domain model (Requirement + RequirementRelation), JML contracts, hand-rolled state machine, exception hierarchy, Flyway migrations, and ArchUnit architecture tests. See [CHANGELOG.md](CHANGELOG.md).
+Pre-alpha. Phase 1 (requirements management) complete: 5 domain entities, StrictDoc import, GitHub issue sync, graph analysis (cycles, orphans, impact, cross-wave), Apache AGE integration, 10 Flyway migrations, REST API (25+ endpoints), E2E integration tests. See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

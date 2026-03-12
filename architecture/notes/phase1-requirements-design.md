@@ -1,5 +1,8 @@
 # Phase 1: Requirements Management System -- Design Notes
 
+> **Status: COMPLETE** as of v0.28.0 (2026-03-12). All components implemented and verified end-to-end.
+> See CHANGELOG.md entries v0.23.0–v0.28.0 for implementation history.
+
 ## Overview
 
 Phase 1 introduces the first domain models in Ground Control. The requirements management system replaces the archived StrictDoc + issue-graph tools with in-app functionality, enabling Ground Control to dogfood its own requirements.
@@ -15,18 +18,42 @@ backend/src/main/java/com/keplerops/groundcontrol/
             model/
                 Requirement.java           # @Entity + JML contracts + @Audited
                 RequirementRelation.java   # @Entity + JML contracts + @Audited
+                TraceabilityLink.java      # @Entity + @Audited
+                GitHubIssueSync.java       # @Entity (JSONB fields)
+                RequirementImport.java     # @Entity (audit record, JSONB fields)
             state/
                 Status.java                # Enum + EnumMap transition table
                 RequirementType.java       # FUNCTIONAL, NON_FUNCTIONAL, CONSTRAINT, INTERFACE
                 Priority.java             # MUST, SHOULD, COULD, WONT
-                RelationType.java         # PARENT, DEPENDS_ON, REFINES, CONFLICTS, SUPERSEDES, RELATED
+                RelationType.java         # PARENT, DEPENDS_ON, CONFLICTS_WITH, REFINES
+                ArtifactType.java         # GITHUB_ISSUE, CODE_FILE, ADR, etc.
+                LinkType.java             # IMPLEMENTS, TESTS, DOCUMENTS, CONSTRAINS, VERIFIES
+                SyncStatus.java           # SYNCED, STALE, BROKEN
+                IssueState.java           # OPEN, CLOSED
+                ImportSourceType.java     # STRICTDOC, GITHUB, MANUAL
             service/
                 RequirementService.java    # Write-owner of Requirement + RequirementRelation
-                CreateRequirementCommand.java  # Immutable command record
-                UpdateRequirementCommand.java  # Immutable command record
+                TraceabilityService.java   # Write-owner of TraceabilityLink
+                ImportService.java         # Orchestrates StrictDoc import
+                GitHubIssueSyncService.java # Write-owner of GitHubIssueSync
+                AnalysisService.java       # Read-only: cycles, orphans, impact, cross-wave
+                GraphAlgorithms.java       # Pure utility: DFS cycle detection, BFS reachability
+                GraphClient.java           # Domain port for graph traversal (AGE)
+                GitHubClient.java          # Domain port for GitHub issue fetching
+                SdocParser.java            # Pure StrictDoc parser
+                SdocRequirement.java       # Parsed requirement record
+                CreateRequirementCommand.java
+                UpdateRequirementCommand.java
+                CreateTraceabilityLinkCommand.java
+                ImportResult.java
+                SyncResult.java
+                GitHubIssueData.java
             repository/
-                RequirementRepository.java           # Spring Data JPA
-                RequirementRelationRepository.java   # Spring Data JPA
+                RequirementRepository.java
+                RequirementRelationRepository.java
+                TraceabilityLinkRepository.java
+                GitHubIssueSyncRepository.java
+                RequirementImportRepository.java
         exception/                         # Shared across all domain areas
             GroundControlException.java
             NotFoundException.java
@@ -36,17 +63,31 @@ backend/src/main/java/com/keplerops/groundcontrol/
             ConflictException.java
     api/
         requirements/
-            RequirementController.java     # @RestController (planned)
-            RequirementRequest.java        # Request DTO record (planned)
-            RequirementResponse.java       # Response DTO record (planned)
-            StatusTransitionRequest.java   # (planned)
-            RelationRequest.java           # (planned)
-            RelationResponse.java          # (planned)
+            RequirementController.java     # @RestController (9 endpoints)
+            RequirementRequest.java        # Request DTO record
+            RequirementResponse.java       # Response DTO record
+            StatusTransitionRequest.java
+            RelationRequest.java
+            RelationResponse.java
+            TraceabilityLinkRequest.java
+            TraceabilityLinkResponse.java
+        admin/
+            ImportController.java          # POST /api/v1/admin/import/strictdoc
+            SyncController.java            # POST /api/v1/admin/sync/github
+            AnalysisController.java        # GET /api/v1/analysis/{cycles,orphans,...}
+            GraphController.java           # POST /api/v1/admin/graph/materialize
+            ImportResultResponse.java
+            SyncResultResponse.java
+            RequirementSummaryResponse.java
+            RelationValidationResponse.java
         GlobalExceptionHandler.java        # @RestControllerAdvice
-        ErrorResponse.java                 # {"error": {"code", "message", "detail"}}
     infrastructure/
         age/
-            AgeGraphService.java           # AGE Cypher via JdbcTemplate (planned)
+            AgeGraphService.java           # AGE Cypher via JdbcTemplate
+            AgeConfig.java
+            AgeProperties.java
+        github/
+            GitHubCliClient.java           # gh CLI adapter
     shared/
         logging/
             RequestLoggingFilter.java      # MDC: request_id
@@ -147,25 +188,23 @@ public class RequirementRelation {
 
 **Validation**: `source != target` (no self-loops), enforced in `RequirementService.createRelation()`. Cycle detection is an analysis-time check, not a save-time constraint (too expensive for real-time validation).
 
-### TraceabilityLink (planned)
+### TraceabilityLink
 
-Connects requirements to external artifacts. The `artifactIdentifier` uses a typed prefix convention:
-- `github:#42` -- GitHub issue
-- `file:backend/src/.../Requirement.java` -- code file
-- `adr:011` -- architecture decision record
-- `test:backend/src/test/.../RequirementTest.java` -- test file
-- `tla:specs/tla/RequirementStateMachine.tla` -- TLA+ specification
-- `proof:verification/results/access-control.json` -- verification result
+Connects requirements to external artifacts. Uses typed `ArtifactType` and `LinkType` enums rather than string prefix conventions. Tracks sync status for links enriched by GitHub sync. Unique constraint on `(requirement_id, artifact_type, artifact_identifier, link_type)`.
 
-See [ADR-011](../adrs/011-requirements-data-model.md#traceabilitylink-planned) for the full field list.
+See [ADR-011](../adrs/011-requirements-data-model.md#traceabilitylink-planned) for the design rationale.
 
-### GitHubIssueSync (planned)
+### GitHubIssueSync
 
-Cached mirror of GitHub issue data. Updated by the sync service. See [ADR-011](../adrs/011-requirements-data-model.md#githubissuesync-planned) for the full field list.
+Cached mirror of GitHub issue data. Updated by `GitHubIssueSyncService` via `GitHubCliClient` (calls `gh issue list`). Parses labels into phase/priority, extracts cross-references from issue body. JSONB fields for labels and cross-references.
 
-### RequirementImport (planned)
+See [ADR-011](../adrs/011-requirements-data-model.md#githubissuesync-planned) for the design rationale.
 
-Audit trail for each import/sync operation. See [ADR-011](../adrs/011-requirements-data-model.md#requirementimport-planned) for the full field list.
+### RequirementImport
+
+Audit trail for each import/sync operation. JSONB fields for stats (counts) and errors (structured error list). Created by both `ImportService` and `GitHubIssueSyncService`.
+
+See [ADR-011](../adrs/011-requirements-data-model.md#requirementimport-planned) for the design rationale.
 
 ## Service Layer Architecture
 
@@ -239,9 +278,9 @@ Service-layer ownership gives us the decoupling benefits where they matter (muta
 Status transitions use JML `requires`/`ensures` annotations:
 
 ```java
-// @ requires newStatus != null;
-// @ requires status.canTransitionTo(newStatus);
-// @ ensures status == newStatus;
+/*@ requires newStatus != null;
+  @ requires status.canTransitionTo(newStatus);
+  @ ensures status == newStatus; @*/
 public void transitionStatus(/*@ non_null @*/ Status newStatus) {
     if (!status.canTransitionTo(newStatus)) {
         throw new DomainValidationException(
@@ -308,7 +347,7 @@ public record CreateRequirementCommand(
 
 This separates the API representation (request DTOs with `@NotBlank` validation) from the domain mutation interface (commands). Controllers map: request -> command -> service call -> entity -> response.
 
-### AGE Graph Materialization (planned)
+### AGE Graph Materialization
 
 AGE is a read-only projection. The materialization flow:
 
