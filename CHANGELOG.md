@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-03-12
+
+### Added
+
+- `SdocParser` pure Java utility for parsing StrictDoc (.sdoc) requirement files, ported from Python reference implementation
+- `SdocRequirement` record for parsed requirement data (UID, title, statement, comment, issue refs, parent UIDs, wave)
+- `ImportResult` record for import operation results with full statistics
+- `ImportService` with idempotent `importStrictdoc()` method: upserts requirements, creates relations, creates traceability links, saves audit records
+- `ImportController` REST endpoint: `POST /api/v1/admin/import/strictdoc` (multipart file upload)
+- `ImportResultResponse` API DTO with `static from()` factory
+- Unit tests: `SdocParserTest` (8 tests), `ImportServiceTest` (8 tests), `ImportControllerTest` (2 tests)
+- Integration tests: `ImportIntegrationTest` (idempotent import, creates requirements/relations/links)
+
+### Changed
+
+- `RequirementRelationRepository`: added `existsBySourceIdAndTargetIdAndRelationType()` for idempotent relation creation
+- `TraceabilityLinkRepository`: added `existsByRequirementIdAndArtifactTypeAndArtifactIdentifierAndLinkType()` for idempotent link creation
+
 ## [0.24.0] - 2026-03-12
 
 ### Added

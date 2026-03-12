@@ -25,6 +25,12 @@
         <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
     </Match>
 
+    <!-- Spring services store injected dependencies by design -->
+    <Match>
+        <Package name="~com\.keplerops\.groundcontrol\.domain\..*\.service" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+
     <!-- Constructors that validate inputs and throw are by-design -->
     <Match>
         <Package name="~com\.keplerops\.groundcontrol\.domain\.exception" />
