@@ -215,6 +215,20 @@ archive/tools/strictdoc/output/
 archive/tools/issue-graph/.issue_cache.json
 archive/tools/issue-graph/graph.json
 
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform/
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfvars
+!*.tfvars.example
+
 # Local files
 tickets
 archive/

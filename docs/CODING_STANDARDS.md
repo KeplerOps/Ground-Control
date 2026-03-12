@@ -302,4 +302,4 @@ All error responses use this envelope. Do not invent new formats.
 - All code goes through PR targeting `dev`. No direct push to `main` or `dev`.
 - PRs require: `./gradlew check` passes (build + spotlessCheck + test + jacocoTestReport).
 - Commit messages: imperative mood. `Add risk scoring engine` not `Added risk scoring engine`.
-- Pre-commit hooks run file checks + gitleaks + Spotless auto-format + `./gradlew check` (full CI-equivalent: build + tests + static analysis + coverage) + `./gradlew openjmlEsc` (formal verification of JML contracts in ESC scope). Do not bypass with `--no-verify`.
+- Pre-commit hooks run file checks + gitleaks + Spotless auto-format + `./gradlew check` (full CI-equivalent: build + tests + static analysis + coverage) + `./gradlew openjmlEsc` (formal verification of JML contracts in ESC scope) + Terraform fmt/validate + Checkov IaC security scanning (on `deploy/terraform/`). Do not bypass with `--no-verify`.

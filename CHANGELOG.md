@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] - 2026-03-12
+
+### Added
+
+- Terraform networking module (`deploy/terraform/modules/networking/`): security group
+  with configurable ingress CIDR for database access, default VPC lookup
+- Terraform RDS module (`deploy/terraform/modules/rds/`): PostgreSQL 16 on db.t4g.micro,
+  gp3 storage, forced SSL via parameter group, encryption at rest, deletion protection,
+  7-day backup retention, random password generation
+- Terraform secrets module (`deploy/terraform/modules/secrets/`): SSM Parameter Store
+  entries for database host, username, and password (SecureString)
+
+### Changed
+
+- Bootstrap IAM role policy expanded with EC2, RDS, and SSM permissions for
+  Terraform CI to plan and apply infrastructure modules
+
+## [0.31.0] - 2026-03-12
+
+### Added
+
+- Terraform bootstrap (`deploy/terraform/bootstrap/`): S3 state bucket with versioning,
+  encryption, and public access blocking; DynamoDB lock table for state locking;
+  GitHub Actions OIDC identity provider and IAM role
+- Terraform CI workflow (`.github/workflows/terraform.yml`): `terraform fmt`, `validate`,
+  and `plan` on PRs to `deploy/terraform/**`; manual `apply` via `workflow_dispatch`;
+  AWS authentication via OIDC federation
+- ADR-015 updated with Terraform CI/CD sub-decision
+- Pre-commit hooks for Terraform: `terraform_fmt`, `terraform_validate`
+  (antonbabenko/pre-commit-terraform), and Checkov IaC security scanning
+
+## [0.30.0] - 2026-03-12
+
+### Added
+
+- Infrastructure requirements (`docs/requirements/infrastructure.sdoc`): 10 requirements
+  across cloud database, infrastructure as code, and developer workflow sections
+- ADR-015: Cloud Database Deployment — RDS PostgreSQL 16 in catalyst-dev (us-east-2),
+  SSM for credentials, Terraform for IaC, accepts AGE unavailability per ADR-005
+- Phase 2 design notes (`architecture/notes/phase2-cloud-database-design.md`): topology,
+  RDS configuration, security model, Terraform structure, cost estimate, migration paths
+- 6 GitHub issues for cloud database implementation (Terraform bootstrap, modules,
+  environment wiring, Makefile targets, data migration, .gitignore)
+
 ## [0.29.0] - 2026-03-12
 
 ### Added

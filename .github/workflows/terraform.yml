@@ -1,0 +1,84 @@
+name: Terraform
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'deploy/terraform/**'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'deploy/terraform/**'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action to perform'
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+      working_directory:
+        description: 'Terraform working directory'
+        required: true
+        default: 'deploy/terraform/environments/dev'
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    defaults:
+      run:
+        working-directory: ${{ github.event.inputs.working_directory || 'deploy/terraform/environments/dev' }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: arn:aws:iam::516608939870:role/github-actions-terraform
+          aws-region: us-east-2
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+        working-directory: deploy/terraform
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        id: plan
+        run: terraform plan -no-color -out=tfplan
+        continue-on-error: true
+
+      - name: Post plan to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          PLAN_OUTPUT: ${{ steps.plan.outputs.stdout }}
+          ACTOR: ${{ github.actor }}
+          EVENT_NAME: ${{ github.event_name }}
+        with:
+          script: |
+            const output = `#### Terraform Plan\n\`\`\`\n${process.env.PLAN_OUTPUT}\n\`\`\`\n\n*Triggered by @${process.env.ACTOR} via ${process.env.EVENT_NAME}*`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+      - name: Plan status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      - name: Terraform apply
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
+        run: terraform apply -auto-approve tfplan

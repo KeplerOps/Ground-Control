@@ -15,3 +15,4 @@ For architecture decisions, see [ADRs](../adrs/).
 | Document | Phase | Description |
 |----------|-------|-------------|
 | [Phase 1: Requirements Management](../notes/phase1-requirements-design.md) | 1 | Data model, app structure, key patterns for the requirements management system |
+| [Phase 2: Cloud Database](../notes/phase2-cloud-database-design.md) | 2 | RDS deployment, Terraform structure, security model, developer workflow |
