@@ -14,6 +14,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   RDS → secrets), and developer-facing outputs (RDS endpoint, SSM paths)
 - `terraform.tfvars.example` documenting required variables for dev environment
 
+### Changed
+
+- Consolidated four separate workflows (CI, SonarCloud, Terraform, Docker) into a
+  single `ci.yml` with conditional jobs and path-based detection: backend jobs always
+  run, terraform runs only when `deploy/terraform/` changes or on manual dispatch,
+  docker builds only on main/tags after tests pass
+- SonarCloud is now non-blocking (`continue-on-error: true`); reports quality metrics
+  without gating merges
+
+### Fixed
+
+- CI race conditions: concurrency group prevents parallel runs on the same branch,
+  cancels in-progress PR runs on new pushes
+- CI waste: integration tests now depend on unit tests passing (`needs: [build, test]`)
+- Bootstrap S3 lifecycle rule missing required `filter {}` block (future provider error)
+
 ## [0.32.0] - 2026-03-12
 
 ### Added
