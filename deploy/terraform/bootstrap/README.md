@@ -33,6 +33,16 @@ terraform output lock_table_name
 terraform output github_actions_role_arn
 ```
 
+## Existing OIDC provider
+
+If the AWS account already has a GitHub Actions OIDC provider (from another project), `terraform apply` will fail with `EntityAlreadyExists`. Import it instead:
+
+```bash
+aws iam list-open-id-connect-providers  # grab the ARN
+terraform import aws_iam_openid_connect_provider.github <ARN>
+terraform apply
+```
+
 ## Important
 
 This configuration uses `prevent_destroy` on the S3 bucket and DynamoDB table. These resources are **not** managed by CI — they are applied manually and should never be destroyed accidentally.

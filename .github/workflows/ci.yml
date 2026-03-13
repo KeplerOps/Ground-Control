@@ -179,14 +179,16 @@ jobs:
         working-directory: deploy/terraform
 
       - name: Terraform init
-        run: terraform init
+        run: terraform init -input=false
 
       - name: Terraform validate
         run: terraform validate
 
       - name: Terraform plan
         id: plan
-        run: terraform plan -no-color -out=tfplan
+        run: terraform plan -no-color -input=false -out=tfplan -var="allowed_cidr=$ALLOWED_CIDR"
+        env:
+          ALLOWED_CIDR: ${{ secrets.TF_ALLOWED_CIDR || '10.0.0.0/32' }}
         continue-on-error: true
 
       - name: Post plan to PR
@@ -212,7 +214,7 @@ jobs:
 
       - name: Terraform apply
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action == 'apply'
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -input=false -auto-approve tfplan
 
   # ---------------------------------------------------------------------------
   # Docker
