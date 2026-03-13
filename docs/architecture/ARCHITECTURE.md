@@ -2,7 +2,7 @@
 
 ## Mission
 
-Ground Control is a verification-aware software lifecycle orchestrator with graph-native artifact traceability. It manages requirements, traces artifacts across the development lifecycle, and integrates formal verification tools to ensure correctness at every stage.
+Ground Control is a requirements management system with traceability and graph analysis. It manages requirements, tracks relations, links to external artifacts, and runs graph-based analysis (cycles, orphans, coverage gaps, impact, cross-wave validation).
 
 See [ADR-014](../../architecture/adrs/014-pluggable-verification-architecture.md) for the verification architecture and [ADR-011](../../architecture/adrs/011-requirements-data-model.md) for the requirements data model.
 
@@ -75,6 +75,23 @@ Environment variables use the `GC_` prefix (e.g., `GC_DATABASE_URL`, `GC_SERVER_
 
 ## What Exists vs. What Doesn't
 
-**Exists (Phase 1 complete as of v0.28.0):** Spring Boot application scaffold, Requirement + RequirementRelation + TraceabilityLink + GitHubIssueSync + RequirementImport domain model with JPA/Envers, RequirementService (9 methods), TraceabilityService, ImportService (StrictDoc parser + idempotent import), GitHubIssueSyncService (CLI-based GitHub sync), AnalysisService (cycle/orphan/coverage/impact/cross-wave), AgeGraphService (Apache AGE graph materialization + Cypher queries), RequirementController (9 REST endpoints), AnalysisController (5 endpoints), ImportController, SyncController, GraphController, Status state machine (EnumMap transitions, JML contracts on L1 methods), Flyway migrations (V001–V010), exception hierarchy with GlobalExceptionHandler, ArchUnit architecture tests, OpenJML ESC integration, Spotless/Error Prone/SpotBugs/Checkstyle/JaCoCo, CI pipeline (build + test + integration + verify), production Dockerfile, GHCR publishing, E2E integration tests (6-step main + 4-step AGE).
+### Exists (Phase 1 complete as of v0.28.0)
 
-**Does not exist yet:** Verification result tracking, auth flows, frontend, search, multi-tenancy.
+**Domain entities:** Requirement, RequirementRelation, TraceabilityLink, GitHubIssueSync, RequirementImport — all JPA with Envers auditing.
+
+**Services:** RequirementService (9 methods), TraceabilityService, ImportService (StrictDoc parser + idempotent import), GitHubIssueSyncService (CLI-based GitHub sync), AnalysisService (cycle/orphan/coverage/impact/cross-wave), AgeGraphService (Apache AGE graph materialization + Cypher queries).
+
+**API:** RequirementController (9 REST endpoints), AnalysisController (5 endpoints), ImportController, SyncController, GraphController. GlobalExceptionHandler maps domain exceptions to HTTP error envelopes.
+
+**Tooling:** Status state machine with JML contracts (verified by OpenJML ESC + Z3), Flyway migrations (V001–V010), Spotless/Error Prone/SpotBugs/Checkstyle/JaCoCo, ArchUnit architecture tests, CI pipeline (build + test + integration + verify), production Dockerfile, GHCR publishing, E2E integration tests (6-step main + 4-step AGE).
+
+### Does not exist yet
+
+- Frontend
+- Auth flows
+- Redis integration (Redis is in docker-compose.yml but nothing in the app uses it)
+- Production deployment infrastructure (local Docker Compose only)
+- Multi-tenancy
+- Search
+- Verification result tracking (VerificationResult entity from ADR-014 not yet implemented)
+- Apache AGE is optional — the app gracefully degrades to JPA-only analysis when AGE is unavailable

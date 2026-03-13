@@ -5,7 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] - 2026-03-13
+
+### Changed
+
+- Requirement listing excludes archived requirements by default (`archivedAt IS NULL`);
+  filtering by `status=ARCHIVED` still returns them explicitly
+- `RequirementService.list()` always uses specification path (no more bypass
+  for null filter)
+- Removed stale `docs/requirements/infrastructure.sdoc` (described withdrawn
+  RDS/Terraform infrastructure)
+- `docker-compose.yml`: database password read from `.env` instead of hardcoded;
+  ports bound to `127.0.0.1` (not `0.0.0.0`)
+- `Makefile`: `dev` target sources `.env` before running Spring Boot
+
+## [0.34.2] - 2026-03-13
+
+### Fixed
+
+- `docs/deployment/DEPLOYMENT.md`: rewrote from stale Python 3.12/Django/uv/gunicorn
+  content to actual Java 21/Spring Boot 3.4/Gradle stack
+- `.github/PULL_REQUEST_TEMPLATE.md`: replaced `mypy --strict`/`tsc`/`ruff check`/`biome`
+  references with `make check` (Spotless, SpotBugs, Error Prone, JaCoCo); removed
+  non-existent tenant isolation checklist item
+- `.github/ISSUE_TEMPLATE/bug_report.md`: removed Kubernetes deployment option and
+  browser field (no frontend exists)
+- `README.md`: replaced aspirational "verification-aware lifecycle orchestrator" tagline
+  with accurate "requirements management system with traceability and graph analysis";
+  rewrote "What is Ground Control?" to describe actual current functionality; removed
+  Redis from Quick Start comment
+- `docs/architecture/ARCHITECTURE.md`: restructured "What Exists" into categorized
+  sections (entities, services, API, tooling); expanded "Does not exist yet" to include
+  frontend, Redis integration, production deployment, auth, multi-tenancy, AGE
+  optional degradation caveat
+
+## [0.34.1] - 2026-03-13
+
+### Fixed
+
+- `archivedAt` timestamp now set when transitioning to ARCHIVED via
+  `/transition` endpoint (previously only set via `/archive` endpoint)
+- `LazyInitializationException` on `GET /api/v1/requirements/{id}/relations`
+  — relation queries now use fetch joins to eagerly load source/target
+  requirement entities
+
 ## [0.34.0] - 2026-03-13
+
+### Added
+
+- `make smoke`: local smoke test — builds Docker image, runs against fresh
+  PostgreSQL 16, verifies Flyway migrations and health endpoint
 
 ### Removed
 

@@ -281,8 +281,8 @@ class RequirementServiceTest {
             var id = UUID.randomUUID();
             var req = makeRequirement("REQ-001");
             when(requirementRepository.findById(id)).thenReturn(Optional.of(req));
-            when(relationRepository.findBySourceId(id)).thenReturn(new java.util.ArrayList<>());
-            when(relationRepository.findByTargetId(id)).thenReturn(List.of());
+            when(relationRepository.findBySourceIdWithEntities(id)).thenReturn(new java.util.ArrayList<>());
+            when(relationRepository.findByTargetIdWithEntities(id)).thenReturn(List.of());
 
             var result = service.getRelations(id);
             assertThat(result).isNotNull();
@@ -310,10 +310,12 @@ class RequirementServiceTest {
     @Nested
     class ListRequirements {
 
+        @SuppressWarnings("unchecked")
         @Test
         void returnsPageWithNullFilter() {
             var page = new PageImpl<>(List.of(makeRequirement("REQ-001")));
-            when(requirementRepository.findAll(any(Pageable.class))).thenReturn(page);
+            when(requirementRepository.findAll(any(Specification.class), any(Pageable.class)))
+                    .thenReturn(page);
 
             Page<Requirement> result = service.list(Pageable.unpaged(), null);
             assertThat(result).isNotNull();

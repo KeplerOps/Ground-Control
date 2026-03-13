@@ -3,17 +3,17 @@
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=KeplerOps_Ground-Control&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=KeplerOps_Ground-Control)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Verification-aware software lifecycle orchestrator with graph-native artifact traceability. Java 21 / Spring Boot 3.4, PostgreSQL + Apache AGE, JML/OpenJML contracts. Pre-alpha.
+Requirements management system with traceability and graph analysis. Java 21 / Spring Boot 3.4, PostgreSQL + Apache AGE. Pre-alpha.
 
 ## What is Ground Control?
 
-Ground Control manages requirements, traces artifacts across the development lifecycle, and integrates formal verification tools to ensure correctness. It uses a graph-native data model (PostgreSQL + Apache AGE) to connect requirements, code, tests, and verification results into a queryable traceability graph. Ground Control dogfoods its own verification infrastructure on itself.
+Ground Control manages requirements, tracks relations between them, links requirements to external artifacts (GitHub issues, code, specs), and runs graph analysis — cycle detection, orphan detection, coverage gap analysis, impact analysis, and cross-wave validation. It supports StrictDoc import and GitHub issue sync for keeping requirements connected to implementation work. Apache AGE provides optional graph queries over the requirements DAG. OpenJML verifies state machine contracts on domain enums.
 
 ## Quick Start
 
 ```bash
 cp .env.example .env
-make up                            # PostgreSQL 16 (Apache AGE) + Redis 7
+make up                            # PostgreSQL 16 (Apache AGE)
 make rapid                         # Format + compile (~1s with warm daemon)
 make test                          # Unit tests
 make dev                           # Spring Boot dev server on :8000
@@ -33,7 +33,7 @@ Ground-Control/
 ├── .github/workflows/        # CI + SonarCloud + Docker
 ├── docs/                     # Operational documentation
 │   └── CODING_STANDARDS.md
-├── docker-compose.yml        # Dev services (PostgreSQL + AGE, Redis)
+├── docker-compose.yml        # Dev services (PostgreSQL + AGE)
 └── Makefile                  # Common commands (build, test, format, dev)
 ```
 

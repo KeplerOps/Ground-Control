@@ -1,4 +1,4 @@
-.PHONY: rapid build test test-cov format lint check integration verify dev clean up down docker-build
+.PHONY: rapid build test test-cov format lint check integration verify dev clean up down docker-build smoke
 
 # --- Rapid dev loop (< 5s) ---
 
@@ -35,8 +35,8 @@ verify: ## Full CI-equivalent verification
 
 # --- Infrastructure ---
 
-dev: ## Start development server
-	cd backend && ./gradlew bootRun
+dev: ## Start development server (loads .env)
+	set -a && [ -f .env ] && . ./.env && set +a && cd backend && ./gradlew bootRun
 
 up: ## Start Docker Compose services (PostgreSQL, Redis)
 	docker compose up -d
@@ -46,6 +46,42 @@ down: ## Stop Docker Compose services
 
 docker-build: ## Build backend Docker image
 	docker build -t ghcr.io/keplerops/ground-control:latest backend/
+
+smoke: docker-build ## Build Docker image and verify Flyway + health
+	@echo "Starting smoke test..."
+	@docker rm -f gc-smoke-db gc-smoke 2>/dev/null || true
+	@docker run -d --name gc-smoke-db \
+		-e POSTGRES_DB=ground_control \
+		-e POSTGRES_USER=gc \
+		-e POSTGRES_PASSWORD=gc \
+		-p 5433:5432 \
+		--health-cmd "pg_isready -U gc -d ground_control" \
+		--health-interval 2s --health-timeout 5s --health-retries 10 \
+		postgres:16
+	@echo "Waiting for database..."
+	@for i in $$(seq 1 30); do \
+		docker inspect --format='{{.State.Health.Status}}' gc-smoke-db 2>/dev/null | grep -q healthy && break; \
+		sleep 1; \
+	done
+	@docker run -d --name gc-smoke \
+		--network host \
+		-e GC_DATABASE_URL=jdbc:postgresql://localhost:5433/ground_control \
+		-e GC_DATABASE_USER=gc \
+		-e GC_DATABASE_PASSWORD=gc \
+		ghcr.io/keplerops/ground-control:latest
+	@echo "Waiting for application startup..."
+	@PASS=false; for i in $$(seq 1 60); do \
+		HEALTH=$$(curl -sf http://localhost:8000/actuator/health 2>/dev/null) && { \
+			echo "Smoke test passed: $$HEALTH"; PASS=true; break; \
+		}; \
+		sleep 2; \
+	done; \
+	if [ "$$PASS" != "true" ]; then \
+		echo "Smoke test failed after 120s"; \
+		docker logs gc-smoke; \
+	fi; \
+	docker rm -f gc-smoke-db gc-smoke 2>/dev/null || true; \
+	[ "$$PASS" = "true" ]
 
 clean: ## Remove build artifacts
 	cd backend && ./gradlew clean

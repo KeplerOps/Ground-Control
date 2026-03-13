@@ -31,8 +31,19 @@ public final class RequirementSpecifications {
         };
     }
 
+    public static Specification<Requirement> notArchived() {
+        return (root, query, cb) -> cb.isNull(root.get("archivedAt"));
+    }
+
     public static Specification<Requirement> fromFilter(RequirementFilter filter) {
-        Specification<Requirement> spec = Specification.where(null);
+        // Exclude archived by default unless explicitly filtering for ARCHIVED status
+        boolean wantsArchived = filter != null && filter.status() == Status.ARCHIVED;
+        Specification<Requirement> spec =
+                wantsArchived ? Specification.where(null) : Specification.where(notArchived());
+
+        if (filter == null) {
+            return spec;
+        }
         if (filter.status() != null) {
             spec = spec.and(hasStatus(filter.status()));
         }

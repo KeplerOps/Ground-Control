@@ -14,6 +14,14 @@ public interface RequirementRelationRepository extends JpaRepository<Requirement
 
     List<RequirementRelation> findByTargetId(UUID targetId);
 
+    @Query("SELECT r FROM RequirementRelation r JOIN FETCH r.source JOIN FETCH r.target"
+            + " WHERE r.source.id = :sourceId")
+    List<RequirementRelation> findBySourceIdWithEntities(@Param("sourceId") UUID sourceId);
+
+    @Query("SELECT r FROM RequirementRelation r JOIN FETCH r.source JOIN FETCH r.target"
+            + " WHERE r.target.id = :targetId")
+    List<RequirementRelation> findByTargetIdWithEntities(@Param("targetId") UUID targetId);
+
     boolean existsBySourceIdAndTargetIdAndRelationType(UUID sourceId, UUID targetId, RelationType relationType);
 
     @Query("SELECT r FROM RequirementRelation r JOIN FETCH r.source JOIN FETCH r.target"

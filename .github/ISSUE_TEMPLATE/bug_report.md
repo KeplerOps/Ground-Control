@@ -27,6 +27,5 @@ assignees: ''
 ## Environment
 
 - Ground Control version:
-- Deployment type: (Docker Compose / Kubernetes / Local)
-- Browser (if frontend):
+- Deployment: (Docker Compose / Local dev)
 - OS:

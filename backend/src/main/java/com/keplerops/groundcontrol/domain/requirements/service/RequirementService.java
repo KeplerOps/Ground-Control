@@ -127,17 +127,14 @@ public class RequirementService {
     public List<RequirementRelation> getRelations(UUID requirementId) {
         // Verify requirement exists
         getById(requirementId);
-        var outgoing = relationRepository.findBySourceId(requirementId);
-        var incoming = relationRepository.findByTargetId(requirementId);
+        var outgoing = relationRepository.findBySourceIdWithEntities(requirementId);
+        var incoming = relationRepository.findByTargetIdWithEntities(requirementId);
         outgoing.addAll(incoming);
         return outgoing;
     }
 
     @Transactional(readOnly = true)
     public Page<Requirement> list(Pageable pageable, RequirementFilter filter) {
-        if (filter == null) {
-            return requirementRepository.findAll(pageable);
-        }
         var spec = RequirementSpecifications.fromFilter(filter);
         return requirementRepository.findAll(spec, pageable);
     }

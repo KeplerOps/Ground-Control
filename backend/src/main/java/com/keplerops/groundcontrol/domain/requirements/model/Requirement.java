@@ -108,6 +108,9 @@ public class Requirement {
                     Map.of("current_status", status.name(), "target_status", newStatus.name()));
         }
         this.status = newStatus;
+        if (newStatus == Status.ARCHIVED) {
+            this.archivedAt = Instant.now();
+        }
     }
 
     /**
