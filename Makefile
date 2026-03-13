@@ -1,4 +1,4 @@
-.PHONY: rapid build test test-cov format lint check integration verify dev clean up down docker-build
+.PHONY: rapid build test test-cov format lint check integration verify dev clean up down docker-build deploy-dev
 
 # --- Rapid dev loop (< 5s) ---
 
@@ -46,6 +46,16 @@ down: ## Stop Docker Compose services
 
 docker-build: ## Build backend Docker image
 	docker build -t ghcr.io/keplerops/ground-control:latest backend/
+
+deploy-dev: ## Run Docker image against dev RDS
+	@echo "Fetching credentials from SSM..."
+	@GC_DB_PASS=$$(aws ssm get-parameter --name /gc/dev/db_password --with-decryption \
+		--query 'Parameter.Value' --output text --region us-east-2 --profile catalyst-dev) && \
+	docker run --rm -p 8000:8000 \
+		-e GC_DATABASE_URL=jdbc:postgresql://groundcontrol-dev.cjmae0omm2br.us-east-2.rds.amazonaws.com:5432/ground_control \
+		-e GC_DATABASE_USER=gcadmin \
+		-e "GC_DATABASE_PASSWORD=$$GC_DB_PASS" \
+		ghcr.io/keplerops/ground-control:dev
 
 clean: ## Remove build artifacts
 	cd backend && ./gradlew clean

@@ -16,10 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Consolidated four separate workflows (CI, SonarCloud, Terraform, Docker) into a
-  single `ci.yml` with conditional jobs and path-based detection: backend jobs always
-  run, terraform runs only when `deploy/terraform/` changes or on manual dispatch,
-  docker builds only on main/tags after tests pass
+- Unified CI/CD pipeline: all jobs flow through a single dependency chain
+  (`build → test → integration → terraform → docker → smoke`) — terraform
+  waits for tests to pass, docker waits for both integration and terraform,
+  smoke test validates the packaged Docker image end-to-end
+- Docker images now built on `dev` branch pushes (in addition to `main`/tags)
+  for local deployment against dev RDS
 - SonarCloud is now non-blocking (`continue-on-error: true`); reports quality metrics
   without gating merges
 
@@ -31,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bootstrap S3 lifecycle rule missing required `filter {}` block (future provider error)
 - RDS module: removed `manage_master_user_password = false` (conflicts with `password` in AWS provider ~>5.0)
 - `.gitignore`: added `tfplan` pattern for extensionless Terraform plan files; removed accidentally committed binary plan file
+
+### Added
+
+- CI smoke test job: builds Docker image, runs against fresh PostgreSQL 16,
+  verifies Flyway migrations apply and health endpoint returns UP
+- `make deploy-dev`: run Docker image locally against dev RDS (fetches
+  credentials from SSM automatically)
 
 ## [0.32.0] - 2026-03-12
 

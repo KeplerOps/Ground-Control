@@ -65,7 +65,7 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # Backend
+  # Backend — build → test → integration (linear, always runs)
   # ---------------------------------------------------------------------------
   build:
     runs-on: ubuntu-latest
@@ -119,6 +119,9 @@ jobs:
           name: integration-test-report
           path: backend/build/reports/tests/integrationTest/
 
+  # ---------------------------------------------------------------------------
+  # Verification (branches off test, runs in parallel with integration)
+  # ---------------------------------------------------------------------------
   verify:
     runs-on: ubuntu-latest
     needs: [test]
@@ -156,11 +159,11 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   # ---------------------------------------------------------------------------
-  # Infrastructure
+  # Infrastructure — runs after tests pass, skipped if no terraform changes
   # ---------------------------------------------------------------------------
   terraform:
     runs-on: ubuntu-latest
-    needs: [changes]
+    needs: [changes, test]
     if: needs.changes.outputs.terraform == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action != '')
     defaults:
       run:
@@ -187,9 +190,9 @@ jobs:
 
       - name: Terraform plan
         id: plan
-        run: terraform plan -no-color -input=false -out=tfplan -var="allowed_cidr=$ALLOWED_CIDR"
         env:
           ALLOWED_CIDR: ${{ secrets.TF_ALLOWED_CIDR || '10.0.0.0/32' }}
+        run: terraform plan -no-color -input=false -out=tfplan -var="allowed_cidr=$ALLOWED_CIDR"
         continue-on-error: true
 
       - name: Post plan to PR
@@ -215,16 +218,20 @@ jobs:
 
       - name: Terraform apply
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action == 'apply'
-
         run: terraform apply -input=false -auto-approve tfplan
 
   # ---------------------------------------------------------------------------
-  # Docker
+  # Docker — builds after integration tests and terraform both complete
   # ---------------------------------------------------------------------------
   docker:
     runs-on: ubuntu-latest
-    needs: [test, integration]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: [integration, terraform]
+    if: |
+      always()
+      && needs.integration.result == 'success'
+      && (needs.terraform.result == 'success' || needs.terraform.result == 'skipped')
+      && github.event_name == 'push'
+      && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/tags/v'))
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -254,3 +261,52 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # Smoke test — validates Docker image starts, Flyway migrates, health is UP
+  # ---------------------------------------------------------------------------
+  smoke:
+    runs-on: ubuntu-latest
+    needs: [docker]
+    if: needs.docker.result == 'success'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ground_control
+          POSTGRES_USER: gc
+          POSTGRES_PASSWORD: gc
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Build image
+        run: docker build -t gc-smoke backend/
+
+      - name: Run image and verify Flyway + health
+        run: |
+          docker run -d --name gc-smoke \
+            --network host \
+            -e GC_DATABASE_URL=jdbc:postgresql://localhost:5432/ground_control \
+            -e GC_DATABASE_USER=gc \
+            -e GC_DATABASE_PASSWORD=gc \
+            gc-smoke
+
+          echo "Waiting for application startup..."
+          for i in $(seq 1 60); do
+            HEALTH=$(curl -sf http://localhost:8000/actuator/health 2>/dev/null) && {
+              echo "Smoke test passed: $HEALTH"
+              exit 0
+            }
+            sleep 2
+          done
+
+          echo "Smoke test failed after 120s"
+          docker logs gc-smoke
+          exit 1
