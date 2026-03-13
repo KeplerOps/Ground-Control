@@ -9,15 +9,16 @@ on:
   workflow_dispatch:
     inputs:
       terraform_action:
-        description: 'Terraform action to perform'
-        required: true
+        description: 'Terraform action (leave empty to skip)'
+        required: false
         type: choice
         options:
+          - ''
           - plan
           - apply
       terraform_directory:
         description: 'Terraform working directory'
-        required: true
+        required: false
         default: 'deploy/terraform/environments/dev'
 
 concurrency:
@@ -160,7 +161,7 @@ jobs:
   terraform:
     runs-on: ubuntu-latest
     needs: [changes]
-    if: needs.changes.outputs.terraform == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.changes.outputs.terraform == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action != '')
     defaults:
       run:
         working-directory: ${{ github.event.inputs.terraform_directory || 'deploy/terraform/environments/dev' }}
@@ -214,6 +215,7 @@ jobs:
 
       - name: Terraform apply
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action == 'apply'
+
         run: terraform apply -input=false -auto-approve tfplan
 
   # ---------------------------------------------------------------------------
