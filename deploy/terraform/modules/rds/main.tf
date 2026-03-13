@@ -29,8 +29,7 @@ resource "aws_db_instance" "this" {
   db_name  = var.database_name
   username = var.database_user
 
-  manage_master_user_password = false
-  password                    = random_password.master.result
+  password = random_password.master.result
 
   parameter_group_name = aws_db_parameter_group.this.name
 

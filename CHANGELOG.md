@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cancels in-progress PR runs on new pushes
 - CI waste: integration tests now depend on unit tests passing (`needs: [build, test]`)
 - Bootstrap S3 lifecycle rule missing required `filter {}` block (future provider error)
+- RDS module: removed `manage_master_user_password = false` (conflicts with `password` in AWS provider ~>5.0)
+- `.gitignore`: added `tfplan` pattern for extensionless Terraform plan files; removed accidentally committed binary plan file
 
 ## [0.32.0] - 2026-03-12
 
