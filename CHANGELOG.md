@@ -38,8 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - CI smoke test job: builds Docker image, runs against fresh PostgreSQL 16,
   verifies Flyway migrations apply and health endpoint returns UP
-- `make deploy-dev`: run Docker image locally against dev RDS (fetches
-  credentials from SSM automatically)
+- `make cloud-db-env`: print export statements for cloud DB credentials
+  (fetches host, username, password from SSM)
+- `make dev-cloud`: start app against cloud RDS (single command)
+- `make cloud-db-ip`: authorize your current IP on the dev database
+  security group
 
 ## [0.32.0] - 2026-03-12
 
