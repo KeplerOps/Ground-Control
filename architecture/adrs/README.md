@@ -31,6 +31,6 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | [012](012-formal-methods-process.md) | Formal Methods Development Process | Accepted |
 | [013](013-java-spring-boot-rewrite.md) | Java/Spring Boot Backend Rewrite | Accepted |
 | [014](014-pluggable-verification-architecture.md) | Pluggable Verification Architecture | Accepted |
-| [015](015-cloud-database-deployment.md) | Cloud Database Deployment | Accepted |
+| [015](015-cloud-database-deployment.md) | Cloud Database Deployment | Withdrawn |
 
 Prior ADRs from the old project frame are archived in `archive/architecture/adrs/`.

@@ -5,13 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.33.1] - 2026-03-13
+## [0.34.0] - 2026-03-13
+
+### Removed
+
+- RDS infrastructure destroyed — ADR-015 withdrawn because RDS does not
+  support Apache AGE, violating ADR-005's single-database commitment
+- Cloud DB Makefile targets (`cloud-db-env`, `dev-cloud`, `cloud-db-ip`)
+- CI terraform job, path detection job, OIDC permissions, workflow_dispatch
+  terraform inputs
+
+### Changed
+
+- ADR-015 status changed from Accepted to Withdrawn
+- CI pipeline simplified: `build → test → integration/verify → docker → smoke`
+  (no terraform dependency)
+- Development defaults to local Docker Compose with `apache/age` image;
+  named volume `gc-postgres-data` provides data durability across rebuilds
 
 ### Fixed
 
 - CI: `docker/build-push-action` SHA had a single-character typo (`d` → `e`)
-  causing the docker job to fail with "action could not be found"; updated to
-  v6.19.2
+  causing the docker job to fail; updated to v6.19.2
 
 ## [0.33.0] - 2026-03-12
 
@@ -21,15 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   S3 backend configuration, provider setup, module composition (networking →
   RDS → secrets), and developer-facing outputs (RDS endpoint, SSM paths)
 - `terraform.tfvars.example` documenting required variables for dev environment
+- CI smoke test job: builds Docker image, runs against fresh PostgreSQL 16,
+  verifies Flyway migrations apply and health endpoint returns UP
 
 ### Changed
 
 - Unified CI/CD pipeline: all jobs flow through a single dependency chain
-  (`build → test → integration → terraform → docker → smoke`) — terraform
-  waits for tests to pass, docker waits for both integration and terraform,
-  smoke test validates the packaged Docker image end-to-end
+  (`build → test → integration → docker → smoke`)
 - Docker images now built on `dev` branch pushes (in addition to `main`/tags)
-  for local deployment against dev RDS
 - SonarCloud is now non-blocking (`continue-on-error: true`); reports quality metrics
   without gating merges
 
@@ -41,16 +55,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bootstrap S3 lifecycle rule missing required `filter {}` block (future provider error)
 - RDS module: removed `manage_master_user_password = false` (conflicts with `password` in AWS provider ~>5.0)
 - `.gitignore`: added `tfplan` pattern for extensionless Terraform plan files; removed accidentally committed binary plan file
-
-### Added
-
-- CI smoke test job: builds Docker image, runs against fresh PostgreSQL 16,
-  verifies Flyway migrations apply and health endpoint returns UP
-- `make cloud-db-env`: print export statements for cloud DB credentials
-  (fetches host, username, password from SSM)
-- `make dev-cloud`: start app against cloud RDS (single command)
-- `make cloud-db-ip`: authorize your current IP on the dev database
-  security group
 
 ## [0.32.0] - 2026-03-12
 
