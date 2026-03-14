@@ -290,6 +290,19 @@ class RequirementServiceTest {
         }
 
         @Test
+        void throwsConflictForDuplicateRelation() {
+            var sourceId = UUID.randomUUID();
+            var targetId = UUID.randomUUID();
+
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(
+                            sourceId, targetId, RelationType.DEPENDS_ON))
+                    .thenReturn(true);
+
+            assertThatThrownBy(() -> service.createRelation(sourceId, targetId, RelationType.DEPENDS_ON))
+                    .isInstanceOf(ConflictException.class);
+        }
+
+        @Test
         void throwsDomainValidationForSelfLoop() {
             var id = UUID.randomUUID();
 

@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.40.0] - 2026-03-14
+## [0.41.0] - 2026-03-13
+
+### Added
+
+- Duplicate relation pre-check in `RequirementService.createRelation()` — returns
+  a clean `ConflictException` instead of letting the DB unique constraint produce
+  an unhandled SQL exception (completes GC-A004 service-layer enforcement)
+- Unit test for duplicate relation rejection (`throwsConflictForDuplicateRelation`)
+- Integration test for duplicate relation rejection end-to-end
+  (`duplicateRelationThrowsConflict`)
+
+## [0.40.0] - 2026-03-13
 
 ### Added
 
@@ -15,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cycle detection or impact analysis
 - Unit tests for SUPERSEDES and RELATED relation creation
 
-## [0.39.0] - 2026-03-14
+## [0.39.0] - 2026-03-13
 
 ### Added
 
@@ -31,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `README.md` rewritten for current implemented state: features, getting
   started, tech stack, architecture, documentation index, project status
 
-## [0.38.0] - 2026-03-14
+## [0.38.0] - 2026-03-13
 
 ### Added
 
@@ -45,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TypeScript + Vite SPA, embedded in Spring Boot, TanStack Query/Table,
   React Flow for dependency graph, shadcn/ui components)
 
-## [0.37.0] - 2026-03-14
+## [0.37.0] - 2026-03-13
 
 ### Added
 
