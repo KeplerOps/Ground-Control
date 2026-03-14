@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.39.0] - 2026-03-14
+
+### Added
+
+- `gc_create_github_issue` MCP tool: creates a GitHub issue from a requirement
+  (via `gh` CLI), formats the issue body with requirement metadata, and
+  auto-creates an IMPLEMENTS traceability link — single command replaces the
+  manual copy-fields → `gh issue create` → `gc_create_traceability_link` workflow
+- `formatIssueBody` and `createGitHubIssue` library functions in MCP server
+- `GH_REPO` env var in `.mcp.json` for default GitHub repository target
+
+### Changed
+
+- `README.md` rewritten for current implemented state: features, getting
+  started, tech stack, architecture, documentation index, project status
+
 ## [0.38.0] - 2026-03-14
 
 ### Added

@@ -1,5 +1,9 @@
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFile = promisify(execFileCb);
 
 // ---------------------------------------------------------------------------
 // Constants (matching Java enums)
@@ -207,4 +211,54 @@ export async function syncGithub(owner, repo) {
   return request("POST", "/api/v1/admin/sync/github", {
     params: { owner, repo },
   });
+}
+
+// ---------------------------------------------------------------------------
+// GitHub issue creation
+// ---------------------------------------------------------------------------
+
+export function formatIssueBody(req, extraBody) {
+  const headerParts = [
+    `**${req.uid}**`,
+    req.requirement_type || "FUNCTIONAL",
+    req.priority || "SHOULD",
+  ];
+  if (req.wave != null) {
+    headerParts.push(`Wave ${req.wave}`);
+  }
+  headerParts.push(req.status || "DRAFT");
+
+  let body = `> ${headerParts.join(" | ")}\n\n## Statement\n\n${req.statement}`;
+
+  if (req.rationale) {
+    body += `\n\n## Rationale\n\n${req.rationale}`;
+  }
+
+  body += `\n\n---\n*Created from Ground Control requirement ${req.uid}*`;
+
+  if (extraBody) {
+    body += `\n\n${extraBody}`;
+  }
+
+  return body;
+}
+
+export async function createGitHubIssue({ title, body, labels, repo }) {
+  const targetRepo = repo || process.env.GH_REPO;
+  const args = ["issue", "create", "--title", title, "--body", body];
+  if (targetRepo) {
+    args.push("--repo", targetRepo);
+  }
+  if (labels && labels.length > 0) {
+    args.push("--label", labels.join(","));
+  }
+
+  const { stdout } = await execFile("gh", args);
+  const url = stdout.trim();
+  const match = url.match(/\/issues\/(\d+)$/);
+  if (!match) {
+    throw new Error(`Could not parse issue number from gh output: ${url}`);
+  }
+  const number = parseInt(match[1], 10);
+  return { url, number };
 }

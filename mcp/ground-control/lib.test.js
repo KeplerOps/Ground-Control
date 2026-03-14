@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildUrl,
   parseErrorBody,
+  formatIssueBody,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -68,6 +69,57 @@ describe("parseErrorBody", () => {
   it("returns raw text for unexpected JSON shape", () => {
     const body = JSON.stringify({ status: 500 });
     assert.equal(parseErrorBody(body), body);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatIssueBody
+// ---------------------------------------------------------------------------
+
+describe("formatIssueBody", () => {
+  it("formats a full requirement with all fields", () => {
+    const req = {
+      uid: "GC-D007",
+      requirement_type: "FUNCTIONAL",
+      priority: "SHOULD",
+      wave: 1,
+      status: "DRAFT",
+      statement: "The system shall create GitHub issues.",
+      rationale: "Reduces manual copy-paste during wave activation.",
+    };
+    const body = formatIssueBody(req);
+    assert.ok(body.includes("> **GC-D007** | FUNCTIONAL | SHOULD | Wave 1 | DRAFT"));
+    assert.ok(body.includes("## Statement"));
+    assert.ok(body.includes("The system shall create GitHub issues."));
+    assert.ok(body.includes("## Rationale"));
+    assert.ok(body.includes("Reduces manual copy-paste during wave activation."));
+    assert.ok(body.includes("*Created from Ground Control requirement GC-D007*"));
+  });
+
+  it("omits rationale and wave when null", () => {
+    const req = {
+      uid: "GC-A001",
+      requirement_type: "CONSTRAINT",
+      priority: "MUST",
+      wave: null,
+      status: "ACTIVE",
+      statement: "Constraints apply.",
+      rationale: null,
+    };
+    const body = formatIssueBody(req);
+    assert.ok(body.includes("> **GC-A001** | CONSTRAINT | MUST | ACTIVE"));
+    assert.ok(!body.includes("Wave"));
+    assert.ok(!body.includes("## Rationale"));
+  });
+
+  it("appends extra body text", () => {
+    const req = {
+      uid: "GC-T001",
+      statement: "Test requirement.",
+    };
+    const body = formatIssueBody(req, "## Acceptance Criteria\n- [ ] Done");
+    assert.ok(body.includes("## Acceptance Criteria"));
+    assert.ok(body.includes("- [ ] Done"));
   });
 });
 
