@@ -14,33 +14,43 @@ repos:
       - id: check-yaml
         args: [--unsafe]
       - id: check-json
-      - id: check-toml
       - id: check-added-large-files
         args: [--maxkb=500]
       - id: check-merge-conflict
       - id: detect-private-key
-        exclude: ^tests/
+        exclude: ^backend/src/test/
 
-  # Python linting and formatting
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.10
+  # Java formatting (Spotless via Gradle — auto-fix mode)
+  - repo: local
     hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
+      - id: spotless
+        name: spotless (Java auto-format)
+        entry: bash -c 'cd backend && ./gradlew spotlessApply -q'
+        language: system
+        files: ^backend/.*\.java$
+        pass_filenames: false
 
-  # Python type checking
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0
+  # Terraform formatting and validation
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.105.0
     hooks:
-      - id: mypy
-        additional_dependencies: []
-        args: [--strict, --ignore-missing-imports]
-        files: ^backend/
+      - id: terraform_fmt
+        files: ^deploy/terraform/
+      - id: terraform_validate
+        files: ^deploy/terraform/
 
   # =============================================================================
   # STAGE 2: Security
   # =============================================================================
+
+  # IaC security (Terraform)
+  - repo: https://github.com/bridgecrewio/checkov
+    rev: 3.2.508
+    hooks:
+      - id: checkov
+        files: ^deploy/terraform/
+        args:
+          [--quiet, --compact, --directory, deploy/terraform/, --soft-fail]
 
   # Secrets detection
   - repo: https://github.com/gitleaks/gitleaks
@@ -49,14 +59,21 @@ repos:
       - id: gitleaks
 
   # =============================================================================
-  # STAGE 3: Tests (slowest — run last)
+  # STAGE 3: Full verification (CI-equivalent)
   # =============================================================================
 
   - repo: local
     hooks:
-      - id: pytest
-        name: pytest (backend)
-        entry: bash -c 'cd backend && python -m pytest -x -q 2>/dev/null || true'
+      - id: gradle-check
+        name: gradle check (build + test + static analysis + coverage)
+        entry: bash -c 'cd backend && ./gradlew check -q'
         language: system
         files: ^backend/
+        pass_filenames: false
+
+      - id: openjml-esc
+        name: openjml ESC (formal verification of JML contracts)
+        entry: bash -c 'cd backend && ./gradlew openjmlEsc -q'
+        language: system
+        files: ^backend/src/main/java/com/keplerops/groundcontrol/domain/requirements/state/
         pass_filenames: false

@@ -1,350 +1,305 @@
-# Ground Control — Coding Standards & Development Practices
+# Ground Control — Coding Standards
 
-**Version:** 1.0.0
+These are mandatory rules. Follow them exactly when writing or modifying code.
 
----
+## Development Workflow
 
-## 1. Project Structure
+Ground Control uses a phased approach to formal methods rigor. During **pre-alpha** (current), the priority is velocity — get the differentiating features built. The bar rises at beta.
 
+### Pre-alpha workflow
+
+1. **Write code.** Implementation first. Get it working.
+2. **Add JML contracts where they prevent silent corruption** — state transitions, security boundaries, cross-field invariants. Not on every method.
+3. **Write one test per significant behavior.** No two-tests-per-contract requirement. No mandatory violation tests for simple CRUD.
+4. **Run `make rapid`.** Format + compile in ~3-5s. Tests run in CI.
+
+### Assurance levels
+
+| Level | Name | When to use (pre-alpha) | What you must produce |
+|-------|------|-------------------------|----------------------|
+| L0 | Standard | **Default.** Everything unless escalated below | Working code + one test per significant behavior |
+| L1 | Contracted | State transitions, security boundaries, methods where invalid input causes silent data corruption | JML contracts + tests for the contracted behavior |
+| L2 | Property-Verified | State machines, DAG operations | L1 + jqwik property tests |
+| L3 | Formally Specified | Future | L2 + KeY/Lean proofs |
+
+**When in doubt, use L0.** Ship features. The bar rises at beta.
+
+### Decision rules
+
+| If you are writing... | Level |
+|-----------------------|-------|
+| A state machine, transition table, or workflow | **L2** |
+| DAG operations (cycle detection, topological sort, reachability) | **L2** |
+| Security boundary logic (auth checks, permission guards) | **L1** |
+| A domain model method where invalid input causes silent data corruption | **L1** |
+| Everything else | **L0** |
+
+### JML contracts (when writing L1+ code)
+
+JML annotations use block comment syntax (`/*@ @*/`). Do not use `// @` — it is not valid JML and OpenJML will not parse it.
+
+```java
+/*@ requires newStatus != null;
+  @ requires status.canTransitionTo(newStatus);
+  @ ensures status == newStatus; @*/
+public void transitionStatus(Status newStatus) { ... }
 ```
-Ground-Control/
-├── backend/
-│   └── src/ground_control/
-│       ├── api/              # Route handlers only. No business logic.
-│       ├── domain/           # Entities, value objects, service interfaces, use cases
-│       ├── infrastructure/   # External adapters: S3 client, Redis, external APIs
-│       ├── schemas/          # Pydantic request/response models (shared across API layer)
-│       ├── middleware/       # Tenant resolution, auth, request-id, logging context
-│       ├── events/           # Domain event bus, event types, handlers
-│       ├── exceptions/       # Exception hierarchy (shared across all layers)
-│       ├── logging/          # Structured logging setup (shared across all layers)
-│       ├── settings/          # Django settings (base, dev, prod, test)
-│       ├── urls.py            # Root URL config (django-ninja API)
-│       ├── asgi.py            # ASGI entry point
-│       └── wsgi.py            # WSGI entry point
-│   ├── tests/
-│   └── manage.py              # Django management script
-├── frontend/
-├── sdks/
-├── plugins/
-├── proofs/                   # Coq/Rocq formal proofs
-├── deploy/
-└── docs/
+
+For method modifiers (`pure`, `non_null`), use inline annotations:
+
+```java
+public /*@ pure @*/ Set<Status> validTargets() { ... }
 ```
 
-## 2. Dependency Rule (Clean Architecture)
+- `/*@ requires @*/` for preconditions
+- `/*@ ensures @*/` for postconditions
+- `/*@ public invariant @*/` for class invariants
+- `/*@ pure @*/` on methods called from JML expressions
+- `/*@ spec_public @*/` on private fields referenced in public specs
+- Keep conditions simple and side-effect-free
+- Files with JML annotations need `@SuppressWarnings("java:S125")` to suppress SonarQube false positives (except files in ESC scope that use only inline annotations)
 
-The most important rule in the codebase:
+### Post-alpha target
+
+At beta, the default rises to L1. Every L1+ public method gets contracts, every contract gets a happy-path and violation test, and the full SDD loop (Classify → Spec → Test → Code → Verify) becomes mandatory. See ADR-012 for the full rationale.
+
+## Architecture Rules
+
+These rules are enforced by ArchUnit tests in `src/test/java/.../architecture/ArchitectureTest.java`. Violations fail the build.
+
+### Dependency rule
 
 ```
 api/ → domain/ ← infrastructure/
-         ↑
-     schemas/ (shared DTOs)
-     exceptions/ (shared error types)
-     logging/ (shared logging)
-     events/ (shared event types)
 ```
 
-- `domain/` has ZERO imports from `api/`, `infrastructure/`, Django views, or any framework (except `django.db.models` for model definitions).
-- `api/` depends on `domain/` (use cases) and `schemas/` (request/response models). Never imports from `infrastructure/`.
-- `infrastructure/` implements interfaces defined in `domain/`. Depends on `domain/` and external libraries (boto3, redis, etc.).
-- `schemas/`, `exceptions/`, `logging/`, `events/` are cross-cutting — importable by any layer.
-- `config.py` is importable by any layer. It's the single source of truth for all configuration.
+| Rule | Meaning | Consequence of violation |
+|------|---------|------------------------|
+| `domain/` must not import `api/` | Domain logic is framework-independent | Build fails |
+| `domain/` must not import `infrastructure/` | Domain logic has no external adapter dependencies | Build fails |
+| `api/` must not import `infrastructure/` | Controllers talk to domain, not adapters | Build fails |
+| All exceptions must extend `GroundControlException` | Uniform error handling | Build fails |
 
-This is enforced by `import-linter` in CI. Violations fail the build.
+### When to add new ArchUnit rules
 
-## 3. Cross-Cutting Concerns
+Add a new `@ArchTest` rule to `ArchitectureTest.java` whenever you:
+- Add a new top-level package (enforce its dependency constraints)
+- Introduce a naming convention that must hold project-wide
+- Add a new annotation that must only appear in specific layers
+- Discover a dependency violation pattern that could recur
 
-These must be used from day one, in every module. Not "added later."
+ArchUnit rules are JUnit 5 tests. They run with `./gradlew test`. No separate tooling.
 
-### 3.1 Exceptions
+## Package Structure
 
-All exceptions inherit from a base hierarchy in `exceptions/`:
-
-```python
-# exceptions/base.py
-class GroundControlError(Exception):
-    """Base for all application exceptions."""
-    def __init__(self, message: str, code: str | None = None):
-        self.message = message
-        self.code = code
-        super().__init__(message)
-
-class NotFoundError(GroundControlError):
-    """Entity not found."""
-
-class ValidationError(GroundControlError):
-    """Business rule validation failure."""
-
-class AuthorizationError(GroundControlError):
-    """Insufficient permissions."""
-
-class ConflictError(GroundControlError):
-    """Duplicate or optimistic lock failure."""
-
-class ExternalServiceError(GroundControlError):
-    """Failure in an external dependency (S3, Redis, IdP)."""
+```
+backend/src/main/java/com/keplerops/groundcontrol/
+├── domain/           # Business logic. No Spring web imports.
+│   └── requirements/
+│       ├── model/        # JPA entities with JML contracts
+│       ├── state/        # Enums (Status, RequirementType, Priority, RelationType)
+│       ├── service/      # Domain services (write-owners of entities)
+│       └── repository/   # Spring Data JPA interfaces
+│   └── exception/       # Domain exception hierarchy (shared across all domain areas)
+├── api/              # REST controllers only. Thin handlers that delegate to services.
+├── infrastructure/   # External adapters (AGE graph, external APIs)
+└── shared/           # Cross-cutting concerns (logging filters, utilities)
 ```
 
-Rules:
-- Domain layer raises `GroundControlError` subclasses. Never `HTTPException`.
-- API layer maps exceptions to HTTP responses via a single exception handler middleware.
-- Never catch `Exception` broadly. Catch specific types.
-- Never swallow exceptions silently. Log and re-raise, or handle explicitly.
-- External library exceptions (boto3, redis, etc.) are caught in `infrastructure/` and wrapped in `GroundControlError` subclasses.
+**Placement rules:**
+- New domain concept? Create a new sub-package under `domain/` following the same structure.
+- New REST endpoint? Add a controller in `api/`. It must only call domain services.
+- New external integration? Add an adapter in `infrastructure/`. Domain defines the interface.
+- New cross-cutting concern? Add to `shared/`.
 
-### 3.2 Structured Logging
+## Exceptions
 
-All logging uses `structlog` with JSON output. Every log line includes context.
+All application exceptions must extend `GroundControlException`. This is enforced by ArchUnit.
 
-```python
-# In any module:
-import structlog
-logger = structlog.get_logger()
+| Exception | `error_code` | HTTP Status | When to throw |
+|-----------|-------------|-------------|---------------|
+| `NotFoundException` | `not_found` | 404 | Entity lookup returns empty |
+| `DomainValidationException` | `validation_error` | 422 | Business rule violation, invalid state transition |
+| `AuthenticationException` | `authentication_error` | 401 | Missing or invalid credentials |
+| `AuthorizationException` | `authorization_error` | 403 | Authenticated but not permitted |
+| `ConflictException` | `conflict` | 409 | Duplicate key, optimistic lock failure |
+| `GroundControlException` | `ground_control_error` | 500 | Fallback for unclassified domain errors |
 
-logger.info("risk_created", risk_id=risk.id, tenant_id=tenant_id, actor_id=user.id)
+**Rules:**
+- Domain layer throws these exceptions. Never throw `ResponseStatusException` or Spring HTTP exceptions from domain code.
+- `GlobalExceptionHandler` maps them to the `{"error": {"code", "message", "detail"}}` JSON envelope. Do not create additional exception handlers.
+- `DomainValidationException` accepts a `Map<String, Object> detail` for structured error context. Use it.
+- Never catch `Exception` broadly. Catch the specific exception you expect.
+- Wrap external library exceptions in `infrastructure/` — domain code must never leak third-party exception types.
+
+## JML Contract Reference
+
+JML annotations use block comment syntax (`/*@ @*/`). Do not use `// @` — it is not valid JML and OpenJML will not parse it.
+
+```java
+// Class invariant — must hold after every public method returns
+/*@ public invariant archivedAt == null || status == Status.ARCHIVED; @*/
+
+// Precondition — must be true when the method is called
+// Postcondition — must be true when the method returns
+/*@ requires newStatus != null;
+  @ requires status.canTransitionTo(newStatus);
+  @ ensures status == newStatus; @*/
+
+// Inline non-null annotation
+public void transitionStatus(/*@ non_null @*/ Status newStatus) { ... }
 ```
 
-Rules:
-- Use semantic event names, not sentences: `"risk_created"` not `"A new risk was created"`.
-- Always include `tenant_id` and `actor_id` when available (bound via middleware context).
-- Never log secrets, tokens, passwords, or PII. Scrub before logging.
-- Never use `print()`. Ever.
-- Log at appropriate levels: `debug` for developer detail, `info` for business events, `warning` for recoverable issues, `error` for failures requiring attention.
+**When to write JML:**
+- Every L1+ public method gets `requires` and `ensures`. No exceptions.
+- Every L1+ class with cross-field constraints gets a `public invariant`
+- Do NOT write JML on `@Configuration` classes, records with no methods, filters, or test code
 
-### 3.3 Audit Logging
+## OpenJML ESC Scoping
 
-Every state change to a domain entity MUST be audit-logged. This is non-negotiable.
+OpenJML Extended Static Checking (ESC) runs the Z3 SMT solver to formally prove JML contracts hold. However, OpenJML's bundled specs for `java.lang.CharSequence` and `java.lang.String` have invariant bugs that produce false positives when verifying classes that pass `String` parameters through constructors. JPA entities also fail ESC due to the no-arg constructor required by Hibernate (all fields are `null` after construction, triggering `NullField` violations).
 
-```python
-# Called from use cases, not from API routes or repositories
-await audit_log.record(
-    tenant_id=tenant_id,
-    actor_id=actor_id,
-    actor_type="user",  # or "agent", "system"
-    action="update",
-    resource_type="risk",
-    resource_id=risk.id,
-    changes={"status": {"old": "open", "new": "mitigated"}},
-)
+### What gets L2 ESC verification
+
+ESC runs on **pure logic classes** with no String constructor parameters and no framework annotations:
+- `domain/requirements/state/` — enums, state machines, transition tables
+- Future pure domain logic classes that follow the same pattern
+
+### What ESC cannot verify (and why)
+
+- `domain/requirements/model/` — JPA entities (Hibernate no-arg constructor produces `NullField` false positives)
+- `domain/exception/` — exception hierarchy (OpenJML `CharSequence.jml` spec bug on String constructors)
+- `domain/requirements/service/` — services that take String parameters
+
+These classes keep their JML contracts as documentation. Contracts are enforced by tests, not by ESC.
+
+### Design guidelines for ESC-verifiable code
+
+When writing new domain logic, prefer designs that isolate pure logic from String-heavy construction:
+
+- **Prefer enums over String constants.** Enums verify cleanly; String constants do not.
+- **Extract pure logic into separate classes/methods** that operate on enums, numbers, or domain types rather than Strings. These can be ESC-verified independently.
+- **Do not distort code to avoid Strings.** If a method naturally takes a `String`, keep it. The cost of a readable API is worth more than an ESC proof on an awkward abstraction.
+- **State machines, validation rules, and computations** should live in classes without String constructors so they remain ESC-eligible.
+
+## Testing
+
+### Test organization
+
+```
+src/test/java/com/keplerops/groundcontrol/
+├── unit/domain/       # No DB, no Spring context. Fast. Run always.
+├── integration/       # Testcontainers PostgreSQL. Slow. Run in CI.
+└── architecture/      # ArchUnit rules. Fast. Run always.
 ```
 
-Rules:
-- Audit logging is part of the use case, not an afterthought.
-- The audit log is append-only. No updates. No deletes.
-- Every audit entry includes the hash of the previous entry (tamper detection chain).
-- Audit log writes happen in the same transaction as the state change.
+### Test requirements by assurance level (pre-alpha)
 
-### 3.4 Schemas (Pydantic)
+| Level | Required tests |
+|-------|---------------|
+| L0 | One test per significant behavior. Skip trivial getters/setters. |
+| L1 | L0 + at least one test per JML contract |
+| L2 | L1 + jqwik `@Property` tests (tagged `@Tag("slow")`, skippable locally) |
+| L3 | Future |
 
-All request/response models live in `schemas/`. They are the contract between API and domain.
+Integration tests: write smoke tests to verify the feature works end-to-end. Exhaustive endpoint coverage is a post-alpha concern.
 
-```python
-# schemas/risk.py
-class RiskCreate(BaseModel):
-    title: str
-    description: str | None = None
-    category: str
-    inherent_likelihood: int = Field(ge=1, le=5)
-    inherent_impact: int = Field(ge=1, le=5)
-    owner_id: UUID | None = None
+### Naming and style
 
-class RiskRead(BaseModel):
-    id: UUID
-    ref_id: str
-    title: str
-    # ... all fields
-    created_at: datetime
-    updated_at: datetime
+- Test class: `FooTest` for unit, `FooIntegrationTest` for integration
+- Test method: describes behavior, not implementation — `archiveFromDraftFails`, not `testArchiveMethod`
+- Use `@Nested` classes to group related tests: `Defaults`, `StatusTransitions`, `Archive`
+- Use AssertJ for assertions: `assertThat(x).isEqualTo(y)`, not JUnit `assertEquals`
+- Use `assertThatThrownBy(() -> ...).isInstanceOf(...)` for exception tests
 
-    model_config = ConfigDict(from_attributes=True)
+### jqwik property tests
+
+Tag with `@Tag("slow")`. Provide an `@Provide` method for custom arbitraries.
+
+```java
+@Tag("slow")
+class TransitionPropertyTest {
+
+    @Provide
+    Arbitrary<Status> statuses() {
+        return Arbitraries.of(Status.values());
+    }
+
+    @Property
+    void validTransitionAlwaysChangesStatus(
+            @ForAll("statuses") Status source,
+            @ForAll("statuses") Status target) {
+        Assume.that(source.canTransitionTo(target));
+        // ... assert the transition works
+    }
+}
 ```
-
-Rules:
-- One file per entity in `schemas/`: `risk.py`, `control.py`, `assessment.py`, etc.
-- Every API endpoint uses explicit `Create`, `Read`, `Update` schema variants. No reuse of the same model for input and output.
-- Validation (field ranges, patterns, enums) lives in the schema, not in the use case.
-- Use `Field()` for constraints. Use `Annotated` types for reusable patterns.
-- Never expose Django model instances directly in API responses.
-
-### 3.5 Tenant Context
-
-Every request carries a tenant context, set by middleware:
-
-```python
-# Accessible anywhere via context var
-from ground_control.middleware.tenant import get_current_tenant_id
-
-tenant_id = get_current_tenant_id()
-```
-
-Rules:
-- Every database query filters by `tenant_id`. No exceptions.
-- PostgreSQL Row-Level Security (RLS) is the safety net, not the primary mechanism. Application code must also filter.
-- Tests must verify that cross-tenant data leakage is impossible.
-
-### 3.6 Request Context
-
-Every request gets a unique `request_id` (set by middleware). It propagates through:
-- All log entries (`structlog` context binding)
-- All audit log entries
-- Error responses (returned to client for support correlation)
-
-## 4. Domain Layer Rules
-
-- Domain entities are Django models (in `domain/`) with business logic. Infrastructure adapters wrap external services.
-- Use cases are single-purpose functions or classes. One use case per business operation.
-- Use case signature: takes primitive types or domain entities, returns domain entities or DTOs. Never takes a `Request` object or returns a `Response`.
-- Repository interfaces are abstract classes defined in `domain/`. Implementations live in `infrastructure/`.
-- Domain services contain business logic that spans multiple entities.
-- The domain layer is independently testable with no database, no HTTP, no external services.
-
-```python
-# domain/services/risk_service.py
-class RiskService:
-    def __init__(self, risk_repo: RiskRepository, audit_log: AuditLog):
-        self.risk_repo = risk_repo
-        self.audit_log = audit_log
-
-    async def create_risk(self, tenant_id: UUID, actor_id: UUID, data: RiskCreate) -> Risk:
-        risk = Risk(tenant_id=tenant_id, **data.model_dump())
-        risk = await self.risk_repo.save(risk)
-        await self.audit_log.record(...)
-        await self.event_bus.publish(RiskCreated(risk_id=risk.id, tenant_id=tenant_id))
-        return risk
-```
-
-## 5. API Layer Rules
-
-- Route handlers are thin. They parse the request, call a use case, and format the response.
-- No business logic in route handlers. If you're writing an `if` that isn't about HTTP concerns, it belongs in the domain layer.
-- Use django-ninja's dependency injection for services, repos, and current user.
-- All routes return Pydantic schemas, never dicts or Django model instances.
-
-```python
-# api/v1/risks.py
-@router.post("/risks", response_model=RiskRead, status_code=201)
-async def create_risk(
-    data: RiskCreate,
-    risk_service: RiskService = Depends(get_risk_service),
-    current_user: User = Depends(get_current_user),
-):
-    risk = await risk_service.create_risk(
-        tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
-        data=data,
-    )
-    return risk
-```
-
-## 6. Infrastructure Layer Rules
-
-- Repository implementations use Django ORM querysets.
-- Every repository method takes `tenant_id` as a parameter (defense in depth alongside RLS).
-- External service clients (S3, Redis, SMTP) are wrapped in thin adapter classes.
-- Adapter classes implement interfaces from `domain/`. They are swappable in tests.
-- Never import infrastructure modules from `domain/` or `api/`.
-
-## 7. Testing
-
-### Test Structure
-```
-tests/
-├── unit/            # Domain logic only. No DB, no HTTP. Fast.
-│   ├── domain/
-│   └── schemas/
-├── integration/     # With DB and real services. Use test containers.
-│   ├── api/
-│   └── infrastructure/
-└── e2e/             # Playwright. Full stack via Docker Compose.
-```
-
-### Rules
-- Unit tests cover domain services and entities. They use fakes/stubs for repositories.
-- Integration tests cover API endpoints and repository implementations. They use a real PostgreSQL instance (testcontainers).
-- Every API endpoint has at least one integration test for success and one for the primary error case.
-- Every domain service method has unit tests for its business rules.
-- Tests are independent. No shared mutable state. Each test sets up its own data.
-- Use `pytest` fixtures for dependency setup. Use `factory_boy` or simple factory functions for test data.
-- Test names describe behavior: `test_create_risk_fails_when_likelihood_out_of_range`.
 
 ### Coverage
-- Minimum 80% line coverage for `domain/`. No exceptions.
-- Minimum 70% line coverage for `api/` and `infrastructure/`.
-- Coverage is measured in CI and reported. Coverage drops fail the build.
 
-## 8. Error Handling Strategy
+- Pre-alpha: 30% minimum (current JaCoCo threshold). Will increase as the platform matures.
+- Post-alpha targets: domain 80%, API/infrastructure 70%.
 
-```
-Layer           | Catches                        | Raises
-----------------|-------------------------------|---------------------------
-infrastructure/ | boto3, redis-py, external APIs | GroundControlError subtypes
-domain/         | Nothing (or domain errors)     | GroundControlError subtypes
-api/            | GroundControlError subtypes    | HTTPException (via handler)
-middleware      | All unhandled exceptions        | 500 with request_id
-```
+## Logging
 
-The exception handler middleware maps exceptions to HTTP:
-```python
-NotFoundError      → 404
-ValidationError    → 422
-AuthorizationError → 403
-ConflictError      → 409
-ExternalServiceError → 502
-GroundControlError → 500 (catch-all)
+Use SLF4J. Never `System.out.println()`.
+
+```java
+private static final Logger log = LoggerFactory.getLogger(RequirementService.class);
+
+// Semantic event name, structured key-value pairs
+log.info("requirement_created: uid={}", requirement.getUid());
 ```
 
-Every error response includes `request_id` for correlation.
+**Rules:**
+- Use semantic event names: `requirement_created`, `status_changed`, not `"Created a new requirement"`
+- Never log secrets, tokens, passwords, or PII
+- `RequestLoggingFilter` auto-binds `request_id` to MDC — do not set it manually
+- Production uses JSON output (Logstash Encoder). Dev uses console. Selected by Spring profile.
 
-## 9. Code Style
+## Java Style
 
-### Python
-- Formatter: `ruff format`
-- Linter: `ruff check`
-- Type checker: `mypy --strict`
-- All functions have type annotations. No `Any` unless unavoidable (and commented why).
-- Line length: 100 characters.
-- Imports: sorted by `ruff` (isort-compatible).
-- Docstrings: only on public API boundaries (use case functions, service classes). Not on every method. Code should be self-explanatory.
+- Formatting: Spotless + Palantir Java Format. Run `./gradlew spotlessApply` before committing.
+- Line length: 120 (Palantir default). Do not override.
+- Javadoc: on public API boundaries only. Do not add javadoc to private methods or obvious code.
+- No `System.out.println()`, no `System.err.println()`.
+- Use records for DTOs and value objects: `RequirementRequest`, `RequirementResponse`, `ErrorResponse`.
+- Use `var` for local variables when the type is obvious from the right-hand side.
+- Use `sealed` classes/interfaces when a type hierarchy is closed.
 
-### TypeScript
-- Formatter/Linter: `biome`
-- Type checker: `tsc --strict`
-- No `any` types. Use `unknown` and narrow.
+### Naming
 
-## 10. Git & CI
+| Element | Convention | Example |
+|---------|-----------|---------|
+| Packages | `lowercase` | `requirements` |
+| Classes | `PascalCase` | `RequirementService` |
+| Methods | `camelCase` | `createRequirement()` |
+| Constants | `UPPER_SNAKE_CASE` | `MAX_RETRY_COUNT` |
+| Private fields | `camelCase` | `requirementType` |
+| DTOs | Records | `RequirementRequest` |
+| Test classes | `FooTest` / `FooIntegrationTest` | `RequirementTest` |
 
-- All code goes through PR. No direct push to `main` or `dev`.
-- PRs require: passing CI (lint + typecheck + tests), no coverage regression.
-- Commit messages: imperative mood, concise. `Add risk scoring engine` not `Added risk scoring engine` or `This commit adds...`
-- CI pipeline runs: `ruff check` → `ruff format --check` → `mypy` → `pytest` → `import-linter` → coverage report.
-- `import-linter` enforces the dependency rule. If `domain/` imports from `infrastructure/`, CI fails.
+## Error Responses
 
-## 11. Formal Methods
+All error responses use this envelope. Do not invent new formats.
 
-Coq/Rocq proofs live in `proofs/` and verify critical invariants that testing alone cannot guarantee:
-
-### What gets proved
-- **Audit log integrity**: The hash chain is append-only and tamper-evident.
-- **RBAC/ABAC policy evaluation**: Permission checks are correct and complete — no privilege escalation paths exist.
-- **State machine transitions**: Entity lifecycle states (finding, assessment, remediation) can only reach valid configurations. No illegal state transitions are possible.
-- **Tenant isolation**: Query construction guarantees no cross-tenant data leakage.
-
-### What does NOT get proved
-- CRUD operations, API routing, UI components, serialization — standard testing is sufficient.
-
-### Structure
-```
-proofs/
-├── audit_log/          # Hash chain integrity, append-only guarantees
-├── authorization/      # RBAC/ABAC policy correctness
-├── state_machines/     # Lifecycle transition validity
-├── tenant_isolation/   # Query isolation guarantees
-└── README.md           # How to build and verify proofs
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "Requirement REQ-42 not found",
+    "detail": null
+  }
+}
 ```
 
-### Integration
-- Proofs are checked in CI (Coq compiler verifies them).
-- When the corresponding domain logic changes, the proof must be updated to match.
-- Proofs reference the domain types they verify (via comments/documentation, not code extraction — the proofs model the logic, they don't compile to Python).
-- Development uses rocq-mcp (Model Context Protocol server for Rocq) for interactive proof writing, type checking, and tactic feedback. See issue #006b for setup.
+- `code`: machine-readable, matches exception's `errorCode`
+- `message`: human-readable description
+- `detail`: optional `Map<String, Object>` with structured context (e.g., `{"current_status": "DRAFT", "target_status": "ARCHIVED"}`)
+
+## Git & CI
+
+- All code goes through PR targeting `dev`. No direct push to `main` or `dev`.
+- PRs require: `./gradlew check` passes (build + spotlessCheck + test + jacocoTestReport).
+- Commit messages: imperative mood. `Add risk scoring engine` not `Added risk scoring engine`.
+- Pre-commit hooks run file checks + gitleaks + Spotless auto-format + `./gradlew check` (full CI-equivalent: build + tests + static analysis + coverage) + `./gradlew openjmlEsc` (formal verification of JML contracts in ESC scope) + Terraform fmt/validate + Checkov IaC security scanning (on `deploy/terraform/`). Do not bypass with `--no-verify`.

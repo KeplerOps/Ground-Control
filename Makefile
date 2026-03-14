@@ -1,43 +1,90 @@
-.PHONY: install lint format test dev clean
+.PHONY: rapid build test test-cov format lint check integration verify dev clean up down docker-build smoke
 
-# Use uv if available, fall back to pip
-UV := $(shell command -v uv 2>/dev/null)
-ifdef UV
-    PIP_INSTALL = uv pip install
-    VENV_CREATE = uv venv
-else
-    PIP_INSTALL = pip install
-    VENV_CREATE = python3 -m venv
-endif
+# --- Rapid dev loop (< 5s) ---
 
-install: ## Create venv and install dependencies
-	cd backend && $(VENV_CREATE) .venv && \
-	. .venv/bin/activate && \
-	$(PIP_INSTALL) -e ".[dev]"
+rapid: ## Format + compile, no tests or static analysis
+	cd backend && ./gradlew spotlessApply compileJava -Pquick
 
-lint: ## Run ruff check + mypy
-	cd backend && ruff check src/ tests/
-	cd backend && mypy src/
+# --- Standard ---
 
-format: ## Run ruff format
-	cd backend && ruff format src/ tests/
+build: ## Build the project (no tests)
+	cd backend && ./gradlew build -x test -Pquick
 
-test: ## Run pytest
-	cd backend && pytest
+test: ## Run unit tests (no static analysis)
+	cd backend && ./gradlew test -Pquick
 
-test-cov: ## Run pytest with coverage
-	cd backend && pytest --cov=ground_control --cov-report=term-missing
+test-cov: ## Run tests with coverage report
+	cd backend && ./gradlew test jacocoTestReport
 
-dev: ## Start development server
-	cd backend && uvicorn ground_control.main:app --reload --host 0.0.0.0 --port 8000
+format: ## Format code with Spotless
+	cd backend && ./gradlew spotlessApply
 
-clean: ## Remove build artifacts and caches
-	find backend -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find backend -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
-	find backend -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true
-	find backend -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
-	find backend -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
-	rm -rf backend/.venv
+lint: ## Check formatting
+	cd backend && ./gradlew spotlessCheck
+
+# --- Full verification (CI-equivalent) ---
+
+check: ## Full build + tests + static analysis + coverage
+	cd backend && ./gradlew check
+
+integration: ## Integration tests (Testcontainers)
+	cd backend && ./gradlew integrationTest
+
+verify: ## Full CI-equivalent verification
+	cd backend && ./gradlew check integrationTest openjmlEsc
+
+# --- Infrastructure ---
+
+dev: ## Start development server (loads .env)
+	set -a && [ -f .env ] && . ./.env && set +a && cd backend && ./gradlew bootRun
+
+up: ## Start Docker Compose services (PostgreSQL, Redis)
+	docker compose up -d
+
+down: ## Stop Docker Compose services
+	docker compose down
+
+docker-build: ## Build backend Docker image
+	docker build -t ghcr.io/keplerops/ground-control:latest backend/
+
+smoke: docker-build ## Build Docker image and verify Flyway + health
+	@echo "Starting smoke test..."
+	@docker rm -f gc-smoke-db gc-smoke 2>/dev/null || true
+	@docker run -d --name gc-smoke-db \
+		-e POSTGRES_DB=ground_control \
+		-e POSTGRES_USER=gc \
+		-e POSTGRES_PASSWORD=gc \
+		-p 5433:5432 \
+		--health-cmd "pg_isready -U gc -d ground_control" \
+		--health-interval 2s --health-timeout 5s --health-retries 10 \
+		postgres:16
+	@echo "Waiting for database..."
+	@for i in $$(seq 1 30); do \
+		docker inspect --format='{{.State.Health.Status}}' gc-smoke-db 2>/dev/null | grep -q healthy && break; \
+		sleep 1; \
+	done
+	@docker run -d --name gc-smoke \
+		--network host \
+		-e GC_DATABASE_URL=jdbc:postgresql://localhost:5433/ground_control \
+		-e GC_DATABASE_USER=gc \
+		-e GC_DATABASE_PASSWORD=gc \
+		ghcr.io/keplerops/ground-control:latest
+	@echo "Waiting for application startup..."
+	@PASS=false; for i in $$(seq 1 60); do \
+		HEALTH=$$(curl -sf http://localhost:8000/actuator/health 2>/dev/null) && { \
+			echo "Smoke test passed: $$HEALTH"; PASS=true; break; \
+		}; \
+		sleep 2; \
+	done; \
+	if [ "$$PASS" != "true" ]; then \
+		echo "Smoke test failed after 120s"; \
+		docker logs gc-smoke; \
+	fi; \
+	docker rm -f gc-smoke-db gc-smoke 2>/dev/null || true; \
+	[ "$$PASS" = "true" ]
+
+clean: ## Remove build artifacts
+	cd backend && ./gradlew clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \

@@ -173,6 +173,16 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Java / Gradle
+.gradle/
+build/
+*.class
+*.jar
+!**/gradle/wrapper/gradle-wrapper.jar
+hs_err_pid*
+replay_pid*
+.jqwik-database
+
 # IDE
 .vscode
 .VSCodeCounter
@@ -200,5 +210,26 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Archive tool caches/output
+archive/tools/strictdoc/output/
+archive/tools/issue-graph/.issue_cache.json
+archive/tools/issue-graph/graph.json
+
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+.terraform/
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfvars
+!*.tfvars.example
+
 # Local files
 tickets
+archive/

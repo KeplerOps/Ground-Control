@@ -22,13 +22,15 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | ADR | Title | Status |
 |-----|-------|--------|
 | [000](000-template.md) | ADR Template | — |
-| [001](001-python-fastapi-backend.md) | Python 3.12+ with FastAPI for Backend | Superseded by ADR-010 |
-| [002](002-postgresql-primary-database.md) | PostgreSQL 16+ as Primary Database | Accepted |
-| [003](003-api-first-design.md) | API-First Design (REST) | Accepted |
-| [004](004-plugin-architecture.md) | Plugin Architecture for Extensibility | Accepted |
-| [005](005-event-driven-architecture.md) | Event-Driven Architecture with Domain Events | Accepted |
-| [006](006-multi-tenancy-strategy.md) | Multi-Tenancy Strategy (Shared Schema Default) | Accepted |
-| [007](007-agent-first-design.md) | Agent-First Design (AI Agents as First-Class Actors) | Accepted |
-| [008](008-clean-architecture.md) | Clean Architecture (API / Domain / Infrastructure) | Accepted |
-| [009](009-coding-standards.md) | Coding Standards and Tooling | Accepted |
-| [010](010-evaluate-django-framework.md) | Switch to Django + django-ninja (Supersedes ADR-001) | Accepted |
+| [001](001-django-backend.md) | Python 3.12+ with Django and django-ninja for Backend | Superseded by ADR-013 |
+| [002](002-postgresql-database.md) | PostgreSQL as Primary Database | Accepted |
+| [003](003-design-by-contract.md) | Design by Contract with icontract | Superseded by ADR-013 |
+| [004](004-code-quality-toolchain.md) | Code Quality Toolchain | Superseded by ADR-013 |
+| [005](005-apache-age-graph.md) | Apache AGE for Graph Database Capabilities | Accepted |
+| [011](011-requirements-data-model.md) | Requirements Data Model | Accepted |
+| [012](012-formal-methods-process.md) | Formal Methods Development Process | Accepted |
+| [013](013-java-spring-boot-rewrite.md) | Java/Spring Boot Backend Rewrite | Accepted |
+| [014](014-pluggable-verification-architecture.md) | Pluggable Verification Architecture | Accepted |
+| [015](015-cloud-database-deployment.md) | Cloud Database Deployment | Withdrawn |
+
+Prior ADRs from the old project frame are archived in `archive/architecture/adrs/`.

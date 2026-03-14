@@ -1,0 +1,201 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Backend — build → test → integration (linear, always runs)
+  # ---------------------------------------------------------------------------
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@06832c7b30a0129d7fb559bcc6e43d26f6374244 # v4
+      - name: Build
+        run: cd backend && ./gradlew build -x test --no-daemon
+      - name: Check formatting
+        run: cd backend && ./gradlew spotlessCheck --no-daemon
+
+  test:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@06832c7b30a0129d7fb559bcc6e43d26f6374244 # v4
+      - name: Run unit tests
+        run: cd backend && ./gradlew check --no-daemon
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-report
+          path: backend/build/reports/tests/test/
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@06832c7b30a0129d7fb559bcc6e43d26f6374244 # v4
+      - name: Run integration tests
+        run: cd backend && ./gradlew integrationTest --no-daemon
+      - name: Upload integration test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: integration-test-report
+          path: backend/build/reports/tests/integrationTest/
+
+  # ---------------------------------------------------------------------------
+  # Verification (branches off test, runs in parallel with integration)
+  # ---------------------------------------------------------------------------
+  verify:
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@06832c7b30a0129d7fb559bcc6e43d26f6374244 # v4
+      - name: OpenJML Extended Static Checking
+        run: cd backend && ./gradlew openjmlEsc --no-daemon
+
+  # ---------------------------------------------------------------------------
+  # Analysis (non-blocking)
+  # ---------------------------------------------------------------------------
+  sonarcloud:
+    runs-on: ubuntu-latest
+    needs: [test, integration]
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@06832c7b30a0129d7fb559bcc6e43d26f6374244 # v4
+      - name: Build and test with coverage
+        run: cd backend && ./gradlew test integrationTest jacocoTestReport --no-daemon
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@2f77a1ec69fb1d595b06f35ab27e97605bdef703 # v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Docker — builds after integration tests and verification both complete
+  # ---------------------------------------------------------------------------
+  docker:
+    runs-on: ubuntu-latest
+    needs: [integration, verify]
+    if: |
+      github.event_name == 'push'
+      && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/tags/v'))
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3
+
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5
+        with:
+          images: ghcr.io/keplerops/ground-control
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: backend/
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # Smoke test — validates Docker image starts, Flyway migrates, health is UP
+  # ---------------------------------------------------------------------------
+  smoke:
+    runs-on: ubuntu-latest
+    needs: [docker]
+    if: needs.docker.result == 'success'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ground_control
+          POSTGRES_USER: gc
+          POSTGRES_PASSWORD: gc
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Build image
+        run: docker build -t gc-smoke backend/
+
+      - name: Run image and verify Flyway + health
+        run: |
+          docker run -d --name gc-smoke \
+            --network host \
+            -e GC_DATABASE_URL=jdbc:postgresql://localhost:5432/ground_control \
+            -e GC_DATABASE_USER=gc \
+            -e GC_DATABASE_PASSWORD=gc \
+            gc-smoke
+
+          echo "Waiting for application startup..."
+          for i in $(seq 1 60); do
+            HEALTH=$(curl -sf http://localhost:8000/actuator/health 2>/dev/null) && {
+              echo "Smoke test passed: $HEALTH"
+              exit 0
+            }
+            sleep 2
+          done
+
+          echo "Smoke test failed after 120s"
+          docker logs gc-smoke
+          exit 1
