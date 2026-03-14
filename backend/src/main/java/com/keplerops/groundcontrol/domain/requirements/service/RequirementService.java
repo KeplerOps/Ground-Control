@@ -117,6 +117,10 @@ public class RequirementService {
         if (sourceId.equals(targetId)) {
             throw new DomainValidationException("A requirement cannot relate to itself");
         }
+        if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(sourceId, targetId, relationType)) {
+            throw new ConflictException(
+                    "Relation " + relationType + " already exists between " + sourceId + " and " + targetId);
+        }
         var source = getById(sourceId);
         var target = getById(targetId);
         var relation = new RequirementRelation(source, target, relationType);
