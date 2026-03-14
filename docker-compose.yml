@@ -25,5 +25,31 @@ services:
       timeout: 5s
       retries: 5
 
+  backend:
+    build:
+      context: backend
+    environment:
+      GC_DATABASE_URL: jdbc:postgresql://db:5432/ground_control
+      GC_DATABASE_USER: ${GC_DATABASE_USER:-gc}
+      GC_DATABASE_PASSWORD: ${GC_DATABASE_PASSWORD:?Set GC_DATABASE_PASSWORD in .env}
+      GC_REDIS_URL: redis://redis:6379
+      GC_SERVER_PORT: "8000"
+      SPRING_PROFILES_ACTIVE: dev
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  roadmap:
+    image: nginx:alpine
+    ports:
+      - "3000:80"
+    volumes:
+      - ./tools/roadmap-viewer:/usr/share/nginx/html:ro
+      - ./tools/roadmap-viewer/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
 volumes:
   gc-postgres-data:

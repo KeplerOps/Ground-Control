@@ -127,6 +127,12 @@ When only one project exists, the selector is hidden and the project is implicit
 | Tailwind CSS generates large stylesheets | Vite's production build tree-shakes unused utilities. Monitor bundle size in CI. |
 | SPA routing conflicts with Spring Boot | Configure Spring Boot to forward all non-API, non-static routes to `index.html` (standard SPA fallback). |
 
+## Implementation Notes
+
+### Dependency Graph Prototype (2026-03-14)
+
+A prototype of the dependency graph view (GC-Q005) was built using Cytoscape.js + dagre layout as a single static HTML file served via nginx container. It successfully renders the full Ground Control requirement set (170+ nodes, 100+ edges) with interactive pan/zoom, node selection with neighborhood highlighting, multi-dimensional color coding (series, priority, status, wave), and switchable DAG layouts. This validates that lightweight browser-based graph rendering is sufficient for the dependency graph view and that React Flow (proposed above) is not strictly required — Cytoscape.js with dagre provides equivalent capability with zero build tooling. See `tools/roadmap-viewer/index.html`.
+
 ## Related ADRs
 
 - [ADR-011](011-requirements-data-model.md) — Data model the UI visualizes

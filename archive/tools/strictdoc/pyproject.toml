@@ -1,8 +1,0 @@
-[project]
-name = "gc-strictdoc"
-version = "0.1.0"
-description = "StrictDoc requirements management for Ground Control"
-requires-python = ">=3.12"
-dependencies = [
-    "strictdoc",
-]
