@@ -141,7 +141,7 @@ describe("constants", () => {
   });
 
   it("RELATION_TYPES matches Java RelationType enum", () => {
-    assert.deepEqual(RELATION_TYPES, ["PARENT", "DEPENDS_ON", "CONFLICTS_WITH", "REFINES"]);
+    assert.deepEqual(RELATION_TYPES, ["PARENT", "DEPENDS_ON", "CONFLICTS_WITH", "REFINES", "SUPERSEDES", "RELATED"]);
   });
 
   it("ARTIFACT_TYPES matches Java ArtifactType enum", () => {

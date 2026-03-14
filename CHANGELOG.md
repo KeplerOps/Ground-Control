@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.0] - 2026-03-14
+
+### Added
+
+- `SUPERSEDES` and `RELATED` relation types, completing all 6 typed DAG
+  relations specified by GC-A003 (PARENT, DEPENDS_ON, CONFLICTS_WITH, REFINES,
+  SUPERSEDES, RELATED). Both are non-DAG types — they do not participate in
+  cycle detection or impact analysis
+- Unit tests for SUPERSEDES and RELATED relation creation
+
 ## [0.39.0] - 2026-03-14
 
 ### Added
