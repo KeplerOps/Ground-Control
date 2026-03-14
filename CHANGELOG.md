@@ -5,7 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.38.0] - 2026-03-14
+
+### Added
+
+- GC-Q001–Q006: new User Interface domain (6 requirements) — Interactive Web
+  Application, Requirements Explorer, Traceability Matrix, Project Health
+  Dashboard, Interactive Dependency Graph, Audit History Timeline
+- ADR-016: Project Scoping — architectural decisions for multi-project support
+  (Project entity, same-project relation constraint, project-scoped operations,
+  UID uniqueness scope change)
+- ADR-017: Interactive Web Application — technology decisions (React 19 +
+  TypeScript + Vite SPA, embedded in Spring Boot, TanStack Query/Table,
+  React Flow for dependency graph, shadcn/ui components)
+
+## [0.37.0] - 2026-03-14
+
+### Added
+
+- GC-A013 (Project Scoping) — new wave 1 requirement for multi-project support
+  via a Project entity with single-project scoped operations
+
+### Changed
+
+- GC-A002 (Status State Machine) activated with full traceability: 7 IMPLEMENTS,
+  4 TESTS, 1 DOCUMENTS links
+- Fixed `gc_transition_status` MCP tool description to include missing
+  ACTIVE->ARCHIVED transition
+
+## [0.36.0] - 2026-03-13
+
+### Added
+
+- `gc_get_relations` MCP tool for inspecting a requirement's incoming and
+  outgoing relations through the MCP interface
+
+### Changed
+
+- GC-E004 (Link Health Tracking) promoted from wave 3 to wave 2 — staleness
+  detection must ship alongside the features that create traceability links
+- GC-E005 (Artifact Change Detection) promoted from wave 3 to wave 2 — same
+  rationale; without change detection, every refactor silently degrades link quality
+
+## [0.35.1] - 2026-03-13
+
+### Fixed
+
+- Wired 9 orphaned requirements into the dependency graph: GC-C002→GC-A001,
+  GC-D003→GC-D001, GC-D004→GC-D001, GC-I004→GC-I003, GC-M002→GC-M001,
+  GC-N001→GC-A006 (REFINES), GC-N002→GC-N001, GC-P005→GC-F005, GC-P007→GC-B001.
+  Orphan count reduced from 13 to 4 (the remaining 4 are accepted cross-cutting
+  concerns: Authentication, Full-Text Search, Notification System, Multi-Tenancy)
+
 ## [0.35.0] - 2026-03-13
+
+### Added
+
+- `mcp/ground-control/README.md`: MCP server usage documentation — setup,
+  workflow order of operations, tool reference table, enum values, error format
+- `docs/API.md`: REST API reference — endpoint tables, filtering, pagination,
+  error envelope, interactive docs pointers
 
 ### Changed
 

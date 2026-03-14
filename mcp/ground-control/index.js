@@ -11,6 +11,7 @@ import {
   transitionStatus,
   archiveRequirement,
   createRelation,
+  getRelations,
   getTraceabilityLinks,
   createTraceabilityLink,
   detectCycles,
@@ -135,7 +136,7 @@ server.tool(
 
 server.tool(
   "gc_transition_status",
-  "Transition a requirement's status. Valid transitions: DRAFT->ACTIVE, ACTIVE->DEPRECATED, DEPRECATED->ARCHIVED.",
+  "Transition a requirement's status. Valid transitions: DRAFT->ACTIVE, ACTIVE->DEPRECATED, ACTIVE->ARCHIVED, DEPRECATED->ARCHIVED.",
   {
     id: z.string().uuid().describe("Requirement UUID"),
     status: z.enum(STATUSES).describe("Target status"),
@@ -175,6 +176,23 @@ server.tool(
   async ({ source_id, target_id, relation_type }) => {
     try {
       return ok(JSON.stringify(await createRelation(source_id, target_id, relation_type), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_relations",
+  "Get all relations (incoming and outgoing) for a requirement.",
+  {
+    id: z.string().uuid().describe("Requirement UUID"),
+  },
+  async ({ id }) => {
+    try {
+      const relations = await getRelations(id);
+      if (Array.isArray(relations) && relations.length === 0) return ok("No relations found.");
+      return ok(JSON.stringify(relations, null, 2));
     } catch (e) {
       return err(e);
     }
