@@ -1,6 +1,7 @@
 package com.keplerops.groundcontrol.unit.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.keplerops.groundcontrol.domain.requirements.service.SdocParser;
 import com.keplerops.groundcontrol.domain.requirements.service.SdocRequirement;
@@ -180,9 +181,9 @@ class SdocParserTest {
         void parsesRealProjectSdoc() throws IOException {
             Path sdocPath = Path.of("../archive/docs/requirements/project.sdoc");
             if (!Files.exists(sdocPath)) {
-                // Fall back to absolute path
                 sdocPath = Path.of("/home/atomik/src/Ground-Control/archive/docs/requirements/project.sdoc");
             }
+            assumeTrue(Files.exists(sdocPath), "Skipped: project.sdoc not present");
             String content = Files.readString(sdocPath);
 
             List<SdocRequirement> result = SdocParser.parse(content);

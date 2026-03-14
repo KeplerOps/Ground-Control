@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.0] - 2026-03-14
+
+### Added
+
+- Interactive roadmap viewer — Cytoscape.js + dagre DAG visualization of the
+  full requirement graph, served as a containerized nginx static site
+  (implements GC-Q005)
+- Color coding switchable between series, priority, status, and wave dimensions
+- Node selection with neighborhood highlighting and click-to-deselect
+- Edge legend showing actual line styles (solid/dashed/dotted) for relation types
+- CORS configuration for dev profile (`CorsConfig`, `@Profile("dev")`)
+- Backend and roadmap services added to `docker-compose.yml`
+- ADR-017 updated with Cytoscape.js prototype implementation notes
+
 ## [0.41.0] - 2026-03-13
 
 ### Added
