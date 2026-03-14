@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `formatIssueBody` and `createGitHubIssue` library functions in MCP server
 - `GH_REPO` env var in `.mcp.json` for default GitHub repository target
 
+### Changed
+
+- `README.md` rewritten for current implemented state: features, getting
+  started, tech stack, architecture, documentation index, project status
+
 ## [0.38.0] - 2026-03-14
 
 ### Added
