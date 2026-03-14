@@ -9,14 +9,16 @@ disable-model-invocation: true
 
 ## Step 1: Fetch Requirement and Ensure GitHub Issue Exists
 
-1. Use the `gc_get_requirement` MCP tool with uid `$ARGUMENTS` to fetch the requirement details. Note the requirement's UUID, title, statement, status, and wave.
+1. Enter plan mode.
 
-2. Use the `gc_get_traceability` MCP tool with the requirement's UUID to check for existing traceability links. Look for a link with artifact_type `GITHUB_ISSUE`.
+2. Use the `gc_get_requirement` MCP tool with uid `$ARGUMENTS` to fetch the requirement details. Note the requirement's UUID, title, statement, status, and wave.
 
-3. If NO GitHub issue link exists:
+3. Use the `gc_get_traceability` MCP tool with the requirement's UUID to check for existing traceability links. Look for a link with artifact_type `GITHUB_ISSUE`.
+
+4. If NO GitHub issue link exists:
    - Use the `gc_create_github_issue` MCP tool with uid `$ARGUMENTS` to create a GitHub issue and auto-link it.
 
-4. If a GitHub issue link DOES exist, note the issue number from the artifact_identifier.
+5. If a GitHub issue link DOES exist, note the issue number from the artifact_identifier.
 
 ## Step 2: Read the GitHub Issue
 
@@ -42,3 +44,5 @@ After implementation is complete (or if already implemented):
   - `TESTS` links from the requirement to the test files that verify it
   - Only create links that don't already exist (check the traceability data from Step 1).
 - use the `gc_transition_status` MCP tool to transition the requirement to `ACTIVE` if it was `DRAFT`.
+
+Do not update the Changelog if all you did was operate Ground Control tools.
