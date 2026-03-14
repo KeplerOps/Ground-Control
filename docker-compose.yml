@@ -49,6 +49,7 @@ services:
       - "3000:80"
     volumes:
       - ./tools/roadmap-viewer:/usr/share/nginx/html:ro
+      - ./tools/roadmap-viewer/nginx.conf:/etc/nginx/conf.d/default.conf:ro
 
 volumes:
   gc-postgres-data:
