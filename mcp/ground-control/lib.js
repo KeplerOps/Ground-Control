@@ -256,6 +256,9 @@ export async function createGitHubIssue({ title, body, labels, repo }) {
   const { stdout } = await execFile("gh", args);
   const url = stdout.trim();
   const match = url.match(/\/issues\/(\d+)$/);
-  const number = match ? parseInt(match[1], 10) : null;
+  if (!match) {
+    throw new Error(`Could not parse issue number from gh output: ${url}`);
+  }
+  const number = parseInt(match[1], 10);
   return { url, number };
 }
