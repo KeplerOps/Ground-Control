@@ -21,6 +21,8 @@ import {
   crossWaveValidation,
   importStrictdoc,
   syncGithub,
+  formatIssueBody,
+  createGitHubIssue,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -237,6 +239,48 @@ server.tool(
       if (artifact_url !== undefined) data.artifact_url = artifact_url;
       if (artifact_title !== undefined) data.artifact_title = artifact_title;
       return ok(JSON.stringify(await createTraceabilityLink(requirement_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// GitHub integration tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_github_issue",
+  "Create a GitHub issue from a requirement and auto-link it via traceability. Shells out to `gh` CLI.",
+  {
+    uid: z.string().describe("Requirement UID (e.g. 'GC-D007')"),
+    extra_body: z.string().optional().describe("Additional markdown to append to the issue body"),
+    labels: z.array(z.string()).optional().describe("GitHub labels to apply"),
+    repo: z.string().optional().describe("GitHub repo as 'owner/repo' (defaults to GH_REPO env var)"),
+  },
+  async ({ uid, extra_body, labels, repo }) => {
+    try {
+      const req = await getRequirementByUid(uid);
+      const title = `${req.uid}: ${req.title}`;
+      const body = formatIssueBody(req, extra_body);
+      const { url, number } = await createGitHubIssue({ title, body, labels, repo });
+
+      const result = { url, number };
+
+      try {
+        const link = await createTraceabilityLink(req.id, {
+          artifact_type: "GITHUB_ISSUE",
+          artifact_identifier: `#${number}`,
+          link_type: "IMPLEMENTS",
+          artifact_url: url,
+          artifact_title: title,
+        });
+        result.traceability_link = link;
+      } catch (linkErr) {
+        result.warning = `Issue created but traceability link failed: ${linkErr.message}`;
+      }
+
+      return ok(JSON.stringify(result, null, 2));
     } catch (e) {
       return err(e);
     }
