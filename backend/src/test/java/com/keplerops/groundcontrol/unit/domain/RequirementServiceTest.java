@@ -254,6 +254,42 @@ class RequirementServiceTest {
         }
 
         @Test
+        void createsSupersedingRelation() {
+            var sourceId = UUID.randomUUID();
+            var targetId = UUID.randomUUID();
+            var source = makeRequirement("REQ-001");
+            var target = makeRequirement("REQ-002");
+            setId(source, sourceId);
+            setId(target, targetId);
+
+            when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
+            when(requirementRepository.findById(targetId)).thenReturn(Optional.of(target));
+            when(relationRepository.save(any(RequirementRelation.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            var result = service.createRelation(sourceId, targetId, RelationType.SUPERSEDES);
+            assertThat(result).isNotNull();
+            assertThat(result.getRelationType()).isEqualTo(RelationType.SUPERSEDES);
+        }
+
+        @Test
+        void createsRelatedRelation() {
+            var sourceId = UUID.randomUUID();
+            var targetId = UUID.randomUUID();
+            var source = makeRequirement("REQ-001");
+            var target = makeRequirement("REQ-002");
+            setId(source, sourceId);
+            setId(target, targetId);
+
+            when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
+            when(requirementRepository.findById(targetId)).thenReturn(Optional.of(target));
+            when(relationRepository.save(any(RequirementRelation.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            var result = service.createRelation(sourceId, targetId, RelationType.RELATED);
+            assertThat(result).isNotNull();
+            assertThat(result.getRelationType()).isEqualTo(RelationType.RELATED);
+        }
+
+        @Test
         void throwsDomainValidationForSelfLoop() {
             var id = UUID.randomUUID();
 
