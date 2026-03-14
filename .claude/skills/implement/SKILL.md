@@ -36,8 +36,9 @@ Explore the codebase to determine whether the requirement described in the issue
 
 ## Step 5: Ensure Traceability Links
 
-After implementation is complete (or if already implemented), use the `gc_create_traceability_link` MCP tool to create any missing links:
-- `IMPLEMENTS` links from the requirement to the code files that implement it
-- `TESTS` links from the requirement to the test files that verify it
-
-Only create links that don't already exist (check the traceability data from Step 1).
+After implementation is complete (or if already implemented):
+- use the `gc_create_traceability_link` MCP tool to create any missing links:
+  - `IMPLEMENTS` links from the requirement to the code files that implement it
+  - `TESTS` links from the requirement to the test files that verify it
+  - Only create links that don't already exist (check the traceability data from Step 1).
+- use the `gc_transition_status` MCP tool to transition the requirement to `ACTIVE` if it was `DRAFT`.
