@@ -80,7 +80,7 @@ public class RequirementController {
     }
 
     @PutMapping("/{id}")
-    public RequirementResponse update(@PathVariable UUID id, @Valid @RequestBody RequirementRequest request) {
+    public RequirementResponse update(@PathVariable UUID id, @Valid @RequestBody UpdateRequirementRequest request) {
         var command = new UpdateRequirementCommand(
                 request.title(),
                 request.statement(),

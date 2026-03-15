@@ -225,10 +225,34 @@ class RequirementControllerTest {
 
             mockMvc.perform(put("/api/v1/requirements/" + req.getId())
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(
-                                    Map.of("uid", "REQ-001", "title", "Updated", "statement", "Stmt"))))
+                            .content(objectMapper.writeValueAsString(Map.of("title", "Updated", "statement", "Stmt"))))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.title", is("Updated")));
+        }
+
+        @Test
+        void update_withBlankTitle_returns422() throws Exception {
+            var id = UUID.randomUUID();
+
+            mockMvc.perform(put("/api/v1/requirements/" + id)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of("title", ""))))
+                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(jsonPath("$.error.code", is("validation_error")));
+        }
+
+        @Test
+        void update_withPartialFields_returns200() throws Exception {
+            var req = createRequirement("REQ-001");
+            req.setWave(3);
+            when(requirementService.update(eq(req.getId()), any(UpdateRequirementCommand.class)))
+                    .thenReturn(req);
+
+            mockMvc.perform(put("/api/v1/requirements/" + req.getId())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of("wave", 3))))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.wave", is(3)));
         }
     }
 

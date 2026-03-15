@@ -173,6 +173,7 @@ class RequirementServiceTest {
             var req = makeRequirement("REQ-001");
             req.setRequirementType(RequirementType.CONSTRAINT);
             req.setPriority(Priority.MUST);
+            req.setWave(3);
             when(requirementRepository.findById(id)).thenReturn(Optional.of(req));
             when(requirementRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -184,6 +185,22 @@ class RequirementServiceTest {
             assertThat(result.getStatement()).isEqualTo("Statement for REQ-001");
             assertThat(result.getRequirementType()).isEqualTo(RequirementType.CONSTRAINT);
             assertThat(result.getPriority()).isEqualTo(Priority.MUST);
+            assertThat(result.getWave()).isEqualTo(3);
+        }
+
+        @Test
+        void update_withNullWave_preservesExistingWave() {
+            var id = UUID.randomUUID();
+            var req = makeRequirement("REQ-001");
+            req.setWave(5);
+            when(requirementRepository.findById(id)).thenReturn(Optional.of(req));
+            when(requirementRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var cmd = new UpdateRequirementCommand("New Title", null, null, null, null, null);
+
+            var result = service.update(id, cmd);
+            assertThat(result.getTitle()).isEqualTo("New Title");
+            assertThat(result.getWave()).isEqualTo(5);
         }
 
         @Test
