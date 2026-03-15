@@ -404,6 +404,45 @@ class RequirementControllerTest {
                     .andExpect(jsonPath("$.uid", is("REQ-001-CLONE")))
                     .andExpect(jsonPath("$.status", is("DRAFT")));
         }
+
+        @Test
+        void conflictUid_returns409() throws Exception {
+            var sourceId = UUID.randomUUID();
+            when(requirementService.clone(eq(sourceId), any(CloneRequirementCommand.class)))
+                    .thenThrow(new ConflictException("Already exists"));
+
+            mockMvc.perform(post("/api/v1/requirements/" + sourceId + "/clone")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(
+                                    Map.of("newUid", "REQ-DUPLICATE", "copyRelations", false))))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.error.code", is("conflict")));
+        }
+
+        @Test
+        void sourceNotFound_returns404() throws Exception {
+            var sourceId = UUID.randomUUID();
+            when(requirementService.clone(eq(sourceId), any(CloneRequirementCommand.class)))
+                    .thenThrow(new NotFoundException("Not found"));
+
+            mockMvc.perform(post("/api/v1/requirements/" + sourceId + "/clone")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(
+                                    Map.of("newUid", "REQ-NEW", "copyRelations", false))))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.error.code", is("not_found")));
+        }
+
+        @Test
+        void blankNewUid_returns422() throws Exception {
+            var sourceId = UUID.randomUUID();
+
+            mockMvc.perform(post("/api/v1/requirements/" + sourceId + "/clone")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of("newUid", "", "copyRelations", false))))
+                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(jsonPath("$.error.code", is("validation_error")));
+        }
     }
 
     @Nested

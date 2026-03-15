@@ -458,6 +458,61 @@ class RequirementServiceTest {
 
             org.mockito.Mockito.verify(relationRepository).save(any(RequirementRelation.class));
         }
+
+        @Test
+        void clonesRequirementWithoutRelations() {
+            var sourceId = UUID.randomUUID();
+            var source = makeRequirement("REQ-001");
+            setId(source, sourceId);
+            source.setRationale("Important");
+            source.setPriority(Priority.SHOULD);
+            source.setRequirementType(RequirementType.CONSTRAINT);
+            source.setWave(2);
+
+            when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
+            when(requirementRepository.existsByUid("REQ-001-CLONE")).thenReturn(false);
+            when(requirementRepository.save(any(Requirement.class))).thenAnswer(inv -> {
+                var r = (Requirement) inv.getArgument(0);
+                setId(r, UUID.randomUUID());
+                return r;
+            });
+
+            var cmd = new CloneRequirementCommand("REQ-001-CLONE", false);
+            var result = service.clone(sourceId, cmd);
+
+            assertThat(result.getUid()).isEqualTo("REQ-001-CLONE");
+            assertThat(result.getTitle()).isEqualTo("Title for REQ-001");
+            assertThat(result.getStatement()).isEqualTo("Statement for REQ-001");
+            assertThat(result.getRationale()).isEqualTo("Important");
+            assertThat(result.getPriority()).isEqualTo(Priority.SHOULD);
+            assertThat(result.getRequirementType()).isEqualTo(RequirementType.CONSTRAINT);
+            assertThat(result.getWave()).isEqualTo(2);
+
+            org.mockito.Mockito.verify(relationRepository, org.mockito.Mockito.never())
+                    .findBySourceIdWithEntities(any());
+        }
+
+        @Test
+        void throwsConflictForDuplicateNewUid() {
+            var sourceId = UUID.randomUUID();
+            var source = makeRequirement("REQ-001");
+            when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
+            when(requirementRepository.existsByUid("REQ-EXISTING")).thenReturn(true);
+
+            var cmd = new CloneRequirementCommand("REQ-EXISTING", false);
+
+            assertThatThrownBy(() -> service.clone(sourceId, cmd)).isInstanceOf(ConflictException.class);
+        }
+
+        @Test
+        void throwsNotFoundForMissingSource() {
+            var sourceId = UUID.randomUUID();
+            when(requirementRepository.findById(sourceId)).thenReturn(Optional.empty());
+
+            var cmd = new CloneRequirementCommand("REQ-NEW", false);
+
+            assertThatThrownBy(() -> service.clone(sourceId, cmd)).isInstanceOf(NotFoundException.class);
+        }
     }
 
     @Nested
