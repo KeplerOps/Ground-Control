@@ -357,6 +357,65 @@ class RequirementServiceTest {
     }
 
     @Nested
+    class BulkTransitionStatus {
+
+        @Test
+        void transitionsMultipleSuccessfully() {
+            var id1 = UUID.randomUUID();
+            var id2 = UUID.randomUUID();
+            var req1 = makeRequirement("REQ-001");
+            var req2 = makeRequirement("REQ-002");
+
+            when(requirementRepository.findById(id1)).thenReturn(Optional.of(req1));
+            when(requirementRepository.findById(id2)).thenReturn(Optional.of(req2));
+            when(requirementRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var result = service.bulkTransitionStatus(List.of(id1, id2), Status.ACTIVE);
+
+            assertThat(result.succeeded()).hasSize(2);
+            assertThat(result.failed()).isEmpty();
+            assertThat(result.succeeded()).allMatch(r -> r.getStatus() == Status.ACTIVE);
+        }
+
+        @Test
+        void collectsFailuresAndSuccesses() {
+            var validId = UUID.randomUUID();
+            var invalidId = UUID.randomUUID();
+            var missingId = UUID.randomUUID();
+
+            var validReq = makeRequirement("REQ-001");
+            var invalidReq = makeRequirement("REQ-002");
+            invalidReq.transitionStatus(Status.ACTIVE);
+            invalidReq.transitionStatus(Status.ARCHIVED);
+
+            when(requirementRepository.findById(validId)).thenReturn(Optional.of(validReq));
+            when(requirementRepository.findById(invalidId)).thenReturn(Optional.of(invalidReq));
+            when(requirementRepository.findById(missingId)).thenReturn(Optional.empty());
+            when(requirementRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var result = service.bulkTransitionStatus(List.of(validId, invalidId, missingId), Status.ACTIVE);
+
+            assertThat(result.succeeded()).hasSize(1);
+            assertThat(result.succeeded().get(0).getUid()).isEqualTo("REQ-001");
+            assertThat(result.failed()).hasSize(2);
+        }
+
+        @Test
+        void allFailReturnsEmptySucceeded() {
+            var id1 = UUID.randomUUID();
+            var id2 = UUID.randomUUID();
+
+            when(requirementRepository.findById(id1)).thenReturn(Optional.empty());
+            when(requirementRepository.findById(id2)).thenReturn(Optional.empty());
+
+            var result = service.bulkTransitionStatus(List.of(id1, id2), Status.ACTIVE);
+
+            assertThat(result.succeeded()).isEmpty();
+            assertThat(result.failed()).hasSize(2);
+        }
+    }
+
+    @Nested
     class ListRequirements {
 
         @SuppressWarnings("unchecked")
