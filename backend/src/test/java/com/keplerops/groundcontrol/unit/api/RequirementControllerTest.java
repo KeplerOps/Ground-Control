@@ -30,8 +30,10 @@ import com.keplerops.groundcontrol.domain.requirements.service.BulkTransitionRes
 import com.keplerops.groundcontrol.domain.requirements.service.CloneRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateTraceabilityLinkCommand;
+import com.keplerops.groundcontrol.domain.requirements.service.RelationRevision;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementService;
+import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityLinkRevision;
 import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityService;
 import com.keplerops.groundcontrol.domain.requirements.service.UpdateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
@@ -518,6 +520,76 @@ class RequirementControllerTest {
             mockMvc.perform(get("/api/v1/requirements/" + id))
                     .andExpect(status().isInternalServerError())
                     .andExpect(jsonPath("$.error.code", is("internal_error")));
+        }
+    }
+
+    @Nested
+    class RelationHistory {
+
+        @Test
+        void returns200WithRevisions() throws Exception {
+            var source = createRequirement("REQ-001");
+            var target = createRequirement("REQ-002");
+            var rel = createRelation(source, target);
+            var revision = new RelationRevision(1, Instant.now(), "ADD", "test-user", rel);
+            when(auditService.getRelationHistory(rel.getId())).thenReturn(List.of(revision));
+
+            mockMvc.perform(get("/api/v1/requirements/" + source.getId() + "/relations/" + rel.getId() + "/history"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()", is(1)))
+                    .andExpect(jsonPath("$[0].revisionType", is("ADD")))
+                    .andExpect(jsonPath("$[0].actor", is("test-user")))
+                    .andExpect(jsonPath("$[0].snapshot.relationType", is("DEPENDS_ON")));
+        }
+
+        @Test
+        void notFound_returns404() throws Exception {
+            var reqId = UUID.randomUUID();
+            var relId = UUID.randomUUID();
+            when(auditService.getRelationHistory(relId)).thenThrow(new NotFoundException("Not found"));
+
+            mockMvc.perform(get("/api/v1/requirements/" + reqId + "/relations/" + relId + "/history"))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.error.code", is("not_found")));
+        }
+    }
+
+    @Nested
+    class TraceabilityLinkHistory {
+
+        private static TraceabilityLink createLink(Requirement req) {
+            var link = new TraceabilityLink(req, ArtifactType.CODE_FILE, "src/Example.java", LinkType.IMPLEMENTS);
+            setField(link, "id", UUID.randomUUID());
+            setField(link, "createdAt", Instant.now());
+            setField(link, "updatedAt", Instant.now());
+            return link;
+        }
+
+        @Test
+        void returns200WithRevisions() throws Exception {
+            var req = createRequirement("REQ-001");
+            var link = createLink(req);
+            var revision = new TraceabilityLinkRevision(1, Instant.now(), "ADD", "test-user", link);
+            when(auditService.getTraceabilityLinkHistory(link.getId())).thenReturn(List.of(revision));
+
+            mockMvc.perform(get("/api/v1/requirements/" + req.getId() + "/traceability/" + link.getId() + "/history"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()", is(1)))
+                    .andExpect(jsonPath("$[0].revisionType", is("ADD")))
+                    .andExpect(jsonPath("$[0].actor", is("test-user")))
+                    .andExpect(jsonPath("$[0].snapshot.artifactType", is("CODE_FILE")))
+                    .andExpect(jsonPath("$[0].snapshot.artifactIdentifier", is("src/Example.java")));
+        }
+
+        @Test
+        void notFound_returns404() throws Exception {
+            var reqId = UUID.randomUUID();
+            var linkId = UUID.randomUUID();
+            when(auditService.getTraceabilityLinkHistory(linkId)).thenThrow(new NotFoundException("Not found"));
+
+            mockMvc.perform(get("/api/v1/requirements/" + reqId + "/traceability/" + linkId + "/history"))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.error.code", is("not_found")));
         }
     }
 }

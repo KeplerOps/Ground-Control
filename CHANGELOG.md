@@ -14,8 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audit history API for relations: `GET /api/v1/requirements/{id}/relations/{relationId}/history`
 - Audit history API for traceability links: `GET /api/v1/requirements/{id}/traceability/{linkId}/history`
 - MCP server now sends `X-Actor: mcp-server` header on all API requests
+- Unit tests for `ActorFilter`, relation history endpoint, and traceability
+  link history endpoint
 - Integration tests for actor identity recording, relation history, and
   traceability link history
+
+### Changed
+
+- JaCoCo line coverage threshold raised from 30% to 80% to match SonarCloud
+  quality gate
 
 ## [0.47.0] - 2026-03-15
 
