@@ -7,6 +7,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementImport;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
@@ -237,6 +238,111 @@ class ImportServiceTest {
             assertThat(result.relationsCreated()).isZero();
             verify(requirementService, never()).createRelation(any(), any(), any());
         }
+
+        @Test
+        void lookupParentFromDb_whenNotInBatch() {
+            // Import only the child; parent is not in the sdoc but exists in DB
+            String sdoc =
+                    """
+                    [REQUIREMENT]
+                    UID: REQ-CHILD
+                    TITLE: Child
+                    STATEMENT: >>>
+                    Statement.
+                    <<<
+                    RELATIONS:
+                    - TYPE: Parent
+                      VALUE: REQ-PREEXISTING-PARENT
+                    """;
+            UUID childId = UUID.randomUUID();
+            UUID parentId = UUID.randomUUID();
+            var child = makeRequirement("REQ-CHILD", childId);
+            var parentReq = makeRequirement("REQ-PREEXISTING-PARENT", parentId);
+
+            when(requirementRepository.findByUid("REQ-CHILD")).thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(child);
+            // Parent not in batch, so Phase 2 looks it up in the DB
+            when(requirementRepository.findByUid("REQ-PREEXISTING-PARENT")).thenReturn(Optional.of(parentReq));
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(childId, parentId, RelationType.PARENT))
+                    .thenReturn(false);
+            when(requirementService.createRelation(childId, parentId, RelationType.PARENT))
+                    .thenReturn(new RequirementRelation(child, parentReq, RelationType.PARENT));
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            var result = service.importStrictdoc("test.sdoc", sdoc);
+
+            assertThat(result.relationsCreated()).isEqualTo(1);
+            verify(requirementService).createRelation(childId, parentId, RelationType.PARENT);
+        }
+
+        @Test
+        void parentNotFoundAnywhere_collectsError() {
+            // Import only the child; parent is not in the sdoc AND not in DB
+            String sdoc =
+                    """
+                    [REQUIREMENT]
+                    UID: REQ-CHILD
+                    TITLE: Child
+                    STATEMENT: >>>
+                    Statement.
+                    <<<
+                    RELATIONS:
+                    - TYPE: Parent
+                      VALUE: REQ-MISSING-PARENT
+                    """;
+            UUID childId = UUID.randomUUID();
+            var child = makeRequirement("REQ-CHILD", childId);
+
+            when(requirementRepository.findByUid("REQ-CHILD")).thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(child);
+            when(requirementRepository.findByUid("REQ-MISSING-PARENT")).thenReturn(Optional.empty());
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            var result = service.importStrictdoc("test.sdoc", sdoc);
+
+            assertThat(result.relationsCreated()).isZero();
+            assertThat(result.errors()).hasSize(1);
+            assertThat(result.errors().get(0).get("error").toString()).contains("Parent not found");
+        }
+
+        @Test
+        void relationCreationError_collectsError() {
+            String sdoc = sdocWithParent("REQ-CHILD", "REQ-PARENT");
+            UUID parentId = UUID.randomUUID();
+            UUID childId = UUID.randomUUID();
+            var parent = makeRequirement("REQ-PARENT", parentId);
+            var child = makeRequirement("REQ-CHILD", childId);
+
+            when(requirementRepository.findByUid("REQ-PARENT")).thenReturn(Optional.empty());
+            when(requirementRepository.findByUid("REQ-CHILD")).thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenReturn(parent)
+                    .thenReturn(child);
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(childId, parentId, RelationType.PARENT))
+                    .thenReturn(false);
+            when(requirementService.createRelation(childId, parentId, RelationType.PARENT))
+                    .thenThrow(new DomainValidationException("Simulated relation failure"));
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            var result = service.importStrictdoc("test.sdoc", sdoc);
+
+            assertThat(result.relationsCreated()).isZero();
+            assertThat(result.errors()).hasSize(1);
+            assertThat(result.errors().get(0).get("phase")).isEqualTo("relations");
+            assertThat(result.errors().get(0).get("error").toString()).contains("Simulated relation failure");
+        }
     }
 
     @Nested
@@ -290,6 +396,33 @@ class ImportServiceTest {
             assertThat(result.traceabilityLinksCreated()).isZero();
             verify(traceabilityService, never()).createLink(any(), any());
         }
+
+        @Test
+        void traceabilityLinkCreationError_collectsError() {
+            String sdoc = sdocWithIssueRef("REQ-TRACE", 42);
+            UUID reqId = UUID.randomUUID();
+            var req = makeRequirement("REQ-TRACE", reqId);
+
+            when(requirementRepository.findByUid("REQ-TRACE")).thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(req);
+            when(traceabilityLinkRepository.existsByRequirementIdAndArtifactTypeAndArtifactIdentifierAndLinkType(
+                            reqId, ArtifactType.GITHUB_ISSUE, "42", LinkType.IMPLEMENTS))
+                    .thenReturn(false);
+            when(traceabilityService.createLink(eq(reqId), any(CreateTraceabilityLinkCommand.class)))
+                    .thenThrow(new DomainValidationException("Simulated traceability failure"));
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            var result = service.importStrictdoc("test.sdoc", sdoc);
+
+            assertThat(result.traceabilityLinksCreated()).isZero();
+            assertThat(result.errors()).hasSize(1);
+            assertThat(result.errors().get(0).get("phase")).isEqualTo("traceability");
+            assertThat(result.errors().get(0).get("error").toString()).contains("Simulated traceability failure");
+        }
     }
 
     @Nested
@@ -320,8 +453,7 @@ class ImportServiceTest {
             when(requirementRepository.findByUid("REQ-FAIL")).thenReturn(Optional.empty());
             when(requirementRepository.findByUid("REQ-OK")).thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
-                    .thenThrow(new com.keplerops.groundcontrol.domain.exception.DomainValidationException(
-                            "Simulated failure"))
+                    .thenThrow(new DomainValidationException("Simulated failure"))
                     .thenReturn(okReq);
             when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
                 var audit = inv.<RequirementImport>getArgument(0);
