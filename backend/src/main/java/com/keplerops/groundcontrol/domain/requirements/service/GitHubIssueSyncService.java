@@ -82,8 +82,8 @@ public class GitHubIssueSyncService {
                     issueSyncRepository.save(sync);
                     issuesCreated++;
                 }
-            } catch (Exception e) {
-                log.warn("Error syncing issue #{}: {}", issue.number(), e.getMessage());
+            } catch (RuntimeException e) {
+                log.warn("github_issue_sync_failed: issue={} error={}", issue.number(), e.getMessage());
                 errors.add(Map.of("phase", "upsert", "issue", issue.number(), "error", e.getMessage()));
             }
         }
@@ -104,8 +104,11 @@ public class GitHubIssueSyncService {
                     traceabilityLinkRepository.save(link);
                     linksUpdated++;
                 }
-            } catch (Exception e) {
-                log.warn("Error updating traceability link {}: {}", link.getArtifactIdentifier(), e.getMessage());
+            } catch (RuntimeException e) {
+                log.warn(
+                        "traceability_link_update_failed: artifact={} error={}",
+                        link.getArtifactIdentifier(),
+                        e.getMessage());
                 errors.add(Map.of(
                         "phase",
                         "traceability",

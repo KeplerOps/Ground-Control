@@ -11,6 +11,7 @@ import {
   transitionStatus,
   bulkTransitionStatus,
   archiveRequirement,
+  cloneRequirement,
   createRelation,
   getRelations,
   getTraceabilityLinks,
@@ -197,6 +198,24 @@ server.tool(
         result.total_requested = (result.total_requested || 0) + resolutionFailures.length;
       }
       return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_clone_requirement",
+  "Clone an existing requirement with a new UID. Copies all content fields (title, statement, rationale, type, priority, wave). The clone starts in DRAFT status. Optionally copies outgoing relations.",
+  {
+    uid: z.string().describe("UID of the requirement to clone (e.g. 'GC-A007')"),
+    new_uid: z.string().describe("UID for the cloned requirement (must be unique)"),
+    copy_relations: z.boolean().optional().default(false).describe("Whether to copy outgoing relations to the clone"),
+  },
+  async ({ uid, new_uid, copy_relations }) => {
+    try {
+      const source = await getRequirementByUid(uid);
+      return ok(JSON.stringify(await cloneRequirement(source.id, new_uid, copy_relations), null, 2));
     } catch (e) {
       return err(e);
     }

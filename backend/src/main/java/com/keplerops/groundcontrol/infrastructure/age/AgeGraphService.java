@@ -36,7 +36,7 @@ public class AgeGraphService implements GraphClient {
     @Override
     public void materializeGraph() {
         if (!ageProperties.enabled()) {
-            log.debug("AGE disabled — skipping graph materialization");
+            log.debug("graph_materialization_skipped: reason=disabled");
             return;
         }
 
@@ -75,8 +75,7 @@ public class AgeGraphService implements GraphClient {
             jdbcTemplate.execute(cypher);
         }
 
-        log.info(
-                "Materialized {} nodes and {} edges into AGE graph '{}'", requirements.size(), relations.size(), graph);
+        log.info("graph_materialized: nodes={} edges={} graph={}", requirements.size(), relations.size(), graph);
     }
 
     @Override
@@ -166,6 +165,6 @@ public class AgeGraphService implements GraphClient {
         if (value == null) {
             return "";
         }
-        return value.replace("'", "\\'").replace("\\", "\\\\");
+        return value.replace("\\", "\\\\").replace("'", "\\'");
     }
 }

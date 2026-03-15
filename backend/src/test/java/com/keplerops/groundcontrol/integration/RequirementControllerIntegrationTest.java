@@ -225,6 +225,98 @@ class RequirementControllerIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    void cloneRequirement_returns201WithCopiedFieldsAndRelations() throws Exception {
+        var sourceId = createAndReturnId("REQ-CLONE-SRC");
+        var targetId = createAndReturnId("REQ-CLONE-TGT");
+
+        // Create a relation from source to target
+        mockMvc.perform(post("/api/v1/requirements/" + sourceId + "/relations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("targetId", targetId, "relationType", "DEPENDS_ON"))))
+                .andExpect(status().isCreated());
+
+        // Clone with relation copy
+        var cloneResult = mockMvc.perform(post("/api/v1/requirements/" + sourceId + "/clone")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("newUid", "REQ-CLONE-NEW", "copyRelations", true))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.uid", is("REQ-CLONE-NEW")))
+                .andExpect(jsonPath("$.status", is("DRAFT")))
+                .andExpect(jsonPath("$.title", is("Title for REQ-CLONE-SRC")))
+                .andReturn();
+
+        // Verify cloned relations
+        var cloneId = objectMapper
+                .readTree(cloneResult.getResponse().getContentAsString())
+                .get("id")
+                .asText();
+        mockMvc.perform(get("/api/v1/requirements/" + cloneId + "/relations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].relationType", is("DEPENDS_ON")));
+    }
+
+    @Test
+    void cloneRequirement_withoutRelations_doesNotCopyRelations() throws Exception {
+        var sourceId = createAndReturnId("REQ-CLONE-NR-SRC");
+        var targetId = createAndReturnId("REQ-CLONE-NR-TGT");
+
+        // Create a relation from source to target
+        mockMvc.perform(post("/api/v1/requirements/" + sourceId + "/relations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("targetId", targetId, "relationType", "DEPENDS_ON"))))
+                .andExpect(status().isCreated());
+
+        // Clone without relation copy
+        var cloneResult = mockMvc.perform(post("/api/v1/requirements/" + sourceId + "/clone")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("newUid", "REQ-CLONE-NR-NEW", "copyRelations", false))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.uid", is("REQ-CLONE-NR-NEW")))
+                .andExpect(jsonPath("$.status", is("DRAFT")))
+                .andExpect(jsonPath("$.title", is("Title for REQ-CLONE-NR-SRC")))
+                .andReturn();
+
+        // Verify clone has no relations
+        var cloneId = objectMapper
+                .readTree(cloneResult.getResponse().getContentAsString())
+                .get("id")
+                .asText();
+        mockMvc.perform(get("/api/v1/requirements/" + cloneId + "/relations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    @Test
+    void cloneRequirement_duplicateUid_returns409() throws Exception {
+        var sourceId = createAndReturnId("REQ-CLONE-DUP-SRC");
+        createAndReturnId("REQ-CLONE-DUP-EXISTING");
+
+        mockMvc.perform(post("/api/v1/requirements/" + sourceId + "/clone")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("newUid", "REQ-CLONE-DUP-EXISTING", "copyRelations", false))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code", is("conflict")));
+    }
+
+    @Test
+    void cloneRequirement_nonExistentSource_returns404() throws Exception {
+        var nonExistentId = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/v1/requirements/" + nonExistentId + "/clone")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("newUid", "REQ-CLONE-GHOST", "copyRelations", false))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code", is("not_found")));
+    }
+
+    @Test
     void deleteRelation_returns204() throws Exception {
         var sourceId = createAndReturnId("REQ-C-017");
         var targetId = createAndReturnId("REQ-C-018");
