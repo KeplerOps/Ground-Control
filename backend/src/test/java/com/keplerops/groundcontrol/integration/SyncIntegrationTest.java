@@ -35,21 +35,31 @@ class SyncIntegrationTest extends BaseIntegrationTest {
         @Bean
         @Primary
         GitHubClient mockGitHubClient() {
-            return (owner, repo) -> List.of(
-                    new GitHubIssueData(
-                            1,
-                            "Setup CI",
-                            "CLOSED",
-                            "https://github.com/test/repo/issues/1",
-                            "Initial CI setup. See #2",
-                            List.of("phase-0", "P0")),
-                    new GitHubIssueData(
-                            2,
-                            "Add linting",
-                            "OPEN",
-                            "https://github.com/test/repo/issues/2",
-                            "Add linting tools",
-                            List.of("phase-0", "P1", "enhancement")));
+            return new GitHubClient() {
+                @Override
+                public List<GitHubIssueData> fetchAllIssues(String owner, String repo) {
+                    return List.of(
+                            new GitHubIssueData(
+                                    1,
+                                    "Setup CI",
+                                    "CLOSED",
+                                    "https://github.com/test/repo/issues/1",
+                                    "Initial CI setup. See #2",
+                                    List.of("phase-0", "P0")),
+                            new GitHubIssueData(
+                                    2,
+                                    "Add linting",
+                                    "OPEN",
+                                    "https://github.com/test/repo/issues/2",
+                                    "Add linting tools",
+                                    List.of("phase-0", "P1", "enhancement")));
+                }
+
+                @Override
+                public GitHubIssueData createIssue(String repo, String title, String body, List<String> labels) {
+                    throw new UnsupportedOperationException("Not used in sync tests");
+                }
+            };
         }
     }
 

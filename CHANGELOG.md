@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.0] - 2026-03-15
+
+### Added
+
+- 9 new MCP tools for full REST/MCP feature parity (GC-A012):
+  `gc_get_requirement_history`, `gc_get_relation_history`,
+  `gc_get_traceability_link_history`, `gc_delete_relation`,
+  `gc_delete_traceability_link`, `gc_materialize_graph`, `gc_get_ancestors`,
+  `gc_get_descendants`, `gc_find_paths`
+- REST endpoint `POST /api/v1/admin/github/issues` to create GitHub issues from
+  requirements, with automatic traceability link creation
+- `GitHubClient.createIssue()` domain interface method and `GitHubCliClient`
+  implementation using `gh issue create` CLI
+- `CreateGitHubIssueCommand` and `CreateGitHubIssueResult` domain records
+- `GitHubIssueSyncService.createIssueFromRequirement()` orchestrates issue
+  creation, body formatting from requirement metadata, and traceability link
+  creation with graceful degradation on link failure
+- `GitHubIssueController`, `GitHubIssueRequest`, and `GitHubIssueResponse` API
+  layer types
+- Unit tests for controller and service; URL parsing test for `GitHubCliClient`
+
+### Changed
+
+- `gc_create_github_issue` MCP tool now delegates to the backend REST API
+  instead of shelling out to `gh` CLI directly
+
 ## [0.48.0] - 2026-03-15
 
 ### Added
