@@ -59,6 +59,34 @@ http://localhost:8000/api/v1/
 | GET | `/graph/descendants/{uid}?depth=N` | — | 200 | Descendant UIDs |
 | GET | `/graph/paths?source=X&target=Y` | — | 200 | All paths between two UIDs |
 
+### GitHub Issues
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/admin/github/issues` | GitHubIssueRequest | 201 | Create issue from requirement |
+
+**GitHubIssueRequest:**
+
+```json
+{
+  "requirementUid": "GC-A001",
+  "repo": "owner/repo",
+  "extraBody": "Additional markdown (optional)",
+  "labels": ["enhancement"]
+}
+```
+
+**GitHubIssueResponse:**
+
+```json
+{
+  "issueUrl": "https://github.com/owner/repo/issues/42",
+  "issueNumber": 42,
+  "traceabilityLinkId": "uuid",
+  "warning": null
+}
+```
+
 ### Import / Sync
 
 | Method | Path | Body | Status | Purpose |
