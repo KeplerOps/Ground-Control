@@ -437,7 +437,7 @@ class RequirementServiceTest {
             when(requirementRepository.findAll(any(Specification.class), any(Pageable.class)))
                     .thenReturn(page);
 
-            var filter = new RequirementFilter(Status.DRAFT, null, null, null);
+            var filter = new RequirementFilter(Status.DRAFT, null, null, null, null);
             Page<Requirement> result = service.list(Pageable.unpaged(), filter);
             assertThat(result).isNotNull();
             assertThat(result.getContent()).hasSize(1);

@@ -2,6 +2,7 @@ package com.keplerops.groundcontrol.domain.requirements.repository;
 
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter;
+import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import java.util.Locale;
@@ -17,6 +18,10 @@ public final class RequirementSpecifications {
 
     public static Specification<Requirement> hasRequirementType(RequirementType type) {
         return (root, query, cb) -> cb.equal(root.get("requirementType"), type);
+    }
+
+    public static Specification<Requirement> hasPriority(Priority priority) {
+        return (root, query, cb) -> cb.equal(root.get("priority"), priority);
     }
 
     public static Specification<Requirement> hasWave(Integer wave) {
@@ -49,6 +54,9 @@ public final class RequirementSpecifications {
         }
         if (filter.requirementType() != null) {
             spec = spec.and(hasRequirementType(filter.requirementType()));
+        }
+        if (filter.priority() != null) {
+            spec = spec.and(hasPriority(filter.priority()));
         }
         if (filter.wave() != null) {
             spec = spec.and(hasWave(filter.wave()));

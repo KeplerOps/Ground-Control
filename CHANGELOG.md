@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.0] - 2026-03-15
+
+### Added
+
+- Priority filtering for requirements list endpoint: `GET /api/v1/requirements?priority=MUST`
+  supports MoSCoW values (MUST, SHOULD, COULD, WONT). Completes GC-A009
+- `priority` parameter in `gc_list_requirements` MCP tool
+
 ## [0.43.0] - 2026-03-14
 
 ### Added

@@ -198,6 +198,7 @@ class RequirementControllerTest {
             mockMvc.perform(get("/api/v1/requirements")
                             .param("status", "DRAFT")
                             .param("type", "FUNCTIONAL")
+                            .param("priority", "MUST")
                             .param("wave", "1")
                             .param("search", "test"))
                     .andExpect(status().isOk())

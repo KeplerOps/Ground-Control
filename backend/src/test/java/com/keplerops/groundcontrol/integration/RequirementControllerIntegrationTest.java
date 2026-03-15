@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -197,6 +198,25 @@ class RequirementControllerIntegrationTest extends BaseIntegrationTest {
                         .content(objectMapper.writeValueAsString(validRequest("REQ-C-013"))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code", is("conflict")));
+    }
+
+    @Test
+    void filteredList_byPriority_returnsFiltered() throws Exception {
+        // MUST priority (default from validRequest)
+        createAndReturnId("REQ-C-030");
+
+        // SHOULD priority
+        var shouldReq = new HashMap<>(validRequest("REQ-C-031"));
+        shouldReq.put("priority", "SHOULD");
+        mockMvc.perform(post("/api/v1/requirements")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(shouldReq)))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/api/v1/requirements").param("priority", "SHOULD"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].uid", is("REQ-C-031")));
     }
 
     @Test
