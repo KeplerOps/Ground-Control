@@ -25,6 +25,7 @@ import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
+import com.keplerops.groundcontrol.domain.requirements.service.AuditService;
 import com.keplerops.groundcontrol.domain.requirements.service.BulkTransitionResult;
 import com.keplerops.groundcontrol.domain.requirements.service.CloneRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
@@ -66,6 +67,9 @@ class RequirementControllerTest {
 
     @MockitoBean
     private TraceabilityService traceabilityService;
+
+    @MockitoBean
+    private AuditService auditService;
 
     private static Requirement createRequirement(String uid) {
         var req = new Requirement(uid, "Title for " + uid, "Statement for " + uid);
