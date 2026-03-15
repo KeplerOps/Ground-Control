@@ -120,6 +120,11 @@ tasks.register<Test>("ageTest") {
 
 tasks.jacocoTestReport {
     dependsOn(tasks.test)
+    // Merge coverage from integration tests when available
+    val integrationTest = tasks.findByName("integrationTest")
+    if (integrationTest != null) {
+        executionData(integrationTest)
+    }
     reports {
         xml.required = true
         html.required = true

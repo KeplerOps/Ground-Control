@@ -84,6 +84,19 @@ class RequirementServiceTest {
         }
 
         @Test
+        void createsWithNullOptionalFields() {
+            var cmd = new CreateRequirementCommand("REQ-002", "Title", "Statement", null, null, null, null);
+
+            when(requirementRepository.existsByUid("REQ-002")).thenReturn(false);
+            when(requirementRepository.save(any(Requirement.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            var result = service.create(cmd);
+            assertThat(result.getRationale()).isEmpty();
+            assertThat(result.getRequirementType()).isEqualTo(RequirementType.FUNCTIONAL); // default
+            assertThat(result.getPriority()).isEqualTo(Priority.MUST); // default
+        }
+
+        @Test
         void throwsConflictOnDuplicateUid() {
             var cmd = new CreateRequirementCommand("REQ-001", "Title", "Statement", null, null, null, null);
 
@@ -152,6 +165,38 @@ class RequirementServiceTest {
             var result = service.update(id, cmd);
             assertThat(result.getTitle()).isEqualTo("New Title");
             assertThat(result.getRequirementType()).isEqualTo(RequirementType.CONSTRAINT);
+        }
+
+        @Test
+        void updatesWithAllNullOptionalFields() {
+            var id = UUID.randomUUID();
+            var req = makeRequirement("REQ-001");
+            req.setRequirementType(RequirementType.CONSTRAINT);
+            req.setPriority(Priority.MUST);
+            when(requirementRepository.findById(id)).thenReturn(Optional.of(req));
+            when(requirementRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var cmd = new UpdateRequirementCommand(null, null, null, null, null, null);
+
+            var result = service.update(id, cmd);
+            // Original values preserved when nulls passed
+            assertThat(result.getTitle()).isEqualTo("Title for REQ-001");
+            assertThat(result.getStatement()).isEqualTo("Statement for REQ-001");
+            assertThat(result.getRequirementType()).isEqualTo(RequirementType.CONSTRAINT);
+            assertThat(result.getPriority()).isEqualTo(Priority.MUST);
+        }
+
+        @Test
+        void updatesRationale() {
+            var id = UUID.randomUUID();
+            var req = makeRequirement("REQ-001");
+            when(requirementRepository.findById(id)).thenReturn(Optional.of(req));
+            when(requirementRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var cmd = new UpdateRequirementCommand(null, null, "New rationale", null, null, null);
+
+            var result = service.update(id, cmd);
+            assertThat(result.getRationale()).isEqualTo("New rationale");
         }
 
         @Test

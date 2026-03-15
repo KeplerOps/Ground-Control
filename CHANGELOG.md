@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.1] - 2026-03-15
+
+### Added
+
+- Integration tests for `RequirementSpecifications`: all 6 spec methods and
+  `fromFilter()` branches tested against real PostgreSQL (19 tests)
+- Unit tests for `RequirementService` uncovered branches: create with null
+  optional fields, update with all-null fields, update rationale (3 tests)
+- JaCoCo report now merges unit + integration test coverage data
+
+### Changed
+
+- `RequirementSpecifications.java` coverage: 54.2% line / 55.0% branch -> 100% / 100%
+- `RequirementService.java` coverage: 99.0% line / 77.8% branch -> 100% / 100%
+- Overall project coverage: 89.7% line / 78.3% branch -> 94.2% / 86.8%
+
 ## [0.46.0] - 2026-03-15
 
 ### Added
