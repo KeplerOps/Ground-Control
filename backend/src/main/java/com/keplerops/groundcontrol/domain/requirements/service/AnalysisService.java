@@ -41,13 +41,14 @@ public class AnalysisService {
     /**
      * Detect cycles in the requirements DAG (PARENT, DEPENDS_ON, REFINES edges).
      *
-     * @return list of cycles as UID strings
+     * @return list of cycles with member UIDs and the edges that form each cycle
      */
-    public List<List<String>> detectCycles() {
+    public List<CycleResult> detectCycles() {
         List<RequirementRelation> relations = relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES);
 
         Map<UUID, List<UUID>> adjacencyList = new HashMap<>();
         Map<UUID, String> idToUid = new HashMap<>();
+        Map<UUID, Map<UUID, RelationType>> edgeTypes = new HashMap<>();
 
         for (RequirementRelation rel : relations) {
             UUID sourceId = rel.getSource().getId();
@@ -56,12 +57,24 @@ public class AnalysisService {
             idToUid.put(targetId, rel.getTarget().getUid());
             adjacencyList.computeIfAbsent(sourceId, k -> new ArrayList<>()).add(targetId);
             adjacencyList.putIfAbsent(targetId, new ArrayList<>());
+            edgeTypes.computeIfAbsent(sourceId, k -> new HashMap<>()).put(targetId, rel.getRelationType());
         }
 
         List<List<UUID>> cycles = GraphAlgorithms.findCycles(adjacencyList);
 
         return cycles.stream()
-                .map(cycle -> cycle.stream().map(idToUid::get).collect(Collectors.toList()))
+                .map(cycle -> {
+                    List<String> members = cycle.stream().map(idToUid::get).collect(Collectors.toList());
+                    List<CycleEdge> edges = new ArrayList<>();
+                    for (int i = 0; i < cycle.size() - 1; i++) {
+                        UUID src = cycle.get(i);
+                        UUID tgt = cycle.get(i + 1);
+                        RelationType type =
+                                edgeTypes.getOrDefault(src, Map.of()).get(tgt);
+                        edges.add(new CycleEdge(idToUid.get(src), idToUid.get(tgt), type));
+                    }
+                    return new CycleResult(members, edges);
+                })
                 .collect(Collectors.toList());
     }
 

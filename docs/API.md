@@ -50,6 +50,24 @@ http://localhost:8000/api/v1/
 | GET | `/analysis/impact/{id}` | — | 200 | Transitive impact analysis |
 | GET | `/analysis/cross-wave` | — | 200 | Cross-wave dependency violations |
 
+**CycleResponse** (`GET /analysis/cycles`):
+
+```json
+[
+  {
+    "members": ["REQ-A", "REQ-B", "REQ-C", "REQ-A"],
+    "edges": [
+      { "sourceUid": "REQ-A", "targetUid": "REQ-B", "relationType": "DEPENDS_ON" },
+      { "sourceUid": "REQ-B", "targetUid": "REQ-C", "relationType": "DEPENDS_ON" },
+      { "sourceUid": "REQ-C", "targetUid": "REQ-A", "relationType": "PARENT" }
+    ]
+  }
+]
+```
+
+Each cycle lists the member UIDs (closing back to the start) and the edges that
+form it, including the relation type between each consecutive pair.
+
 ### Graph
 
 | Method | Path | Body | Status | Purpose |
