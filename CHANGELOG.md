@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.51.0] - 2026-03-15
+
+### Changed
+
+- **Breaking:** `PUT /api/v1/requirements/{id}` now uses `UpdateRequirementRequest`
+  DTO — all fields are optional for partial updates, `uid` removed from request body
+
+### Fixed
+
+- Omitting `wave` in a requirement update request no longer resets it to null
+- `gc_update_requirement` MCP tool no longer accepts `uid` parameter (UID updates
+  were silently ignored); partial updates now work correctly without 422 errors
+
 ## [0.50.0] - 2026-03-15
 
 ### Changed

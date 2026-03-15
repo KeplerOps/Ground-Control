@@ -83,7 +83,9 @@ public class RequirementService {
         if (command.priority() != null) {
             requirement.setPriority(command.priority());
         }
-        requirement.setWave(command.wave());
+        if (command.wave() != null) {
+            requirement.setWave(command.wave());
+        }
         return requirementRepository.save(requirement);
     }
 

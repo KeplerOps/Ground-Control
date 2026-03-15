@@ -122,7 +122,6 @@ server.tool(
   "Update an existing requirement's fields. Pass only the fields to change.",
   {
     id: z.string().uuid().describe("Requirement UUID"),
-    uid: z.string().optional().describe("New UID"),
     title: z.string().optional().describe("New title"),
     statement: z.string().optional().describe("New statement"),
     rationale: z.string().optional().describe("New rationale"),
@@ -130,10 +129,9 @@ server.tool(
     priority: z.enum(PRIORITIES).optional().describe("New MoSCoW priority"),
     wave: z.number().int().optional().describe("New wave number"),
   },
-  async ({ id, uid, title, statement, rationale, requirement_type, priority, wave }) => {
+  async ({ id, title, statement, rationale, requirement_type, priority, wave }) => {
     try {
       const data = {};
-      if (uid !== undefined) data.uid = uid;
       if (title !== undefined) data.title = title;
       if (statement !== undefined) data.statement = statement;
       if (rationale !== undefined) data.rationale = rationale;
