@@ -17,6 +17,10 @@ stale spreadsheets, no traceability theater.
 management, DAG-based dependency tracking, graph analysis, GitHub sync, and
 MCP-driven AI workflows. The rest of the factory is coming.
 
+<p align="center">
+  <img src="assets/interactive_graph_example.png" alt="Interactive requirements graph showing DAG layout with dependency edges, status coloring, and requirement details" width="720">
+</p>
+
 ## What's Live
 
 - **Requirements lifecycle** — DRAFT → ACTIVE → DEPRECATED → ARCHIVED, with MoSCoW priority and wave-based planning
