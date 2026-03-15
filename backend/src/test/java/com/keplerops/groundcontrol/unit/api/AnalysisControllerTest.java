@@ -12,6 +12,8 @@ import com.keplerops.groundcontrol.api.admin.AnalysisController;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
+import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
+import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import java.lang.reflect.Field;
@@ -55,12 +57,22 @@ class AnalysisControllerTest {
 
         @Test
         void returns200() throws Exception {
-            when(analysisService.detectCycles()).thenReturn(List.of(List.of("REQ-A", "REQ-B", "REQ-A")));
+            var edges = List.of(
+                    new CycleEdge("REQ-A", "REQ-B", RelationType.DEPENDS_ON),
+                    new CycleEdge("REQ-B", "REQ-A", RelationType.PARENT));
+            var cycleResult = new CycleResult(List.of("REQ-A", "REQ-B", "REQ-A"), edges);
+            when(analysisService.detectCycles()).thenReturn(List.of(cycleResult));
 
             mockMvc.perform(get("/api/v1/analysis/cycles"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$", hasSize(1)))
-                    .andExpect(jsonPath("$[0]", hasSize(3)));
+                    .andExpect(jsonPath("$[0].members", hasSize(3)))
+                    .andExpect(jsonPath("$[0].members[0]", is("REQ-A")))
+                    .andExpect(jsonPath("$[0].edges", hasSize(2)))
+                    .andExpect(jsonPath("$[0].edges[0].sourceUid", is("REQ-A")))
+                    .andExpect(jsonPath("$[0].edges[0].targetUid", is("REQ-B")))
+                    .andExpect(jsonPath("$[0].edges[0].relationType", is("DEPENDS_ON")))
+                    .andExpect(jsonPath("$[0].edges[1].relationType", is("PARENT")));
         }
     }
 

@@ -21,8 +21,8 @@ public class AnalysisController {
     }
 
     @GetMapping("/cycles")
-    public List<List<String>> detectCycles() {
-        return analysisService.detectCycles();
+    public List<CycleResponse> detectCycles() {
+        return analysisService.detectCycles().stream().map(CycleResponse::from).toList();
     }
 
     @GetMapping("/orphans")
