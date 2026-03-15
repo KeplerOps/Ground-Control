@@ -25,6 +25,7 @@ import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
+import com.keplerops.groundcontrol.domain.requirements.service.BulkTransitionResult;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateTraceabilityLinkCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter;
@@ -381,6 +382,43 @@ class RequirementControllerTest {
 
             mockMvc.perform(delete("/api/v1/requirements/" + reqId + "/traceability/" + linkId))
                     .andExpect(status().isNoContent());
+        }
+    }
+
+    @Nested
+    class BulkTransitionStatus {
+
+        @Test
+        void returns200WithResults() throws Exception {
+            var req1 = createRequirement("REQ-001");
+            setField(req1, "status", Status.ACTIVE);
+            var req2 = createRequirement("REQ-002");
+            setField(req2, "status", Status.ACTIVE);
+
+            var result = new BulkTransitionResult(List.of(req1, req2), List.of());
+
+            when(requirementService.bulkTransitionStatus(any(), eq(Status.ACTIVE)))
+                    .thenReturn(result);
+
+            mockMvc.perform(post("/api/v1/requirements/bulk/transition")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(
+                                    Map.of("ids", List.of(req1.getId(), req2.getId()), "status", "ACTIVE"))))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalRequested", is(2)))
+                    .andExpect(jsonPath("$.totalSucceeded", is(2)))
+                    .andExpect(jsonPath("$.totalFailed", is(0)))
+                    .andExpect(jsonPath("$.succeeded[0].uid", is("REQ-001")))
+                    .andExpect(jsonPath("$.succeeded[1].uid", is("REQ-002")));
+        }
+
+        @Test
+        void emptyIdsReturns422() throws Exception {
+            mockMvc.perform(post("/api/v1/requirements/bulk/transition")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of("ids", List.of(), "status", "ACTIVE"))))
+                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(jsonPath("$.error.code", is("validation_error")));
         }
     }
 

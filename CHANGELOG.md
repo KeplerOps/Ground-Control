@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.0] - 2026-03-14
+
+### Added
+
+- Bulk status transitions: `POST /api/v1/requirements/bulk/transition` accepts
+  a list of requirement IDs and a target status, applies the same state machine
+  rules to each independently (best-effort semantics — valid transitions succeed,
+  invalid ones collected as failures). Implements GC-A008
+- `BulkTransitionResult` domain record, `BulkStatusTransitionRequest` and
+  `BulkStatusTransitionResponse` API DTOs
+- `gc_bulk_transition_status` MCP tool: accepts UIDs, resolves to UUIDs, calls
+  the bulk endpoint, merges UID-resolution errors into the failure list
+- Unit tests for `RequirementService.bulkTransitionStatus()` (3 tests) and
+  `RequirementController.bulkTransitionStatus()` (2 tests)
+
 ## [0.42.1] - 2026-03-14
 
 ### Changed
