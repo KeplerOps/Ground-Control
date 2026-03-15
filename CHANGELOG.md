@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.0] - 2026-03-15
+
+### Added
+
+- Audit history REST endpoint: `GET /api/v1/requirements/{id}/history` returns
+  chronological list of all revisions with revision type, timestamp, actor, and
+  full entity snapshot at each point in time (GC-A006)
+- Custom Envers revision entity (`GroundControlRevisionEntity`) with `actor`
+  column for tracking who made each change (nullable until auth is added)
+- `ActorHolder` thread-local utility for propagating actor identity to Envers
+- `AuditService` for querying Hibernate Envers revision history
+- Flyway migration V011: adds `actor` column to `revinfo` table
+- Integration test for audit history endpoint (create + update + verify history)
+
 ## [0.46.1] - 2026-03-15
 
 ### Added

@@ -46,4 +46,16 @@
         <Package name="~com\.keplerops\.groundcontrol\.domain\..*\.model" />
         <Bug pattern="CT_CONSTRUCTOR_THROW" />
     </Match>
+
+    <!-- Envers revision entity inherits correct equals from DefaultRevisionEntity -->
+    <Match>
+        <Class name="com.keplerops.groundcontrol.domain.audit.GroundControlRevisionEntity" />
+        <Bug pattern="EQ_DOESNT_OVERRIDE_EQUALS" />
+    </Match>
+
+    <!-- Service-layer records that hold entity references are read-only audit snapshots -->
+    <Match>
+        <Package name="~com\.keplerops\.groundcontrol\.domain\..*\.service" />
+        <Bug pattern="EI_EXPOSE_REP" />
+    </Match>
 </FindBugsFilter>

@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.api.requirements;
 
+import com.keplerops.groundcontrol.domain.requirements.service.AuditService;
 import com.keplerops.groundcontrol.domain.requirements.service.CloneRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateTraceabilityLinkCommand;
@@ -33,10 +34,13 @@ public class RequirementController {
 
     private final RequirementService requirementService;
     private final TraceabilityService traceabilityService;
+    private final AuditService auditService;
 
-    public RequirementController(RequirementService requirementService, TraceabilityService traceabilityService) {
+    public RequirementController(
+            RequirementService requirementService, TraceabilityService traceabilityService, AuditService auditService) {
         this.requirementService = requirementService;
         this.traceabilityService = traceabilityService;
+        this.auditService = auditService;
     }
 
     @PostMapping
@@ -104,6 +108,13 @@ public class RequirementController {
     public RequirementResponse clone(@PathVariable UUID id, @Valid @RequestBody CloneRequirementRequest request) {
         var command = new CloneRequirementCommand(request.newUid(), request.copyRelations());
         return RequirementResponse.from(requirementService.clone(id, command));
+    }
+
+    @GetMapping("/{id}/history")
+    public List<RequirementHistoryResponse> getHistory(@PathVariable UUID id) {
+        return auditService.getRequirementHistory(id).stream()
+                .map(RequirementHistoryResponse::from)
+                .toList();
     }
 
     @PostMapping("/{id}/archive")
