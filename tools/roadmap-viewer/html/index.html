@@ -203,13 +203,13 @@
     <select id="colorBy">
       <option value="series">Series</option>
       <option value="priority">Priority</option>
-      <option value="status">Status</option>
+      <option value="status" selected>Status</option>
       <option value="wave">Wave</option>
     </select>
     <label>Layout</label>
     <select id="layoutSelect">
       <option value="dagre-lr">DAG (left to right)</option>
-      <option value="dagre-tb">DAG (top to bottom)</option>
+      <option value="dagre-tb" selected>DAG (top to bottom)</option>
     </select>
     <button id="btnFit" title="Fit to screen">Fit</button>
     <button id="btnReset" title="Reset filters">Reset</button>
@@ -644,7 +644,7 @@ async function main() {
     allRelations = await fetchAllRelations(allRequirements);
 
     document.getElementById('loading').style.display = 'none';
-    renderGraph('series', 'dagre-lr');
+    renderGraph('status', 'dagre-tb');
   } catch (err) {
     var msg = document.getElementById('loadMsg');
     msg.textContent = 'Error: ' + err.message + '. Is the backend running on localhost:8000?';

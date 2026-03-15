@@ -1,11 +1,14 @@
 package com.keplerops.groundcontrol.api.requirements;
 
+import com.keplerops.groundcontrol.domain.requirements.service.AuditService;
+import com.keplerops.groundcontrol.domain.requirements.service.CloneRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateTraceabilityLinkCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementService;
 import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityService;
 import com.keplerops.groundcontrol.domain.requirements.service.UpdateRequirementCommand;
+import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import jakarta.validation.Valid;
@@ -31,10 +34,13 @@ public class RequirementController {
 
     private final RequirementService requirementService;
     private final TraceabilityService traceabilityService;
+    private final AuditService auditService;
 
-    public RequirementController(RequirementService requirementService, TraceabilityService traceabilityService) {
+    public RequirementController(
+            RequirementService requirementService, TraceabilityService traceabilityService, AuditService auditService) {
         this.requirementService = requirementService;
         this.traceabilityService = traceabilityService;
+        this.auditService = auditService;
     }
 
     @PostMapping
@@ -56,9 +62,10 @@ public class RequirementController {
             Pageable pageable,
             @RequestParam(required = false) Status status,
             @RequestParam(required = false) RequirementType type,
+            @RequestParam(required = false) Priority priority,
             @RequestParam(required = false) Integer wave,
             @RequestParam(required = false) String search) {
-        var filter = new RequirementFilter(status, type, wave, search);
+        var filter = new RequirementFilter(status, type, priority, wave, search);
         return requirementService.list(pageable, filter).map(RequirementResponse::from);
     }
 
@@ -94,6 +101,20 @@ public class RequirementController {
     public BulkStatusTransitionResponse bulkTransitionStatus(@Valid @RequestBody BulkStatusTransitionRequest request) {
         var result = requirementService.bulkTransitionStatus(request.ids(), request.status());
         return BulkStatusTransitionResponse.from(result, request.ids().size());
+    }
+
+    @PostMapping("/{id}/clone")
+    @ResponseStatus(HttpStatus.CREATED)
+    public RequirementResponse clone(@PathVariable UUID id, @Valid @RequestBody CloneRequirementRequest request) {
+        var command = new CloneRequirementCommand(request.newUid(), request.copyRelations());
+        return RequirementResponse.from(requirementService.clone(id, command));
+    }
+
+    @GetMapping("/{id}/history")
+    public List<RequirementHistoryResponse> getHistory(@PathVariable UUID id) {
+        return auditService.getRequirementHistory(id).stream()
+                .map(RequirementHistoryResponse::from)
+                .toList();
     }
 
     @PostMapping("/{id}/archive")

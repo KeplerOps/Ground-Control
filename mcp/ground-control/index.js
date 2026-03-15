@@ -11,6 +11,7 @@ import {
   transitionStatus,
   bulkTransitionStatus,
   archiveRequirement,
+  cloneRequirement,
   createRelation,
   getRelations,
   getTraceabilityLinks,
@@ -63,18 +64,19 @@ server.tool(
 
 server.tool(
   "gc_list_requirements",
-  "List requirements with optional filtering by status, type, wave, or free-text search. Returns paginated results.",
+  "List requirements with optional filtering by status, type, priority, wave, or free-text search. Returns paginated results.",
   {
     status: z.enum(STATUSES).optional().describe("Filter by status"),
     type: z.enum(REQUIREMENT_TYPES).optional().describe("Filter by requirement type"),
+    priority: z.enum(PRIORITIES).optional().describe("Filter by priority (MoSCoW)"),
     wave: z.number().int().optional().describe("Filter by wave number"),
     search: z.string().optional().describe("Free-text search in title and statement"),
     page: z.number().int().optional().describe("Page number (0-based)"),
     size: z.number().int().optional().describe("Page size (default 20)"),
   },
-  async ({ status, type, wave, search, page, size }) => {
+  async ({ status, type, priority, wave, search, page, size }) => {
     try {
-      return ok(JSON.stringify(await listRequirements({ status, type, wave, search, page, size }), null, 2));
+      return ok(JSON.stringify(await listRequirements({ status, type, priority, wave, search, page, size }), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -197,6 +199,24 @@ server.tool(
         result.total_requested = (result.total_requested || 0) + resolutionFailures.length;
       }
       return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_clone_requirement",
+  "Clone an existing requirement with a new UID. Copies all content fields (title, statement, rationale, type, priority, wave). The clone starts in DRAFT status. Optionally copies outgoing relations.",
+  {
+    uid: z.string().describe("UID of the requirement to clone (e.g. 'GC-A007')"),
+    new_uid: z.string().describe("UID for the cloned requirement (must be unique)"),
+    copy_relations: z.boolean().optional().default(false).describe("Whether to copy outgoing relations to the clone"),
+  },
+  async ({ uid, new_uid, copy_relations }) => {
+    try {
+      const source = await getRequirementByUid(uid);
+      return ok(JSON.stringify(await cloneRequirement(source.id, new_uid, copy_relations), null, 2));
     } catch (e) {
       return err(e);
     }

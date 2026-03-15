@@ -1,5 +1,8 @@
 package com.keplerops.groundcontrol.domain.requirements.service;
 
+import com.keplerops.groundcontrol.domain.exception.ConflictException;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementImport;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementImportRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
@@ -91,8 +94,8 @@ public class ImportService {
                     requirementsCreated++;
                 }
                 uidToId.put(sdocReq.uid(), reqId);
-            } catch (Exception e) {
-                log.warn("Error importing requirement {}: {}", sdocReq.uid(), e.getMessage());
+            } catch (ConflictException | NotFoundException | DomainValidationException e) {
+                log.warn("import_requirement_failed: uid={} error={}", sdocReq.uid(), e.getMessage());
                 errors.add(Map.of("phase", "requirements", "uid", sdocReq.uid(), "error", e.getMessage()));
             }
         }
@@ -127,8 +130,12 @@ public class ImportService {
                     }
                     requirementService.createRelation(childId, parentId, RelationType.PARENT);
                     relationsCreated++;
-                } catch (Exception e) {
-                    log.warn("Error creating relation {} -> {}: {}", sdocReq.uid(), parentUid, e.getMessage());
+                } catch (ConflictException | NotFoundException | DomainValidationException e) {
+                    log.warn(
+                            "import_relation_failed: source={} target={} error={}",
+                            sdocReq.uid(),
+                            parentUid,
+                            e.getMessage());
                     errors.add(Map.of(
                             "phase", "relations", "uid", sdocReq.uid(), "parent", parentUid, "error", e.getMessage()));
                 }
@@ -153,8 +160,12 @@ public class ImportService {
                             ArtifactType.GITHUB_ISSUE, artifactId, null, null, LinkType.IMPLEMENTS);
                     traceabilityService.createLink(reqId, cmd);
                     traceabilityLinksCreated++;
-                } catch (Exception e) {
-                    log.warn("Error creating traceability link {} -> #{}: {}", sdocReq.uid(), issueNum, e.getMessage());
+                } catch (ConflictException | NotFoundException | DomainValidationException e) {
+                    log.warn(
+                            "import_traceability_link_failed: uid={} issue={} error={}",
+                            sdocReq.uid(),
+                            issueNum,
+                            e.getMessage());
                     errors.add(Map.of(
                             "phase",
                             "traceability",

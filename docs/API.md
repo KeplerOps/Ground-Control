@@ -20,6 +20,8 @@ http://localhost:8000/api/v1/
 | GET | `/requirements/uid/{uid}` | — | 200 | Get requirement by UID |
 | PUT | `/requirements/{id}` | RequirementRequest | 200 | Update requirement |
 | POST | `/requirements/{id}/transition` | `{ "status": "ACTIVE" }` | 200 | Transition status |
+| POST | `/requirements/bulk/transition` | BulkStatusTransitionRequest | 200 | Bulk transition status |
+| POST | `/requirements/{id}/clone` | CloneRequirementRequest | 201 | Clone requirement |
 | POST | `/requirements/{id}/archive` | — | 200 | Archive requirement |
 
 ### Relations

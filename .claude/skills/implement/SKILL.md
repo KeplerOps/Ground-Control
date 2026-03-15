@@ -11,7 +11,7 @@ disable-model-invocation: true
 
 1. Enter plan mode.
 
-2. Use the `gc_get_requirement` MCP tool with uid `$ARGUMENTS` to fetch the requirement details. Note the requirement's UUID, title, statement, status, and wave.
+2. Use the `gc_get_requirement` MCP tool with uid `GC-$ARGUMENTS` to fetch the requirement details. Note the requirement's UUID, title, statement, status, and wave.
 
 3. Use the `gc_get_traceability` MCP tool with the requirement's UUID to check for existing traceability links. Look for a link with artifact_type `GITHUB_ISSUE`.
 
@@ -19,6 +19,8 @@ disable-model-invocation: true
    - Use the `gc_create_github_issue` MCP tool with uid `$ARGUMENTS` to create a GitHub issue and auto-link it.
 
 5. If a GitHub issue link DOES exist, note the issue number from the artifact_identifier.
+
+6. Run `gh issue develop <issue-number> --checkout --base dev` to switch to the issue branch.
 
 ## Step 2: Read the GitHub Issue
 
@@ -34,6 +36,7 @@ Explore the codebase to determine whether the requirement described in the issue
 ## Step 4: Plan or Report
 
 - **If the requirement is NOT yet met**: Plan the implementation. Identify which files need to be created or modified, what tests to write, and what approach to take. Enter plan mode.
+- Your plans must respect the coding standards and classification levels in ADR-012.
 - **If the requirement IS already met**: Report that the requirement is satisfied and identify which code satisfies it.
 
 ## Step 5: Ensure Traceability Links

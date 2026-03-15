@@ -12,6 +12,7 @@ import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
+import com.keplerops.groundcontrol.domain.requirements.service.CloneRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementService;
@@ -83,6 +84,19 @@ class RequirementServiceTest {
         }
 
         @Test
+        void createsWithNullOptionalFields() {
+            var cmd = new CreateRequirementCommand("REQ-002", "Title", "Statement", null, null, null, null);
+
+            when(requirementRepository.existsByUid("REQ-002")).thenReturn(false);
+            when(requirementRepository.save(any(Requirement.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            var result = service.create(cmd);
+            assertThat(result.getRationale()).isEmpty();
+            assertThat(result.getRequirementType()).isEqualTo(RequirementType.FUNCTIONAL); // default
+            assertThat(result.getPriority()).isEqualTo(Priority.MUST); // default
+        }
+
+        @Test
         void throwsConflictOnDuplicateUid() {
             var cmd = new CreateRequirementCommand("REQ-001", "Title", "Statement", null, null, null, null);
 
@@ -151,6 +165,38 @@ class RequirementServiceTest {
             var result = service.update(id, cmd);
             assertThat(result.getTitle()).isEqualTo("New Title");
             assertThat(result.getRequirementType()).isEqualTo(RequirementType.CONSTRAINT);
+        }
+
+        @Test
+        void updatesWithAllNullOptionalFields() {
+            var id = UUID.randomUUID();
+            var req = makeRequirement("REQ-001");
+            req.setRequirementType(RequirementType.CONSTRAINT);
+            req.setPriority(Priority.MUST);
+            when(requirementRepository.findById(id)).thenReturn(Optional.of(req));
+            when(requirementRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var cmd = new UpdateRequirementCommand(null, null, null, null, null, null);
+
+            var result = service.update(id, cmd);
+            // Original values preserved when nulls passed
+            assertThat(result.getTitle()).isEqualTo("Title for REQ-001");
+            assertThat(result.getStatement()).isEqualTo("Statement for REQ-001");
+            assertThat(result.getRequirementType()).isEqualTo(RequirementType.CONSTRAINT);
+            assertThat(result.getPriority()).isEqualTo(Priority.MUST);
+        }
+
+        @Test
+        void updatesRationale() {
+            var id = UUID.randomUUID();
+            var req = makeRequirement("REQ-001");
+            when(requirementRepository.findById(id)).thenReturn(Optional.of(req));
+            when(requirementRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var cmd = new UpdateRequirementCommand(null, null, "New rationale", null, null, null);
+
+            var result = service.update(id, cmd);
+            assertThat(result.getRationale()).isEqualTo("New rationale");
         }
 
         @Test
@@ -416,6 +462,105 @@ class RequirementServiceTest {
     }
 
     @Nested
+    class Clone {
+
+        @Test
+        void clonesRequirementWithRelations() {
+            var sourceId = UUID.randomUUID();
+            var targetId = UUID.randomUUID();
+            var source = makeRequirement("REQ-001");
+            var target = makeRequirement("REQ-002");
+            setId(source, sourceId);
+            setId(target, targetId);
+            source.setRationale("Important");
+            source.setPriority(Priority.SHOULD);
+            source.setRequirementType(RequirementType.CONSTRAINT);
+            source.setWave(2);
+
+            var outgoingRelation = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
+
+            when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
+            when(requirementRepository.existsByUid("REQ-001-CLONE")).thenReturn(false);
+            when(requirementRepository.save(any(Requirement.class))).thenAnswer(inv -> {
+                var r = (Requirement) inv.getArgument(0);
+                setId(r, UUID.randomUUID());
+                return r;
+            });
+            when(relationRepository.findBySourceIdWithEntities(sourceId)).thenReturn(List.of(outgoingRelation));
+            when(relationRepository.save(any(RequirementRelation.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            var cmd = new CloneRequirementCommand("REQ-001-CLONE", true);
+            var result = service.clone(sourceId, cmd);
+
+            assertThat(result.getUid()).isEqualTo("REQ-001-CLONE");
+            assertThat(result.getTitle()).isEqualTo("Title for REQ-001");
+            assertThat(result.getStatement()).isEqualTo("Statement for REQ-001");
+            assertThat(result.getStatus()).isEqualTo(Status.DRAFT);
+            assertThat(result.getRationale()).isEqualTo("Important");
+            assertThat(result.getPriority()).isEqualTo(Priority.SHOULD);
+            assertThat(result.getRequirementType()).isEqualTo(RequirementType.CONSTRAINT);
+            assertThat(result.getWave()).isEqualTo(2);
+
+            org.mockito.Mockito.verify(relationRepository).save(any(RequirementRelation.class));
+        }
+
+        @Test
+        void clonesRequirementWithoutRelations() {
+            var sourceId = UUID.randomUUID();
+            var source = makeRequirement("REQ-001");
+            setId(source, sourceId);
+            source.setRationale("Important");
+            source.setPriority(Priority.SHOULD);
+            source.setRequirementType(RequirementType.CONSTRAINT);
+            source.setWave(2);
+
+            when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
+            when(requirementRepository.existsByUid("REQ-001-CLONE")).thenReturn(false);
+            when(requirementRepository.save(any(Requirement.class))).thenAnswer(inv -> {
+                var r = (Requirement) inv.getArgument(0);
+                setId(r, UUID.randomUUID());
+                return r;
+            });
+
+            var cmd = new CloneRequirementCommand("REQ-001-CLONE", false);
+            var result = service.clone(sourceId, cmd);
+
+            assertThat(result.getUid()).isEqualTo("REQ-001-CLONE");
+            assertThat(result.getTitle()).isEqualTo("Title for REQ-001");
+            assertThat(result.getStatement()).isEqualTo("Statement for REQ-001");
+            assertThat(result.getRationale()).isEqualTo("Important");
+            assertThat(result.getPriority()).isEqualTo(Priority.SHOULD);
+            assertThat(result.getRequirementType()).isEqualTo(RequirementType.CONSTRAINT);
+            assertThat(result.getWave()).isEqualTo(2);
+
+            org.mockito.Mockito.verify(relationRepository, org.mockito.Mockito.never())
+                    .findBySourceIdWithEntities(any());
+        }
+
+        @Test
+        void throwsConflictForDuplicateNewUid() {
+            var sourceId = UUID.randomUUID();
+            var source = makeRequirement("REQ-001");
+            when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
+            when(requirementRepository.existsByUid("REQ-EXISTING")).thenReturn(true);
+
+            var cmd = new CloneRequirementCommand("REQ-EXISTING", false);
+
+            assertThatThrownBy(() -> service.clone(sourceId, cmd)).isInstanceOf(ConflictException.class);
+        }
+
+        @Test
+        void throwsNotFoundForMissingSource() {
+            var sourceId = UUID.randomUUID();
+            when(requirementRepository.findById(sourceId)).thenReturn(Optional.empty());
+
+            var cmd = new CloneRequirementCommand("REQ-NEW", false);
+
+            assertThatThrownBy(() -> service.clone(sourceId, cmd)).isInstanceOf(NotFoundException.class);
+        }
+    }
+
+    @Nested
     class ListRequirements {
 
         @SuppressWarnings("unchecked")
@@ -437,7 +582,7 @@ class RequirementServiceTest {
             when(requirementRepository.findAll(any(Specification.class), any(Pageable.class)))
                     .thenReturn(page);
 
-            var filter = new RequirementFilter(Status.DRAFT, null, null, null);
+            var filter = new RequirementFilter(Status.DRAFT, null, null, null, null);
             Page<Requirement> result = service.list(Pageable.unpaged(), filter);
             assertThat(result).isNotNull();
             assertThat(result.getContent()).hasSize(1);

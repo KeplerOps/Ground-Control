@@ -39,6 +39,8 @@ const TO_CAMEL = {
   link_type: "linkType",
   relation_type: "relationType",
   target_id: "targetId",
+  new_uid: "newUid",
+  copy_relations: "copyRelations",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -132,9 +134,9 @@ export async function getRequirement(id) {
   return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}`);
 }
 
-export async function listRequirements({ status, type, wave, search, page, size } = {}) {
+export async function listRequirements({ status, type, priority, wave, search, page, size } = {}) {
   return request("GET", "/api/v1/requirements", {
-    params: { status, type, wave, search, page, size },
+    params: { status, type, priority, wave, search, page, size },
   });
 }
 
@@ -159,6 +161,12 @@ export async function archiveRequirement(id) {
 export async function bulkTransitionStatus(ids, status) {
   return request("POST", "/api/v1/requirements/bulk/transition", {
     body: { ids, status },
+  });
+}
+
+export async function cloneRequirement(id, newUid, copyRelations) {
+  return request("POST", `/api/v1/requirements/${encodeURIComponent(id)}/clone`, {
+    body: { new_uid: newUid, copy_relations: copyRelations },
   });
 }
 

@@ -1,0 +1,1 @@
+ALTER TABLE revinfo ADD COLUMN actor VARCHAR(255);
