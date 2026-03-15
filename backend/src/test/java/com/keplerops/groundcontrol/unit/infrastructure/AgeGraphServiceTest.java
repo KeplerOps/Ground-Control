@@ -1,12 +1,21 @@
 package com.keplerops.groundcontrol.unit.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.infrastructure.age.AgeGraphService;
 import com.keplerops.groundcontrol.infrastructure.age.AgeProperties;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -14,6 +23,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowCallbackHandler;
 
 @ExtendWith(MockitoExtension.class)
 class AgeGraphServiceTest {
@@ -67,6 +77,68 @@ class AgeGraphServiceTest {
 
             assertThat(result).isEmpty();
             verifyNoInteractions(jdbcTemplate);
+        }
+    }
+
+    @Nested
+    class WhenEnabled {
+
+        private AgeGraphService enabledService;
+
+        @BeforeEach
+        void setUp() {
+            var enabledProperties = new AgeProperties(true, "test_graph");
+            enabledService =
+                    new AgeGraphService(jdbcTemplate, enabledProperties, requirementRepository, relationRepository);
+        }
+
+        @Test
+        void materializeGraph_createsNodesAndEdges() {
+            when(requirementRepository.findAll()).thenReturn(List.of());
+            when(relationRepository.findAllWithSourceAndTarget()).thenReturn(List.of());
+
+            enabledService.materializeGraph();
+
+            verify(jdbcTemplate).execute("LOAD 'age'");
+            verify(jdbcTemplate).execute("SET search_path = ag_catalog, \"$user\", public");
+            verify(jdbcTemplate).execute(contains("DETACH DELETE"));
+        }
+
+        @Test
+        void materializeGraph_withRequirements_createsNodes() {
+            var req = new Requirement("GC-A001", "Test Req", "Statement");
+            when(requirementRepository.findAll()).thenReturn(List.of(req));
+            when(relationRepository.findAllWithSourceAndTarget()).thenReturn(List.of());
+
+            enabledService.materializeGraph();
+
+            // LOAD, SET, DETACH DELETE, and one CREATE for the requirement
+            verify(jdbcTemplate, atLeast(4)).execute(anyString());
+        }
+
+        @Test
+        void getAncestors_queriesGraph() {
+            enabledService.getAncestors("REQ-001", 5);
+
+            // setupSearchPath: LOAD + SET
+            verify(jdbcTemplate, times(2)).execute(anyString());
+            verify(jdbcTemplate).query(contains("PARENT"), any(RowCallbackHandler.class));
+        }
+
+        @Test
+        void getDescendants_queriesGraph() {
+            enabledService.getDescendants("REQ-001", 5);
+
+            verify(jdbcTemplate, times(2)).execute(anyString());
+            verify(jdbcTemplate).query(contains("PARENT"), any(RowCallbackHandler.class));
+        }
+
+        @Test
+        void findPaths_queriesGraph() {
+            enabledService.findPaths("REQ-001", "REQ-002");
+
+            verify(jdbcTemplate, times(2)).execute(anyString());
+            verify(jdbcTemplate).query(contains("nodes(path)"), any(RowCallbackHandler.class));
         }
     }
 }

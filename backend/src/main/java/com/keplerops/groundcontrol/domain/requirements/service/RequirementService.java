@@ -98,7 +98,6 @@ public class RequirementService {
         return requirementRepository.save(requirement);
     }
 
-    @Transactional
     public BulkTransitionResult bulkTransitionStatus(List<UUID> ids, Status newStatus) {
         var succeeded = new ArrayList<Requirement>();
         var failed = new ArrayList<Map<String, Object>>();
@@ -166,6 +165,30 @@ public class RequirementService {
     public Page<Requirement> list(Pageable pageable, RequirementFilter filter) {
         var spec = RequirementSpecifications.fromFilter(filter);
         return requirementRepository.findAll(spec, pageable);
+    }
+
+    public Requirement clone(UUID sourceId, CloneRequirementCommand command) {
+        var source = getById(sourceId);
+
+        if (requirementRepository.existsByUid(command.newUid())) {
+            throw new ConflictException("Requirement with UID '" + command.newUid() + "' already exists");
+        }
+
+        var clone = new Requirement(command.newUid(), source.getTitle(), source.getStatement());
+        clone.setRationale(source.getRationale());
+        clone.setRequirementType(source.getRequirementType());
+        clone.setPriority(source.getPriority());
+        clone.setWave(source.getWave());
+        clone = requirementRepository.save(clone);
+
+        if (command.copyRelations()) {
+            for (var rel : relationRepository.findBySourceIdWithEntities(sourceId)) {
+                var clonedRelation = new RequirementRelation(clone, rel.getTarget(), rel.getRelationType());
+                relationRepository.save(clonedRelation);
+            }
+        }
+
+        return clone;
     }
 
     public void deleteRelation(UUID requirementId, UUID relationId) {

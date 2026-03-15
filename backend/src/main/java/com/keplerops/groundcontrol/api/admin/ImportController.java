@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.api.admin;
 
+import com.keplerops.groundcontrol.domain.exception.GroundControlException;
 import com.keplerops.groundcontrol.domain.requirements.service.ImportService;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -21,8 +22,14 @@ public class ImportController {
     }
 
     @PostMapping(value = "/strictdoc", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ImportResultResponse importStrictdoc(@RequestParam("file") MultipartFile file) throws IOException {
-        var content = new String(file.getBytes(), StandardCharsets.UTF_8);
+    public ImportResultResponse importStrictdoc(@RequestParam("file") MultipartFile file) {
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (IOException e) {
+            throw new GroundControlException("Failed to read uploaded file: " + e.getMessage(), "file_read_error", e);
+        }
+        var content = new String(bytes, StandardCharsets.UTF_8);
         var filename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "unknown.sdoc";
         return ImportResultResponse.from(importService.importStrictdoc(filename, content));
     }

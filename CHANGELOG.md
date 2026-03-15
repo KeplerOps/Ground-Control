@@ -5,13 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.44.0] - 2026-03-15
+## [0.46.0] - 2026-03-15
 
 ### Added
 
 - Priority filtering for requirements list endpoint: `GET /api/v1/requirements?priority=MUST`
   supports MoSCoW values (MUST, SHOULD, COULD, WONT). Completes GC-A009
 - `priority` parameter in `gc_list_requirements` MCP tool
+
+## [0.45.1] - 2026-03-15
+
+### Fixed
+
+- Docker roadmap viewer 403 Forbidden when files change: mount stable parent
+  directory (`tools/roadmap-viewer`) at `/srv/roadmap` instead of mounting
+  subdirectories whose inodes change on git operations
+
+## [0.45.0] - 2026-03-15
+
+### Fixed
+
+- Cypher injection bug in `escapeCypher()`: backslash escaping now runs before
+  quote escaping, preventing malformed output like `O\\'Malley` (unescaped quote)
+- `Requirement.archive()` no longer double-sets `archivedAt` — the assignment in
+  `transitionStatus(ARCHIVED)` is the single canonical source
+- `ImportController.importStrictdoc()` wraps `IOException` in `GroundControlException`
+  instead of leaking it outside the error envelope
+
+### Changed
+
+- Narrowed `catch(Exception)` blocks to specific exception types in `ImportService`
+  (3 blocks → `ConflictException | NotFoundException | DomainValidationException`)
+  and `GitHubIssueSyncService` (2 blocks → `RuntimeException`)
+- Standardized 8 log messages across `ImportService`, `GitHubIssueSyncService`,
+  `GitHubCliClient`, and `AgeGraphService` to semantic event names
+  (e.g. `import_requirement_failed:`, `graph_materialized:`)
+- Added `@SuppressWarnings("java:S125")` to `Status.java` for block JML annotations
+- Removed redundant `@Transactional` from `RequirementService.bulkTransitionStatus()`
+  (already covered by class-level annotation)
+
+## [0.44.0] - 2026-03-15
+
+### Added
+
+- Requirement cloning: `POST /api/v1/requirements/{id}/clone` creates a new
+  requirement by copying content fields (title, statement, rationale, type,
+  priority, wave) with a new UID in DRAFT status, optionally copying outgoing
+  relations. Implements GC-A007
+- `gc_clone_requirement` MCP tool for cloning requirements by UID
 
 ## [0.43.0] - 2026-03-14
 

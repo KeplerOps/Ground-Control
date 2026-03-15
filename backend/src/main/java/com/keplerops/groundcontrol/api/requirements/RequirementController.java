@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.api.requirements;
 
+import com.keplerops.groundcontrol.domain.requirements.service.CloneRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateTraceabilityLinkCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter;
@@ -96,6 +97,13 @@ public class RequirementController {
     public BulkStatusTransitionResponse bulkTransitionStatus(@Valid @RequestBody BulkStatusTransitionRequest request) {
         var result = requirementService.bulkTransitionStatus(request.ids(), request.status());
         return BulkStatusTransitionResponse.from(result, request.ids().size());
+    }
+
+    @PostMapping("/{id}/clone")
+    @ResponseStatus(HttpStatus.CREATED)
+    public RequirementResponse clone(@PathVariable UUID id, @Valid @RequestBody CloneRequirementRequest request) {
+        var command = new CloneRequirementCommand(request.newUid(), request.copyRelations());
+        return RequirementResponse.from(requirementService.clone(id, command));
     }
 
     @PostMapping("/{id}/archive")

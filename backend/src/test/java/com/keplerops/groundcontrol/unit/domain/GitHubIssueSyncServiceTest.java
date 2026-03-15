@@ -231,6 +231,35 @@ class GitHubIssueSyncServiceTest {
             assertThat(link.getArtifactTitle()).isEqualTo("Issue 10");
             assertThat(link.getSyncStatus()).isEqualTo(SyncStatus.SYNCED);
         }
+
+        @Test
+        void collectsErrorWhenLinkUpdateFails() {
+            var issue = new GitHubIssueData(10, "Issue 10", "OPEN", "https://github.com/o/r/issues/10", "", List.of());
+            var sync = new GitHubIssueSync(
+                    10, "Issue 10", IssueState.OPEN, "https://github.com/o/r/issues/10", Instant.now());
+
+            var link = new TraceabilityLink(null, ArtifactType.GITHUB_ISSUE, "10", LinkType.IMPLEMENTS);
+            setField(link, "id", UUID.randomUUID());
+
+            when(gitHubClient.fetchAllIssues("owner", "repo")).thenReturn(List.of(issue));
+            when(issueSyncRepository.findByIssueNumber(10))
+                    .thenReturn(Optional.empty())
+                    .thenReturn(Optional.of(sync));
+            when(issueSyncRepository.save(any(GitHubIssueSync.class))).thenAnswer(inv -> inv.getArgument(0));
+            when(traceabilityLinkRepository.findByArtifactType(ArtifactType.GITHUB_ISSUE))
+                    .thenReturn(List.of(link));
+            when(traceabilityLinkRepository.save(any(TraceabilityLink.class)))
+                    .thenThrow(new RuntimeException("DB save failed"));
+            stubAuditSave();
+
+            var result = service.syncGitHubIssues("owner", "repo");
+
+            assertThat(result.linksUpdated()).isZero();
+            assertThat(result.errors()).hasSize(1);
+            assertThat(result.errors().get(0).get("phase")).isEqualTo("traceability");
+            assertThat(result.errors().get(0).get("artifactIdentifier")).isEqualTo("10");
+            assertThat(result.errors().get(0).get("error")).isEqualTo("DB save failed");
+        }
     }
 
     @Nested

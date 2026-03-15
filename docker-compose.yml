@@ -48,8 +48,14 @@ services:
     ports:
       - "3000:80"
     volumes:
-      - ./tools/roadmap-viewer/html:/usr/share/nginx/html:ro
-      - ./tools/roadmap-viewer/conf:/etc/nginx/conf.d:ro
+      - ./tools/roadmap-viewer:/srv/roadmap:ro
+    command:
+      - sh
+      - -c
+      - |
+        rm -f /etc/nginx/conf.d/default.conf
+        ln -s /srv/roadmap/conf/default.conf /etc/nginx/conf.d/default.conf
+        exec nginx -g 'daemon off;'
 
 volumes:
   gc-postgres-data:
