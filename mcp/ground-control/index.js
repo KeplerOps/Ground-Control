@@ -64,18 +64,19 @@ server.tool(
 
 server.tool(
   "gc_list_requirements",
-  "List requirements with optional filtering by status, type, wave, or free-text search. Returns paginated results.",
+  "List requirements with optional filtering by status, type, priority, wave, or free-text search. Returns paginated results.",
   {
     status: z.enum(STATUSES).optional().describe("Filter by status"),
     type: z.enum(REQUIREMENT_TYPES).optional().describe("Filter by requirement type"),
+    priority: z.enum(PRIORITIES).optional().describe("Filter by priority (MoSCoW)"),
     wave: z.number().int().optional().describe("Filter by wave number"),
     search: z.string().optional().describe("Free-text search in title and statement"),
     page: z.number().int().optional().describe("Page number (0-based)"),
     size: z.number().int().optional().describe("Page size (default 20)"),
   },
-  async ({ status, type, wave, search, page, size }) => {
+  async ({ status, type, priority, wave, search, page, size }) => {
     try {
-      return ok(JSON.stringify(await listRequirements({ status, type, wave, search, page, size }), null, 2));
+      return ok(JSON.stringify(await listRequirements({ status, type, priority, wave, search, page, size }), null, 2));
     } catch (e) {
       return err(e);
     }

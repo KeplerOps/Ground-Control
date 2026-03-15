@@ -7,6 +7,7 @@ import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementService;
 import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityService;
 import com.keplerops.groundcontrol.domain.requirements.service.UpdateRequirementCommand;
+import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import jakarta.validation.Valid;
@@ -57,9 +58,10 @@ public class RequirementController {
             Pageable pageable,
             @RequestParam(required = false) Status status,
             @RequestParam(required = false) RequirementType type,
+            @RequestParam(required = false) Priority priority,
             @RequestParam(required = false) Integer wave,
             @RequestParam(required = false) String search) {
-        var filter = new RequirementFilter(status, type, wave, search);
+        var filter = new RequirementFilter(status, type, priority, wave, search);
         return requirementService.list(pageable, filter).map(RequirementResponse::from);
     }
 
