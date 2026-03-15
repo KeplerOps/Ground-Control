@@ -36,6 +36,7 @@ Explore the codebase to determine whether the requirement described in the issue
 ## Step 4: Plan or Report
 
 - **If the requirement is NOT yet met**: Plan the implementation. Identify which files need to be created or modified, what tests to write, and what approach to take. Enter plan mode.
+- Your plans must respect the coding standards and classification levels in ADR-012.
 - **If the requirement IS already met**: Report that the requirement is satisfied and identify which code satisfies it.
 
 ## Step 5: Ensure Traceability Links

@@ -125,7 +125,6 @@ public class Requirement {
             return;
         }
         transitionStatus(Status.ARCHIVED);
-        this.archivedAt = Instant.now();
     }
 
     // --- Accessors ---

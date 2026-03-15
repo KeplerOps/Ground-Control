@@ -320,7 +320,8 @@ class ImportServiceTest {
             when(requirementRepository.findByUid("REQ-FAIL")).thenReturn(Optional.empty());
             when(requirementRepository.findByUid("REQ-OK")).thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
-                    .thenThrow(new RuntimeException("Simulated failure"))
+                    .thenThrow(new com.keplerops.groundcontrol.domain.exception.DomainValidationException(
+                            "Simulated failure"))
                     .thenReturn(okReq);
             when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
                 var audit = inv.<RequirementImport>getArgument(0);

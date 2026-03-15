@@ -12,6 +12,7 @@ import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
+import com.keplerops.groundcontrol.domain.requirements.service.CloneRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementService;
@@ -412,6 +413,50 @@ class RequirementServiceTest {
 
             assertThat(result.succeeded()).isEmpty();
             assertThat(result.failed()).hasSize(2);
+        }
+    }
+
+    @Nested
+    class Clone {
+
+        @Test
+        void clonesRequirementWithRelations() {
+            var sourceId = UUID.randomUUID();
+            var targetId = UUID.randomUUID();
+            var source = makeRequirement("REQ-001");
+            var target = makeRequirement("REQ-002");
+            setId(source, sourceId);
+            setId(target, targetId);
+            source.setRationale("Important");
+            source.setPriority(Priority.SHOULD);
+            source.setRequirementType(RequirementType.CONSTRAINT);
+            source.setWave(2);
+
+            var outgoingRelation = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
+
+            when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
+            when(requirementRepository.existsByUid("REQ-001-CLONE")).thenReturn(false);
+            when(requirementRepository.save(any(Requirement.class))).thenAnswer(inv -> {
+                var r = (Requirement) inv.getArgument(0);
+                setId(r, UUID.randomUUID());
+                return r;
+            });
+            when(relationRepository.findBySourceIdWithEntities(sourceId)).thenReturn(List.of(outgoingRelation));
+            when(relationRepository.save(any(RequirementRelation.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            var cmd = new CloneRequirementCommand("REQ-001-CLONE", true);
+            var result = service.clone(sourceId, cmd);
+
+            assertThat(result.getUid()).isEqualTo("REQ-001-CLONE");
+            assertThat(result.getTitle()).isEqualTo("Title for REQ-001");
+            assertThat(result.getStatement()).isEqualTo("Statement for REQ-001");
+            assertThat(result.getStatus()).isEqualTo(Status.DRAFT);
+            assertThat(result.getRationale()).isEqualTo("Important");
+            assertThat(result.getPriority()).isEqualTo(Priority.SHOULD);
+            assertThat(result.getRequirementType()).isEqualTo(RequirementType.CONSTRAINT);
+            assertThat(result.getWave()).isEqualTo(2);
+
+            org.mockito.Mockito.verify(relationRepository).save(any(RequirementRelation.class));
         }
     }
 

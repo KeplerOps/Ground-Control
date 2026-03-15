@@ -26,6 +26,7 @@ import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
 import com.keplerops.groundcontrol.domain.requirements.service.BulkTransitionResult;
+import com.keplerops.groundcontrol.domain.requirements.service.CloneRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateTraceabilityLinkCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter;
@@ -382,6 +383,26 @@ class RequirementControllerTest {
 
             mockMvc.perform(delete("/api/v1/requirements/" + reqId + "/traceability/" + linkId))
                     .andExpect(status().isNoContent());
+        }
+    }
+
+    @Nested
+    class Clone {
+
+        @Test
+        void returns201WithClonedRequirement() throws Exception {
+            var source = createRequirement("REQ-001");
+            var clone = createRequirement("REQ-001-CLONE");
+            when(requirementService.clone(eq(source.getId()), any(CloneRequirementCommand.class)))
+                    .thenReturn(clone);
+
+            mockMvc.perform(post("/api/v1/requirements/" + source.getId() + "/clone")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(
+                                    Map.of("newUid", "REQ-001-CLONE", "copyRelations", false))))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.uid", is("REQ-001-CLONE")))
+                    .andExpect(jsonPath("$.status", is("DRAFT")));
         }
     }
 

@@ -84,7 +84,7 @@ public class GitHubCliClient implements GitHubClient {
                 result.add(new GitHubIssueData(number, title, state, url, body, labels));
             }
 
-            log.info("Fetched {} issues from {}/{}", result.size(), owner, repo);
+            log.info("github_issues_fetched: count={} repo={}/{}", result.size(), owner, repo);
             return result;
         } catch (IOException e) {
             throw new GroundControlException("Failed to execute gh CLI: " + e.getMessage(), "github_cli_error", e);
