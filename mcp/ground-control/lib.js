@@ -100,11 +100,14 @@ async function request(method, path, { body, params, formData } = {}) {
   const options = { method };
 
   if (formData) {
+    options.headers = { "X-Actor": "mcp-server" };
     options.body = formData;
     // Let fetch set Content-Type with boundary for multipart
   } else if (body !== undefined) {
-    options.headers = { "Content-Type": "application/json" };
+    options.headers = { "Content-Type": "application/json", "X-Actor": "mcp-server" };
     options.body = JSON.stringify(toCamelCase(body));
+  } else {
+    options.headers = { "X-Actor": "mcp-server" };
   }
 
   const res = await fetch(url, options);
