@@ -41,6 +41,16 @@ const TO_CAMEL = {
   target_id: "targetId",
   new_uid: "newUid",
   copy_relations: "copyRelations",
+  revision_number: "revisionNumber",
+  revision_type: "revisionType",
+  sync_status: "syncStatus",
+  last_synced_at: "lastSyncedAt",
+  source_uid: "sourceUid",
+  target_uid: "targetUid",
+  source_wave: "sourceWave",
+  target_wave: "targetWave",
+  requirement_uid: "requirementUid",
+  extra_body: "extraBody",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -100,11 +110,14 @@ async function request(method, path, { body, params, formData } = {}) {
   const options = { method };
 
   if (formData) {
+    options.headers = { "X-Actor": "mcp-server" };
     options.body = formData;
     // Let fetch set Content-Type with boundary for multipart
   } else if (body !== undefined) {
-    options.headers = { "Content-Type": "application/json" };
+    options.headers = { "Content-Type": "application/json", "X-Actor": "mcp-server" };
     options.body = JSON.stringify(toCamelCase(body));
+  } else {
+    options.headers = { "X-Actor": "mcp-server" };
   }
 
   const res = await fetch(url, options);
@@ -228,6 +241,60 @@ export async function syncGithub(owner, repo) {
 }
 
 // ---------------------------------------------------------------------------
+// History functions
+// ---------------------------------------------------------------------------
+
+export async function getRequirementHistory(id) {
+  return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}/history`);
+}
+
+export async function getRelationHistory(reqId, relId) {
+  return request("GET", `/api/v1/requirements/${encodeURIComponent(reqId)}/relations/${encodeURIComponent(relId)}/history`);
+}
+
+export async function getTraceabilityLinkHistory(reqId, linkId) {
+  return request("GET", `/api/v1/requirements/${encodeURIComponent(reqId)}/traceability/${encodeURIComponent(linkId)}/history`);
+}
+
+// ---------------------------------------------------------------------------
+// Delete functions
+// ---------------------------------------------------------------------------
+
+export async function deleteRelation(reqId, relId) {
+  await request("DELETE", `/api/v1/requirements/${encodeURIComponent(reqId)}/relations/${encodeURIComponent(relId)}`);
+}
+
+export async function deleteTraceabilityLink(reqId, linkId) {
+  await request("DELETE", `/api/v1/requirements/${encodeURIComponent(reqId)}/traceability/${encodeURIComponent(linkId)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Graph functions
+// ---------------------------------------------------------------------------
+
+export async function materializeGraph() {
+  return request("POST", "/api/v1/admin/graph/materialize");
+}
+
+export async function getAncestors(uid, depth) {
+  return request("GET", `/api/v1/graph/ancestors/${encodeURIComponent(uid)}`, {
+    params: { depth },
+  });
+}
+
+export async function getDescendants(uid, depth) {
+  return request("GET", `/api/v1/graph/descendants/${encodeURIComponent(uid)}`, {
+    params: { depth },
+  });
+}
+
+export async function findPaths(source, target) {
+  return request("GET", "/api/v1/graph/paths", {
+    params: { source, target },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // GitHub issue creation
 // ---------------------------------------------------------------------------
 
@@ -275,4 +342,8 @@ export async function createGitHubIssue({ title, body, labels, repo }) {
   }
   const number = parseInt(match[1], 10);
   return { url, number };
+}
+
+export async function createGitHubIssueViaApi(data) {
+  return request("POST", "/api/v1/admin/github/issues", { body: data });
 }

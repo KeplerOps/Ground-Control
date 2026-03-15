@@ -2,18 +2,24 @@ package com.keplerops.groundcontrol.unit.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.requirements.model.GitHubIssueSync;
+import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementImport;
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
 import com.keplerops.groundcontrol.domain.requirements.repository.GitHubIssueSyncRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementImportRepository;
+import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
+import com.keplerops.groundcontrol.domain.requirements.service.CreateGitHubIssueCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubClient;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueSyncService;
+import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityService;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.IssueState;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
@@ -46,12 +52,23 @@ class GitHubIssueSyncServiceTest {
     @Mock
     private RequirementImportRepository importRepository;
 
+    @Mock
+    private RequirementRepository requirementRepository;
+
+    @Mock
+    private TraceabilityService traceabilityService;
+
     private GitHubIssueSyncService service;
 
     @BeforeEach
     void setUp() {
         service = new GitHubIssueSyncService(
-                gitHubClient, issueSyncRepository, traceabilityLinkRepository, importRepository);
+                gitHubClient,
+                issueSyncRepository,
+                traceabilityLinkRepository,
+                importRepository,
+                requirementRepository,
+                traceabilityService);
     }
 
     private static void setField(Object obj, String fieldName, Object value) {
@@ -303,6 +320,35 @@ class GitHubIssueSyncServiceTest {
             assertThat(captor.getValue().getSourceType())
                     .isEqualTo(com.keplerops.groundcontrol.domain.requirements.state.ImportSourceType.GITHUB);
             assertThat(captor.getValue().getSourceFile()).isEqualTo("owner/repo");
+        }
+    }
+
+    @Nested
+    class IssueCreation {
+
+        @Test
+        void createsIssueAndTraceabilityLink() {
+            var requirement = new Requirement("GC-A001", "Test Title", "Test statement");
+            setField(requirement, "id", UUID.randomUUID());
+
+            when(requirementRepository.findByUid("GC-A001")).thenReturn(Optional.of(requirement));
+
+            var issueData = new GitHubIssueData(
+                    42, "GC-A001: Test Title", "OPEN", "https://github.com/o/r/issues/42", "body", List.of());
+            when(gitHubClient.createIssue(anyString(), anyString(), anyString(), anyList()))
+                    .thenReturn(issueData);
+
+            var traceLink = new TraceabilityLink(requirement, ArtifactType.GITHUB_ISSUE, "#42", LinkType.IMPLEMENTS);
+            setField(traceLink, "id", UUID.randomUUID());
+            when(traceabilityService.createLink(any(UUID.class), any())).thenReturn(traceLink);
+
+            var command = new CreateGitHubIssueCommand("GC-A001", "o/r", null, List.of());
+            var result = service.createIssueFromRequirement(command);
+
+            assertThat(result.issueUrl()).isEqualTo("https://github.com/o/r/issues/42");
+            assertThat(result.issueNumber()).isEqualTo(42);
+            assertThat(result.traceabilityLinkId()).isNotNull();
+            assertThat(result.warning()).isNull();
         }
     }
 }

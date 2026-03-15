@@ -101,7 +101,6 @@ class RequirementControllerIntegrationTest extends BaseIntegrationTest {
         var id = createAndReturnId("REQ-C-005");
 
         var updateBody = Map.of(
-                "uid", "REQ-C-005",
                 "title", "Updated Title",
                 "statement", "Updated Statement");
 
@@ -110,6 +109,21 @@ class RequirementControllerIntegrationTest extends BaseIntegrationTest {
                         .content(objectMapper.writeValueAsString(updateBody)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.title", is("Updated Title")));
+    }
+
+    @Test
+    void updateRequirement_partialUpdate_preservesOtherFields() throws Exception {
+        var id = createAndReturnId("REQ-C-040");
+
+        // Update only the title
+        mockMvc.perform(put("/api/v1/requirements/" + id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("title", "New Title Only"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title", is("New Title Only")))
+                .andExpect(jsonPath("$.statement", is("Statement for REQ-C-040")))
+                .andExpect(jsonPath("$.requirementType", is("FUNCTIONAL")))
+                .andExpect(jsonPath("$.priority", is("MUST")));
     }
 
     @Test

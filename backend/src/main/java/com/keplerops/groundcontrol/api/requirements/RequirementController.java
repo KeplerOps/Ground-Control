@@ -80,7 +80,7 @@ public class RequirementController {
     }
 
     @PutMapping("/{id}")
-    public RequirementResponse update(@PathVariable UUID id, @Valid @RequestBody RequirementRequest request) {
+    public RequirementResponse update(@PathVariable UUID id, @Valid @RequestBody UpdateRequirementRequest request) {
         var command = new UpdateRequirementCommand(
                 request.title(),
                 request.statement(),
@@ -135,6 +135,13 @@ public class RequirementController {
                 .toList();
     }
 
+    @GetMapping("/{id}/relations/{relationId}/history")
+    public List<RelationHistoryResponse> getRelationHistory(@PathVariable UUID id, @PathVariable UUID relationId) {
+        return auditService.getRelationHistory(relationId).stream()
+                .map(RelationHistoryResponse::from)
+                .toList();
+    }
+
     @DeleteMapping("/{id}/relations/{relationId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteRelation(@PathVariable UUID id, @PathVariable UUID relationId) {
@@ -159,6 +166,14 @@ public class RequirementController {
                 request.artifactTitle(),
                 request.linkType());
         return TraceabilityLinkResponse.from(traceabilityService.createLink(id, command));
+    }
+
+    @GetMapping("/{id}/traceability/{linkId}/history")
+    public List<TraceabilityLinkHistoryResponse> getTraceabilityLinkHistory(
+            @PathVariable UUID id, @PathVariable UUID linkId) {
+        return auditService.getTraceabilityLinkHistory(linkId).stream()
+                .map(TraceabilityLinkHistoryResponse::from)
+                .toList();
     }
 
     @DeleteMapping("/{id}/traceability/{linkId}")

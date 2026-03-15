@@ -8,6 +8,8 @@ import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -87,6 +89,19 @@ class GitHubCliClientTest {
             List<GitHubIssueData> result = parseJson(json);
 
             assertThat(result.get(0).labels()).containsExactly("bug", "P0", "phase-1");
+        }
+    }
+
+    @Nested
+    class CreateIssueUrlParsing {
+
+        @Test
+        void parsesIssueNumberFromUrl() {
+            String url = "https://github.com/KeplerOps/Ground-Control/issues/42";
+            Pattern pattern = Pattern.compile("/issues/(\\d+)$");
+            Matcher matcher = pattern.matcher(url);
+            assertThat(matcher.find()).isTrue();
+            assertThat(Integer.parseInt(matcher.group(1))).isEqualTo(42);
         }
     }
 

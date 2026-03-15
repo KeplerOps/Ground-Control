@@ -55,42 +55,52 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
         @Bean
         @Primary
         GitHubClient mockGitHubClient() {
-            return (owner, repo) -> List.of(
-                    new GitHubIssueData(
-                            10,
-                            "Foundation issue",
-                            "CLOSED",
-                            "https://github.com/test/e2e/issues/10",
-                            "Foundation issue body",
-                            List.of("phase-1", "P0")),
-                    new GitHubIssueData(
-                            11,
-                            "Relationships issue",
-                            "OPEN",
-                            "https://github.com/test/e2e/issues/11",
-                            "Relationships issue body",
-                            List.of("phase-1", "P1")),
-                    new GitHubIssueData(
-                            12,
-                            "Hierarchy issue",
-                            "OPEN",
-                            "https://github.com/test/e2e/issues/12",
-                            "Hierarchy issue body",
-                            List.of("phase-1", "P1")),
-                    new GitHubIssueData(
-                            13,
-                            "Multi-level issue",
-                            "OPEN",
-                            "https://github.com/test/e2e/issues/13",
-                            "Multi-level issue body",
-                            List.of("phase-1", "P2")),
-                    new GitHubIssueData(
-                            14,
-                            "Integration issue",
-                            "OPEN",
-                            "https://github.com/test/e2e/issues/14",
-                            "Integration issue body",
-                            List.of("phase-2", "P1")));
+            return new GitHubClient() {
+                @Override
+                public List<GitHubIssueData> fetchAllIssues(String owner, String repo) {
+                    return List.of(
+                            new GitHubIssueData(
+                                    10,
+                                    "Foundation issue",
+                                    "CLOSED",
+                                    "https://github.com/test/e2e/issues/10",
+                                    "Foundation issue body",
+                                    List.of("phase-1", "P0")),
+                            new GitHubIssueData(
+                                    11,
+                                    "Relationships issue",
+                                    "OPEN",
+                                    "https://github.com/test/e2e/issues/11",
+                                    "Relationships issue body",
+                                    List.of("phase-1", "P1")),
+                            new GitHubIssueData(
+                                    12,
+                                    "Hierarchy issue",
+                                    "OPEN",
+                                    "https://github.com/test/e2e/issues/12",
+                                    "Hierarchy issue body",
+                                    List.of("phase-1", "P1")),
+                            new GitHubIssueData(
+                                    13,
+                                    "Multi-level issue",
+                                    "OPEN",
+                                    "https://github.com/test/e2e/issues/13",
+                                    "Multi-level issue body",
+                                    List.of("phase-1", "P2")),
+                            new GitHubIssueData(
+                                    14,
+                                    "Integration issue",
+                                    "OPEN",
+                                    "https://github.com/test/e2e/issues/14",
+                                    "Integration issue body",
+                                    List.of("phase-2", "P1")));
+                }
+
+                @Override
+                public GitHubIssueData createIssue(String repo, String title, String body, List<String> labels) {
+                    throw new UnsupportedOperationException("Not used in E2E tests");
+                }
+            };
         }
     }
 

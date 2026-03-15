@@ -11,6 +11,8 @@ import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRel
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
+import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
+import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import java.lang.reflect.Field;
@@ -108,14 +110,22 @@ class AnalysisServiceTest {
 
             var ab = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
             var bc = new RequirementRelation(b, c, RelationType.DEPENDS_ON);
-            var ca = new RequirementRelation(c, a, RelationType.DEPENDS_ON);
+            var ca = new RequirementRelation(c, a, RelationType.PARENT);
 
             when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
                     .thenReturn(List.of(ab, bc, ca));
 
             var result = service.detectCycles();
 
-            assertThat(result).isNotEmpty();
+            assertThat(result).hasSize(1);
+            CycleResult cycle = result.get(0);
+            assertThat(cycle.members()).hasSize(4); // A, B, C, A (cycle closes)
+            assertThat(cycle.edges()).hasSize(3);
+
+            // Verify edges carry the correct relation types
+            assertThat(cycle.edges())
+                    .extracting(CycleEdge::relationType)
+                    .containsExactlyInAnyOrder(RelationType.DEPENDS_ON, RelationType.DEPENDS_ON, RelationType.PARENT);
         }
     }
 

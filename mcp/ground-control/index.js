@@ -23,8 +23,16 @@ import {
   crossWaveValidation,
   importStrictdoc,
   syncGithub,
-  formatIssueBody,
-  createGitHubIssue,
+  getRequirementHistory,
+  getRelationHistory,
+  getTraceabilityLinkHistory,
+  deleteRelation,
+  deleteTraceabilityLink,
+  materializeGraph,
+  getAncestors,
+  getDescendants,
+  findPaths,
+  createGitHubIssueViaApi,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -114,7 +122,6 @@ server.tool(
   "Update an existing requirement's fields. Pass only the fields to change.",
   {
     id: z.string().uuid().describe("Requirement UUID"),
-    uid: z.string().optional().describe("New UID"),
     title: z.string().optional().describe("New title"),
     statement: z.string().optional().describe("New statement"),
     rationale: z.string().optional().describe("New rationale"),
@@ -122,10 +129,9 @@ server.tool(
     priority: z.enum(PRIORITIES).optional().describe("New MoSCoW priority"),
     wave: z.number().int().optional().describe("New wave number"),
   },
-  async ({ id, uid, title, statement, rationale, requirement_type, priority, wave }) => {
+  async ({ id, title, statement, rationale, requirement_type, priority, wave }) => {
     try {
       const data = {};
-      if (uid !== undefined) data.uid = uid;
       if (title !== undefined) data.title = title;
       if (statement !== undefined) data.statement = statement;
       if (rationale !== undefined) data.rationale = rationale;
@@ -257,6 +263,23 @@ server.tool(
   },
 );
 
+server.tool(
+  "gc_delete_relation",
+  "Delete a relation between two requirements.",
+  {
+    requirement_id: z.string().uuid().describe("Source requirement UUID"),
+    relation_id: z.string().uuid().describe("Relation UUID to delete"),
+  },
+  async ({ requirement_id, relation_id }) => {
+    try {
+      await deleteRelation(requirement_id, relation_id);
+      return ok("Relation deleted successfully.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
 // ==========================================================================
 // Traceability tools
 // ==========================================================================
@@ -301,13 +324,30 @@ server.tool(
   },
 );
 
+server.tool(
+  "gc_delete_traceability_link",
+  "Delete a traceability link from a requirement.",
+  {
+    requirement_id: z.string().uuid().describe("Requirement UUID"),
+    link_id: z.string().uuid().describe("Traceability link UUID to delete"),
+  },
+  async ({ requirement_id, link_id }) => {
+    try {
+      await deleteTraceabilityLink(requirement_id, link_id);
+      return ok("Traceability link deleted successfully.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
 // ==========================================================================
 // GitHub integration tools
 // ==========================================================================
 
 server.tool(
   "gc_create_github_issue",
-  "Create a GitHub issue from a requirement and auto-link it via traceability. Shells out to `gh` CLI.",
+  "Create a GitHub issue from a requirement and auto-link it via traceability.",
   {
     uid: z.string().describe("Requirement UID (e.g. 'GC-D007')"),
     extra_body: z.string().optional().describe("Additional markdown to append to the issue body"),
@@ -316,27 +356,68 @@ server.tool(
   },
   async ({ uid, extra_body, labels, repo }) => {
     try {
-      const req = await getRequirementByUid(uid);
-      const title = `${req.uid}: ${req.title}`;
-      const body = formatIssueBody(req, extra_body);
-      const { url, number } = await createGitHubIssue({ title, body, labels, repo });
+      const data = { requirement_uid: uid };
+      if (extra_body !== undefined) data.extra_body = extra_body;
+      if (labels !== undefined) data.labels = labels;
+      if (repo !== undefined) data.repo = repo;
+      return ok(JSON.stringify(await createGitHubIssueViaApi(data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
 
-      const result = { url, number };
+// ==========================================================================
+// History tools
+// ==========================================================================
 
-      try {
-        const link = await createTraceabilityLink(req.id, {
-          artifact_type: "GITHUB_ISSUE",
-          artifact_identifier: `#${number}`,
-          link_type: "IMPLEMENTS",
-          artifact_url: url,
-          artifact_title: title,
-        });
-        result.traceability_link = link;
-      } catch (linkErr) {
-        result.warning = `Issue created but traceability link failed: ${linkErr.message}`;
-      }
+server.tool(
+  "gc_get_requirement_history",
+  "Get the full audit history for a requirement, showing all revisions with timestamps and actors.",
+  {
+    id: z.string().uuid().describe("Requirement UUID"),
+  },
+  async ({ id }) => {
+    try {
+      const history = await getRequirementHistory(id);
+      if (Array.isArray(history) && history.length === 0) return ok("No history found.");
+      return ok(JSON.stringify(history, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
 
-      return ok(JSON.stringify(result, null, 2));
+server.tool(
+  "gc_get_relation_history",
+  "Get the full audit history for a relation between requirements.",
+  {
+    requirement_id: z.string().uuid().describe("Requirement UUID"),
+    relation_id: z.string().uuid().describe("Relation UUID"),
+  },
+  async ({ requirement_id, relation_id }) => {
+    try {
+      const history = await getRelationHistory(requirement_id, relation_id);
+      if (Array.isArray(history) && history.length === 0) return ok("No history found.");
+      return ok(JSON.stringify(history, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_traceability_link_history",
+  "Get the full audit history for a traceability link.",
+  {
+    requirement_id: z.string().uuid().describe("Requirement UUID"),
+    link_id: z.string().uuid().describe("Traceability link UUID"),
+  },
+  async ({ requirement_id, link_id }) => {
+    try {
+      const history = await getTraceabilityLinkHistory(requirement_id, link_id);
+      if (Array.isArray(history) && history.length === 0) return ok("No history found.");
+      return ok(JSON.stringify(history, null, 2));
     } catch (e) {
       return err(e);
     }
@@ -420,6 +501,78 @@ server.tool(
       const violations = await crossWaveValidation();
       if (Array.isArray(violations) && violations.length === 0) return ok("No cross-wave violations found.");
       return ok(JSON.stringify(violations, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Graph tools
+// ==========================================================================
+
+server.tool(
+  "gc_materialize_graph",
+  "Materialize the requirements dependency graph in Apache AGE. Run this after bulk changes to relations.",
+  {},
+  async () => {
+    try {
+      await materializeGraph();
+      return ok("Graph materialized successfully.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_ancestors",
+  "Get all ancestor requirement UIDs for a given requirement in the dependency graph.",
+  {
+    uid: z.string().describe("Requirement UID (e.g. 'GC-A001')"),
+    depth: z.number().int().optional().default(10).describe("Maximum traversal depth (default 10)"),
+  },
+  async ({ uid, depth }) => {
+    try {
+      const ancestors = await getAncestors(uid, depth);
+      if (Array.isArray(ancestors) && ancestors.length === 0) return ok("No ancestors found.");
+      return ok(JSON.stringify(ancestors, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_descendants",
+  "Get all descendant requirement UIDs for a given requirement in the dependency graph.",
+  {
+    uid: z.string().describe("Requirement UID (e.g. 'GC-A001')"),
+    depth: z.number().int().optional().default(10).describe("Maximum traversal depth (default 10)"),
+  },
+  async ({ uid, depth }) => {
+    try {
+      const descendants = await getDescendants(uid, depth);
+      if (Array.isArray(descendants) && descendants.length === 0) return ok("No descendants found.");
+      return ok(JSON.stringify(descendants, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_find_paths",
+  "Find all paths between two requirements in the dependency graph.",
+  {
+    source: z.string().describe("Source requirement UID"),
+    target: z.string().describe("Target requirement UID"),
+  },
+  async ({ source, target }) => {
+    try {
+      const paths = await findPaths(source, target);
+      if (Array.isArray(paths) && paths.length === 0) return ok("No paths found.");
+      return ok(JSON.stringify(paths, null, 2));
     } catch (e) {
       return err(e);
     }

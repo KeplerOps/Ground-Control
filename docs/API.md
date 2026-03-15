@@ -18,7 +18,7 @@ http://localhost:8000/api/v1/
 | GET | `/requirements` | — | 200 | List requirements (paginated, filterable) |
 | GET | `/requirements/{id}` | — | 200 | Get requirement by UUID |
 | GET | `/requirements/uid/{uid}` | — | 200 | Get requirement by UID |
-| PUT | `/requirements/{id}` | RequirementRequest | 200 | Update requirement |
+| PUT | `/requirements/{id}` | UpdateRequirementRequest | 200 | Update requirement (partial) |
 | POST | `/requirements/{id}/transition` | `{ "status": "ACTIVE" }` | 200 | Transition status |
 | POST | `/requirements/bulk/transition` | BulkStatusTransitionRequest | 200 | Bulk transition status |
 | POST | `/requirements/{id}/clone` | CloneRequirementRequest | 201 | Clone requirement |
@@ -50,6 +50,24 @@ http://localhost:8000/api/v1/
 | GET | `/analysis/impact/{id}` | — | 200 | Transitive impact analysis |
 | GET | `/analysis/cross-wave` | — | 200 | Cross-wave dependency violations |
 
+**CycleResponse** (`GET /analysis/cycles`):
+
+```json
+[
+  {
+    "members": ["REQ-A", "REQ-B", "REQ-C", "REQ-A"],
+    "edges": [
+      { "sourceUid": "REQ-A", "targetUid": "REQ-B", "relationType": "DEPENDS_ON" },
+      { "sourceUid": "REQ-B", "targetUid": "REQ-C", "relationType": "DEPENDS_ON" },
+      { "sourceUid": "REQ-C", "targetUid": "REQ-A", "relationType": "PARENT" }
+    ]
+  }
+]
+```
+
+Each cycle lists the member UIDs (closing back to the start) and the edges that
+form it, including the relation type between each consecutive pair.
+
 ### Graph
 
 | Method | Path | Body | Status | Purpose |
@@ -58,6 +76,34 @@ http://localhost:8000/api/v1/
 | GET | `/graph/ancestors/{uid}?depth=N` | — | 200 | Ancestor UIDs |
 | GET | `/graph/descendants/{uid}?depth=N` | — | 200 | Descendant UIDs |
 | GET | `/graph/paths?source=X&target=Y` | — | 200 | All paths between two UIDs |
+
+### GitHub Issues
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/admin/github/issues` | GitHubIssueRequest | 201 | Create issue from requirement |
+
+**GitHubIssueRequest:**
+
+```json
+{
+  "requirementUid": "GC-A001",
+  "repo": "owner/repo",
+  "extraBody": "Additional markdown (optional)",
+  "labels": ["enhancement"]
+}
+```
+
+**GitHubIssueResponse:**
+
+```json
+{
+  "issueUrl": "https://github.com/owner/repo/issues/42",
+  "issueNumber": 42,
+  "traceabilityLinkId": "uuid",
+  "warning": null
+}
+```
 
 ### Import / Sync
 

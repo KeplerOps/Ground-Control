@@ -5,6 +5,77 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.51.0] - 2026-03-15
+
+### Changed
+
+- **Breaking:** `PUT /api/v1/requirements/{id}` now uses `UpdateRequirementRequest`
+  DTO — all fields are optional for partial updates, `uid` removed from request body
+
+### Added
+
+- Interactive graph screenshot in README showing DAG layout and requirement details
+
+### Fixed
+
+- Omitting `wave` in a requirement update request no longer resets it to null
+- `gc_update_requirement` MCP tool no longer accepts `uid` parameter (UID updates
+  were silently ignored); partial updates now work correctly without 422 errors
+
+## [0.50.0] - 2026-03-15
+
+### Changed
+
+- **Breaking:** `GET /api/v1/analysis/cycles` now returns objects with `members`
+  and `edges` fields instead of plain UID arrays. Each edge includes `sourceUid`,
+  `targetUid`, and `relationType`, fulfilling GC-C001 requirement to report
+  which relation types form each cycle (GC-C001)
+
+## [0.49.0] - 2026-03-15
+
+### Added
+
+- 9 new MCP tools for full REST/MCP feature parity (GC-A012):
+  `gc_get_requirement_history`, `gc_get_relation_history`,
+  `gc_get_traceability_link_history`, `gc_delete_relation`,
+  `gc_delete_traceability_link`, `gc_materialize_graph`, `gc_get_ancestors`,
+  `gc_get_descendants`, `gc_find_paths`
+- REST endpoint `POST /api/v1/admin/github/issues` to create GitHub issues from
+  requirements, with automatic traceability link creation
+- `GitHubClient.createIssue()` domain interface method and `GitHubCliClient`
+  implementation using `gh issue create` CLI
+- `CreateGitHubIssueCommand` and `CreateGitHubIssueResult` domain records
+- `GitHubIssueSyncService.createIssueFromRequirement()` orchestrates issue
+  creation, body formatting from requirement metadata, and traceability link
+  creation with graceful degradation on link failure
+- `GitHubIssueController`, `GitHubIssueRequest`, and `GitHubIssueResponse` API
+  layer types
+- Unit tests for controller and service; URL parsing test for `GitHubCliClient`
+
+### Changed
+
+- `gc_create_github_issue` MCP tool now delegates to the backend REST API
+  instead of shelling out to `gh` CLI directly
+
+## [0.48.0] - 2026-03-15
+
+### Added
+
+- Actor identity population via `X-Actor` HTTP header on every request
+  (`ActorFilter`); defaults to "anonymous" when header is absent (GC-P002)
+- Audit history API for relations: `GET /api/v1/requirements/{id}/relations/{relationId}/history`
+- Audit history API for traceability links: `GET /api/v1/requirements/{id}/traceability/{linkId}/history`
+- MCP server now sends `X-Actor: mcp-server` header on all API requests
+- Unit tests for `ActorFilter`, relation history endpoint, and traceability
+  link history endpoint
+- Integration tests for actor identity recording, relation history, and
+  traceability link history
+
+### Changed
+
+- JaCoCo line coverage threshold raised from 30% to 80% to match SonarCloud
+  quality gate
+
 ## [0.47.0] - 2026-03-15
 
 ### Added

@@ -140,8 +140,7 @@ tasks.jacocoTestCoverageVerification {
             limit {
                 counter = "LINE"
                 value = "COVEREDRATIO"
-                // Start with a low threshold — will increase as test coverage grows
-                minimum = "0.30".toBigDecimal()
+                minimum = "0.80".toBigDecimal()
             }
         }
     }
