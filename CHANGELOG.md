@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `PUT /api/v1/requirements/{id}` now uses `UpdateRequirementRequest`
   DTO — all fields are optional for partial updates, `uid` removed from request body
 
+### Added
+
+- Interactive graph screenshot in README showing DAG layout and requirement details
+
 ### Fixed
 
 - Omitting `wave` in a requirement update request no longer resets it to null
