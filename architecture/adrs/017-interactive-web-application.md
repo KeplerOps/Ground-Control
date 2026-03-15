@@ -48,7 +48,8 @@ Build a single-page application using React 19 with TypeScript, bundled with Vit
 | State | TanStack Query 5.x | Server state management with caching, deduplication, background refresh — avoids manual fetch/cache boilerplate |
 | Tables | TanStack Table 8.x | Headless table library; handles sorting, filtering, pagination without opinionated UI |
 | Charts | Recharts 2.x | Lightweight, composable, React-native charting for dashboard metrics |
-| Graph viz | React Flow 12.x | Interactive node-graph rendering with pan/zoom, selection, and custom nodes |
+| Graph viz (structured) | React Flow 12.x | Explicit DAG layouts with hierarchy, custom nodes — for requirement detail local neighborhood view |
+| Graph viz (exploratory) | Sigma.js + Graphology | Force-directed graph exploration with graph algorithms, filtering, and search — for the `/graph` whole-graph view |
 | Styling | Tailwind CSS 4.x | Utility-first CSS; fast iteration without maintaining a separate stylesheet |
 | Component lib | shadcn/ui | Copy-paste components built on Radix primitives; no library lock-in, fully customizable |
 
@@ -90,7 +91,7 @@ Six views, mapped to requirements GC-Q001 through GC-Q006:
 | **Explorer** | `/requirements` | Browse, filter, author requirements | Data table with inline filters, detail panel, create/edit forms, status transition actions |
 | **Requirement Detail** | `/requirements/:id` | Deep dive on one requirement | All fields, relations graph (local neighborhood), traceability links, audit history |
 | **Traceability Matrix** | `/traceability` | Audit coverage | Requirements x artifacts grid, color-coded by link type, gap highlighting, export to CSV |
-| **Dependency Graph** | `/graph` | Visualize the DAG | React Flow canvas, node coloring by status/wave, edge coloring by relation type, click-to-detail |
+| **Dependency Graph** | `/graph` | Visualize the DAG | Sigma.js + Graphology canvas for whole-graph exploration; React Flow for structured local neighborhood views. Node coloring by status/wave, edge coloring by relation type, click-to-detail |
 | **Audit Timeline** | `/audit` | Change investigation | Chronological event list, filterable by requirement/change type/date, field-level diffs |
 
 ### 5. Project Context
@@ -121,10 +122,16 @@ When only one project exists, the selector is hidden and the project is implicit
 | Risk | Mitigation |
 |------|-----------|
 | Single developer maintaining both backend and frontend | shadcn/ui and TanStack reduce boilerplate significantly. The UI is a read-heavy consumer of an existing API, not a complex interactive application. |
-| React Flow performance with large graphs (500+ nodes) | Implement viewport culling, level-of-detail rendering, and lazy edge loading. Most projects will have <200 requirements. |
+| Two graph libraries increases bundle size | Tree-shake each library to its respective route via code splitting; Sigma.js is ~40KB gzipped |
 | OpenAPI type generation drifts from actual API | Add CI step that regenerates types and fails if uncommitted changes exist. |
 | Tailwind CSS generates large stylesheets | Vite's production build tree-shakes unused utilities. Monitor bundle size in CI. |
 | SPA routing conflicts with Spring Boot | Configure Spring Boot to forward all non-API, non-static routes to `index.html` (standard SPA fallback). |
+
+## Implementation Notes
+
+### Dependency Graph Prototype (2026-03-14)
+
+A prototype of the dependency graph view (GC-Q005) was built using Cytoscape.js + dagre layout as a single static HTML file served via nginx container. It successfully renders the full Ground Control requirement set (170+ nodes, 100+ edges) with interactive pan/zoom, node selection with neighborhood highlighting, multi-dimensional color coding (series, priority, status, wave), and switchable DAG layouts. This validates that lightweight browser-based graph rendering is sufficient for the dependency graph view and that React Flow (proposed above) is not strictly required — Cytoscape.js with dagre provides equivalent capability with zero build tooling. See `tools/roadmap-viewer/index.html`.
 
 ## Related ADRs
 

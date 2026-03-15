@@ -156,6 +156,12 @@ export async function archiveRequirement(id) {
   return request("POST", `/api/v1/requirements/${encodeURIComponent(id)}/archive`);
 }
 
+export async function bulkTransitionStatus(ids, status) {
+  return request("POST", "/api/v1/requirements/bulk/transition", {
+    body: { ids, status },
+  });
+}
+
 export async function getRelations(id) {
   return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}/relations`);
 }

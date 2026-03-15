@@ -90,6 +90,12 @@ public class RequirementController {
         return RequirementResponse.from(requirementService.transitionStatus(id, request.status()));
     }
 
+    @PostMapping("/bulk/transition")
+    public BulkStatusTransitionResponse bulkTransitionStatus(@Valid @RequestBody BulkStatusTransitionRequest request) {
+        var result = requirementService.bulkTransitionStatus(request.ids(), request.status());
+        return BulkStatusTransitionResponse.from(result, request.ids().size());
+    }
+
     @PostMapping("/{id}/archive")
     public RequirementResponse archive(@PathVariable UUID id) {
         return RequirementResponse.from(requirementService.archive(id));

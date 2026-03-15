@@ -5,7 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.40.0] - 2026-03-14
+## [0.43.0] - 2026-03-14
+
+### Added
+
+- Bulk status transitions: `POST /api/v1/requirements/bulk/transition` accepts
+  a list of requirement IDs and a target status, applies the same state machine
+  rules to each independently (best-effort semantics — valid transitions succeed,
+  invalid ones collected as failures). Implements GC-A008
+- `BulkTransitionResult` domain record, `BulkStatusTransitionRequest` and
+  `BulkStatusTransitionResponse` API DTOs
+- `gc_bulk_transition_status` MCP tool: accepts UIDs, resolves to UUIDs, calls
+  the bulk endpoint, merges UID-resolution errors into the failure list
+- Unit tests for `RequirementService.bulkTransitionStatus()` (3 tests) and
+  `RequirementController.bulkTransitionStatus()` (2 tests)
+
+## [0.42.1] - 2026-03-14
+
+### Changed
+
+- ADR-017: Split graph visualization into two libraries — React Flow for
+  structured local neighborhood views (requirement detail page), Sigma.js +
+  Graphology for force-directed whole-graph exploration (`/graph` route).
+  Replaces single React Flow approach that was wrong for organic exploration
+  of 50–500 node graphs
+
+## [0.42.0] - 2026-03-14
+
+### Added
+
+- Interactive roadmap viewer — Cytoscape.js + dagre DAG visualization of the
+  full requirement graph, served as a containerized nginx static site
+  (implements GC-Q005)
+- Color coding switchable between series, priority, status, and wave dimensions
+- Node selection with neighborhood highlighting and click-to-deselect
+- Edge legend showing actual line styles (solid/dashed/dotted) for relation types
+- CORS configuration for dev profile (`CorsConfig`, `@Profile("dev")`)
+- Backend and roadmap services added to `docker-compose.yml`
+- ADR-017 updated with Cytoscape.js prototype implementation notes
+
+## [0.41.0] - 2026-03-13
+
+### Added
+
+- Duplicate relation pre-check in `RequirementService.createRelation()` — returns
+  a clean `ConflictException` instead of letting the DB unique constraint produce
+  an unhandled SQL exception (completes GC-A004 service-layer enforcement)
+- Unit test for duplicate relation rejection (`throwsConflictForDuplicateRelation`)
+- Integration test for duplicate relation rejection end-to-end
+  (`duplicateRelationThrowsConflict`)
+
+## [0.40.0] - 2026-03-13
 
 ### Added
 
@@ -15,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cycle detection or impact analysis
 - Unit tests for SUPERSEDES and RELATED relation creation
 
-## [0.39.0] - 2026-03-14
+## [0.39.0] - 2026-03-13
 
 ### Added
 
@@ -31,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `README.md` rewritten for current implemented state: features, getting
   started, tech stack, architecture, documentation index, project status
 
-## [0.38.0] - 2026-03-14
+## [0.38.0] - 2026-03-13
 
 ### Added
 
@@ -45,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TypeScript + Vite SPA, embedded in Spring Boot, TanStack Query/Table,
   React Flow for dependency graph, shadcn/ui components)
 
-## [0.37.0] - 2026-03-14
+## [0.37.0] - 2026-03-13
 
 ### Added
 

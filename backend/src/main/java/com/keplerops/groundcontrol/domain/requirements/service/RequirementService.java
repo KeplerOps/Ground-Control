@@ -10,7 +10,9 @@ import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRep
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementSpecifications;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -96,6 +98,29 @@ public class RequirementService {
         return requirementRepository.save(requirement);
     }
 
+    @Transactional
+    public BulkTransitionResult bulkTransitionStatus(List<UUID> ids, Status newStatus) {
+        var succeeded = new ArrayList<Requirement>();
+        var failed = new ArrayList<Map<String, Object>>();
+        for (UUID id : ids) {
+            try {
+                var requirement = getById(id);
+                if (!requirement.getStatus().canTransitionTo(newStatus)) {
+                    failed.add(Map.of(
+                            "id", id.toString(),
+                            "uid", requirement.getUid(),
+                            "error", "Cannot transition from " + requirement.getStatus() + " to " + newStatus));
+                    continue;
+                }
+                requirement.transitionStatus(newStatus);
+                succeeded.add(requirementRepository.save(requirement));
+            } catch (NotFoundException e) {
+                failed.add(Map.of("id", id.toString(), "error", e.getMessage()));
+            }
+        }
+        return new BulkTransitionResult(succeeded, failed);
+    }
+
     /*@ requires id != null;
     @ ensures \result.getStatus() == Status.ARCHIVED;
     @ ensures \result.getArchivedAt() != null;
@@ -116,6 +141,10 @@ public class RequirementService {
     public RequirementRelation createRelation(UUID sourceId, UUID targetId, RelationType relationType) {
         if (sourceId.equals(targetId)) {
             throw new DomainValidationException("A requirement cannot relate to itself");
+        }
+        if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(sourceId, targetId, relationType)) {
+            throw new ConflictException(
+                    "Relation " + relationType + " already exists between " + sourceId + " and " + targetId);
         }
         var source = getById(sourceId);
         var target = getById(targetId);

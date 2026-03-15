@@ -98,6 +98,18 @@ class RequirementServiceIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    void duplicateRelationThrowsConflict() {
+        var source = requirementService.create(makeCommand("REQ-INT-DUP-S"));
+        var target = requirementService.create(makeCommand("REQ-INT-DUP-T"));
+
+        requirementService.createRelation(source.getId(), target.getId(), RelationType.DEPENDS_ON);
+
+        assertThatThrownBy(() ->
+                        requirementService.createRelation(source.getId(), target.getId(), RelationType.DEPENDS_ON))
+                .isInstanceOf(ConflictException.class);
+    }
+
+    @Test
     void enversAuditTrailRecordsRevisions() {
         // Envers writes audit data on commit, so we must commit to see revisions
         var req = requirementService.create(makeCommand("REQ-INT-008"));

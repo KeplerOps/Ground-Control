@@ -9,6 +9,7 @@ import {
   createRequirement,
   updateRequirement,
   transitionStatus,
+  bulkTransitionStatus,
   archiveRequirement,
   createRelation,
   getRelations,
@@ -161,6 +162,41 @@ server.tool(
   async ({ id }) => {
     try {
       return ok(JSON.stringify(await archiveRequirement(id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_bulk_transition_status",
+  "Transition multiple requirements to the same status in a single operation. Best-effort: valid transitions succeed, invalid ones are collected as failures. Accepts UIDs (human-readable IDs like 'GC-A008'), not UUIDs.",
+  {
+    uids: z.array(z.string()).min(1).describe("Requirement UIDs (e.g. ['GC-A001', 'GC-A002'])"),
+    status: z.enum(STATUSES).describe("Target status for all requirements"),
+  },
+  async ({ uids, status }) => {
+    try {
+      const ids = [];
+      const resolutionFailures = [];
+      for (const uid of uids) {
+        try {
+          const req = await getRequirementByUid(uid);
+          ids.push(req.id);
+        } catch (e) {
+          resolutionFailures.push({ id: uid, error: `UID resolution failed: ${e.message}` });
+        }
+      }
+      if (ids.length === 0) {
+        return ok(JSON.stringify({ succeeded: [], failed: resolutionFailures, total_requested: uids.length, total_succeeded: 0, total_failed: resolutionFailures.length }, null, 2));
+      }
+      const result = await bulkTransitionStatus(ids, status);
+      if (resolutionFailures.length > 0) {
+        result.failed = [...(result.failed || []), ...resolutionFailures];
+        result.total_failed = (result.total_failed || 0) + resolutionFailures.length;
+        result.total_requested = (result.total_requested || 0) + resolutionFailures.length;
+      }
+      return ok(JSON.stringify(result, null, 2));
     } catch (e) {
       return err(e);
     }
