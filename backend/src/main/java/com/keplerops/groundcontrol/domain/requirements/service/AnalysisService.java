@@ -38,13 +38,9 @@ public class AnalysisService {
         this.traceabilityLinkRepository = traceabilityLinkRepository;
     }
 
-    /**
-     * Detect cycles in the requirements DAG (PARENT, DEPENDS_ON, REFINES edges).
-     *
-     * @return list of cycles with member UIDs and the edges that form each cycle
-     */
-    public List<CycleResult> detectCycles() {
-        List<RequirementRelation> relations = relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES);
+    public List<CycleResult> detectCycles(UUID projectId) {
+        List<RequirementRelation> relations =
+                relationRepository.findAllByProjectAndRelationTypeIn(projectId, DAG_TYPES);
 
         Map<UUID, List<UUID>> adjacencyList = new HashMap<>();
         Map<UUID, String> idToUid = new HashMap<>();
@@ -78,11 +74,8 @@ public class AnalysisService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Find orphan requirements — those with no relations and no traceability links.
-     */
-    public List<Requirement> findOrphans() {
-        List<Requirement> allRequirements = requirementRepository.findAll();
+    public List<Requirement> findOrphans(UUID projectId) {
+        List<Requirement> allRequirements = requirementRepository.findByProjectId(projectId);
         List<Requirement> orphans = new ArrayList<>();
 
         for (Requirement req : allRequirements) {
@@ -99,11 +92,8 @@ public class AnalysisService {
         return orphans;
     }
 
-    /**
-     * Find requirements that lack a traceability link of the given type.
-     */
-    public List<Requirement> findCoverageGaps(LinkType linkType) {
-        List<Requirement> allRequirements = requirementRepository.findAll();
+    public List<Requirement> findCoverageGaps(UUID projectId, LinkType linkType) {
+        List<Requirement> allRequirements = requirementRepository.findByProjectId(projectId);
         List<Requirement> gaps = new ArrayList<>();
 
         for (Requirement req : allRequirements) {
@@ -115,19 +105,16 @@ public class AnalysisService {
         return gaps;
     }
 
-    /**
-     * Find all requirements transitively affected by changes to the given requirement.
-     * Follows reverse DAG edges (target → sources) to find dependents, children, refinements.
-     * The result includes the seed requirement.
-     */
     public Set<Requirement> impactAnalysis(UUID requirementId) {
         Requirement seed = requirementRepository
                 .findById(requirementId)
                 .orElseThrow(() -> new NotFoundException("Requirement not found: " + requirementId));
 
-        List<RequirementRelation> relations = relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES);
+        UUID projectId = seed.getProject().getId();
+        List<RequirementRelation> relations =
+                relationRepository.findAllByProjectAndRelationTypeIn(projectId, DAG_TYPES);
 
-        // Build reverse adjacency list: target → list of sources (downstream = those that depend on target)
+        // Build reverse adjacency list: target -> list of sources (downstream = those that depend on target)
         Map<UUID, List<UUID>> reverseAdj = new HashMap<>();
         for (RequirementRelation rel : relations) {
             UUID sourceId = rel.getSource().getId();
@@ -146,12 +133,8 @@ public class AnalysisService {
                 .collect(Collectors.toSet());
     }
 
-    /**
-     * Find relations where source.wave > target.wave (backward cross-wave dependencies).
-     * Relations where either wave is null are excluded.
-     */
-    public List<RequirementRelation> crossWaveValidation() {
-        List<RequirementRelation> allRelations = relationRepository.findAllWithSourceAndTarget();
+    public List<RequirementRelation> crossWaveValidation(UUID projectId) {
+        List<RequirementRelation> allRelations = relationRepository.findAllWithSourceAndTargetByProjectId(projectId);
         List<RequirementRelation> violations = new ArrayList<>();
 
         for (RequirementRelation rel : allRelations) {

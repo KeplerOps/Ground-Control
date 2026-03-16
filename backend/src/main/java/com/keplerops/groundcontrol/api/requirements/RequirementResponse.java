@@ -10,6 +10,7 @@ import java.util.UUID;
 public record RequirementResponse(
         UUID id,
         String uid,
+        String projectIdentifier,
         String title,
         String statement,
         String rationale,
@@ -25,6 +26,7 @@ public record RequirementResponse(
         return new RequirementResponse(
                 r.getId(),
                 r.getUid(),
+                r.getProject() != null ? r.getProject().getIdentifier() : null,
                 r.getTitle(),
                 r.getStatement(),
                 r.getRationale(),

@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.52.0] - 2026-03-16
+
+### Added
+
+- **Project scoping** (GC-A013): Ground Control now supports multiple independent
+  projects within a single instance. All requirements, relations, and analysis are
+  scoped to a project.
+- `POST /api/v1/projects` — create a new project
+- `GET /api/v1/projects` — list all projects
+- `GET /api/v1/projects/{identifier}` — get project by identifier
+- `PUT /api/v1/projects/{identifier}` — update project name/description
+- Optional `project` query parameter on requirement, analysis, graph, import, and
+  GitHub issue endpoints. When omitted and only one project exists, auto-resolves
+  to that project. When multiple projects exist and param is missing, returns 422.
+- `gc_list_projects` and `gc_create_project` MCP tools
+- Optional `project` parameter on 17 existing MCP tools for project-scoped operations
+- `project_identifier` field in all requirement API responses
+- Same-project validation: relations can only be created between requirements in
+  the same project
+- Flyway migration V012: creates `project` table, inserts default "ground-control"
+  project, adds `project_id` to requirements with composite unique constraint
+  `(project_id, uid)`
+- Composite indexes on `(project_id)`, `(project_id, status)`, `(project_id, uid)`
+- `gc_analyze_completeness` MCP tool for requirement completeness analysis
+
 ## [0.51.0] - 2026-03-15
 
 ### Changed

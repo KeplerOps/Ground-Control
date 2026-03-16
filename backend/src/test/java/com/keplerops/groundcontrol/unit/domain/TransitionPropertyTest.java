@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
+import java.util.UUID;
 import net.jqwik.api.*;
 import org.junit.jupiter.api.Tag;
 
@@ -14,6 +16,20 @@ import org.junit.jupiter.api.Tag;
  */
 @Tag("slow")
 class TransitionPropertyTest {
+
+    private static final Project TEST_PROJECT = createTestProject();
+
+    private static Project createTestProject() {
+        var project = new Project("test-project", "Test Project");
+        try {
+            var field = Project.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(project, UUID.fromString("00000000-0000-0000-0000-000000000001"));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return project;
+    }
 
     @Provide
     Arbitrary<Status> statuses() {
@@ -24,7 +40,7 @@ class TransitionPropertyTest {
     void validTransitionAlwaysChangesStatus(@ForAll("statuses") Status source, @ForAll("statuses") Status target) {
         Assume.that(source.canTransitionTo(target));
 
-        var req = new Requirement("REQ-PROP", "Property test", "Statement");
+        var req = new Requirement(TEST_PROJECT, "REQ-PROP", "Property test", "Statement");
         // Walk to source state
         walkToStatus(req, source);
 
@@ -36,7 +52,7 @@ class TransitionPropertyTest {
     void invalidTransitionAlwaysThrows(@ForAll("statuses") Status source, @ForAll("statuses") Status target) {
         Assume.that(!source.canTransitionTo(target));
 
-        var req = new Requirement("REQ-PROP", "Property test", "Statement");
+        var req = new Requirement(TEST_PROJECT, "REQ-PROP", "Property test", "Statement");
         walkToStatus(req, source);
 
         assertThatThrownBy(() -> req.transitionStatus(target)).isInstanceOf(DomainValidationException.class);

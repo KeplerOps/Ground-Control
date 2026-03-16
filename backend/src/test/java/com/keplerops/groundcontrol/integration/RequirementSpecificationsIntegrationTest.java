@@ -2,6 +2,8 @@ package com.keplerops.groundcontrol.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementSpecifications;
@@ -23,26 +25,32 @@ class RequirementSpecificationsIntegrationTest extends BaseIntegrationTest {
     @Autowired
     private RequirementRepository repository;
 
+    @Autowired
+    private ProjectRepository projectRepository;
+
+    private Project testProject;
     private Requirement mustFunctionalWave1;
     private Requirement shouldConstraintWave2;
     private Requirement couldFunctionalWave1;
 
     @BeforeEach
     void setUp() {
-        mustFunctionalWave1 = new Requirement("SPEC-001", "Alpha Feature", "Must have alpha");
+        testProject = projectRepository.findByIdentifier("ground-control").orElseThrow();
+
+        mustFunctionalWave1 = new Requirement(testProject, "SPEC-001", "Alpha Feature", "Must have alpha");
         mustFunctionalWave1.setPriority(Priority.MUST);
         mustFunctionalWave1.setRequirementType(RequirementType.FUNCTIONAL);
         mustFunctionalWave1.setWave(1);
         mustFunctionalWave1.transitionStatus(Status.ACTIVE);
         repository.save(mustFunctionalWave1);
 
-        shouldConstraintWave2 = new Requirement("SPEC-002", "Beta Constraint", "Should have beta");
+        shouldConstraintWave2 = new Requirement(testProject, "SPEC-002", "Beta Constraint", "Should have beta");
         shouldConstraintWave2.setPriority(Priority.SHOULD);
         shouldConstraintWave2.setRequirementType(RequirementType.CONSTRAINT);
         shouldConstraintWave2.setWave(2);
         repository.save(shouldConstraintWave2);
 
-        couldFunctionalWave1 = new Requirement("SPEC-003", "Gamma Feature", "Could have gamma");
+        couldFunctionalWave1 = new Requirement(testProject, "SPEC-003", "Gamma Feature", "Could have gamma");
         couldFunctionalWave1.setPriority(Priority.COULD);
         couldFunctionalWave1.setRequirementType(RequirementType.FUNCTIONAL);
         couldFunctionalWave1.setWave(1);

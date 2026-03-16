@@ -6,11 +6,16 @@ import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import java.util.Locale;
+import java.util.UUID;
 import org.springframework.data.jpa.domain.Specification;
 
 public final class RequirementSpecifications {
 
     private RequirementSpecifications() {}
+
+    public static Specification<Requirement> hasProject(UUID projectId) {
+        return (root, query, cb) -> cb.equal(root.get("project").get("id"), projectId);
+    }
 
     public static Specification<Requirement> hasStatus(Status status) {
         return (root, query, cb) -> cb.equal(root.get("status"), status);
@@ -65,5 +70,9 @@ public final class RequirementSpecifications {
             spec = spec.and(searchTitleOrStatement(filter.search()));
         }
         return spec;
+    }
+
+    public static Specification<Requirement> fromFilter(UUID projectId, RequirementFilter filter) {
+        return hasProject(projectId).and(fromFilter(filter));
     }
 }

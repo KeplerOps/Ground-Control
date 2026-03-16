@@ -8,6 +8,8 @@ import static org.mockito.Mockito.when;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
@@ -39,21 +41,40 @@ import org.springframework.data.jpa.domain.Specification;
 @ExtendWith(MockitoExtension.class)
 class RequirementServiceTest {
 
+    private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+
+    private static final Project TEST_PROJECT = createTestProject();
+
+    private static Project createTestProject() {
+        var project = new Project("test-project", "Test Project");
+        try {
+            var field = Project.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(project, PROJECT_ID);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return project;
+    }
+
     @Mock
     private RequirementRepository requirementRepository;
 
     @Mock
     private RequirementRelationRepository relationRepository;
 
+    @Mock
+    private ProjectRepository projectRepository;
+
     private RequirementService service;
 
     @BeforeEach
     void setUp() {
-        service = new RequirementService(requirementRepository, relationRepository);
+        service = new RequirementService(requirementRepository, relationRepository, projectRepository);
     }
 
     private static Requirement makeRequirement(String uid) {
-        return new Requirement(uid, "Title for " + uid, "Statement for " + uid);
+        return new Requirement(TEST_PROJECT, uid, "Title for " + uid, "Statement for " + uid);
     }
 
     private static void setId(Requirement req, UUID id) {
@@ -72,9 +93,18 @@ class RequirementServiceTest {
         @Test
         void createsRequirementInDraftStatus() {
             var cmd = new CreateRequirementCommand(
-                    "REQ-001", "Title", "Statement", "Rationale", RequirementType.FUNCTIONAL, Priority.MUST, 1);
+                    PROJECT_ID,
+                    "REQ-001",
+                    "Title",
+                    "Statement",
+                    "Rationale",
+                    RequirementType.FUNCTIONAL,
+                    Priority.MUST,
+                    1);
 
-            when(requirementRepository.existsByUid("REQ-001")).thenReturn(false);
+            when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
+            when(requirementRepository.existsByProjectIdAndUid(PROJECT_ID, "REQ-001"))
+                    .thenReturn(false);
             when(requirementRepository.save(any(Requirement.class))).thenAnswer(inv -> inv.getArgument(0));
 
             var result = service.create(cmd);
@@ -85,9 +115,11 @@ class RequirementServiceTest {
 
         @Test
         void createsWithNullOptionalFields() {
-            var cmd = new CreateRequirementCommand("REQ-002", "Title", "Statement", null, null, null, null);
+            var cmd = new CreateRequirementCommand(PROJECT_ID, "REQ-002", "Title", "Statement", null, null, null, null);
 
-            when(requirementRepository.existsByUid("REQ-002")).thenReturn(false);
+            when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
+            when(requirementRepository.existsByProjectIdAndUid(PROJECT_ID, "REQ-002"))
+                    .thenReturn(false);
             when(requirementRepository.save(any(Requirement.class))).thenAnswer(inv -> inv.getArgument(0));
 
             var result = service.create(cmd);
@@ -98,9 +130,11 @@ class RequirementServiceTest {
 
         @Test
         void throwsConflictOnDuplicateUid() {
-            var cmd = new CreateRequirementCommand("REQ-001", "Title", "Statement", null, null, null, null);
+            var cmd = new CreateRequirementCommand(PROJECT_ID, "REQ-001", "Title", "Statement", null, null, null, null);
 
-            when(requirementRepository.existsByUid("REQ-001")).thenReturn(true);
+            when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
+            when(requirementRepository.existsByProjectIdAndUid(PROJECT_ID, "REQ-001"))
+                    .thenReturn(true);
 
             assertThatThrownBy(() -> service.create(cmd)).isInstanceOf(ConflictException.class);
         }
@@ -135,17 +169,19 @@ class RequirementServiceTest {
         @Test
         void returnsExistingRequirement() {
             var req = makeRequirement("REQ-001");
-            when(requirementRepository.findByUid("REQ-001")).thenReturn(Optional.of(req));
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-001"))
+                    .thenReturn(Optional.of(req));
 
-            var result = service.getByUid("REQ-001");
+            var result = service.getByUid(PROJECT_ID, "REQ-001");
             assertThat(result).isNotNull();
         }
 
         @Test
         void throwsNotFoundForMissingUid() {
-            when(requirementRepository.findByUid("NOPE")).thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "NOPE"))
+                    .thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> service.getByUid("NOPE")).isInstanceOf(NotFoundException.class);
+            assertThatThrownBy(() -> service.getByUid(PROJECT_ID, "NOPE")).isInstanceOf(NotFoundException.class);
         }
     }
 
@@ -383,6 +419,32 @@ class RequirementServiceTest {
             assertThatThrownBy(() -> service.createRelation(sourceId, targetId, RelationType.DEPENDS_ON))
                     .isInstanceOf(NotFoundException.class);
         }
+
+        @Test
+        void throwsDomainValidationForCrossProjectRelation() {
+            var otherProject = new Project("other-project", "Other");
+            try {
+                var field = Project.class.getDeclaredField("id");
+                field.setAccessible(true);
+                field.set(otherProject, UUID.fromString("00000000-0000-0000-0000-000000000099"));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+
+            var sourceId = UUID.randomUUID();
+            var targetId = UUID.randomUUID();
+            var source = makeRequirement("REQ-001");
+            var target = new Requirement(otherProject, "REQ-002", "Title for REQ-002", "Statement for REQ-002");
+            setId(source, sourceId);
+            setId(target, targetId);
+
+            when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
+            when(requirementRepository.findById(targetId)).thenReturn(Optional.of(target));
+
+            assertThatThrownBy(() -> service.createRelation(sourceId, targetId, RelationType.DEPENDS_ON))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("different projects");
+        }
     }
 
     @Nested
@@ -497,7 +559,8 @@ class RequirementServiceTest {
             var outgoingRelation = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
 
             when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
-            when(requirementRepository.existsByUid("REQ-001-CLONE")).thenReturn(false);
+            when(requirementRepository.existsByProjectIdAndUid(PROJECT_ID, "REQ-001-CLONE"))
+                    .thenReturn(false);
             when(requirementRepository.save(any(Requirement.class))).thenAnswer(inv -> {
                 var r = (Requirement) inv.getArgument(0);
                 setId(r, UUID.randomUUID());
@@ -532,7 +595,8 @@ class RequirementServiceTest {
             source.setWave(2);
 
             when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
-            when(requirementRepository.existsByUid("REQ-001-CLONE")).thenReturn(false);
+            when(requirementRepository.existsByProjectIdAndUid(PROJECT_ID, "REQ-001-CLONE"))
+                    .thenReturn(false);
             when(requirementRepository.save(any(Requirement.class))).thenAnswer(inv -> {
                 var r = (Requirement) inv.getArgument(0);
                 setId(r, UUID.randomUUID());
@@ -559,7 +623,8 @@ class RequirementServiceTest {
             var sourceId = UUID.randomUUID();
             var source = makeRequirement("REQ-001");
             when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
-            when(requirementRepository.existsByUid("REQ-EXISTING")).thenReturn(true);
+            when(requirementRepository.existsByProjectIdAndUid(PROJECT_ID, "REQ-EXISTING"))
+                    .thenReturn(true);
 
             var cmd = new CloneRequirementCommand("REQ-EXISTING", false);
 
@@ -587,7 +652,7 @@ class RequirementServiceTest {
             when(requirementRepository.findAll(any(Specification.class), any(Pageable.class)))
                     .thenReturn(page);
 
-            Page<Requirement> result = service.list(Pageable.unpaged(), null);
+            Page<Requirement> result = service.list(PROJECT_ID, Pageable.unpaged(), null);
             assertThat(result).isNotNull();
             assertThat(result.getContent()).hasSize(1);
         }
@@ -600,7 +665,7 @@ class RequirementServiceTest {
                     .thenReturn(page);
 
             var filter = new RequirementFilter(Status.DRAFT, null, null, null, null);
-            Page<Requirement> result = service.list(Pageable.unpaged(), filter);
+            Page<Requirement> result = service.list(PROJECT_ID, Pageable.unpaged(), filter);
             assertThat(result).isNotNull();
             assertThat(result.getContent()).hasSize(1);
         }

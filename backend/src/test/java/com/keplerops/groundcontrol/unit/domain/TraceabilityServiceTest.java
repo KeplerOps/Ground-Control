@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
@@ -35,6 +36,20 @@ class TraceabilityServiceTest {
     @Mock
     private TraceabilityLinkRepository traceabilityLinkRepository;
 
+    private static final Project TEST_PROJECT = createTestProject();
+
+    private static Project createTestProject() {
+        var project = new Project("test-project", "Test Project");
+        try {
+            var field = Project.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(project, UUID.fromString("00000000-0000-0000-0000-000000000001"));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return project;
+    }
+
     private TraceabilityService service;
 
     @BeforeEach
@@ -43,7 +58,7 @@ class TraceabilityServiceTest {
     }
 
     private static Requirement makeRequirement(String uid) {
-        var req = new Requirement(uid, "Title for " + uid, "Statement for " + uid);
+        var req = new Requirement(TEST_PROJECT, uid, "Title for " + uid, "Statement for " + uid);
         setField(req, "id", UUID.randomUUID());
         return req;
     }

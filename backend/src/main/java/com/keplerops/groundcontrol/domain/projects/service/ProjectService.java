@@ -1,0 +1,103 @@
+package com.keplerops.groundcontrol.domain.projects.service;
+
+import com.keplerops.groundcontrol.domain.exception.ConflictException;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@Transactional
+public class ProjectService {
+
+    private static final Logger log = LoggerFactory.getLogger(ProjectService.class);
+
+    private final ProjectRepository projectRepository;
+
+    public ProjectService(ProjectRepository projectRepository) {
+        this.projectRepository = projectRepository;
+    }
+
+    public Project create(CreateProjectCommand command) {
+        if (projectRepository.existsByIdentifier(command.identifier())) {
+            throw new ConflictException("Project with identifier '" + command.identifier() + "' already exists");
+        }
+        var project = new Project(command.identifier(), command.name());
+        if (command.description() != null) {
+            project.setDescription(command.description());
+        }
+        var saved = projectRepository.save(project);
+        log.info("project_created: identifier={} id={}", saved.getIdentifier(), saved.getId());
+        return saved;
+    }
+
+    @Transactional(readOnly = true)
+    public Project getById(UUID id) {
+        return projectRepository.findById(id).orElseThrow(() -> new NotFoundException("Project not found: " + id));
+    }
+
+    @Transactional(readOnly = true)
+    public Project getByIdentifier(String identifier) {
+        return projectRepository
+                .findByIdentifier(identifier)
+                .orElseThrow(() -> new NotFoundException("Project not found: " + identifier));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Project> list() {
+        return projectRepository.findAll();
+    }
+
+    public Project updateByIdentifier(String identifier, UpdateProjectCommand command) {
+        var project = getByIdentifier(identifier);
+        if (command.name() != null) {
+            project.setName(command.name());
+        }
+        if (command.description() != null) {
+            project.setDescription(command.description());
+        }
+        var saved = projectRepository.save(project);
+        log.info("project_updated: identifier={} id={}", saved.getIdentifier(), saved.getId());
+        return saved;
+    }
+
+    public Project update(UUID id, UpdateProjectCommand command) {
+        var project = getById(id);
+        if (command.name() != null) {
+            project.setName(command.name());
+        }
+        if (command.description() != null) {
+            project.setDescription(command.description());
+        }
+        var saved = projectRepository.save(project);
+        log.info("project_updated: identifier={} id={}", saved.getIdentifier(), saved.getId());
+        return saved;
+    }
+
+    @Transactional(readOnly = true)
+    public Project resolveProject(String projectIdentifier) {
+        if (projectIdentifier != null) {
+            return getByIdentifier(projectIdentifier);
+        }
+        long count = projectRepository.count();
+        if (count == 1) {
+            return projectRepository.findAll().getFirst();
+        }
+        throw new DomainValidationException(
+                "Multiple projects exist. Specify a 'project' parameter.",
+                "project_required",
+                Map.of("project_count", count));
+    }
+
+    @Transactional(readOnly = true)
+    public UUID resolveProjectId(String projectIdentifier) {
+        return resolveProject(projectIdentifier).getId();
+    }
+}

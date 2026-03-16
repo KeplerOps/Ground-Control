@@ -1,6 +1,7 @@
 package com.keplerops.groundcontrol.domain.requirements.model;
 
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
@@ -8,9 +9,12 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -18,6 +22,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 import org.hibernate.envers.Audited;
+import org.hibernate.envers.NotAudited;
 
 /**
  * A traceable requirement with lifecycle management.
@@ -38,7 +43,12 @@ public class Requirement {
     @Column(updatable = false, nullable = false)
     private UUID id;
 
-    @Column(unique = true, nullable = false, length = 50)
+    @NotAudited
+    @ManyToOne(fetch = FetchType.EAGER, optional = false)
+    @JoinColumn(name = "project_id", nullable = false)
+    private Project project;
+
+    @Column(nullable = false, length = 50)
     private String uid;
 
     @Column(nullable = false)
@@ -76,7 +86,8 @@ public class Requirement {
         // JPA
     }
 
-    public Requirement(String uid, String title, String statement) {
+    public Requirement(Project project, String uid, String title, String statement) {
+        this.project = project;
         this.uid = uid;
         this.title = title;
         this.statement = statement;
@@ -131,6 +142,10 @@ public class Requirement {
 
     public UUID getId() {
         return id;
+    }
+
+    public Project getProject() {
+        return project;
     }
 
     public String getUid() {

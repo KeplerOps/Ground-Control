@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.keplerops.groundcontrol.api.admin.GraphController;
+import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.service.GraphClient;
 import java.util.List;
 import org.junit.jupiter.api.Nested;
@@ -29,6 +30,10 @@ class GraphControllerTest {
 
     @MockitoBean
     private GraphClient graphClient;
+
+    @SuppressWarnings("UnusedVariable") // Required by Spring context
+    @MockitoBean
+    private ProjectService projectService;
 
     @Nested
     class Materialize {
