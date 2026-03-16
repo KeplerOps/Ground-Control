@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.api.requirements;
 
+import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.service.AuditService;
 import com.keplerops.groundcontrol.domain.requirements.service.CloneRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
@@ -35,18 +36,26 @@ public class RequirementController {
     private final RequirementService requirementService;
     private final TraceabilityService traceabilityService;
     private final AuditService auditService;
+    private final ProjectService projectService;
 
     public RequirementController(
-            RequirementService requirementService, TraceabilityService traceabilityService, AuditService auditService) {
+            RequirementService requirementService,
+            TraceabilityService traceabilityService,
+            AuditService auditService,
+            ProjectService projectService) {
         this.requirementService = requirementService;
         this.traceabilityService = traceabilityService;
         this.auditService = auditService;
+        this.projectService = projectService;
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public RequirementResponse create(@Valid @RequestBody RequirementRequest request) {
+    public RequirementResponse create(
+            @Valid @RequestBody RequirementRequest request, @RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
         var command = new CreateRequirementCommand(
+                projectId,
                 request.uid(),
                 request.title(),
                 request.statement(),
@@ -60,13 +69,15 @@ public class RequirementController {
     @GetMapping
     public Page<RequirementResponse> list(
             Pageable pageable,
+            @RequestParam(required = false) String project,
             @RequestParam(required = false) Status status,
             @RequestParam(required = false) RequirementType type,
             @RequestParam(required = false) Priority priority,
             @RequestParam(required = false) Integer wave,
             @RequestParam(required = false) String search) {
+        var projectId = projectService.resolveProjectId(project);
         var filter = new RequirementFilter(status, type, priority, wave, search);
-        return requirementService.list(pageable, filter).map(RequirementResponse::from);
+        return requirementService.list(projectId, pageable, filter).map(RequirementResponse::from);
     }
 
     @GetMapping("/{id}")
@@ -75,8 +86,9 @@ public class RequirementController {
     }
 
     @GetMapping("/uid/{uid}")
-    public RequirementResponse getByUid(@PathVariable String uid) {
-        return RequirementResponse.from(requirementService.getByUid(uid));
+    public RequirementResponse getByUid(@PathVariable String uid, @RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return RequirementResponse.from(requirementService.getByUid(projectId, uid));
     }
 
     @PutMapping("/{id}")

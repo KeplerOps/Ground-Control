@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementImport;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
@@ -58,6 +59,21 @@ class ImportServiceTest {
 
     private ImportService service;
 
+    private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    private static final Project TEST_PROJECT = createTestProject();
+
+    private static Project createTestProject() {
+        var project = new Project("test-project", "Test Project");
+        try {
+            var field = Project.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(project, PROJECT_ID);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return project;
+    }
+
     @BeforeEach
     void setUp() {
         service = new ImportService(
@@ -70,7 +86,7 @@ class ImportServiceTest {
     }
 
     private static Requirement makeRequirement(String uid, UUID id) {
-        var req = new Requirement(uid, "Title for " + uid, "Statement for " + uid);
+        var req = new Requirement(TEST_PROJECT, uid, "Title for " + uid, "Statement for " + uid);
         setField(req, "id", id);
         return req;
     }
@@ -141,7 +157,8 @@ class ImportServiceTest {
             UUID newId = UUID.randomUUID();
             var created = makeRequirement("REQ-NEW", newId);
 
-            when(requirementRepository.findByUid("REQ-NEW")).thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-NEW"))
+                    .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(created);
             when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
                 var audit = inv.<RequirementImport>getArgument(0);
@@ -149,7 +166,7 @@ class ImportServiceTest {
                 return audit;
             });
 
-            var result = service.importStrictdoc("test.sdoc", sdoc);
+            var result = service.importStrictdoc(PROJECT_ID, "test.sdoc", sdoc);
 
             assertThat(result.requirementsCreated()).isEqualTo(1);
             assertThat(result.requirementsUpdated()).isZero();
@@ -162,7 +179,8 @@ class ImportServiceTest {
             UUID existingId = UUID.randomUUID();
             var existing = makeRequirement("REQ-EXISTING", existingId);
 
-            when(requirementRepository.findByUid("REQ-EXISTING")).thenReturn(Optional.of(existing));
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-EXISTING"))
+                    .thenReturn(Optional.of(existing));
             when(requirementService.update(eq(existingId), any(UpdateRequirementCommand.class)))
                     .thenReturn(existing);
             when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
@@ -171,7 +189,7 @@ class ImportServiceTest {
                 return audit;
             });
 
-            var result = service.importStrictdoc("test.sdoc", sdoc);
+            var result = service.importStrictdoc(PROJECT_ID, "test.sdoc", sdoc);
 
             assertThat(result.requirementsUpdated()).isEqualTo(1);
             assertThat(result.requirementsCreated()).isZero();
@@ -190,8 +208,10 @@ class ImportServiceTest {
             var parent = makeRequirement("REQ-PARENT", parentId);
             var child = makeRequirement("REQ-CHILD", childId);
 
-            when(requirementRepository.findByUid("REQ-PARENT")).thenReturn(Optional.empty());
-            when(requirementRepository.findByUid("REQ-CHILD")).thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-PARENT"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-CHILD"))
+                    .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenReturn(parent)
                     .thenReturn(child);
@@ -205,7 +225,7 @@ class ImportServiceTest {
                 return audit;
             });
 
-            var result = service.importStrictdoc("test.sdoc", sdoc);
+            var result = service.importStrictdoc(PROJECT_ID, "test.sdoc", sdoc);
 
             assertThat(result.relationsCreated()).isEqualTo(1);
             verify(requirementService).createRelation(childId, parentId, RelationType.PARENT);
@@ -219,8 +239,10 @@ class ImportServiceTest {
             var parent = makeRequirement("REQ-PARENT", parentId);
             var child = makeRequirement("REQ-CHILD", childId);
 
-            when(requirementRepository.findByUid("REQ-PARENT")).thenReturn(Optional.empty());
-            when(requirementRepository.findByUid("REQ-CHILD")).thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-PARENT"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-CHILD"))
+                    .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenReturn(parent)
                     .thenReturn(child);
@@ -232,7 +254,7 @@ class ImportServiceTest {
                 return audit;
             });
 
-            var result = service.importStrictdoc("test.sdoc", sdoc);
+            var result = service.importStrictdoc(PROJECT_ID, "test.sdoc", sdoc);
 
             assertThat(result.relationsSkipped()).isEqualTo(1);
             assertThat(result.relationsCreated()).isZero();
@@ -259,10 +281,12 @@ class ImportServiceTest {
             var child = makeRequirement("REQ-CHILD", childId);
             var parentReq = makeRequirement("REQ-PREEXISTING-PARENT", parentId);
 
-            when(requirementRepository.findByUid("REQ-CHILD")).thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-CHILD"))
+                    .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(child);
             // Parent not in batch, so Phase 2 looks it up in the DB
-            when(requirementRepository.findByUid("REQ-PREEXISTING-PARENT")).thenReturn(Optional.of(parentReq));
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-PREEXISTING-PARENT"))
+                    .thenReturn(Optional.of(parentReq));
             when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(childId, parentId, RelationType.PARENT))
                     .thenReturn(false);
             when(requirementService.createRelation(childId, parentId, RelationType.PARENT))
@@ -273,7 +297,7 @@ class ImportServiceTest {
                 return audit;
             });
 
-            var result = service.importStrictdoc("test.sdoc", sdoc);
+            var result = service.importStrictdoc(PROJECT_ID, "test.sdoc", sdoc);
 
             assertThat(result.relationsCreated()).isEqualTo(1);
             verify(requirementService).createRelation(childId, parentId, RelationType.PARENT);
@@ -297,16 +321,18 @@ class ImportServiceTest {
             UUID childId = UUID.randomUUID();
             var child = makeRequirement("REQ-CHILD", childId);
 
-            when(requirementRepository.findByUid("REQ-CHILD")).thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-CHILD"))
+                    .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(child);
-            when(requirementRepository.findByUid("REQ-MISSING-PARENT")).thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-MISSING-PARENT"))
+                    .thenReturn(Optional.empty());
             when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
                 var audit = inv.<RequirementImport>getArgument(0);
                 setField(audit, "id", UUID.randomUUID());
                 return audit;
             });
 
-            var result = service.importStrictdoc("test.sdoc", sdoc);
+            var result = service.importStrictdoc(PROJECT_ID, "test.sdoc", sdoc);
 
             assertThat(result.relationsCreated()).isZero();
             assertThat(result.errors()).hasSize(1);
@@ -321,8 +347,10 @@ class ImportServiceTest {
             var parent = makeRequirement("REQ-PARENT", parentId);
             var child = makeRequirement("REQ-CHILD", childId);
 
-            when(requirementRepository.findByUid("REQ-PARENT")).thenReturn(Optional.empty());
-            when(requirementRepository.findByUid("REQ-CHILD")).thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-PARENT"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-CHILD"))
+                    .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenReturn(parent)
                     .thenReturn(child);
@@ -336,7 +364,7 @@ class ImportServiceTest {
                 return audit;
             });
 
-            var result = service.importStrictdoc("test.sdoc", sdoc);
+            var result = service.importStrictdoc(PROJECT_ID, "test.sdoc", sdoc);
 
             assertThat(result.relationsCreated()).isZero();
             assertThat(result.errors()).hasSize(1);
@@ -354,7 +382,8 @@ class ImportServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-TRACE", reqId);
 
-            when(requirementRepository.findByUid("REQ-TRACE")).thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-TRACE"))
+                    .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(req);
             when(traceabilityLinkRepository.existsByRequirementIdAndArtifactTypeAndArtifactIdentifierAndLinkType(
                             reqId, ArtifactType.GITHUB_ISSUE, "42", LinkType.IMPLEMENTS))
@@ -367,7 +396,7 @@ class ImportServiceTest {
                 return audit;
             });
 
-            var result = service.importStrictdoc("test.sdoc", sdoc);
+            var result = service.importStrictdoc(PROJECT_ID, "test.sdoc", sdoc);
 
             assertThat(result.traceabilityLinksCreated()).isEqualTo(1);
             verify(traceabilityService).createLink(eq(reqId), any(CreateTraceabilityLinkCommand.class));
@@ -379,7 +408,8 @@ class ImportServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-TRACE", reqId);
 
-            when(requirementRepository.findByUid("REQ-TRACE")).thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-TRACE"))
+                    .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(req);
             when(traceabilityLinkRepository.existsByRequirementIdAndArtifactTypeAndArtifactIdentifierAndLinkType(
                             reqId, ArtifactType.GITHUB_ISSUE, "42", LinkType.IMPLEMENTS))
@@ -390,7 +420,7 @@ class ImportServiceTest {
                 return audit;
             });
 
-            var result = service.importStrictdoc("test.sdoc", sdoc);
+            var result = service.importStrictdoc(PROJECT_ID, "test.sdoc", sdoc);
 
             assertThat(result.traceabilityLinksSkipped()).isEqualTo(1);
             assertThat(result.traceabilityLinksCreated()).isZero();
@@ -403,7 +433,8 @@ class ImportServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-TRACE", reqId);
 
-            when(requirementRepository.findByUid("REQ-TRACE")).thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-TRACE"))
+                    .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(req);
             when(traceabilityLinkRepository.existsByRequirementIdAndArtifactTypeAndArtifactIdentifierAndLinkType(
                             reqId, ArtifactType.GITHUB_ISSUE, "42", LinkType.IMPLEMENTS))
@@ -416,7 +447,7 @@ class ImportServiceTest {
                 return audit;
             });
 
-            var result = service.importStrictdoc("test.sdoc", sdoc);
+            var result = service.importStrictdoc(PROJECT_ID, "test.sdoc", sdoc);
 
             assertThat(result.traceabilityLinksCreated()).isZero();
             assertThat(result.errors()).hasSize(1);
@@ -450,8 +481,10 @@ class ImportServiceTest {
             UUID okId = UUID.randomUUID();
             var okReq = makeRequirement("REQ-OK", okId);
 
-            when(requirementRepository.findByUid("REQ-FAIL")).thenReturn(Optional.empty());
-            when(requirementRepository.findByUid("REQ-OK")).thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-FAIL"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-OK"))
+                    .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenThrow(new DomainValidationException("Simulated failure"))
                     .thenReturn(okReq);
@@ -461,7 +494,7 @@ class ImportServiceTest {
                 return audit;
             });
 
-            var result = service.importStrictdoc("test.sdoc", sdoc);
+            var result = service.importStrictdoc(PROJECT_ID, "test.sdoc", sdoc);
 
             assertThat(result.requirementsCreated()).isEqualTo(1);
             assertThat(result.errors()).hasSize(1);
@@ -478,7 +511,8 @@ class ImportServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-AUDIT", reqId);
 
-            when(requirementRepository.findByUid("REQ-AUDIT")).thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-AUDIT"))
+                    .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(req);
             when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
                 var audit = inv.<RequirementImport>getArgument(0);
@@ -486,7 +520,7 @@ class ImportServiceTest {
                 return audit;
             });
 
-            service.importStrictdoc("test.sdoc", sdoc);
+            service.importStrictdoc(PROJECT_ID, "test.sdoc", sdoc);
 
             verify(importRepository).save(any(RequirementImport.class));
         }

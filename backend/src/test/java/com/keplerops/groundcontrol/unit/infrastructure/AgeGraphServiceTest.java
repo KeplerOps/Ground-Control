@@ -10,12 +10,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.infrastructure.age.AgeGraphService;
 import com.keplerops.groundcontrol.infrastructure.age.AgeProperties;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -38,6 +40,21 @@ class AgeGraphServiceTest {
     private RequirementRelationRepository relationRepository;
 
     private AgeGraphService service;
+
+    private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    private static final Project TEST_PROJECT = createTestProject();
+
+    private static Project createTestProject() {
+        var project = new Project("test-project", "Test Project");
+        try {
+            var field = Project.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(project, PROJECT_ID);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return project;
+    }
 
     @BeforeEach
     void setUp() {
@@ -106,7 +123,7 @@ class AgeGraphServiceTest {
 
         @Test
         void materializeGraph_withRequirements_createsNodes() {
-            var req = new Requirement("GC-A001", "Test Req", "Statement");
+            var req = new Requirement(TEST_PROJECT, "GC-A001", "Test Req", "Statement");
             when(requirementRepository.findAll()).thenReturn(List.of(req));
             when(relationRepository.findAllWithSourceAndTarget()).thenReturn(List.of());
 

@@ -2,8 +2,10 @@ package com.keplerops.groundcontrol.domain.requirements.service;
 
 import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
+import java.util.UUID;
 
 public record CreateRequirementCommand(
+        UUID projectId,
         String uid,
         String title,
         String statement,

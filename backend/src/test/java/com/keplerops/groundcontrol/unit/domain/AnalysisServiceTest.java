@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
@@ -43,13 +44,28 @@ class AnalysisServiceTest {
     private static final List<RelationType> DAG_TYPES =
             List.of(RelationType.PARENT, RelationType.DEPENDS_ON, RelationType.REFINES);
 
+    private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    private static final Project TEST_PROJECT = createTestProject();
+
+    private static Project createTestProject() {
+        var project = new Project("test-project", "Test Project");
+        try {
+            var field = Project.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(project, PROJECT_ID);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return project;
+    }
+
     @BeforeEach
     void setUp() {
         service = new AnalysisService(requirementRepository, relationRepository, traceabilityLinkRepository);
     }
 
     private static Requirement makeRequirement(String uid, UUID id) {
-        var req = new Requirement(uid, "Title for " + uid, "Statement for " + uid);
+        var req = new Requirement(TEST_PROJECT, uid, "Title for " + uid, "Statement for " + uid);
         setField(req, "id", id);
         return req;
     }
@@ -75,10 +91,10 @@ class AnalysisServiceTest {
 
         @Test
         void emptyGraph_returnsEmpty() {
-            when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
+            when(relationRepository.findAllByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of());
 
-            var result = service.detectCycles();
+            var result = service.detectCycles(PROJECT_ID);
 
             assertThat(result).isEmpty();
         }
@@ -91,10 +107,10 @@ class AnalysisServiceTest {
             var b = makeRequirement("REQ-B", bId);
             var rel = new RequirementRelation(a, b, RelationType.PARENT);
 
-            when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
+            when(relationRepository.findAllByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(rel));
 
-            var result = service.detectCycles();
+            var result = service.detectCycles(PROJECT_ID);
 
             assertThat(result).isEmpty();
         }
@@ -112,10 +128,10 @@ class AnalysisServiceTest {
             var bc = new RequirementRelation(b, c, RelationType.DEPENDS_ON);
             var ca = new RequirementRelation(c, a, RelationType.PARENT);
 
-            when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
+            when(relationRepository.findAllByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(ab, bc, ca));
 
-            var result = service.detectCycles();
+            var result = service.detectCycles(PROJECT_ID);
 
             assertThat(result).hasSize(1);
             CycleResult cycle = result.get(0);
@@ -137,12 +153,12 @@ class AnalysisServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-ORPHAN", reqId);
 
-            when(requirementRepository.findAll()).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectId(PROJECT_ID)).thenReturn(List.of(req));
             when(relationRepository.findBySourceId(reqId)).thenReturn(List.of());
             when(relationRepository.findByTargetId(reqId)).thenReturn(List.of());
             when(traceabilityLinkRepository.existsByRequirementId(reqId)).thenReturn(false);
 
-            var result = service.findOrphans();
+            var result = service.findOrphans(PROJECT_ID);
 
             assertThat(result).containsExactly(req);
         }
@@ -155,10 +171,10 @@ class AnalysisServiceTest {
             var other = makeRequirement("REQ-OTHER", otherId);
             var rel = new RequirementRelation(req, other, RelationType.PARENT);
 
-            when(requirementRepository.findAll()).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectId(PROJECT_ID)).thenReturn(List.of(req));
             when(relationRepository.findBySourceId(reqId)).thenReturn(List.of(rel));
 
-            var result = service.findOrphans();
+            var result = service.findOrphans(PROJECT_ID);
 
             assertThat(result).isEmpty();
         }
@@ -168,12 +184,12 @@ class AnalysisServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-TRACED", reqId);
 
-            when(requirementRepository.findAll()).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectId(PROJECT_ID)).thenReturn(List.of(req));
             when(relationRepository.findBySourceId(reqId)).thenReturn(List.of());
             when(relationRepository.findByTargetId(reqId)).thenReturn(List.of());
             when(traceabilityLinkRepository.existsByRequirementId(reqId)).thenReturn(true);
 
-            var result = service.findOrphans();
+            var result = service.findOrphans(PROJECT_ID);
 
             assertThat(result).isEmpty();
         }
@@ -187,11 +203,11 @@ class AnalysisServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-GAP", reqId);
 
-            when(requirementRepository.findAll()).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectId(PROJECT_ID)).thenReturn(List.of(req));
             when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.TESTS))
                     .thenReturn(false);
 
-            var result = service.findCoverageGaps(LinkType.TESTS);
+            var result = service.findCoverageGaps(PROJECT_ID, LinkType.TESTS);
 
             assertThat(result).containsExactly(req);
         }
@@ -201,11 +217,11 @@ class AnalysisServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-COVERED", reqId);
 
-            when(requirementRepository.findAll()).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectId(PROJECT_ID)).thenReturn(List.of(req));
             when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.TESTS))
                     .thenReturn(true);
 
-            var result = service.findCoverageGaps(LinkType.TESTS);
+            var result = service.findCoverageGaps(PROJECT_ID, LinkType.TESTS);
 
             assertThat(result).isEmpty();
         }
@@ -220,7 +236,7 @@ class AnalysisServiceTest {
             var seed = makeRequirement("REQ-SEED", seedId);
 
             when(requirementRepository.findById(seedId)).thenReturn(Optional.of(seed));
-            when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
+            when(relationRepository.findAllByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of());
 
             var result = service.impactAnalysis(seedId);
@@ -240,7 +256,7 @@ class AnalysisServiceTest {
 
             when(requirementRepository.findById(parentId)).thenReturn(Optional.of(parent));
             when(requirementRepository.findById(childId)).thenReturn(Optional.of(child));
-            when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
+            when(relationRepository.findAllByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(rel));
 
             var result = service.impactAnalysis(parentId);
@@ -264,7 +280,7 @@ class AnalysisServiceTest {
             when(requirementRepository.findById(aId)).thenReturn(Optional.of(a));
             when(requirementRepository.findById(bId)).thenReturn(Optional.of(b));
             when(requirementRepository.findById(cId)).thenReturn(Optional.of(c));
-            when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
+            when(relationRepository.findAllByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(relBA, relCB));
 
             var result = service.impactAnalysis(aId);
@@ -293,7 +309,7 @@ class AnalysisServiceTest {
             when(requirementRepository.findById(bId)).thenReturn(Optional.of(b));
             when(requirementRepository.findById(cId)).thenReturn(Optional.of(c));
             when(requirementRepository.findById(dId)).thenReturn(Optional.of(d));
-            when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
+            when(relationRepository.findAllByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(relBA, relCA, relDB, relDC));
 
             var result = service.impactAnalysis(aId);
@@ -324,9 +340,10 @@ class AnalysisServiceTest {
             // Source wave 1, target wave 2 — correct order
             var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
 
-            when(relationRepository.findAllWithSourceAndTarget()).thenReturn(List.of(rel));
+            when(relationRepository.findAllWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(rel));
 
-            var result = service.crossWaveValidation();
+            var result = service.crossWaveValidation(PROJECT_ID);
 
             assertThat(result).isEmpty();
         }
@@ -341,9 +358,10 @@ class AnalysisServiceTest {
             // Source wave 3 > target wave 1 — backward dependency
             var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
 
-            when(relationRepository.findAllWithSourceAndTarget()).thenReturn(List.of(rel));
+            when(relationRepository.findAllWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(rel));
 
-            var result = service.crossWaveValidation();
+            var result = service.crossWaveValidation(PROJECT_ID);
 
             assertThat(result).containsExactly(rel);
         }
@@ -357,9 +375,10 @@ class AnalysisServiceTest {
 
             var rel = new RequirementRelation(a, b, RelationType.PARENT);
 
-            when(relationRepository.findAllWithSourceAndTarget()).thenReturn(List.of(rel));
+            when(relationRepository.findAllWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(rel));
 
-            var result = service.crossWaveValidation();
+            var result = service.crossWaveValidation(PROJECT_ID);
 
             assertThat(result).isEmpty();
         }

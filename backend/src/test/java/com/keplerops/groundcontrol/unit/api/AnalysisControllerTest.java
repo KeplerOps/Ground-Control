@@ -9,6 +9,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.keplerops.groundcontrol.api.admin.AnalysisController;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
@@ -20,6 +22,7 @@ import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,8 +39,31 @@ class AnalysisControllerTest {
     @MockitoBean
     private AnalysisService analysisService;
 
+    @MockitoBean
+    private ProjectService projectService;
+
+    private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    private static final Project TEST_PROJECT = createTestProject();
+
+    private static Project createTestProject() {
+        var project = new Project("test-project", "Test Project");
+        try {
+            var field = Project.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(project, PROJECT_ID);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return project;
+    }
+
+    @BeforeEach
+    void setUp() {
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
+    }
+
     private static Requirement makeRequirement(String uid, UUID id) {
-        var req = new Requirement(uid, "Title for " + uid, "Statement for " + uid);
+        var req = new Requirement(TEST_PROJECT, uid, "Title for " + uid, "Statement for " + uid);
         setField(req, "id", id);
         return req;
     }
@@ -61,7 +87,7 @@ class AnalysisControllerTest {
                     new CycleEdge("REQ-A", "REQ-B", RelationType.DEPENDS_ON),
                     new CycleEdge("REQ-B", "REQ-A", RelationType.PARENT));
             var cycleResult = new CycleResult(List.of("REQ-A", "REQ-B", "REQ-A"), edges);
-            when(analysisService.detectCycles()).thenReturn(List.of(cycleResult));
+            when(analysisService.detectCycles(PROJECT_ID)).thenReturn(List.of(cycleResult));
 
             mockMvc.perform(get("/api/v1/analysis/cycles"))
                     .andExpect(status().isOk())
@@ -83,7 +109,7 @@ class AnalysisControllerTest {
         void returns200() throws Exception {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-ORPHAN", reqId);
-            when(analysisService.findOrphans()).thenReturn(List.of(req));
+            when(analysisService.findOrphans(PROJECT_ID)).thenReturn(List.of(req));
 
             mockMvc.perform(get("/api/v1/analysis/orphans"))
                     .andExpect(status().isOk())
@@ -99,7 +125,7 @@ class AnalysisControllerTest {
         void returns200() throws Exception {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-GAP", reqId);
-            when(analysisService.findCoverageGaps(LinkType.TESTS)).thenReturn(List.of(req));
+            when(analysisService.findCoverageGaps(PROJECT_ID, LinkType.TESTS)).thenReturn(List.of(req));
 
             mockMvc.perform(get("/api/v1/analysis/coverage-gaps").param("linkType", "TESTS"))
                     .andExpect(status().isOk())
@@ -143,7 +169,7 @@ class AnalysisControllerTest {
             var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
             setField(rel, "id", UUID.randomUUID());
 
-            when(analysisService.crossWaveValidation()).thenReturn(List.of(rel));
+            when(analysisService.crossWaveValidation(PROJECT_ID)).thenReturn(List.of(rel));
 
             mockMvc.perform(get("/api/v1/analysis/cross-wave"))
                     .andExpect(status().isOk())

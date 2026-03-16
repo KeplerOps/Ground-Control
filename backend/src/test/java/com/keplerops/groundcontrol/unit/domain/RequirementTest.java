@@ -3,6 +3,7 @@ package com.keplerops.groundcontrol.unit.domain;
 import static org.assertj.core.api.Assertions.*;
 
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.state.*;
@@ -14,8 +15,22 @@ import org.junit.jupiter.api.Test;
 @SuppressWarnings("java:S2187") // Tests are in @Nested inner classes
 class RequirementTest {
 
+    private static final Project TEST_PROJECT = createTestProject();
+
+    private static Project createTestProject() {
+        var project = new Project("test-project", "Test Project");
+        try {
+            var field = Project.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(project, UUID.fromString("00000000-0000-0000-0000-000000000001"));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return project;
+    }
+
     private static Requirement createRequirement(String uid) {
-        return new Requirement(uid, "Title for " + uid, "Statement for " + uid);
+        return new Requirement(TEST_PROJECT, uid, "Title for " + uid, "Statement for " + uid);
     }
 
     private static void setId(Requirement req, UUID id) {

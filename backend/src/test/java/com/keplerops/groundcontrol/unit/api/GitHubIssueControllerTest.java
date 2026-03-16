@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.keplerops.groundcontrol.api.admin.GitHubIssueController;
+import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateGitHubIssueCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateGitHubIssueResult;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueSyncService;
@@ -29,6 +30,10 @@ class GitHubIssueControllerTest {
 
     @MockitoBean
     private GitHubIssueSyncService syncService;
+
+    @SuppressWarnings("UnusedVariable") // Required by Spring context
+    @MockitoBean
+    private ProjectService projectService;
 
     @Nested
     class CreateIssue {

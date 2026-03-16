@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementService;
 import com.keplerops.groundcontrol.domain.requirements.state.Priority;
@@ -13,6 +15,7 @@ import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import jakarta.persistence.EntityManager;
 import org.hibernate.envers.AuditReaderFactory;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.transaction.TestTransaction;
@@ -27,8 +30,19 @@ class RequirementServiceIntegrationTest extends BaseIntegrationTest {
     @Autowired
     private EntityManager entityManager;
 
+    @Autowired
+    private ProjectRepository projectRepository;
+
+    private Project testProject;
+
+    @BeforeEach
+    void setUp() {
+        testProject = projectRepository.findByIdentifier("ground-control").orElseThrow();
+    }
+
     private CreateRequirementCommand makeCommand(String uid) {
         return new CreateRequirementCommand(
+                testProject.getId(),
                 uid,
                 "Title for " + uid,
                 "Statement for " + uid,
@@ -53,7 +67,7 @@ class RequirementServiceIntegrationTest extends BaseIntegrationTest {
     void getByUidRetrievesByHumanReadableUid() {
         requirementService.create(makeCommand("REQ-INT-002"));
 
-        var found = requirementService.getByUid("REQ-INT-002");
+        var found = requirementService.getByUid(testProject.getId(), "REQ-INT-002");
         assertThat(found.getUid()).isEqualTo("REQ-INT-002");
     }
 

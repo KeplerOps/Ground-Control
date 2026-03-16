@@ -22,6 +22,8 @@ import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.GroundControlException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
@@ -45,6 +47,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -73,8 +76,31 @@ class RequirementControllerTest {
     @MockitoBean
     private AuditService auditService;
 
+    @MockitoBean
+    private ProjectService projectService;
+
+    private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    private static final Project TEST_PROJECT = createTestProject();
+
+    private static Project createTestProject() {
+        var project = new Project("test-project", "Test Project");
+        try {
+            var field = Project.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(project, PROJECT_ID);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return project;
+    }
+
+    @BeforeEach
+    void setUp() {
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
+    }
+
     private static Requirement createRequirement(String uid) {
-        var req = new Requirement(uid, "Title for " + uid, "Statement for " + uid);
+        var req = new Requirement(TEST_PROJECT, uid, "Title for " + uid, "Statement for " + uid);
         setField(req, "id", UUID.randomUUID());
         setField(req, "createdAt", Instant.now());
         setField(req, "updatedAt", Instant.now());
@@ -174,7 +200,7 @@ class RequirementControllerTest {
         @Test
         void returns200() throws Exception {
             var req = createRequirement("REQ-001");
-            when(requirementService.getByUid("REQ-001")).thenReturn(req);
+            when(requirementService.getByUid(eq(PROJECT_ID), eq("REQ-001"))).thenReturn(req);
 
             mockMvc.perform(get("/api/v1/requirements/uid/REQ-001"))
                     .andExpect(status().isOk())
@@ -188,7 +214,7 @@ class RequirementControllerTest {
         @Test
         void returns200WithPagination() throws Exception {
             var req = createRequirement("REQ-001");
-            when(requirementService.list(any(Pageable.class), any(RequirementFilter.class)))
+            when(requirementService.list(eq(PROJECT_ID), any(Pageable.class), any(RequirementFilter.class)))
                     .thenReturn(new PageImpl<>(List.of(req)));
 
             mockMvc.perform(get("/api/v1/requirements"))
@@ -199,7 +225,7 @@ class RequirementControllerTest {
         @Test
         void returns200WithFilterParams() throws Exception {
             var req = createRequirement("REQ-001");
-            when(requirementService.list(any(Pageable.class), any(RequirementFilter.class)))
+            when(requirementService.list(eq(PROJECT_ID), any(Pageable.class), any(RequirementFilter.class)))
                     .thenReturn(new PageImpl<>(List.of(req)));
 
             mockMvc.perform(get("/api/v1/requirements")
