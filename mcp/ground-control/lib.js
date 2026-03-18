@@ -170,9 +170,9 @@ export async function getRequirement(id) {
   return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}`);
 }
 
-export async function listRequirements({ status, type, priority, wave, search, page, size, project } = {}) {
+export async function listRequirements({ status, type, priority, wave, search, page, size, sort, project } = {}) {
   return request("GET", "/api/v1/requirements", {
-    params: { status, type, priority, wave, search, page, size, project },
+    params: { status, type, priority, wave, search, page, size, sort, project },
   });
 }
 
