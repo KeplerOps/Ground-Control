@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.56.0] - 2026-03-18
+
+### Added
+
+- Consistency violation detection analysis — detects ACTIVE requirements linked
+  by `CONFLICTS_WITH` relations and `SUPERSEDES` relations where both sides are
+  ACTIVE (GC-C007)
+- REST endpoint `GET /api/v1/analysis/consistency-violations`
+- `gc_analyze_consistency` MCP tool
+- Consistency tab on the frontend analysis page
+
 ## [0.55.0] - 2026-03-18
 
 ### Added

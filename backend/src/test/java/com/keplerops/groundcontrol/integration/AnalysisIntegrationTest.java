@@ -13,6 +13,7 @@ import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
+import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -77,6 +78,24 @@ class AnalysisIntegrationTest extends BaseIntegrationTest {
         mockMvc.perform(get("/api/v1/analysis/impact/" + a.getId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(3)));
+    }
+
+    @Test
+    void consistencyViolations_detectsActiveConflict() throws Exception {
+        var a = new Requirement(testProject, "INT-CONF-A", "Conflict A", "Conflict A statement");
+        a.transitionStatus(Status.ACTIVE);
+        a = requirementRepository.save(a);
+
+        var b = new Requirement(testProject, "INT-CONF-B", "Conflict B", "Conflict B statement");
+        b.transitionStatus(Status.ACTIVE);
+        b = requirementRepository.save(b);
+
+        relationRepository.save(new RequirementRelation(a, b, RelationType.CONFLICTS_WITH));
+
+        mockMvc.perform(get("/api/v1/analysis/consistency-violations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.sourceUid == 'INT-CONF-A')]").exists())
+                .andExpect(jsonPath("$[0].violationType", is("ACTIVE_CONFLICT")));
     }
 
     @Test

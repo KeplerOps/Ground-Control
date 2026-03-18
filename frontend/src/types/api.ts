@@ -145,6 +145,18 @@ export interface RelationValidationResponse {
   relationType: RelationType;
 }
 
+export interface ConsistencyViolationResponse {
+  relationId: string;
+  sourceId: string;
+  sourceUid: string;
+  sourceStatus: Status;
+  targetId: string;
+  targetUid: string;
+  targetStatus: Status;
+  relationType: RelationType;
+  violationType: string;
+}
+
 export interface BulkStatusTransitionResponse {
   succeeded: RequirementResponse[];
   failed: Array<{ id: string; error: string }>;

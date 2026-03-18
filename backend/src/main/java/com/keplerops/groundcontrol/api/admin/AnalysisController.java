@@ -55,6 +55,15 @@ public class AnalysisController {
                 .toList();
     }
 
+    @GetMapping("/consistency-violations")
+    public List<ConsistencyViolationResponse> detectConsistencyViolations(
+            @RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return analysisService.detectConsistencyViolations(projectId).stream()
+                .map(ConsistencyViolationResponse::from)
+                .toList();
+    }
+
     @GetMapping("/cross-wave")
     public List<RelationValidationResponse> crossWaveValidation(@RequestParam(required = false) String project) {
         var projectId = projectService.resolveProjectId(project);

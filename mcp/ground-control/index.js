@@ -23,6 +23,7 @@ import {
   findCoverageGaps,
   impactAnalysis,
   crossWaveValidation,
+  detectConsistencyViolations,
   importStrictdoc,
   syncGithub,
   getRequirementHistory,
@@ -552,6 +553,23 @@ server.tool(
     try {
       const violations = await crossWaveValidation(project);
       if (Array.isArray(violations) && violations.length === 0) return ok("No cross-wave violations found.");
+      return ok(JSON.stringify(violations, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_analyze_consistency",
+  "Detect consistency violations: ACTIVE requirements linked by CONFLICTS_WITH, or SUPERSEDES relations where both sides are ACTIVE.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const violations = await detectConsistencyViolations(project);
+      if (Array.isArray(violations) && violations.length === 0) return ok("No consistency violations found.");
       return ok(JSON.stringify(violations, null, 2));
     } catch (e) {
       return err(e);

@@ -1,6 +1,7 @@
 import { useProjectContext } from "@/contexts/project-context";
 import { apiFetch } from "@/lib/api-client";
 import type {
+  ConsistencyViolationResponse,
   CycleResponse,
   LinkType,
   RelationValidationResponse,
@@ -55,6 +56,25 @@ export function useImpact(id: string | undefined) {
     queryFn: () =>
       apiFetch<RequirementSummaryResponse[]>(`/analysis/impact/${id}`),
     enabled: !!id,
+  });
+}
+
+export function useConsistencyViolations() {
+  const { activeProject } = useProjectContext();
+  return useQuery({
+    queryKey: [
+      "analysis",
+      "consistency-violations",
+      activeProject?.identifier,
+    ],
+    queryFn: () =>
+      apiFetch<ConsistencyViolationResponse[]>(
+        "/analysis/consistency-violations",
+        {
+          params: { project: activeProject?.identifier },
+        },
+      ),
+    enabled: !!activeProject,
   });
 }
 

@@ -1,6 +1,7 @@
 import { StatusBadge } from "@/components/ui/badge";
 import { useProjectContext } from "@/contexts/project-context";
 import {
+  useConsistencyViolations,
   useCoverageGaps,
   useCrossWave,
   useCycles,
@@ -37,7 +38,7 @@ export function Analysis() {
 
       <Tabs.Root defaultValue="cycles">
         <Tabs.List className="flex gap-1 border-b border-border">
-          {["cycles", "orphans", "coverage", "cross-wave"].map((tab) => (
+          {["cycles", "orphans", "coverage", "cross-wave", "consistency"].map((tab) => (
             <Tabs.Trigger
               key={tab}
               value={tab}
@@ -59,6 +60,9 @@ export function Analysis() {
         </Tabs.Content>
         <Tabs.Content value="cross-wave" className="pt-4">
           <CrossWaveTab />
+        </Tabs.Content>
+        <Tabs.Content value="consistency" className="pt-4">
+          <ConsistencyTab />
         </Tabs.Content>
       </Tabs.Root>
     </div>
@@ -265,6 +269,87 @@ function CrossWaveTab() {
                 </td>
                 <td className="px-3 py-2 text-xs text-muted-foreground">
                   {v.targetWave}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ConsistencyTab() {
+  const { data: violations = [], isLoading } = useConsistencyViolations();
+
+  if (isLoading)
+    return <div className="animate-pulse h-20 bg-muted rounded" />;
+
+  if (violations.length === 0) {
+    return (
+      <p className="text-sm text-green-400">No consistency violations.</p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        {violations.length} consistency violation(s) detected
+      </p>
+      <div className="rounded-lg border border-border overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-card border-b border-border">
+            <tr>
+              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">
+                Source
+              </th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">
+                Status
+              </th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">
+                Relation
+              </th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">
+                Target
+              </th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">
+                Status
+              </th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">
+                Violation
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {violations.map((v) => (
+              <tr key={v.relationId} className="hover:bg-accent/30">
+                <td className="px-3 py-2">
+                  <Link
+                    to={`/requirements/${v.sourceId}`}
+                    className="font-mono text-xs text-primary hover:underline"
+                  >
+                    {v.sourceUid}
+                  </Link>
+                </td>
+                <td className="px-3 py-2">
+                  <StatusBadge status={v.sourceStatus} />
+                </td>
+                <td className="px-3 py-2 text-xs">
+                  {v.relationType.replace(/_/g, " ")}
+                </td>
+                <td className="px-3 py-2">
+                  <Link
+                    to={`/requirements/${v.targetId}`}
+                    className="font-mono text-xs text-primary hover:underline"
+                  >
+                    {v.targetUid}
+                  </Link>
+                </td>
+                <td className="px-3 py-2">
+                  <StatusBadge status={v.targetStatus} />
+                </td>
+                <td className="px-3 py-2 text-xs text-red-400 font-medium">
+                  {v.violationType.replace(/_/g, " ")}
                 </td>
               </tr>
             ))}
