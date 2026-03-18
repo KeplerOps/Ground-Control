@@ -120,11 +120,12 @@ server.tool(
     search: z.string().optional().describe("Free-text search in title and statement"),
     page: z.number().int().optional().describe("Page number (0-based)"),
     size: z.number().int().optional().describe("Page size (default 20)"),
+    sort: z.string().optional().describe("Sort expression (e.g. 'uid,asc' or 'title,desc')"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ status, type, priority, wave, search, page, size, project }) => {
+  async ({ status, type, priority, wave, search, page, size, sort, project }) => {
     try {
-      return ok(JSON.stringify(await listRequirements({ status, type, priority, wave, search, page, size, project }), null, 2));
+      return ok(JSON.stringify(await listRequirements({ status, type, priority, wave, search, page, size, sort, project }), null, 2));
     } catch (e) {
       return err(e);
     }

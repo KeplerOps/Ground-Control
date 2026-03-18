@@ -48,7 +48,7 @@ be related, linked, or analyzed.
 |------|-----------|---------|
 | `gc_create_requirement` | `uid` (required), `title` (required), `statement` (required), `rationale`, `requirement_type`, `priority`, `wave` | Create a requirement. Status defaults to DRAFT |
 | `gc_get_requirement` | `uid` (required) | Get requirement by UID |
-| `gc_list_requirements` | `status`, `type`, `wave`, `search`, `page`, `size` | List requirements with optional filters. Paginated |
+| `gc_list_requirements` | `status`, `type`, `wave`, `search`, `page`, `size`, `sort` | List requirements with optional filters. Paginated, sortable |
 | `gc_update_requirement` | `id` (required), `uid`, `title`, `statement`, `rationale`, `requirement_type`, `priority`, `wave` | Update fields on an existing requirement. Pass only changed fields |
 | `gc_transition_status` | `id` (required), `status` (required) | Transition requirement status. Forward-only |
 | `gc_archive_requirement` | `id` (required) | Shortcut to transition to ARCHIVED |
