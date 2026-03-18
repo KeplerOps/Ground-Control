@@ -366,7 +366,7 @@ export function Graph() {
         layout: layoutConfig,
         minZoom: 0.15,
         maxZoom: 4,
-        wheelSensitivity: 0.3,
+        wheelSensitivity: 1,
       });
 
       cyRef.current = cy;
