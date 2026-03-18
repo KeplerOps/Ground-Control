@@ -12,6 +12,7 @@ import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRel
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
+import com.keplerops.groundcontrol.domain.requirements.service.CompletenessResult;
 import com.keplerops.groundcontrol.domain.requirements.service.ConsistencyViolation;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
@@ -465,6 +466,71 @@ class AnalysisServiceTest {
             var result = service.crossWaveValidation(PROJECT_ID);
 
             assertThat(result).isEmpty();
+        }
+    }
+
+    @Nested
+    class AnalyzeCompleteness {
+
+        @Test
+        void emptyProject_returnsZero() {
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of());
+
+            CompletenessResult result = service.analyzeCompleteness(PROJECT_ID);
+
+            assertThat(result.total()).isZero();
+            assertThat(result.byStatus()).isEmpty();
+            assertThat(result.issues()).isEmpty();
+        }
+
+        @Test
+        void countsStatuses() {
+            var draft = makeRequirement("REQ-D", UUID.randomUUID());
+            var active = makeRequirement("REQ-A", UUID.randomUUID());
+            setField(active, "status", Status.ACTIVE);
+            var active2 = makeRequirement("REQ-A2", UUID.randomUUID());
+            setField(active2, "status", Status.ACTIVE);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(draft, active, active2));
+
+            CompletenessResult result = service.analyzeCompleteness(PROJECT_ID);
+
+            assertThat(result.total()).isEqualTo(3);
+            assertThat(result.byStatus()).containsEntry("DRAFT", 1);
+            assertThat(result.byStatus()).containsEntry("ACTIVE", 2);
+            assertThat(result.issues()).isEmpty();
+        }
+
+        @Test
+        void detectsMissingStatement() {
+            var req = makeRequirement("REQ-BLANK", UUID.randomUUID());
+            setField(req, "statement", "");
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
+
+            CompletenessResult result = service.analyzeCompleteness(PROJECT_ID);
+
+            assertThat(result.issues()).hasSize(1);
+            assertThat(result.issues().get(0).uid()).isEqualTo("REQ-BLANK");
+            assertThat(result.issues().get(0).issue()).isEqualTo("missing statement");
+        }
+
+        @Test
+        void detectsMissingTitle() {
+            var req = makeRequirement("REQ-NOTITLE", UUID.randomUUID());
+            setField(req, "title", "");
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
+
+            CompletenessResult result = service.analyzeCompleteness(PROJECT_ID);
+
+            assertThat(result.issues()).hasSize(1);
+            assertThat(result.issues().get(0).uid()).isEqualTo("REQ-NOTITLE");
+            assertThat(result.issues().get(0).issue()).isEqualTo("missing title");
         }
     }
 }

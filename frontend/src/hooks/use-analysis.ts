@@ -1,6 +1,7 @@
 import { useProjectContext } from "@/contexts/project-context";
 import { apiFetch } from "@/lib/api-client";
 import type {
+  CompletenessResponse,
   ConsistencyViolationResponse,
   CycleResponse,
   LinkType,
@@ -74,6 +75,18 @@ export function useConsistencyViolations() {
           params: { project: activeProject?.identifier },
         },
       ),
+    enabled: !!activeProject,
+  });
+}
+
+export function useCompleteness() {
+  const { activeProject } = useProjectContext();
+  return useQuery({
+    queryKey: ["analysis", "completeness", activeProject?.identifier],
+    queryFn: () =>
+      apiFetch<CompletenessResponse>("/analysis/completeness", {
+        params: { project: activeProject?.identifier },
+      }),
     enabled: !!activeProject,
   });
 }

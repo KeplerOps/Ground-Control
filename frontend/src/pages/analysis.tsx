@@ -1,13 +1,14 @@
 import { StatusBadge } from "@/components/ui/badge";
 import { useProjectContext } from "@/contexts/project-context";
 import {
+  useCompleteness,
   useConsistencyViolations,
   useCoverageGaps,
   useCrossWave,
   useCycles,
   useOrphans,
 } from "@/hooks/use-analysis";
-import type { LinkType } from "@/types/api";
+import type { CompletenessIssueResponse, LinkType } from "@/types/api";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Activity } from "lucide-react";
 import { useState } from "react";
@@ -38,7 +39,7 @@ export function Analysis() {
 
       <Tabs.Root defaultValue="cycles">
         <Tabs.List className="flex gap-1 border-b border-border">
-          {["cycles", "orphans", "coverage", "cross-wave", "consistency"].map((tab) => (
+          {["cycles", "orphans", "coverage", "cross-wave", "consistency", "completeness"].map((tab) => (
             <Tabs.Trigger
               key={tab}
               value={tab}
@@ -63,6 +64,9 @@ export function Analysis() {
         </Tabs.Content>
         <Tabs.Content value="consistency" className="pt-4">
           <ConsistencyTab />
+        </Tabs.Content>
+        <Tabs.Content value="completeness" className="pt-4">
+          <CompletenessTab />
         </Tabs.Content>
       </Tabs.Root>
     </div>
@@ -356,6 +360,78 @@ function ConsistencyTab() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function CompletenessTab() {
+  const { data, isLoading } = useCompleteness();
+
+  if (isLoading)
+    return <div className="animate-pulse h-20 bg-muted rounded" />;
+
+  if (!data || data.total === 0) {
+    return <p className="text-sm text-muted-foreground">No requirements found.</p>;
+  }
+
+  const statusEntries = Object.entries(data.byStatus);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="text-sm font-medium mb-3">
+          {data.total} requirement(s) total
+        </p>
+        <div className="flex flex-wrap gap-3">
+          {statusEntries.map(([status, count]) => (
+            <div
+              key={status}
+              className="rounded-lg border border-border bg-card px-4 py-3 text-center"
+            >
+              <p className="text-lg font-semibold">{count}</p>
+              <p className="text-xs text-muted-foreground">{status}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {data.issues.length === 0 ? (
+        <p className="text-sm text-green-400">
+          All requirements have title and statement.
+        </p>
+      ) : (
+        <div>
+          <p className="text-sm text-destructive font-medium mb-3">
+            {data.issues.length} issue(s) found
+          </p>
+          <div className="rounded-lg border border-border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-card border-b border-border">
+                <tr>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">
+                    UID
+                  </th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">
+                    Issue
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {data.issues.map((issue: CompletenessIssueResponse) => (
+                  <tr key={`${issue.uid}-${issue.issue}`} className="hover:bg-accent/30">
+                    <td className="px-3 py-2 font-mono text-xs">
+                      {issue.uid}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-red-400">
+                      {issue.issue}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
