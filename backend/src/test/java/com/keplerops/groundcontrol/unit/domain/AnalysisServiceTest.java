@@ -12,10 +12,12 @@ import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRel
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
+import com.keplerops.groundcontrol.domain.requirements.service.ConsistencyViolation;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
+import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Optional;
@@ -329,6 +331,83 @@ class AnalysisServiceTest {
             when(requirementRepository.findById(missingId)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.impactAnalysis(missingId)).isInstanceOf(NotFoundException.class);
+        }
+    }
+
+    @Nested
+    class DetectConsistencyViolations {
+
+        @Test
+        void noViolations_returnsEmpty() {
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of());
+
+            var result = service.detectConsistencyViolations(PROJECT_ID);
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        void activeConflict_detected() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            var a = makeRequirement("REQ-A", aId);
+            var b = makeRequirement("REQ-B", bId);
+            setField(a, "status", Status.ACTIVE);
+            setField(b, "status", Status.ACTIVE);
+
+            var rel = new RequirementRelation(a, b, RelationType.CONFLICTS_WITH);
+
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(rel));
+
+            var result = service.detectConsistencyViolations(PROJECT_ID);
+
+            assertThat(result).hasSize(1);
+            ConsistencyViolation violation = result.get(0);
+            assertThat(violation.violationType()).isEqualTo("ACTIVE_CONFLICT");
+            assertThat(violation.relation()).isSameAs(rel);
+        }
+
+        @Test
+        void activeSupersedes_detected() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            var a = makeRequirement("REQ-A", aId);
+            var b = makeRequirement("REQ-B", bId);
+            setField(a, "status", Status.ACTIVE);
+            setField(b, "status", Status.ACTIVE);
+
+            var rel = new RequirementRelation(a, b, RelationType.SUPERSEDES);
+
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(rel));
+
+            var result = service.detectConsistencyViolations(PROJECT_ID);
+
+            assertThat(result).hasSize(1);
+            ConsistencyViolation violation = result.get(0);
+            assertThat(violation.violationType()).isEqualTo("ACTIVE_SUPERSEDES");
+            assertThat(violation.relation()).isSameAs(rel);
+        }
+
+        @Test
+        void draftConflict_notDetected() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            var a = makeRequirement("REQ-A", aId);
+            var b = makeRequirement("REQ-B", bId);
+            setField(a, "status", Status.ACTIVE);
+            // b remains DRAFT (default)
+
+            var rel = new RequirementRelation(a, b, RelationType.CONFLICTS_WITH);
+
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(rel));
+
+            var result = service.detectConsistencyViolations(PROJECT_ID);
+
+            assertThat(result).isEmpty();
         }
     }
 

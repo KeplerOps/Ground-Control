@@ -8,6 +8,7 @@ import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRep
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
+import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -131,6 +132,25 @@ public class AnalysisService {
                                 .findById(id)
                                 .orElseThrow(() -> new NotFoundException("Requirement not found: " + id)))
                 .collect(Collectors.toSet());
+    }
+
+    public List<ConsistencyViolation> detectConsistencyViolations(UUID projectId) {
+        List<RequirementRelation> allRelations = relationRepository.findActiveWithSourceAndTargetByProjectId(projectId);
+        List<ConsistencyViolation> violations = new ArrayList<>();
+
+        for (RequirementRelation rel : allRelations) {
+            Status sourceStatus = rel.getSource().getStatus();
+            Status targetStatus = rel.getTarget().getStatus();
+            boolean bothActive = sourceStatus == Status.ACTIVE && targetStatus == Status.ACTIVE;
+
+            if (bothActive && rel.getRelationType() == RelationType.CONFLICTS_WITH) {
+                violations.add(new ConsistencyViolation(rel, "ACTIVE_CONFLICT"));
+            } else if (bothActive && rel.getRelationType() == RelationType.SUPERSEDES) {
+                violations.add(new ConsistencyViolation(rel, "ACTIVE_SUPERSEDES"));
+            }
+        }
+
+        return violations;
     }
 
     public List<RequirementRelation> crossWaveValidation(UUID projectId) {

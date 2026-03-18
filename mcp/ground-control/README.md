@@ -38,7 +38,7 @@ be related, linked, or analyzed.
 1. **Create requirements** — `gc_create_requirement` with uid, title, statement
 2. **Create relations** — `gc_create_relation` between two existing requirements
 3. **Add traceability links** — `gc_create_traceability_link` to connect code, tests, issues, ADRs
-4. **Run analysis** — `gc_analyze_cycles`, `gc_analyze_orphans`, `gc_analyze_coverage_gaps`, `gc_analyze_impact`, `gc_analyze_cross_wave`
+4. **Run analysis** — `gc_analyze_cycles`, `gc_analyze_orphans`, `gc_analyze_coverage_gaps`, `gc_analyze_impact`, `gc_analyze_cross_wave`, `gc_analyze_consistency`
 5. **Transition status** — `gc_transition_status` moves requirements forward: DRAFT → ACTIVE → DEPRECATED → ARCHIVED
 6. **Bulk operations** — `gc_import_strictdoc` for .sdoc files, `gc_sync_github` for issue sync
 
@@ -61,6 +61,7 @@ be related, linked, or analyzed.
 | `gc_analyze_coverage_gaps` | `link_type` (required) | Find requirements missing a specific link type |
 | `gc_analyze_impact` | `id` (required) | Transitive impact analysis from a given requirement |
 | `gc_analyze_cross_wave` | _(none)_ | Find cross-wave dependency violations |
+| `gc_analyze_consistency` | `project` (optional) | Detect consistency violations (active conflicts, active supersedes) |
 | `gc_import_strictdoc` | `file_path` (required) | Import requirements from a .sdoc file. Idempotent |
 | `gc_sync_github` | `owner` (required), `repo` (required) | Sync GitHub issues as traceability links |
 
