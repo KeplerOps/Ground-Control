@@ -64,6 +64,12 @@ public class AnalysisController {
                 .toList();
     }
 
+    @GetMapping("/completeness")
+    public CompletenessResponse analyzeCompleteness(@RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return CompletenessResponse.from(analysisService.analyzeCompleteness(projectId));
+    }
+
     @GetMapping("/cross-wave")
     public List<RelationValidationResponse> crossWaveValidation(@RequestParam(required = false) String project) {
         var projectId = projectService.resolveProjectId(project);

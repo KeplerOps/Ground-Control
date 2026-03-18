@@ -11,6 +11,7 @@ import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -151,6 +152,27 @@ public class AnalysisService {
         }
 
         return violations;
+    }
+
+    public CompletenessResult analyzeCompleteness(UUID projectId) {
+        List<Requirement> allRequirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
+
+        Map<String, Integer> byStatus = new LinkedHashMap<>();
+        List<CompletenessIssue> issues = new ArrayList<>();
+
+        for (Requirement req : allRequirements) {
+            String status = req.getStatus().name();
+            byStatus.merge(status, 1, Integer::sum);
+
+            if (req.getTitle() == null || req.getTitle().isBlank()) {
+                issues.add(new CompletenessIssue(req.getUid(), "missing title"));
+            }
+            if (req.getStatement() == null || req.getStatement().isBlank()) {
+                issues.add(new CompletenessIssue(req.getUid(), "missing statement"));
+            }
+        }
+
+        return new CompletenessResult(allRequirements.size(), byStatus, issues);
     }
 
     public List<RequirementRelation> crossWaveValidation(UUID projectId) {

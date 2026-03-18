@@ -157,6 +157,17 @@ export interface ConsistencyViolationResponse {
   violationType: string;
 }
 
+export interface CompletenessIssueResponse {
+  uid: string;
+  issue: string;
+}
+
+export interface CompletenessResponse {
+  total: number;
+  byStatus: Record<string, number>;
+  issues: CompletenessIssueResponse[];
+}
+
 export interface BulkStatusTransitionResponse {
   succeeded: RequirementResponse[];
   failed: Array<{ id: string; error: string }>;

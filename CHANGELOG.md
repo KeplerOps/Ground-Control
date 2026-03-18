@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.57.0] - 2026-03-18
+
+### Added
+
+- Completeness analysis backend endpoint `GET /api/v1/analysis/completeness` —
+  returns total count, status distribution, and missing-field issues (GC-C008)
+- `gc_analyze_completeness` MCP tool now calls the backend API instead of doing
+  client-side computation, achieving full REST/MCP parity for all 7 analysis
+  operations
+- Completeness tab on the frontend analysis page
+- Coverage-gaps integration test
+
 ## [0.56.0] - 2026-03-18
 
 ### Added

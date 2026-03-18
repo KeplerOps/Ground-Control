@@ -24,6 +24,7 @@ import {
   impactAnalysis,
   crossWaveValidation,
   detectConsistencyViolations,
+  analyzeCompleteness,
   importStrictdoc,
   syncGithub,
   getRequirementHistory,
@@ -583,25 +584,15 @@ server.tool(
 
 server.tool(
   "gc_analyze_completeness",
-  "Analyze overall completeness of requirements: checks for missing fields, unlinked requirements, and status distribution.",
+  "Analyze overall completeness of requirements: checks for missing fields and status distribution.",
   {
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
   async ({ project }) => {
     try {
-      const reqs = await listRequirements({ size: 1000, project });
-      const content = reqs.content || reqs;
-      const items = Array.isArray(content) ? content : [];
-      const total = items.length;
-      const byStatus = {};
-      const issues = [];
-      for (const r of items) {
-        const st = r.status || "UNKNOWN";
-        byStatus[st] = (byStatus[st] || 0) + 1;
-        if (!r.statement || r.statement.trim() === "") issues.push({ uid: r.uid, issue: "missing statement" });
-        if (!r.title || r.title.trim() === "") issues.push({ uid: r.uid, issue: "missing title" });
-      }
-      return ok(JSON.stringify({ total, by_status: byStatus, issues }, null, 2));
+      const result = await analyzeCompleteness(project);
+      if (result.total === 0) return ok("No requirements found.");
+      return ok(JSON.stringify(result, null, 2));
     } catch (e) {
       return err(e);
     }

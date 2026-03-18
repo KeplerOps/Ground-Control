@@ -99,6 +99,30 @@ class AnalysisIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    void completeness_returnsStatusDistribution() throws Exception {
+        requirementRepository.save(new Requirement(testProject, "INT-COMP-A", "Comp A", "Statement A"));
+        var active = new Requirement(testProject, "INT-COMP-B", "Comp B", "Statement B");
+        active.transitionStatus(Status.ACTIVE);
+        requirementRepository.save(active);
+
+        mockMvc.perform(get("/api/v1/analysis/completeness"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").isNumber())
+                .andExpect(jsonPath("$.byStatus").isMap())
+                .andExpect(jsonPath("$.issues").isArray());
+    }
+
+    @Test
+    void coverageGaps_returnsRequirementsMissingLinkType() throws Exception {
+        requirementRepository.save(new Requirement(testProject, "INT-COV-A", "Cov A", "Statement A"));
+
+        mockMvc.perform(get("/api/v1/analysis/coverage-gaps").param("linkType", "IMPLEMENTS"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[?(@.uid == 'INT-COV-A')]").exists());
+    }
+
+    @Test
     void crossWaveValidation_detectsForwardDeps() throws Exception {
         var wave1 = new Requirement(testProject, "INT-W1", "Wave 1", "Wave 1 statement");
         wave1.setWave(1);
