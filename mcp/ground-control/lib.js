@@ -258,6 +258,10 @@ export async function analyzeCompleteness(project) {
   return request("GET", "/api/v1/analysis/completeness", { params: { project } });
 }
 
+export async function getDashboardStats(project) {
+  return request("GET", "/api/v1/analysis/dashboard-stats", { params: { project } });
+}
+
 export async function importStrictdoc(filePath, project) {
   const content = readFileSync(filePath);
   const form = new FormData();

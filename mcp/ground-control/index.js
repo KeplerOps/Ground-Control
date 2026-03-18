@@ -25,6 +25,7 @@ import {
   crossWaveValidation,
   detectConsistencyViolations,
   analyzeCompleteness,
+  getDashboardStats,
   importStrictdoc,
   syncGithub,
   getRequirementHistory,
@@ -593,6 +594,26 @@ server.tool(
       const result = await analyzeCompleteness(project);
       if (result.total === 0) return ok("No requirements found.");
       return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Dashboard stats tool
+// ==========================================================================
+
+server.tool(
+  "gc_dashboard_stats",
+  "Get aggregate project health dashboard: requirement counts by status and wave, traceability coverage percentages, and recent changes.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const stats = await getDashboardStats(project);
+      return ok(JSON.stringify(stats, null, 2));
     } catch (e) {
       return err(e);
     }

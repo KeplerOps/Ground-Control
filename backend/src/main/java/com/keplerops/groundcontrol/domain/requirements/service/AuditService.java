@@ -10,6 +10,7 @@ import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRep
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import jakarta.persistence.EntityManager;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.hibernate.envers.AuditReaderFactory;
 import org.hibernate.envers.RevisionType;
@@ -93,6 +94,37 @@ public class AuditService {
                             revType.name(),
                             revInfo.getActor(),
                             entity);
+                })
+                .toList();
+    }
+
+    public List<RecentChange> getRecentRequirementChanges(Set<UUID> requirementIds, int limit) {
+        if (requirementIds.isEmpty()) {
+            return List.of();
+        }
+
+        var auditReader = AuditReaderFactory.get(entityManager);
+
+        @SuppressWarnings("unchecked")
+        List<Object[]> results = auditReader
+                .createQuery()
+                .forRevisionsOfEntity(Requirement.class, false, true)
+                .add(AuditEntity.id().in(requirementIds))
+                .addOrder(AuditEntity.revisionNumber().desc())
+                .setMaxResults(limit)
+                .getResultList();
+
+        return results.stream()
+                .map(row -> {
+                    var entity = (Requirement) row[0];
+                    var revInfo = (GroundControlRevisionEntity) row[1];
+                    var revType = (RevisionType) row[2];
+                    return new RecentChange(
+                            entity.getUid(),
+                            entity.getTitle(),
+                            revType.name(),
+                            java.time.Instant.ofEpochMilli(revInfo.getTimestamp()),
+                            revInfo.getActor());
                 })
                 .toList();
     }

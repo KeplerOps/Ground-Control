@@ -4,6 +4,7 @@ import type {
   CompletenessResponse,
   ConsistencyViolationResponse,
   CycleResponse,
+  DashboardStatsResponse,
   LinkType,
   RelationValidationResponse,
   RequirementSummaryResponse,
@@ -97,6 +98,18 @@ export function useCrossWave() {
     queryKey: ["analysis", "cross-wave", activeProject?.identifier],
     queryFn: () =>
       apiFetch<RelationValidationResponse[]>("/analysis/cross-wave", {
+        params: { project: activeProject?.identifier },
+      }),
+    enabled: !!activeProject,
+  });
+}
+
+export function useDashboardStats() {
+  const { activeProject } = useProjectContext();
+  return useQuery({
+    queryKey: ["analysis", "dashboard-stats", activeProject?.identifier],
+    queryFn: () =>
+      apiFetch<DashboardStatsResponse>("/analysis/dashboard-stats", {
         params: { project: activeProject?.identifier },
       }),
     enabled: !!activeProject,

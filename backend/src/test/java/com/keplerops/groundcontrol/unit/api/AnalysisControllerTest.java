@@ -14,12 +14,19 @@ import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
+import com.keplerops.groundcontrol.domain.requirements.service.CoverageStats;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
+import com.keplerops.groundcontrol.domain.requirements.service.DashboardStats;
+import com.keplerops.groundcontrol.domain.requirements.service.RecentChange;
+import com.keplerops.groundcontrol.domain.requirements.service.WaveStats;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import java.lang.reflect.Field;
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -176,6 +183,45 @@ class AnalysisControllerTest {
                     .andExpect(jsonPath("$", hasSize(1)))
                     .andExpect(jsonPath("$[0].sourceUid", is("REQ-A")))
                     .andExpect(jsonPath("$[0].targetUid", is("REQ-B")));
+        }
+    }
+
+    @Nested
+    class GetDashboardStats {
+
+        @Test
+        void returns200WithExpectedStructure() throws Exception {
+            Map<String, Integer> byStatus = new LinkedHashMap<>();
+            byStatus.put("DRAFT", 2);
+            byStatus.put("ACTIVE", 1);
+
+            var waveStats = List.of(
+                    new WaveStats(1, 2, Map.of("DRAFT", 1, "ACTIVE", 1)), new WaveStats(2, 1, Map.of("DRAFT", 1)));
+
+            Map<String, CoverageStats> coverage = new LinkedHashMap<>();
+            coverage.put("IMPLEMENTS", new CoverageStats(3, 1, 33.3));
+            coverage.put("TESTS", new CoverageStats(3, 0, 0.0));
+
+            var recentChanges = List.of(
+                    new RecentChange("REQ-A", "Title A", "MOD", Instant.parse("2026-03-18T10:00:00Z"), "user1"));
+
+            var stats = new DashboardStats(3, byStatus, waveStats, coverage, recentChanges);
+
+            when(analysisService.getDashboardStats(PROJECT_ID)).thenReturn(stats);
+
+            mockMvc.perform(get("/api/v1/analysis/dashboard-stats"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalRequirements", is(3)))
+                    .andExpect(jsonPath("$.byStatus.DRAFT", is(2)))
+                    .andExpect(jsonPath("$.byStatus.ACTIVE", is(1)))
+                    .andExpect(jsonPath("$.byWave", hasSize(2)))
+                    .andExpect(jsonPath("$.byWave[0].wave", is(1)))
+                    .andExpect(jsonPath("$.byWave[0].total", is(2)))
+                    .andExpect(jsonPath("$.coverageByLinkType.IMPLEMENTS.covered", is(1)))
+                    .andExpect(jsonPath("$.coverageByLinkType.IMPLEMENTS.percentage", is(33.3)))
+                    .andExpect(jsonPath("$.recentChanges", hasSize(1)))
+                    .andExpect(jsonPath("$.recentChanges[0].uid", is("REQ-A")))
+                    .andExpect(jsonPath("$.recentChanges[0].revisionType", is("MOD")));
         }
     }
 }

@@ -168,6 +168,34 @@ export interface CompletenessResponse {
   issues: CompletenessIssueResponse[];
 }
 
+export interface WaveStatsResponse {
+  wave: number | null;
+  total: number;
+  byStatus: Record<string, number>;
+}
+
+export interface CoverageStatsResponse {
+  total: number;
+  covered: number;
+  percentage: number;
+}
+
+export interface RecentChangeResponse {
+  uid: string;
+  title: string;
+  revisionType: RevisionType;
+  timestamp: string;
+  actor: string;
+}
+
+export interface DashboardStatsResponse {
+  totalRequirements: number;
+  byStatus: Record<string, number>;
+  byWave: WaveStatsResponse[];
+  coverageByLinkType: Record<string, CoverageStatsResponse>;
+  recentChanges: RecentChangeResponse[];
+}
+
 export interface BulkStatusTransitionResponse {
   succeeded: RequirementResponse[];
   failed: Array<{ id: string; error: string }>;
