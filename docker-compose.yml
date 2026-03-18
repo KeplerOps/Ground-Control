@@ -27,7 +27,8 @@ services:
 
   backend:
     build:
-      context: backend
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
       GC_DATABASE_URL: jdbc:postgresql://db:5432/ground_control
       GC_DATABASE_USER: ${GC_DATABASE_USER:-gc}

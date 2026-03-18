@@ -39,4 +39,15 @@ public interface RequirementRelationRepository extends JpaRepository<Requirement
     @Query("SELECT r FROM RequirementRelation r JOIN FETCH r.source JOIN FETCH r.target"
             + " WHERE r.source.project.id = :projectId")
     List<RequirementRelation> findAllWithSourceAndTargetByProjectId(@Param("projectId") UUID projectId);
+
+    @Query("SELECT r FROM RequirementRelation r JOIN FETCH r.source JOIN FETCH r.target"
+            + " WHERE r.source.project.id = :projectId AND r.relationType IN :types"
+            + " AND r.source.archivedAt IS NULL AND r.target.archivedAt IS NULL")
+    List<RequirementRelation> findActiveByProjectAndRelationTypeIn(
+            @Param("projectId") UUID projectId, @Param("types") List<RelationType> types);
+
+    @Query("SELECT r FROM RequirementRelation r JOIN FETCH r.source JOIN FETCH r.target"
+            + " WHERE r.source.project.id = :projectId"
+            + " AND r.source.archivedAt IS NULL AND r.target.archivedAt IS NULL")
+    List<RequirementRelation> findActiveWithSourceAndTargetByProjectId(@Param("projectId") UUID projectId);
 }

@@ -5,6 +5,78 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.54.1] - 2026-03-18
+
+### Fixed
+
+- Cross-wave validation logic was inverted — flagged valid "later depends on
+  earlier" relationships instead of invalid "earlier depends on later" ones
+- All analysis endpoints (cycles, orphans, coverage gaps, cross-wave) now
+  exclude archived requirements
+
+## [0.54.0] - 2026-03-17
+
+### Added
+
+- **Full-parity frontend** — every REST API capability is now accessible via the
+  UI, covering all 34 endpoints across 7 controllers
+- **Requirements list page** — paginated table with filtering (status, type,
+  priority, wave, free-text search), column sorting, bulk status transitions via
+  checkbox selection, per-row status dropdown for quick transitions, and create
+  modal
+- **Requirement detail page** with tabbed interface:
+  - Details tab: view/edit all fields, status transitions, clone, archive
+  - Relations tab: list, add, delete relations with search-based target picker
+  - Traceability tab: list, add, delete traceability links to external artifacts
+  - History tab: audit timeline showing all revisions with snapshots
+  - Impact tab: transitive impact analysis for the requirement
+- **Dashboard rewrite** — project health overview with requirement counts by
+  status and clickable analysis alert cards (cycles, orphans, coverage gaps,
+  cross-wave violations)
+- **Analysis page** — tabbed view for dependency cycles, orphan requirements,
+  coverage gaps (by link type), and cross-wave violations
+- **Projects page** — list, create, edit, and switch projects
+- **Admin page** — StrictDoc import (file upload), GitHub sync, GitHub issue
+  creation, and graph materialization
+- Shared type definitions (`src/types/api.ts`) for all API request/response types
+- `apiDelete()` and `apiUpload()` utilities in the API client
+- React Query hooks: `use-requirements`, `use-relations`, `use-traceability`,
+  `use-analysis`, `use-history`
+- Reusable UI components: Modal, Badge (status/priority/type), FormField,
+  ConfirmDialog, Toast notifications, StatusBadgeDropdown, RequirementForm,
+  RelationForm, TraceabilityForm
+- Navigation expanded: Dashboard, Requirements, Graph, Analysis, Projects, Admin
+- Radix UI dependencies: dialog, tabs, dropdown-menu, toast, checkbox
+
+## [0.53.0] - 2026-03-16
+
+### Added
+
+- **Web application shell** (GC-Q008): Bootstrap React 19 frontend with Vite 6,
+  TanStack Query 5, React Router 7, and Tailwind CSS 4
+- **Project switcher** in app header — persistent project selection via
+  localStorage, auto-selects when only one project exists, hidden when
+  single-project
+- **Interactive graph view** — full port of the roadmap viewer into the React
+  app with Cytoscape.js, dagre layout, color-by (series/priority/status/wave),
+  legend filtering, node click highlighting, tooltips, fit/reset controls
+- Dashboard page showing active project details
+- Requirements page with project-scoped requirement listing
+- `SpaController` — Spring Boot controller forwarding non-API routes to
+  `index.html` for client-side routing
+- Typed `apiFetch<T>()` wrapper with automatic `?project=` injection from
+  context
+- Multi-stage Docker build: Node frontend stage → Spring Boot backend stage
+- Makefile targets: `frontend-install`, `frontend-dev`, `frontend-build`,
+  `frontend-lint`, `frontend-format`
+- Biome for frontend formatting and linting
+
+### Changed
+
+- Docker build context changed from `backend/` to project root (`.`) with
+  explicit `dockerfile: backend/Dockerfile`
+- `docker-build` Make target updated for new build context
+
 ## [0.52.0] - 2026-03-16
 
 ### Added

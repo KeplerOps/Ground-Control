@@ -17,6 +17,18 @@ This is a Java 21 / Spring Boot 3.4 / Gradle project.
 
 Use `make rapid` for the inner dev loop. Use `make check` before pushing.
 
+## Frontend
+
+React 19 / Vite 6 / TypeScript 5 / Tailwind 4 app in `frontend/`.
+
+- Install: `cd frontend && npm install`
+- Dev server: `cd frontend && npm run dev` (proxies `/api` to `:8000`)
+- Build: `cd frontend && npm run build`
+- Lint: `cd frontend && npm run lint`
+- Format: `cd frontend && npm run format`
+
+Or use `make frontend-install`, `make frontend-dev`, `make frontend-build`, etc.
+
 ## Package
 
 `com.keplerops.groundcontrol`

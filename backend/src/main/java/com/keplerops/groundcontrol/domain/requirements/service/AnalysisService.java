@@ -40,7 +40,7 @@ public class AnalysisService {
 
     public List<CycleResult> detectCycles(UUID projectId) {
         List<RequirementRelation> relations =
-                relationRepository.findAllByProjectAndRelationTypeIn(projectId, DAG_TYPES);
+                relationRepository.findActiveByProjectAndRelationTypeIn(projectId, DAG_TYPES);
 
         Map<UUID, List<UUID>> adjacencyList = new HashMap<>();
         Map<UUID, String> idToUid = new HashMap<>();
@@ -75,7 +75,7 @@ public class AnalysisService {
     }
 
     public List<Requirement> findOrphans(UUID projectId) {
-        List<Requirement> allRequirements = requirementRepository.findByProjectId(projectId);
+        List<Requirement> allRequirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
         List<Requirement> orphans = new ArrayList<>();
 
         for (Requirement req : allRequirements) {
@@ -93,7 +93,7 @@ public class AnalysisService {
     }
 
     public List<Requirement> findCoverageGaps(UUID projectId, LinkType linkType) {
-        List<Requirement> allRequirements = requirementRepository.findByProjectId(projectId);
+        List<Requirement> allRequirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
         List<Requirement> gaps = new ArrayList<>();
 
         for (Requirement req : allRequirements) {
@@ -112,7 +112,7 @@ public class AnalysisService {
 
         UUID projectId = seed.getProject().getId();
         List<RequirementRelation> relations =
-                relationRepository.findAllByProjectAndRelationTypeIn(projectId, DAG_TYPES);
+                relationRepository.findActiveByProjectAndRelationTypeIn(projectId, DAG_TYPES);
 
         // Build reverse adjacency list: target -> list of sources (downstream = those that depend on target)
         Map<UUID, List<UUID>> reverseAdj = new HashMap<>();
@@ -134,13 +134,13 @@ public class AnalysisService {
     }
 
     public List<RequirementRelation> crossWaveValidation(UUID projectId) {
-        List<RequirementRelation> allRelations = relationRepository.findAllWithSourceAndTargetByProjectId(projectId);
+        List<RequirementRelation> allRelations = relationRepository.findActiveWithSourceAndTargetByProjectId(projectId);
         List<RequirementRelation> violations = new ArrayList<>();
 
         for (RequirementRelation rel : allRelations) {
             Integer sourceWave = rel.getSource().getWave();
             Integer targetWave = rel.getTarget().getWave();
-            if (sourceWave != null && targetWave != null && sourceWave > targetWave) {
+            if (sourceWave != null && targetWave != null && sourceWave < targetWave) {
                 violations.add(rel);
             }
         }
