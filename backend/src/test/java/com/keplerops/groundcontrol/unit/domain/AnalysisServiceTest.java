@@ -91,7 +91,7 @@ class AnalysisServiceTest {
 
         @Test
         void emptyGraph_returnsEmpty() {
-            when(relationRepository.findAllByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of());
 
             var result = service.detectCycles(PROJECT_ID);
@@ -107,7 +107,7 @@ class AnalysisServiceTest {
             var b = makeRequirement("REQ-B", bId);
             var rel = new RequirementRelation(a, b, RelationType.PARENT);
 
-            when(relationRepository.findAllByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(rel));
 
             var result = service.detectCycles(PROJECT_ID);
@@ -128,7 +128,7 @@ class AnalysisServiceTest {
             var bc = new RequirementRelation(b, c, RelationType.DEPENDS_ON);
             var ca = new RequirementRelation(c, a, RelationType.PARENT);
 
-            when(relationRepository.findAllByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(ab, bc, ca));
 
             var result = service.detectCycles(PROJECT_ID);
@@ -153,7 +153,8 @@ class AnalysisServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-ORPHAN", reqId);
 
-            when(requirementRepository.findByProjectId(PROJECT_ID)).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
             when(relationRepository.findBySourceId(reqId)).thenReturn(List.of());
             when(relationRepository.findByTargetId(reqId)).thenReturn(List.of());
             when(traceabilityLinkRepository.existsByRequirementId(reqId)).thenReturn(false);
@@ -171,7 +172,8 @@ class AnalysisServiceTest {
             var other = makeRequirement("REQ-OTHER", otherId);
             var rel = new RequirementRelation(req, other, RelationType.PARENT);
 
-            when(requirementRepository.findByProjectId(PROJECT_ID)).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
             when(relationRepository.findBySourceId(reqId)).thenReturn(List.of(rel));
 
             var result = service.findOrphans(PROJECT_ID);
@@ -184,7 +186,8 @@ class AnalysisServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-TRACED", reqId);
 
-            when(requirementRepository.findByProjectId(PROJECT_ID)).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
             when(relationRepository.findBySourceId(reqId)).thenReturn(List.of());
             when(relationRepository.findByTargetId(reqId)).thenReturn(List.of());
             when(traceabilityLinkRepository.existsByRequirementId(reqId)).thenReturn(true);
@@ -203,7 +206,8 @@ class AnalysisServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-GAP", reqId);
 
-            when(requirementRepository.findByProjectId(PROJECT_ID)).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
             when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.TESTS))
                     .thenReturn(false);
 
@@ -217,7 +221,8 @@ class AnalysisServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-COVERED", reqId);
 
-            when(requirementRepository.findByProjectId(PROJECT_ID)).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
             when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.TESTS))
                     .thenReturn(true);
 
@@ -236,7 +241,7 @@ class AnalysisServiceTest {
             var seed = makeRequirement("REQ-SEED", seedId);
 
             when(requirementRepository.findById(seedId)).thenReturn(Optional.of(seed));
-            when(relationRepository.findAllByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of());
 
             var result = service.impactAnalysis(seedId);
@@ -256,7 +261,7 @@ class AnalysisServiceTest {
 
             when(requirementRepository.findById(parentId)).thenReturn(Optional.of(parent));
             when(requirementRepository.findById(childId)).thenReturn(Optional.of(child));
-            when(relationRepository.findAllByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(rel));
 
             var result = service.impactAnalysis(parentId);
@@ -280,7 +285,7 @@ class AnalysisServiceTest {
             when(requirementRepository.findById(aId)).thenReturn(Optional.of(a));
             when(requirementRepository.findById(bId)).thenReturn(Optional.of(b));
             when(requirementRepository.findById(cId)).thenReturn(Optional.of(c));
-            when(relationRepository.findAllByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(relBA, relCB));
 
             var result = service.impactAnalysis(aId);
@@ -309,7 +314,7 @@ class AnalysisServiceTest {
             when(requirementRepository.findById(bId)).thenReturn(Optional.of(b));
             when(requirementRepository.findById(cId)).thenReturn(Optional.of(c));
             when(requirementRepository.findById(dId)).thenReturn(Optional.of(d));
-            when(relationRepository.findAllByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(relBA, relCA, relDB, relDC));
 
             var result = service.impactAnalysis(aId);
@@ -334,13 +339,13 @@ class AnalysisServiceTest {
         void correctOrder_returnsEmpty() {
             UUID aId = UUID.randomUUID();
             UUID bId = UUID.randomUUID();
-            var a = makeRequirement("REQ-A", aId, 1);
-            var b = makeRequirement("REQ-B", bId, 2);
+            var a = makeRequirement("REQ-A", aId, 2);
+            var b = makeRequirement("REQ-B", bId, 1);
 
-            // Source wave 1, target wave 2 — correct order
+            // Source wave 2, target wave 1 — later depends on earlier, correct order
             var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
 
-            when(relationRepository.findAllWithSourceAndTargetByProjectId(PROJECT_ID))
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
                     .thenReturn(List.of(rel));
 
             var result = service.crossWaveValidation(PROJECT_ID);
@@ -349,16 +354,16 @@ class AnalysisServiceTest {
         }
 
         @Test
-        void backwardDependency_detected() {
+        void forwardDependency_detected() {
             UUID aId = UUID.randomUUID();
             UUID bId = UUID.randomUUID();
-            var a = makeRequirement("REQ-A", aId, 3);
-            var b = makeRequirement("REQ-B", bId, 1);
+            var a = makeRequirement("REQ-A", aId, 1);
+            var b = makeRequirement("REQ-B", bId, 3);
 
-            // Source wave 3 > target wave 1 — backward dependency
+            // Source wave 1 < target wave 3 — earlier depends on later, forward dependency violation
             var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
 
-            when(relationRepository.findAllWithSourceAndTargetByProjectId(PROJECT_ID))
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
                     .thenReturn(List.of(rel));
 
             var result = service.crossWaveValidation(PROJECT_ID);
@@ -375,7 +380,7 @@ class AnalysisServiceTest {
 
             var rel = new RequirementRelation(a, b, RelationType.PARENT);
 
-            when(relationRepository.findAllWithSourceAndTargetByProjectId(PROJECT_ID))
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
                     .thenReturn(List.of(rel));
 
             var result = service.crossWaveValidation(PROJECT_ID);

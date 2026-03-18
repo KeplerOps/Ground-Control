@@ -163,9 +163,9 @@ class AnalysisControllerTest {
             UUID aId = UUID.randomUUID();
             UUID bId = UUID.randomUUID();
             var a = makeRequirement("REQ-A", aId);
-            a.setWave(3);
+            a.setWave(1);
             var b = makeRequirement("REQ-B", bId);
-            b.setWave(1);
+            b.setWave(3);
             var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
             setField(rel, "id", UUID.randomUUID());
 

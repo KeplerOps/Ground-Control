@@ -80,22 +80,22 @@ class AnalysisIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    void crossWaveValidation_detectsBackwardDeps() throws Exception {
-        var wave3 = new Requirement(testProject, "INT-W3", "Wave 3", "Wave 3 statement");
-        wave3.setWave(3);
-        wave3 = requirementRepository.save(wave3);
-
+    void crossWaveValidation_detectsForwardDeps() throws Exception {
         var wave1 = new Requirement(testProject, "INT-W1", "Wave 1", "Wave 1 statement");
         wave1.setWave(1);
         wave1 = requirementRepository.save(wave1);
 
-        // wave3 depends on wave1 — source.wave(3) > target.wave(1)
-        relationRepository.save(new RequirementRelation(wave3, wave1, RelationType.DEPENDS_ON));
+        var wave3 = new Requirement(testProject, "INT-W3", "Wave 3", "Wave 3 statement");
+        wave3.setWave(3);
+        wave3 = requirementRepository.save(wave3);
+
+        // wave1 depends on wave3 — source.wave(1) < target.wave(3), forward dependency violation
+        relationRepository.save(new RequirementRelation(wave1, wave3, RelationType.DEPENDS_ON));
 
         mockMvc.perform(get("/api/v1/analysis/cross-wave"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.sourceUid == 'INT-W3')]").exists())
-                .andExpect(jsonPath("$[0].sourceWave", is(3)))
-                .andExpect(jsonPath("$[0].targetWave", is(1)));
+                .andExpect(jsonPath("$[?(@.sourceUid == 'INT-W1')]").exists())
+                .andExpect(jsonPath("$[0].sourceWave", is(1)))
+                .andExpect(jsonPath("$[0].targetWave", is(3)));
     }
 }
