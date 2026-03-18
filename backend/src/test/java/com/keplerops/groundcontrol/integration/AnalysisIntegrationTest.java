@@ -123,6 +123,24 @@ class AnalysisIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    void dashboardStats_returnsAggregatedMetrics() throws Exception {
+        requirementRepository.save(new Requirement(testProject, "INT-DASH-A", "Dash A", "Statement A"));
+        var active = new Requirement(testProject, "INT-DASH-B", "Dash B", "Statement B");
+        active.transitionStatus(Status.ACTIVE);
+        active.setWave(1);
+        requirementRepository.save(active);
+
+        mockMvc.perform(get("/api/v1/analysis/dashboard-stats"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalRequirements").isNumber())
+                .andExpect(jsonPath("$.byStatus").isMap())
+                .andExpect(jsonPath("$.byWave").isArray())
+                .andExpect(jsonPath("$.coverageByLinkType").isMap())
+                .andExpect(jsonPath("$.coverageByLinkType.IMPLEMENTS").exists())
+                .andExpect(jsonPath("$.recentChanges").isArray());
+    }
+
+    @Test
     void crossWaveValidation_detectsForwardDeps() throws Exception {
         var wave1 = new Requirement(testProject, "INT-W1", "Wave 1", "Wave 1 statement");
         wave1.setWave(1);

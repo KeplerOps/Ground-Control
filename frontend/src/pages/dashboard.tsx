@@ -3,13 +3,18 @@ import {
   useCoverageGaps,
   useCrossWave,
   useCycles,
+  useDashboardStats,
   useOrphans,
 } from "@/hooks/use-analysis";
-import { useRequirements } from "@/hooks/use-requirements";
 import { cn } from "@/lib/utils";
+import type {
+  DashboardStatsResponse,
+  RecentChangeResponse,
+} from "@/types/api";
 import {
   AlertTriangle,
   ArrowRight,
+  Clock,
   GitFork,
   Layers,
   Link2Off,
@@ -47,60 +52,259 @@ export function Dashboard() {
         )}
       </div>
 
-      <RequirementStats />
+      <DashboardContent navigate={navigate} />
+    </div>
+  );
+}
+
+function DashboardContent({
+  navigate,
+}: {
+  navigate: (path: string) => void;
+}) {
+  const { data: stats, isLoading } = useDashboardStats();
+
+  if (isLoading || !stats) {
+    return <LoadingSkeleton />;
+  }
+
+  return (
+    <div className="space-y-6">
+      <StatusOverview stats={stats} navigate={navigate} />
+      <WaveProgress stats={stats} navigate={navigate} />
+      <TraceabilityCoverage stats={stats} navigate={navigate} />
+      <RecentChanges changes={stats.recentChanges} navigate={navigate} />
       <AnalysisAlerts navigate={navigate} />
     </div>
   );
 }
 
-function RequirementStats() {
-  const draftQ = useRequirements({ status: "DRAFT", size: 0 });
-  const activeQ = useRequirements({ status: "ACTIVE", size: 0 });
-  const deprecatedQ = useRequirements({ status: "DEPRECATED", size: 0 });
-  const archivedQ = useRequirements({ status: "ARCHIVED", size: 0 });
-  const allQ = useRequirements({ size: 0 });
-
-  const stats = [
+function StatusOverview({
+  stats,
+  navigate,
+}: {
+  stats: DashboardStatsResponse;
+  navigate: (path: string) => void;
+}) {
+  const statCards = [
     {
       label: "Total",
-      value: allQ.data?.totalElements ?? "-",
+      value: stats.totalRequirements,
       color: "text-foreground",
+      filter: undefined,
     },
-    {
-      label: "Draft",
-      value: draftQ.data?.totalElements ?? "-",
-      color: "text-gray-400",
-    },
-    {
-      label: "Active",
-      value: activeQ.data?.totalElements ?? "-",
-      color: "text-green-400",
-    },
-    {
-      label: "Deprecated",
-      value: deprecatedQ.data?.totalElements ?? "-",
-      color: "text-orange-400",
-    },
-    {
-      label: "Archived",
-      value: archivedQ.data?.totalElements ?? "-",
-      color: "text-gray-500",
-    },
+    { label: "Draft", value: stats.byStatus.DRAFT ?? 0, color: "text-gray-400", filter: "DRAFT" },
+    { label: "Active", value: stats.byStatus.ACTIVE ?? 0, color: "text-green-400", filter: "ACTIVE" },
+    { label: "Deprecated", value: stats.byStatus.DEPRECATED ?? 0, color: "text-orange-400", filter: "DEPRECATED" },
+    { label: "Archived", value: stats.byStatus.ARCHIVED ?? 0, color: "text-gray-500", filter: "ARCHIVED" },
   ];
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-      {stats.map((s) => (
-        <div
+      {statCards.map((s) => (
+        <button
           key={s.label}
-          className="rounded-lg border border-border bg-card p-4"
+          type="button"
+          className="rounded-lg border border-border bg-card p-4 text-left transition-colors hover:bg-accent/30"
+          onClick={() =>
+            navigate(
+              s.filter
+                ? `/requirements?status=${s.filter}`
+                : "/requirements",
+            )
+          }
         >
           <p className="text-sm text-muted-foreground">{s.label}</p>
           <p className={cn("mt-1 text-2xl font-semibold", s.color)}>
             {s.value}
           </p>
-        </div>
+        </button>
       ))}
+    </div>
+  );
+}
+
+const STATUS_BAR_COLORS: Record<string, string> = {
+  DRAFT: "bg-gray-400",
+  ACTIVE: "bg-green-400",
+  DEPRECATED: "bg-orange-400",
+  ARCHIVED: "bg-gray-500",
+};
+
+function WaveProgress({
+  stats,
+  navigate,
+}: {
+  stats: DashboardStatsResponse;
+  navigate: (path: string) => void;
+}) {
+  if (stats.byWave.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-lg font-medium">Wave Progress</h2>
+      <div className="space-y-2">
+        {stats.byWave.map((wave) => (
+          <button
+            key={wave.wave ?? "unassigned"}
+            type="button"
+            className="flex w-full items-center gap-4 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-accent/30"
+            onClick={() =>
+              navigate(
+                wave.wave != null
+                  ? `/requirements?wave=${wave.wave}`
+                  : "/requirements",
+              )
+            }
+          >
+            <span className="w-24 shrink-0 text-sm font-medium text-muted-foreground">
+              {wave.wave != null ? `Wave ${wave.wave}` : "Unassigned"}
+            </span>
+            <div className="flex h-4 flex-1 overflow-hidden rounded-full bg-muted">
+              {Object.entries(wave.byStatus).map(([status, count]) => (
+                <div
+                  key={status}
+                  className={cn("h-full", STATUS_BAR_COLORS[status] ?? "bg-blue-400")}
+                  style={{ width: `${(count / wave.total) * 100}%` }}
+                  title={`${status}: ${count}`}
+                />
+              ))}
+            </div>
+            <span className="w-10 shrink-0 text-right text-sm font-medium">
+              {wave.total}
+            </span>
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+        {Object.entries(STATUS_BAR_COLORS).map(([status, color]) => (
+          <span key={status} className="flex items-center gap-1">
+            <span className={cn("inline-block h-2.5 w-2.5 rounded-full", color)} />
+            {status}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TraceabilityCoverage({
+  stats,
+  navigate,
+}: {
+  stats: DashboardStatsResponse;
+  navigate: (path: string) => void;
+}) {
+  const entries = Object.entries(stats.coverageByLinkType);
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-lg font-medium">Traceability Coverage</h2>
+      <div className="space-y-2">
+        {entries.map(([linkType, cov]) => (
+          <button
+            key={linkType}
+            type="button"
+            className="flex w-full items-center gap-4 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-accent/30"
+            onClick={() => navigate("/analysis")}
+          >
+            <span className="w-28 shrink-0 text-sm font-medium text-muted-foreground">
+              {linkType}
+            </span>
+            <div className="flex h-4 flex-1 overflow-hidden rounded-full bg-muted">
+              <div
+                className={cn(
+                  "h-full rounded-full",
+                  cov.percentage >= 80
+                    ? "bg-green-400"
+                    : cov.percentage >= 50
+                      ? "bg-yellow-400"
+                      : "bg-red-400",
+                )}
+                style={{ width: `${cov.percentage}%` }}
+              />
+            </div>
+            <span className="w-20 shrink-0 text-right text-sm font-medium">
+              {cov.covered}/{cov.total} ({cov.percentage}%)
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const REVISION_TYPE_COLORS: Record<string, string> = {
+  ADD: "bg-green-500/20 text-green-400",
+  MOD: "bg-blue-500/20 text-blue-400",
+  DEL: "bg-red-500/20 text-red-400",
+};
+
+function formatRelativeTime(timestamp: string): string {
+  const now = Date.now();
+  const then = new Date(timestamp).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDays = Math.floor(diffHr / 24);
+  return `${diffDays}d ago`;
+}
+
+function RecentChanges({
+  changes,
+  navigate,
+}: {
+  changes: RecentChangeResponse[];
+  navigate: (path: string) => void;
+}) {
+  if (changes.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-lg font-medium flex items-center gap-2">
+        <Clock className="h-5 w-5 text-muted-foreground" />
+        Recent Changes
+      </h2>
+      <div className="space-y-1">
+        {changes.map((change, idx) => (
+          <button
+            key={`${change.uid}-${idx}`}
+            type="button"
+            className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent/30"
+            onClick={() =>
+              navigate(`/requirements?search=${encodeURIComponent(change.uid)}`)
+            }
+          >
+            <span
+              className={cn(
+                "inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-xs font-medium",
+                REVISION_TYPE_COLORS[change.revisionType] ?? "bg-muted text-muted-foreground",
+              )}
+            >
+              {change.revisionType}
+            </span>
+            <span className="shrink-0 text-sm font-mono text-muted-foreground">
+              {change.uid}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm">
+              {change.title}
+            </span>
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {formatRelativeTime(change.timestamp)}
+            </span>
+            {change.actor && (
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {change.actor}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

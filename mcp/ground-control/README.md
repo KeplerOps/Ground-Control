@@ -63,6 +63,7 @@ be related, linked, or analyzed.
 | `gc_analyze_cross_wave` | _(none)_ | Find cross-wave dependency violations |
 | `gc_analyze_consistency` | `project` (optional) | Detect consistency violations (active conflicts, active supersedes) |
 | `gc_analyze_completeness` | `project` (optional) | Analyze completeness: status distribution and missing fields |
+| `gc_dashboard_stats` | `project` (optional) | Aggregate project health: counts by status/wave, coverage percentages, recent changes |
 | `gc_import_strictdoc` | `file_path` (required) | Import requirements from a .sdoc file. Idempotent |
 | `gc_sync_github` | `owner` (required), `repo` (required) | Sync GitHub issues as traceability links |
 

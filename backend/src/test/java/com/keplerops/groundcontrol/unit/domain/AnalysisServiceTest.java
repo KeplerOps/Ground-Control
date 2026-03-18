@@ -12,16 +12,22 @@ import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRel
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
+import com.keplerops.groundcontrol.domain.requirements.service.AuditService;
 import com.keplerops.groundcontrol.domain.requirements.service.CompletenessResult;
 import com.keplerops.groundcontrol.domain.requirements.service.ConsistencyViolation;
+import com.keplerops.groundcontrol.domain.requirements.service.CoverageStats;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
+import com.keplerops.groundcontrol.domain.requirements.service.DashboardStats;
+import com.keplerops.groundcontrol.domain.requirements.service.RecentChange;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import java.lang.reflect.Field;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -41,6 +47,9 @@ class AnalysisServiceTest {
 
     @Mock
     private TraceabilityLinkRepository traceabilityLinkRepository;
+
+    @Mock
+    private AuditService auditService;
 
     private AnalysisService service;
 
@@ -64,7 +73,8 @@ class AnalysisServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AnalysisService(requirementRepository, relationRepository, traceabilityLinkRepository);
+        service = new AnalysisService(
+                requirementRepository, relationRepository, traceabilityLinkRepository, auditService);
     }
 
     private static Requirement makeRequirement(String uid, UUID id) {
@@ -531,6 +541,89 @@ class AnalysisServiceTest {
             assertThat(result.issues()).hasSize(1);
             assertThat(result.issues().get(0).uid()).isEqualTo("REQ-NOTITLE");
             assertThat(result.issues().get(0).issue()).isEqualTo("missing title");
+        }
+    }
+
+    @Nested
+    class GetDashboardStats {
+
+        @Test
+        void emptyProject_returnsZeroCounts() {
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of());
+            when(auditService.getRecentRequirementChanges(Set.of(), 10)).thenReturn(List.of());
+
+            DashboardStats result = service.getDashboardStats(PROJECT_ID);
+
+            assertThat(result.totalRequirements()).isZero();
+            assertThat(result.byStatus()).isEmpty();
+            assertThat(result.byWave()).isEmpty();
+            assertThat(result.coverageByLinkType()).hasSize(LinkType.values().length);
+            assertThat(result.recentChanges()).isEmpty();
+        }
+
+        @Test
+        void aggregatesByStatusAndWave() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            UUID cId = UUID.randomUUID();
+            var draft1 = makeRequirement("REQ-D1", aId, 1);
+            var active1 = makeRequirement("REQ-A1", bId, 1);
+            setField(active1, "status", Status.ACTIVE);
+            var active2 = makeRequirement("REQ-A2", cId, 2);
+            setField(active2, "status", Status.ACTIVE);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(draft1, active1, active2));
+            when(auditService.getRecentRequirementChanges(Set.of(aId, bId, cId), 10))
+                    .thenReturn(List.of());
+
+            DashboardStats result = service.getDashboardStats(PROJECT_ID);
+
+            assertThat(result.totalRequirements()).isEqualTo(3);
+            assertThat(result.byStatus()).containsEntry("DRAFT", 1);
+            assertThat(result.byStatus()).containsEntry("ACTIVE", 2);
+
+            // Wave 1: 2 reqs (1 DRAFT, 1 ACTIVE); Wave 2: 1 req (1 ACTIVE)
+            assertThat(result.byWave()).hasSize(2);
+            assertThat(result.byWave().get(0).wave()).isEqualTo(1);
+            assertThat(result.byWave().get(0).total()).isEqualTo(2);
+            assertThat(result.byWave().get(1).wave()).isEqualTo(2);
+            assertThat(result.byWave().get(1).total()).isEqualTo(1);
+        }
+
+        @Test
+        void coverageComputed() {
+            UUID reqId = UUID.randomUUID();
+            var req = makeRequirement("REQ-COV", reqId);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
+            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.IMPLEMENTS))
+                    .thenReturn(true);
+            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.TESTS))
+                    .thenReturn(false);
+            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.DOCUMENTS))
+                    .thenReturn(false);
+            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.CONSTRAINS))
+                    .thenReturn(false);
+            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.VERIFIES))
+                    .thenReturn(false);
+            when(auditService.getRecentRequirementChanges(Set.of(reqId), 10))
+                    .thenReturn(List.of(new RecentChange("REQ-COV", "Title", "ADD", Instant.now(), "test-actor")));
+
+            DashboardStats result = service.getDashboardStats(PROJECT_ID);
+
+            CoverageStats implCoverage = result.coverageByLinkType().get("IMPLEMENTS");
+            assertThat(implCoverage.total()).isEqualTo(1);
+            assertThat(implCoverage.covered()).isEqualTo(1);
+            assertThat(implCoverage.percentage()).isEqualTo(100.0);
+
+            CoverageStats testsCoverage = result.coverageByLinkType().get("TESTS");
+            assertThat(testsCoverage.covered()).isZero();
+            assertThat(testsCoverage.percentage()).isEqualTo(0.0);
+
+            assertThat(result.recentChanges()).hasSize(1);
         }
     }
 }

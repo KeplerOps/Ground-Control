@@ -77,4 +77,10 @@ public class AnalysisController {
                 .map(RelationValidationResponse::from)
                 .toList();
     }
+
+    @GetMapping("/dashboard-stats")
+    public DashboardStatsResponse getDashboardStats(@RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return DashboardStatsResponse.from(analysisService.getDashboardStats(projectId));
+    }
 }
