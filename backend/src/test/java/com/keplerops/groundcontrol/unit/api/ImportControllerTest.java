@@ -3,6 +3,7 @@ package com.keplerops.groundcontrol.unit.api;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -12,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.keplerops.groundcontrol.api.admin.ImportController;
 import com.keplerops.groundcontrol.domain.exception.GroundControlException;
+import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.service.ImportResult;
 import com.keplerops.groundcontrol.domain.requirements.service.ImportService;
 import java.io.IOException;
@@ -37,6 +39,9 @@ class ImportControllerTest {
     @MockitoBean
     private ImportService importService;
 
+    @MockitoBean
+    private ProjectService projectService;
+
     @Nested
     class ImportStrictdoc {
 
@@ -44,7 +49,9 @@ class ImportControllerTest {
         void returns200WithStats() throws Exception {
             var result = new ImportResult(UUID.randomUUID(), Instant.now(), 10, 8, 2, 5, 1, 12, 3, List.of());
 
-            when(importService.importStrictdoc(anyString(), anyString())).thenReturn(result);
+            when(projectService.resolveProjectId(any())).thenReturn(UUID.randomUUID());
+            when(importService.importStrictdoc(any(UUID.class), anyString(), anyString()))
+                    .thenReturn(result);
 
             var file = new MockMultipartFile(
                     "file", "project.sdoc", "text/plain", "sdoc content".getBytes(StandardCharsets.UTF_8));
@@ -72,8 +79,8 @@ class ImportControllerTest {
             when(brokenFile.getBytes()).thenThrow(new IOException("disk error"));
             when(brokenFile.getOriginalFilename()).thenReturn("test.sdoc");
 
-            var controller = new ImportController(importService);
-            assertThatThrownBy(() -> controller.importStrictdoc(brokenFile))
+            var controller = new ImportController(importService, projectService);
+            assertThatThrownBy(() -> controller.importStrictdoc(brokenFile, null))
                     .isInstanceOf(GroundControlException.class)
                     .hasMessageContaining("Failed to read uploaded file")
                     .hasMessageContaining("disk error");

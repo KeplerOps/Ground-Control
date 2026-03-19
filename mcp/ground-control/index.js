@@ -4,6 +4,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import {
+  listProjects,
+  createProject,
   getRequirementByUid,
   listRequirements,
   createRequirement,
@@ -21,6 +23,9 @@ import {
   findCoverageGaps,
   impactAnalysis,
   crossWaveValidation,
+  detectConsistencyViolations,
+  analyzeCompleteness,
+  getDashboardStats,
   importStrictdoc,
   syncGithub,
   getRequirementHistory,
@@ -52,6 +57,42 @@ function err(e) {
 const server = new McpServer({ name: "ground-control", version: "1.0.0" });
 
 // ==========================================================================
+// Project tools
+// ==========================================================================
+
+server.tool(
+  "gc_list_projects",
+  "List all projects in Ground Control.",
+  {},
+  async () => {
+    try {
+      return ok(JSON.stringify(await listProjects(), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_create_project",
+  "Create a new project. Identifier must be lowercase alphanumeric with hyphens (e.g. 'my-project').",
+  {
+    identifier: z.string().describe("Unique project identifier (lowercase, hyphens allowed, e.g. 'my-project')"),
+    name: z.string().describe("Human-readable project name"),
+    description: z.string().optional().describe("Project description"),
+  },
+  async ({ identifier, name, description }) => {
+    try {
+      const data = { identifier, name };
+      if (description !== undefined) data.description = description;
+      return ok(JSON.stringify(await createProject(data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
 // Requirement tools
 // ==========================================================================
 
@@ -60,10 +101,11 @@ server.tool(
   "Get a requirement by its human-readable UID (e.g. 'REQ-001').",
   {
     uid: z.string().describe("Requirement UID (e.g. 'REQ-001')"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ uid }) => {
+  async ({ uid, project }) => {
     try {
-      return ok(JSON.stringify(await getRequirementByUid(uid), null, 2));
+      return ok(JSON.stringify(await getRequirementByUid(uid, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -81,10 +123,12 @@ server.tool(
     search: z.string().optional().describe("Free-text search in title and statement"),
     page: z.number().int().optional().describe("Page number (0-based)"),
     size: z.number().int().optional().describe("Page size (default 20)"),
+    sort: z.string().optional().describe("Sort expression (e.g. 'uid,asc' or 'title,desc')"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ status, type, priority, wave, search, page, size }) => {
+  async ({ status, type, priority, wave, search, page, size, sort, project }) => {
     try {
-      return ok(JSON.stringify(await listRequirements({ status, type, priority, wave, search, page, size }), null, 2));
+      return ok(JSON.stringify(await listRequirements({ status, type, priority, wave, search, page, size, sort, project }), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -102,15 +146,16 @@ server.tool(
     requirement_type: z.enum(REQUIREMENT_TYPES).optional().describe("Type (default FUNCTIONAL)"),
     priority: z.enum(PRIORITIES).optional().describe("MoSCoW priority"),
     wave: z.number().int().optional().describe("Implementation wave number"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ uid, title, statement, rationale, requirement_type, priority, wave }) => {
+  async ({ uid, title, statement, rationale, requirement_type, priority, wave, project }) => {
     try {
       const data = { uid, title, statement };
       if (rationale !== undefined) data.rationale = rationale;
       if (requirement_type !== undefined) data.requirement_type = requirement_type;
       if (priority !== undefined) data.priority = priority;
       if (wave !== undefined) data.wave = wave;
-      return ok(JSON.stringify(await createRequirement(data), null, 2));
+      return ok(JSON.stringify(await createRequirement(data, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -182,14 +227,15 @@ server.tool(
   {
     uids: z.array(z.string()).min(1).describe("Requirement UIDs (e.g. ['GC-A001', 'GC-A002'])"),
     status: z.enum(STATUSES).describe("Target status for all requirements"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ uids, status }) => {
+  async ({ uids, status, project }) => {
     try {
       const ids = [];
       const resolutionFailures = [];
       for (const uid of uids) {
         try {
-          const req = await getRequirementByUid(uid);
+          const req = await getRequirementByUid(uid, project);
           ids.push(req.id);
         } catch (e) {
           resolutionFailures.push({ id: uid, error: `UID resolution failed: ${e.message}` });
@@ -218,10 +264,11 @@ server.tool(
     uid: z.string().describe("UID of the requirement to clone (e.g. 'GC-A007')"),
     new_uid: z.string().describe("UID for the cloned requirement (must be unique)"),
     copy_relations: z.boolean().optional().default(false).describe("Whether to copy outgoing relations to the clone"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ uid, new_uid, copy_relations }) => {
+  async ({ uid, new_uid, copy_relations, project }) => {
     try {
-      const source = await getRequirementByUid(uid);
+      const source = await getRequirementByUid(uid, project);
       return ok(JSON.stringify(await cloneRequirement(source.id, new_uid, copy_relations), null, 2));
     } catch (e) {
       return err(e);
@@ -353,14 +400,15 @@ server.tool(
     extra_body: z.string().optional().describe("Additional markdown to append to the issue body"),
     labels: z.array(z.string()).optional().describe("GitHub labels to apply"),
     repo: z.string().optional().describe("GitHub repo as 'owner/repo' (defaults to GH_REPO env var)"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ uid, extra_body, labels, repo }) => {
+  async ({ uid, extra_body, labels, repo, project }) => {
     try {
       const data = { requirement_uid: uid };
       if (extra_body !== undefined) data.extra_body = extra_body;
       if (labels !== undefined) data.labels = labels;
       if (repo !== undefined) data.repo = repo;
-      return ok(JSON.stringify(await createGitHubIssueViaApi(data), null, 2));
+      return ok(JSON.stringify(await createGitHubIssueViaApi(data, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -431,10 +479,12 @@ server.tool(
 server.tool(
   "gc_analyze_cycles",
   "Detect dependency cycles in the requirements graph. Returns list of cycles (each cycle is a list of requirement UIDs).",
-  {},
-  async () => {
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
     try {
-      const cycles = await detectCycles();
+      const cycles = await detectCycles(project);
       if (Array.isArray(cycles) && cycles.length === 0) return ok("No cycles detected.");
       return ok(JSON.stringify(cycles, null, 2));
     } catch (e) {
@@ -446,10 +496,12 @@ server.tool(
 server.tool(
   "gc_analyze_orphans",
   "Find requirements with no relations to other requirements (no parent, no dependencies, not depended upon).",
-  {},
-  async () => {
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
     try {
-      const orphans = await findOrphans();
+      const orphans = await findOrphans(project);
       if (Array.isArray(orphans) && orphans.length === 0) return ok("No orphan requirements found.");
       return ok(JSON.stringify(orphans, null, 2));
     } catch (e) {
@@ -463,10 +515,11 @@ server.tool(
   "Find requirements missing a specific traceability link type (e.g. requirements with no IMPLEMENTS link).",
   {
     link_type: z.enum(LINK_TYPES).describe("Link type to check coverage for"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ link_type }) => {
+  async ({ link_type, project }) => {
     try {
-      const gaps = await findCoverageGaps(link_type);
+      const gaps = await findCoverageGaps(link_type, project);
       if (Array.isArray(gaps) && gaps.length === 0) return ok("No coverage gaps found.");
       return ok(JSON.stringify(gaps, null, 2));
     } catch (e) {
@@ -495,12 +548,72 @@ server.tool(
 server.tool(
   "gc_analyze_cross_wave",
   "Find cross-wave validation issues (e.g. a requirement in wave 2 depending on one in wave 3).",
-  {},
-  async () => {
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
     try {
-      const violations = await crossWaveValidation();
+      const violations = await crossWaveValidation(project);
       if (Array.isArray(violations) && violations.length === 0) return ok("No cross-wave violations found.");
       return ok(JSON.stringify(violations, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_analyze_consistency",
+  "Detect consistency violations: ACTIVE requirements linked by CONFLICTS_WITH, or SUPERSEDES relations where both sides are ACTIVE.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const violations = await detectConsistencyViolations(project);
+      if (Array.isArray(violations) && violations.length === 0) return ok("No consistency violations found.");
+      return ok(JSON.stringify(violations, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Completeness analysis tool
+// ==========================================================================
+
+server.tool(
+  "gc_analyze_completeness",
+  "Analyze overall completeness of requirements: checks for missing fields and status distribution.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await analyzeCompleteness(project);
+      if (result.total === 0) return ok("No requirements found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Dashboard stats tool
+// ==========================================================================
+
+server.tool(
+  "gc_dashboard_stats",
+  "Get aggregate project health dashboard: requirement counts by status and wave, traceability coverage percentages, and recent changes.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const stats = await getDashboardStats(project);
+      return ok(JSON.stringify(stats, null, 2));
     } catch (e) {
       return err(e);
     }
@@ -531,10 +644,11 @@ server.tool(
   {
     uid: z.string().describe("Requirement UID (e.g. 'GC-A001')"),
     depth: z.number().int().optional().default(10).describe("Maximum traversal depth (default 10)"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ uid, depth }) => {
+  async ({ uid, depth, project }) => {
     try {
-      const ancestors = await getAncestors(uid, depth);
+      const ancestors = await getAncestors(uid, depth, project);
       if (Array.isArray(ancestors) && ancestors.length === 0) return ok("No ancestors found.");
       return ok(JSON.stringify(ancestors, null, 2));
     } catch (e) {
@@ -549,10 +663,11 @@ server.tool(
   {
     uid: z.string().describe("Requirement UID (e.g. 'GC-A001')"),
     depth: z.number().int().optional().default(10).describe("Maximum traversal depth (default 10)"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ uid, depth }) => {
+  async ({ uid, depth, project }) => {
     try {
-      const descendants = await getDescendants(uid, depth);
+      const descendants = await getDescendants(uid, depth, project);
       if (Array.isArray(descendants) && descendants.length === 0) return ok("No descendants found.");
       return ok(JSON.stringify(descendants, null, 2));
     } catch (e) {
@@ -567,10 +682,11 @@ server.tool(
   {
     source: z.string().describe("Source requirement UID"),
     target: z.string().describe("Target requirement UID"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ source, target }) => {
+  async ({ source, target, project }) => {
     try {
-      const paths = await findPaths(source, target);
+      const paths = await findPaths(source, target, project);
       if (Array.isArray(paths) && paths.length === 0) return ok("No paths found.");
       return ok(JSON.stringify(paths, null, 2));
     } catch (e) {
@@ -588,10 +704,11 @@ server.tool(
   "Import requirements from a StrictDoc (.sdoc) file. Idempotent: re-importing updates existing requirements by UID.",
   {
     file_path: z.string().describe("Absolute path to the .sdoc file"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ file_path }) => {
+  async ({ file_path, project }) => {
     try {
-      return ok(JSON.stringify(await importStrictdoc(file_path), null, 2));
+      return ok(JSON.stringify(await importStrictdoc(file_path, project), null, 2));
     } catch (e) {
       return err(e);
     }

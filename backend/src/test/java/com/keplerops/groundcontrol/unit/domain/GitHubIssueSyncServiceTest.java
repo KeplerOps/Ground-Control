@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.GitHubIssueSync;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementImport;
@@ -59,6 +60,21 @@ class GitHubIssueSyncServiceTest {
     private TraceabilityService traceabilityService;
 
     private GitHubIssueSyncService service;
+
+    private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    private static final Project TEST_PROJECT = createTestProject();
+
+    private static Project createTestProject() {
+        var project = new Project("test-project", "Test Project");
+        try {
+            var field = Project.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(project, PROJECT_ID);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return project;
+    }
 
     @BeforeEach
     void setUp() {
@@ -328,10 +344,11 @@ class GitHubIssueSyncServiceTest {
 
         @Test
         void createsIssueAndTraceabilityLink() {
-            var requirement = new Requirement("GC-A001", "Test Title", "Test statement");
+            var requirement = new Requirement(TEST_PROJECT, "GC-A001", "Test Title", "Test statement");
             setField(requirement, "id", UUID.randomUUID());
 
-            when(requirementRepository.findByUid("GC-A001")).thenReturn(Optional.of(requirement));
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "GC-A001"))
+                    .thenReturn(Optional.of(requirement));
 
             var issueData = new GitHubIssueData(
                     42, "GC-A001: Test Title", "OPEN", "https://github.com/o/r/issues/42", "body", List.of());
@@ -342,7 +359,7 @@ class GitHubIssueSyncServiceTest {
             setField(traceLink, "id", UUID.randomUUID());
             when(traceabilityService.createLink(any(UUID.class), any())).thenReturn(traceLink);
 
-            var command = new CreateGitHubIssueCommand("GC-A001", "o/r", null, List.of());
+            var command = new CreateGitHubIssueCommand(PROJECT_ID, "GC-A001", "o/r", null, List.of());
             var result = service.createIssueFromRequirement(command);
 
             assertThat(result.issueUrl()).isEqualTo("https://github.com/o/r/issues/42");

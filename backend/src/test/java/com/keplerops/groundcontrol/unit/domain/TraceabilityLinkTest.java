@@ -2,20 +2,36 @@ package com.keplerops.groundcontrol.unit.domain;
 
 import static org.assertj.core.api.Assertions.*;
 
+import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.SyncStatus;
 import java.time.Instant;
+import java.util.UUID;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 @SuppressWarnings("java:S2187") // Tests are in @Nested inner classes
 class TraceabilityLinkTest {
 
+    private static final Project TEST_PROJECT = createTestProject();
+
+    private static Project createTestProject() {
+        var project = new Project("test-project", "Test Project");
+        try {
+            var field = Project.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(project, UUID.fromString("00000000-0000-0000-0000-000000000001"));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return project;
+    }
+
     private static Requirement createRequirement() {
-        return new Requirement("REQ-001", "Title", "Statement");
+        return new Requirement(TEST_PROJECT, "REQ-001", "Title", "Statement");
     }
 
     private static TraceabilityLink createLink() {

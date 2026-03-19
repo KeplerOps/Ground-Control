@@ -6,11 +6,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
+import com.keplerops.groundcontrol.domain.requirements.state.Status;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -30,10 +34,21 @@ class AnalysisIntegrationTest extends BaseIntegrationTest {
     @Autowired
     private RequirementRelationRepository relationRepository;
 
+    @Autowired
+    private ProjectRepository projectRepository;
+
+    private Project testProject;
+
+    @BeforeEach
+    void setUp() {
+        testProject = projectRepository.findByIdentifier("ground-control").orElseThrow();
+    }
+
     @Test
     void detectCycles_withAcyclicGraph_returnsEmpty() throws Exception {
-        var parent = requirementRepository.save(new Requirement("INT-PARENT", "Parent", "Parent statement"));
-        var child = requirementRepository.save(new Requirement("INT-CHILD", "Child", "Child statement"));
+        var parent =
+                requirementRepository.save(new Requirement(testProject, "INT-PARENT", "Parent", "Parent statement"));
+        var child = requirementRepository.save(new Requirement(testProject, "INT-CHILD", "Child", "Child statement"));
         relationRepository.save(new RequirementRelation(child, parent, RelationType.PARENT));
 
         mockMvc.perform(get("/api/v1/analysis/cycles"))
@@ -43,7 +58,7 @@ class AnalysisIntegrationTest extends BaseIntegrationTest {
 
     @Test
     void findOrphans_withOrphan_returnsIt() throws Exception {
-        requirementRepository.save(new Requirement("INT-ORPHAN", "Orphan", "Orphan statement"));
+        requirementRepository.save(new Requirement(testProject, "INT-ORPHAN", "Orphan", "Orphan statement"));
 
         mockMvc.perform(get("/api/v1/analysis/orphans"))
                 .andExpect(status().isOk())
@@ -52,9 +67,9 @@ class AnalysisIntegrationTest extends BaseIntegrationTest {
 
     @Test
     void impactAnalysis_returnsTransitiveDependents() throws Exception {
-        var a = requirementRepository.save(new Requirement("INT-A", "A", "A statement"));
-        var b = requirementRepository.save(new Requirement("INT-B", "B", "B statement"));
-        var c = requirementRepository.save(new Requirement("INT-C", "C", "C statement"));
+        var a = requirementRepository.save(new Requirement(testProject, "INT-A", "A", "A statement"));
+        var b = requirementRepository.save(new Requirement(testProject, "INT-B", "B", "B statement"));
+        var c = requirementRepository.save(new Requirement(testProject, "INT-C", "C", "C statement"));
 
         // c -> b -> a (child -> parent)
         relationRepository.save(new RequirementRelation(b, a, RelationType.PARENT));
@@ -66,22 +81,82 @@ class AnalysisIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    void crossWaveValidation_detectsBackwardDeps() throws Exception {
-        var wave3 = new Requirement("INT-W3", "Wave 3", "Wave 3 statement");
-        wave3.setWave(3);
-        wave3 = requirementRepository.save(wave3);
+    void consistencyViolations_detectsActiveConflict() throws Exception {
+        var a = new Requirement(testProject, "INT-CONF-A", "Conflict A", "Conflict A statement");
+        a.transitionStatus(Status.ACTIVE);
+        a = requirementRepository.save(a);
 
-        var wave1 = new Requirement("INT-W1", "Wave 1", "Wave 1 statement");
+        var b = new Requirement(testProject, "INT-CONF-B", "Conflict B", "Conflict B statement");
+        b.transitionStatus(Status.ACTIVE);
+        b = requirementRepository.save(b);
+
+        relationRepository.save(new RequirementRelation(a, b, RelationType.CONFLICTS_WITH));
+
+        mockMvc.perform(get("/api/v1/analysis/consistency-violations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.sourceUid == 'INT-CONF-A')]").exists())
+                .andExpect(jsonPath("$[0].violationType", is("ACTIVE_CONFLICT")));
+    }
+
+    @Test
+    void completeness_returnsStatusDistribution() throws Exception {
+        requirementRepository.save(new Requirement(testProject, "INT-COMP-A", "Comp A", "Statement A"));
+        var active = new Requirement(testProject, "INT-COMP-B", "Comp B", "Statement B");
+        active.transitionStatus(Status.ACTIVE);
+        requirementRepository.save(active);
+
+        mockMvc.perform(get("/api/v1/analysis/completeness"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").isNumber())
+                .andExpect(jsonPath("$.byStatus").isMap())
+                .andExpect(jsonPath("$.issues").isArray());
+    }
+
+    @Test
+    void coverageGaps_returnsRequirementsMissingLinkType() throws Exception {
+        requirementRepository.save(new Requirement(testProject, "INT-COV-A", "Cov A", "Statement A"));
+
+        mockMvc.perform(get("/api/v1/analysis/coverage-gaps").param("linkType", "IMPLEMENTS"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[?(@.uid == 'INT-COV-A')]").exists());
+    }
+
+    @Test
+    void dashboardStats_returnsAggregatedMetrics() throws Exception {
+        requirementRepository.save(new Requirement(testProject, "INT-DASH-A", "Dash A", "Statement A"));
+        var active = new Requirement(testProject, "INT-DASH-B", "Dash B", "Statement B");
+        active.transitionStatus(Status.ACTIVE);
+        active.setWave(1);
+        requirementRepository.save(active);
+
+        mockMvc.perform(get("/api/v1/analysis/dashboard-stats"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalRequirements").isNumber())
+                .andExpect(jsonPath("$.byStatus").isMap())
+                .andExpect(jsonPath("$.byWave").isArray())
+                .andExpect(jsonPath("$.coverageByLinkType").isMap())
+                .andExpect(jsonPath("$.coverageByLinkType.IMPLEMENTS").exists())
+                .andExpect(jsonPath("$.recentChanges").isArray());
+    }
+
+    @Test
+    void crossWaveValidation_detectsForwardDeps() throws Exception {
+        var wave1 = new Requirement(testProject, "INT-W1", "Wave 1", "Wave 1 statement");
         wave1.setWave(1);
         wave1 = requirementRepository.save(wave1);
 
-        // wave3 depends on wave1 — source.wave(3) > target.wave(1)
-        relationRepository.save(new RequirementRelation(wave3, wave1, RelationType.DEPENDS_ON));
+        var wave3 = new Requirement(testProject, "INT-W3", "Wave 3", "Wave 3 statement");
+        wave3.setWave(3);
+        wave3 = requirementRepository.save(wave3);
+
+        // wave1 depends on wave3 — source.wave(1) < target.wave(3), forward dependency violation
+        relationRepository.save(new RequirementRelation(wave1, wave3, RelationType.DEPENDS_ON));
 
         mockMvc.perform(get("/api/v1/analysis/cross-wave"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.sourceUid == 'INT-W3')]").exists())
-                .andExpect(jsonPath("$[0].sourceWave", is(3)))
-                .andExpect(jsonPath("$[0].targetWave", is(1)));
+                .andExpect(jsonPath("$[?(@.sourceUid == 'INT-W1')]").exists())
+                .andExpect(jsonPath("$[0].sourceWave", is(1)))
+                .andExpect(jsonPath("$[0].targetWave", is(3)));
     }
 }

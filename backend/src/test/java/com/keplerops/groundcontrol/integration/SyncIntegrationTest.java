@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
 import com.keplerops.groundcontrol.domain.requirements.repository.GitHubIssueSyncRepository;
@@ -16,6 +18,7 @@ import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import java.util.List;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -75,6 +78,16 @@ class SyncIntegrationTest extends BaseIntegrationTest {
     @Autowired
     private TraceabilityLinkRepository traceabilityLinkRepository;
 
+    @Autowired
+    private ProjectRepository projectRepository;
+
+    private Project testProject;
+
+    @BeforeEach
+    void setUp() {
+        testProject = projectRepository.findByIdentifier("ground-control").orElseThrow();
+    }
+
     @Test
     void syncGithubIssues_createsIssueSyncRecords() throws Exception {
         mockMvc.perform(post("/api/v1/admin/sync/github").param("owner", "test").param("repo", "repo"))
@@ -107,7 +120,7 @@ class SyncIntegrationTest extends BaseIntegrationTest {
     @Test
     void syncGithubIssues_updatesTraceabilityLinks() throws Exception {
         // Pre-create a requirement with a traceability link to issue #1
-        var requirement = new Requirement("SYNC-REQ-001", "Test requirement", "Statement");
+        var requirement = new Requirement(testProject, "SYNC-REQ-001", "Test requirement", "Statement");
         requirement = requirementRepository.save(requirement);
 
         var link = new TraceabilityLink(requirement, ArtifactType.GITHUB_ISSUE, "1", LinkType.IMPLEMENTS);

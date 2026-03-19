@@ -5,6 +5,202 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.59.0] - 2026-03-18
+
+### Added
+
+- AWS EC2 deployment infrastructure — single `t3a.small` instance running
+  Docker Compose with Tailscale-only access (zero public ingress) (ADR-018)
+- Terraform `compute` module: EC2 instance, IAM instance profile, EBS data
+  volume with cloud-init bootstrapping (Docker, Tailscale, compose)
+- Terraform `backup` module: S3 bucket for pg_dump backups (30-day lifecycle),
+  DLM policy for daily EBS snapshots (7-day retention)
+- Production Docker Compose (`deploy/docker/docker-compose.prod.yml`) — GHCR
+  image, EBS bind mounts, no Redis, JVM memory caps
+- Automated deployment: CI pushes to `main` trigger deploy to EC2 via SSM
+  `SendCommand` after smoke test passes — no manual SSH needed
+- Operational scripts: `backup.sh` (pg_dump + S3), `watchdog.sh` (health check
+  + auto-restart), `deploy.sh` (pull + restart + verify)
+- Makefile targets: `deploy` (SSH deploy to EC2), `deploy-infra` (terraform
+  apply)
+- ADR-018: AWS EC2 Deployment — documents architecture, cost, and rationale
+
+### Changed
+
+- Terraform `networking` module rewritten for zero-ingress security group
+  (Tailscale-only, was CIDR-based ingress for RDS)
+- Terraform `secrets` module rewritten for Tailscale auth key + DB password
+  (was RDS host/user/pass)
+- Terraform `environments/dev` rewritten to wire compute + networking + backup
+  + secrets modules (was RDS + networking + secrets)
+- Bootstrap IAM policy updated: replaced RDS permissions with EC2, IAM instance
+  profile, S3 backup bucket, DLM, and SSM SendCommand permissions
+- CI workflow (`ci.yml`): added `deploy` job that auto-deploys to EC2 on
+  push to `main`, added `id-token: write` permission for OIDC
+- Deployment docs updated with AWS deployment section
+
+### Fixed
+
+- TypeScript build errors in `requirements.tsx` — added explicit types for
+  `BulkStatusTransitionResponse` callback and `RequirementResponse` map parameter
+
+### Removed
+
+- Terraform `rds` module (stale — RDS withdrawn per ADR-015)
+
+## [0.58.0] - 2026-03-18
+
+### Added
+
+- Project health dashboard endpoint `GET /api/v1/analysis/dashboard-stats` —
+  returns aggregate metrics: requirement counts by status and wave, traceability
+  coverage percentages per link type, and recent changes (GC-Q004)
+- `gc_dashboard_stats` MCP tool for dashboard stats retrieval
+- Enriched frontend dashboard with wave progress bars, traceability coverage
+  percentages, recent changes feed, and clickable stat cards linking to detail
+  views
+
+## [0.57.1] - 2026-03-18
+
+### Fixed
+
+- CI Docker build and smoke test used `context: backend/` but the Dockerfile
+  references repo-root paths (`backend/`, `frontend/`) — changed to
+  `context: .` with `file: backend/Dockerfile` to match docker-compose.yml
+
+## [0.57.0] - 2026-03-18
+
+### Added
+
+- Completeness analysis backend endpoint `GET /api/v1/analysis/completeness` —
+  returns total count, status distribution, and missing-field issues (GC-C008)
+- `gc_analyze_completeness` MCP tool now calls the backend API instead of doing
+  client-side computation, achieving full REST/MCP parity for all 7 analysis
+  operations
+- Completeness tab on the frontend analysis page
+- Coverage-gaps integration test
+
+## [0.56.0] - 2026-03-18
+
+### Added
+
+- Consistency violation detection analysis — detects ACTIVE requirements linked
+  by `CONFLICTS_WITH` relations and `SUPERSEDES` relations where both sides are
+  ACTIVE (GC-C007)
+- REST endpoint `GET /api/v1/analysis/consistency-violations`
+- `gc_analyze_consistency` MCP tool
+- Consistency tab on the frontend analysis page
+
+## [0.55.0] - 2026-03-18
+
+### Added
+
+- `sort` parameter on `gc_list_requirements` MCP tool, achieving parity with
+  the REST API's `sort` query parameter (e.g. `sort: "uid,asc"`)
+
+## [0.54.2] - 2026-03-18
+
+### Fixed
+
+- Graph view zoom/scroll speed was too slow (wheelSensitivity 0.3 → 1)
+
+## [0.54.1] - 2026-03-18
+
+### Fixed
+
+- Cross-wave validation logic was inverted — flagged valid "later depends on
+  earlier" relationships instead of invalid "earlier depends on later" ones
+- All analysis endpoints (cycles, orphans, coverage gaps, cross-wave) now
+  exclude archived requirements
+
+## [0.54.0] - 2026-03-17
+
+### Added
+
+- **Full-parity frontend** — every REST API capability is now accessible via the
+  UI, covering all 34 endpoints across 7 controllers
+- **Requirements list page** — paginated table with filtering (status, type,
+  priority, wave, free-text search), column sorting, bulk status transitions via
+  checkbox selection, per-row status dropdown for quick transitions, and create
+  modal
+- **Requirement detail page** with tabbed interface:
+  - Details tab: view/edit all fields, status transitions, clone, archive
+  - Relations tab: list, add, delete relations with search-based target picker
+  - Traceability tab: list, add, delete traceability links to external artifacts
+  - History tab: audit timeline showing all revisions with snapshots
+  - Impact tab: transitive impact analysis for the requirement
+- **Dashboard rewrite** — project health overview with requirement counts by
+  status and clickable analysis alert cards (cycles, orphans, coverage gaps,
+  cross-wave violations)
+- **Analysis page** — tabbed view for dependency cycles, orphan requirements,
+  coverage gaps (by link type), and cross-wave violations
+- **Projects page** — list, create, edit, and switch projects
+- **Admin page** — StrictDoc import (file upload), GitHub sync, GitHub issue
+  creation, and graph materialization
+- Shared type definitions (`src/types/api.ts`) for all API request/response types
+- `apiDelete()` and `apiUpload()` utilities in the API client
+- React Query hooks: `use-requirements`, `use-relations`, `use-traceability`,
+  `use-analysis`, `use-history`
+- Reusable UI components: Modal, Badge (status/priority/type), FormField,
+  ConfirmDialog, Toast notifications, StatusBadgeDropdown, RequirementForm,
+  RelationForm, TraceabilityForm
+- Navigation expanded: Dashboard, Requirements, Graph, Analysis, Projects, Admin
+- Radix UI dependencies: dialog, tabs, dropdown-menu, toast, checkbox
+
+## [0.53.0] - 2026-03-16
+
+### Added
+
+- **Web application shell** (GC-Q008): Bootstrap React 19 frontend with Vite 6,
+  TanStack Query 5, React Router 7, and Tailwind CSS 4
+- **Project switcher** in app header — persistent project selection via
+  localStorage, auto-selects when only one project exists, hidden when
+  single-project
+- **Interactive graph view** — full port of the roadmap viewer into the React
+  app with Cytoscape.js, dagre layout, color-by (series/priority/status/wave),
+  legend filtering, node click highlighting, tooltips, fit/reset controls
+- Dashboard page showing active project details
+- Requirements page with project-scoped requirement listing
+- `SpaController` — Spring Boot controller forwarding non-API routes to
+  `index.html` for client-side routing
+- Typed `apiFetch<T>()` wrapper with automatic `?project=` injection from
+  context
+- Multi-stage Docker build: Node frontend stage → Spring Boot backend stage
+- Makefile targets: `frontend-install`, `frontend-dev`, `frontend-build`,
+  `frontend-lint`, `frontend-format`
+- Biome for frontend formatting and linting
+
+### Changed
+
+- Docker build context changed from `backend/` to project root (`.`) with
+  explicit `dockerfile: backend/Dockerfile`
+- `docker-build` Make target updated for new build context
+
+## [0.52.0] - 2026-03-16
+
+### Added
+
+- **Project scoping** (GC-A013): Ground Control now supports multiple independent
+  projects within a single instance. All requirements, relations, and analysis are
+  scoped to a project.
+- `POST /api/v1/projects` — create a new project
+- `GET /api/v1/projects` — list all projects
+- `GET /api/v1/projects/{identifier}` — get project by identifier
+- `PUT /api/v1/projects/{identifier}` — update project name/description
+- Optional `project` query parameter on requirement, analysis, graph, import, and
+  GitHub issue endpoints. When omitted and only one project exists, auto-resolves
+  to that project. When multiple projects exist and param is missing, returns 422.
+- `gc_list_projects` and `gc_create_project` MCP tools
+- Optional `project` parameter on 17 existing MCP tools for project-scoped operations
+- `project_identifier` field in all requirement API responses
+- Same-project validation: relations can only be created between requirements in
+  the same project
+- Flyway migration V012: creates `project` table, inserts default "ground-control"
+  project, adds `project_id` to requirements with composite unique constraint
+  `(project_id, uid)`
+- Composite indexes on `(project_id)`, `(project_id, status)`, `(project_id, uid)`
+- `gc_analyze_completeness` MCP tool for requirement completeness analysis
+
 ## [0.51.0] - 2026-03-15
 
 ### Changed

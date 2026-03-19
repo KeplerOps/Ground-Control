@@ -1,0 +1,41 @@
+# Production Docker Compose for AWS EC2 deployment
+# Differences from local docker-compose.yml:
+#   - Backend uses pre-built GHCR image (not local build)
+#   - PostgreSQL data bind-mounted to /data/postgres/ (EBS volume)
+#   - Redis omitted (unused, GC_CACHE_TYPE=none)
+#   - Roadmap viewer omitted
+#   - restart: unless-stopped on all services
+#   - JVM memory capped via JAVA_TOOL_OPTIONS
+
+services:
+  db:
+    image: apache/age:release_PG16_1.6.0
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - /data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    image: ${GC_IMAGE}
+    environment:
+      GC_DATABASE_URL: ${GC_DATABASE_URL}
+      GC_DATABASE_USER: ${GC_DATABASE_USER}
+      GC_DATABASE_PASSWORD: ${GC_DATABASE_PASSWORD}
+      GC_SERVER_PORT: "8000"
+      GC_CACHE_TYPE: "none"
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS}
+      SPRING_PROFILES_ACTIVE: prod
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped

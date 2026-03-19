@@ -1,4 +1,6 @@
-.PHONY: rapid build test test-cov format lint check integration verify dev clean up down docker-build smoke
+.PHONY: rapid build test test-cov format lint check integration verify dev clean up down docker-build smoke \
+       frontend-install frontend-dev frontend-build frontend-lint frontend-format \
+       deploy deploy-infra
 
 # --- Rapid dev loop (< 5s) ---
 
@@ -33,6 +35,23 @@ integration: ## Integration tests (Testcontainers)
 verify: ## Full CI-equivalent verification
 	cd backend && ./gradlew check integrationTest openjmlEsc
 
+# --- Frontend ---
+
+frontend-install: ## Install frontend dependencies
+	cd frontend && npm install
+
+frontend-dev: ## Start frontend dev server (Vite)
+	cd frontend && npm run dev
+
+frontend-build: ## Build frontend for production
+	cd frontend && npm run build
+
+frontend-lint: ## Lint frontend code (Biome)
+	cd frontend && npm run lint
+
+frontend-format: ## Format frontend code (Biome)
+	cd frontend && npm run format
+
 # --- Infrastructure ---
 
 dev: ## Start development server (loads .env)
@@ -44,8 +63,8 @@ up: ## Start Docker Compose services (PostgreSQL, Redis)
 down: ## Stop Docker Compose services
 	docker compose down
 
-docker-build: ## Build backend Docker image
-	docker build -t ghcr.io/keplerops/ground-control:latest backend/
+docker-build: ## Build Docker image (frontend + backend)
+	docker build -f backend/Dockerfile -t ghcr.io/keplerops/ground-control:latest .
 
 smoke: docker-build ## Build Docker image and verify Flyway + health
 	@echo "Starting smoke test..."
@@ -82,6 +101,14 @@ smoke: docker-build ## Build Docker image and verify Flyway + health
 	fi; \
 	docker rm -f gc-smoke-db gc-smoke 2>/dev/null || true; \
 	[ "$$PASS" = "true" ]
+
+# --- AWS Deployment ---
+
+deploy: ## Deploy latest image to EC2 (pulls, restarts, verifies health)
+	ssh gc-dev /opt/gc/deploy.sh
+
+deploy-infra: ## Apply Terraform for dev environment
+	cd deploy/terraform/environments/dev && terraform apply
 
 clean: ## Remove build artifacts
 	cd backend && ./gradlew clean

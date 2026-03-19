@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.api.admin;
 
+import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import java.util.List;
@@ -15,26 +16,34 @@ import org.springframework.web.bind.annotation.RestController;
 public class AnalysisController {
 
     private final AnalysisService analysisService;
+    private final ProjectService projectService;
 
-    public AnalysisController(AnalysisService analysisService) {
+    public AnalysisController(AnalysisService analysisService, ProjectService projectService) {
         this.analysisService = analysisService;
+        this.projectService = projectService;
     }
 
     @GetMapping("/cycles")
-    public List<CycleResponse> detectCycles() {
-        return analysisService.detectCycles().stream().map(CycleResponse::from).toList();
+    public List<CycleResponse> detectCycles(@RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return analysisService.detectCycles(projectId).stream()
+                .map(CycleResponse::from)
+                .toList();
     }
 
     @GetMapping("/orphans")
-    public List<RequirementSummaryResponse> findOrphans() {
-        return analysisService.findOrphans().stream()
+    public List<RequirementSummaryResponse> findOrphans(@RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return analysisService.findOrphans(projectId).stream()
                 .map(RequirementSummaryResponse::from)
                 .toList();
     }
 
     @GetMapping("/coverage-gaps")
-    public List<RequirementSummaryResponse> findCoverageGaps(@RequestParam LinkType linkType) {
-        return analysisService.findCoverageGaps(linkType).stream()
+    public List<RequirementSummaryResponse> findCoverageGaps(
+            @RequestParam LinkType linkType, @RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return analysisService.findCoverageGaps(projectId, linkType).stream()
                 .map(RequirementSummaryResponse::from)
                 .toList();
     }
@@ -46,10 +55,32 @@ public class AnalysisController {
                 .toList();
     }
 
+    @GetMapping("/consistency-violations")
+    public List<ConsistencyViolationResponse> detectConsistencyViolations(
+            @RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return analysisService.detectConsistencyViolations(projectId).stream()
+                .map(ConsistencyViolationResponse::from)
+                .toList();
+    }
+
+    @GetMapping("/completeness")
+    public CompletenessResponse analyzeCompleteness(@RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return CompletenessResponse.from(analysisService.analyzeCompleteness(projectId));
+    }
+
     @GetMapping("/cross-wave")
-    public List<RelationValidationResponse> crossWaveValidation() {
-        return analysisService.crossWaveValidation().stream()
+    public List<RelationValidationResponse> crossWaveValidation(@RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return analysisService.crossWaveValidation(projectId).stream()
                 .map(RelationValidationResponse::from)
                 .toList();
+    }
+
+    @GetMapping("/dashboard-stats")
+    public DashboardStatsResponse getDashboardStats(@RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return DashboardStatsResponse.from(analysisService.getDashboardStats(projectId));
     }
 }

@@ -3,6 +3,8 @@ package com.keplerops.groundcontrol.domain.requirements.service;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
@@ -26,19 +28,27 @@ public class RequirementService {
 
     private final RequirementRepository requirementRepository;
     private final RequirementRelationRepository relationRepository;
+    private final ProjectRepository projectRepository;
 
     public RequirementService(
-            RequirementRepository requirementRepository, RequirementRelationRepository relationRepository) {
+            RequirementRepository requirementRepository,
+            RequirementRelationRepository relationRepository,
+            ProjectRepository projectRepository) {
         this.requirementRepository = requirementRepository;
         this.relationRepository = relationRepository;
+        this.projectRepository = projectRepository;
     }
 
     public Requirement create(CreateRequirementCommand command) {
-        if (requirementRepository.existsByUid(command.uid())) {
-            throw new ConflictException("Requirement with UID '" + command.uid() + "' already exists");
+        Project project = projectRepository
+                .findById(command.projectId())
+                .orElseThrow(() -> new NotFoundException("Project not found: " + command.projectId()));
+
+        if (requirementRepository.existsByProjectIdAndUid(project.getId(), command.uid())) {
+            throw new ConflictException("Requirement with UID '" + command.uid() + "' already exists in project");
         }
 
-        var requirement = new Requirement(command.uid(), command.title(), command.statement());
+        var requirement = new Requirement(project, command.uid(), command.title(), command.statement());
         if (command.rationale() != null) {
             requirement.setRationale(command.rationale());
         }
@@ -60,9 +70,9 @@ public class RequirementService {
     }
 
     @Transactional(readOnly = true)
-    public Requirement getByUid(String uid) {
+    public Requirement getByUid(UUID projectId, String uid) {
         return requirementRepository
-                .findByUid(uid)
+                .findByProjectIdAndUid(projectId, uid)
                 .orElseThrow(() -> new NotFoundException("Requirement not found: " + uid));
     }
 
@@ -149,6 +159,9 @@ public class RequirementService {
         }
         var source = getById(sourceId);
         var target = getById(targetId);
+        if (!source.getProject().getId().equals(target.getProject().getId())) {
+            throw new DomainValidationException("Cannot create relation between requirements in different projects");
+        }
         var relation = new RequirementRelation(source, target, relationType);
         return relationRepository.save(relation);
     }
@@ -164,19 +177,20 @@ public class RequirementService {
     }
 
     @Transactional(readOnly = true)
-    public Page<Requirement> list(Pageable pageable, RequirementFilter filter) {
-        var spec = RequirementSpecifications.fromFilter(filter);
+    public Page<Requirement> list(UUID projectId, Pageable pageable, RequirementFilter filter) {
+        var spec = RequirementSpecifications.fromFilter(projectId, filter);
         return requirementRepository.findAll(spec, pageable);
     }
 
     public Requirement clone(UUID sourceId, CloneRequirementCommand command) {
         var source = getById(sourceId);
+        var project = source.getProject();
 
-        if (requirementRepository.existsByUid(command.newUid())) {
-            throw new ConflictException("Requirement with UID '" + command.newUid() + "' already exists");
+        if (requirementRepository.existsByProjectIdAndUid(project.getId(), command.newUid())) {
+            throw new ConflictException("Requirement with UID '" + command.newUid() + "' already exists in project");
         }
 
-        var clone = new Requirement(command.newUid(), source.getTitle(), source.getStatement());
+        var clone = new Requirement(project, command.newUid(), source.getTitle(), source.getStatement());
         clone.setRationale(source.getRationale());
         clone.setRequirementType(source.getRequirementType());
         clone.setPriority(source.getPriority());

@@ -2,12 +2,15 @@ package com.keplerops.groundcontrol.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.GraphClient;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,11 +27,22 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
     @Autowired
     private RequirementRelationRepository relationRepository;
 
+    @Autowired
+    private ProjectRepository projectRepository;
+
+    private Project testProject;
+
+    @BeforeEach
+    void setUp() {
+        testProject = projectRepository.findByIdentifier("ground-control").orElseThrow();
+    }
+
     @Test
     void materializeAndQueryAncestors() {
-        var grandparent = requirementRepository.save(new Requirement("AGE-GP", "Grandparent", "GP statement"));
-        var parent = requirementRepository.save(new Requirement("AGE-P", "Parent", "P statement"));
-        var child = requirementRepository.save(new Requirement("AGE-C", "Child", "C statement"));
+        var grandparent =
+                requirementRepository.save(new Requirement(testProject, "AGE-GP", "Grandparent", "GP statement"));
+        var parent = requirementRepository.save(new Requirement(testProject, "AGE-P", "Parent", "P statement"));
+        var child = requirementRepository.save(new Requirement(testProject, "AGE-C", "Child", "C statement"));
 
         relationRepository.save(new RequirementRelation(parent, grandparent, RelationType.PARENT));
         relationRepository.save(new RequirementRelation(child, parent, RelationType.PARENT));
@@ -41,8 +55,8 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
 
     @Test
     void materializeAndQueryDescendants() {
-        var root = requirementRepository.save(new Requirement("AGE-ROOT", "Root", "Root statement"));
-        var leaf = requirementRepository.save(new Requirement("AGE-LEAF", "Leaf", "Leaf statement"));
+        var root = requirementRepository.save(new Requirement(testProject, "AGE-ROOT", "Root", "Root statement"));
+        var leaf = requirementRepository.save(new Requirement(testProject, "AGE-LEAF", "Leaf", "Leaf statement"));
 
         relationRepository.save(new RequirementRelation(leaf, root, RelationType.PARENT));
 
@@ -54,9 +68,9 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
 
     @Test
     void materializeAndFindPaths() {
-        var a = requirementRepository.save(new Requirement("AGE-A", "A", "A statement"));
-        var b = requirementRepository.save(new Requirement("AGE-B", "B", "B statement"));
-        var c = requirementRepository.save(new Requirement("AGE-C2", "C", "C statement"));
+        var a = requirementRepository.save(new Requirement(testProject, "AGE-A", "A", "A statement"));
+        var b = requirementRepository.save(new Requirement(testProject, "AGE-B", "B", "B statement"));
+        var c = requirementRepository.save(new Requirement(testProject, "AGE-C2", "C", "C statement"));
 
         relationRepository.save(new RequirementRelation(a, b, RelationType.DEPENDS_ON));
         relationRepository.save(new RequirementRelation(b, c, RelationType.DEPENDS_ON));

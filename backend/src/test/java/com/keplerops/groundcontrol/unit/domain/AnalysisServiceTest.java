@@ -5,19 +5,29 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
+import com.keplerops.groundcontrol.domain.requirements.service.AuditService;
+import com.keplerops.groundcontrol.domain.requirements.service.CompletenessResult;
+import com.keplerops.groundcontrol.domain.requirements.service.ConsistencyViolation;
+import com.keplerops.groundcontrol.domain.requirements.service.CoverageStats;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
+import com.keplerops.groundcontrol.domain.requirements.service.DashboardStats;
+import com.keplerops.groundcontrol.domain.requirements.service.RecentChange;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
+import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import java.lang.reflect.Field;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -38,18 +48,37 @@ class AnalysisServiceTest {
     @Mock
     private TraceabilityLinkRepository traceabilityLinkRepository;
 
+    @Mock
+    private AuditService auditService;
+
     private AnalysisService service;
 
     private static final List<RelationType> DAG_TYPES =
             List.of(RelationType.PARENT, RelationType.DEPENDS_ON, RelationType.REFINES);
 
+    private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    private static final Project TEST_PROJECT = createTestProject();
+
+    private static Project createTestProject() {
+        var project = new Project("test-project", "Test Project");
+        try {
+            var field = Project.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(project, PROJECT_ID);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return project;
+    }
+
     @BeforeEach
     void setUp() {
-        service = new AnalysisService(requirementRepository, relationRepository, traceabilityLinkRepository);
+        service = new AnalysisService(
+                requirementRepository, relationRepository, traceabilityLinkRepository, auditService);
     }
 
     private static Requirement makeRequirement(String uid, UUID id) {
-        var req = new Requirement(uid, "Title for " + uid, "Statement for " + uid);
+        var req = new Requirement(TEST_PROJECT, uid, "Title for " + uid, "Statement for " + uid);
         setField(req, "id", id);
         return req;
     }
@@ -75,10 +104,10 @@ class AnalysisServiceTest {
 
         @Test
         void emptyGraph_returnsEmpty() {
-            when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of());
 
-            var result = service.detectCycles();
+            var result = service.detectCycles(PROJECT_ID);
 
             assertThat(result).isEmpty();
         }
@@ -91,10 +120,10 @@ class AnalysisServiceTest {
             var b = makeRequirement("REQ-B", bId);
             var rel = new RequirementRelation(a, b, RelationType.PARENT);
 
-            when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(rel));
 
-            var result = service.detectCycles();
+            var result = service.detectCycles(PROJECT_ID);
 
             assertThat(result).isEmpty();
         }
@@ -112,10 +141,10 @@ class AnalysisServiceTest {
             var bc = new RequirementRelation(b, c, RelationType.DEPENDS_ON);
             var ca = new RequirementRelation(c, a, RelationType.PARENT);
 
-            when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(ab, bc, ca));
 
-            var result = service.detectCycles();
+            var result = service.detectCycles(PROJECT_ID);
 
             assertThat(result).hasSize(1);
             CycleResult cycle = result.get(0);
@@ -137,12 +166,13 @@ class AnalysisServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-ORPHAN", reqId);
 
-            when(requirementRepository.findAll()).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
             when(relationRepository.findBySourceId(reqId)).thenReturn(List.of());
             when(relationRepository.findByTargetId(reqId)).thenReturn(List.of());
             when(traceabilityLinkRepository.existsByRequirementId(reqId)).thenReturn(false);
 
-            var result = service.findOrphans();
+            var result = service.findOrphans(PROJECT_ID);
 
             assertThat(result).containsExactly(req);
         }
@@ -155,10 +185,11 @@ class AnalysisServiceTest {
             var other = makeRequirement("REQ-OTHER", otherId);
             var rel = new RequirementRelation(req, other, RelationType.PARENT);
 
-            when(requirementRepository.findAll()).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
             when(relationRepository.findBySourceId(reqId)).thenReturn(List.of(rel));
 
-            var result = service.findOrphans();
+            var result = service.findOrphans(PROJECT_ID);
 
             assertThat(result).isEmpty();
         }
@@ -168,12 +199,13 @@ class AnalysisServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-TRACED", reqId);
 
-            when(requirementRepository.findAll()).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
             when(relationRepository.findBySourceId(reqId)).thenReturn(List.of());
             when(relationRepository.findByTargetId(reqId)).thenReturn(List.of());
             when(traceabilityLinkRepository.existsByRequirementId(reqId)).thenReturn(true);
 
-            var result = service.findOrphans();
+            var result = service.findOrphans(PROJECT_ID);
 
             assertThat(result).isEmpty();
         }
@@ -187,11 +219,12 @@ class AnalysisServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-GAP", reqId);
 
-            when(requirementRepository.findAll()).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
             when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.TESTS))
                     .thenReturn(false);
 
-            var result = service.findCoverageGaps(LinkType.TESTS);
+            var result = service.findCoverageGaps(PROJECT_ID, LinkType.TESTS);
 
             assertThat(result).containsExactly(req);
         }
@@ -201,11 +234,12 @@ class AnalysisServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-COVERED", reqId);
 
-            when(requirementRepository.findAll()).thenReturn(List.of(req));
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
             when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.TESTS))
                     .thenReturn(true);
 
-            var result = service.findCoverageGaps(LinkType.TESTS);
+            var result = service.findCoverageGaps(PROJECT_ID, LinkType.TESTS);
 
             assertThat(result).isEmpty();
         }
@@ -220,7 +254,7 @@ class AnalysisServiceTest {
             var seed = makeRequirement("REQ-SEED", seedId);
 
             when(requirementRepository.findById(seedId)).thenReturn(Optional.of(seed));
-            when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of());
 
             var result = service.impactAnalysis(seedId);
@@ -240,7 +274,7 @@ class AnalysisServiceTest {
 
             when(requirementRepository.findById(parentId)).thenReturn(Optional.of(parent));
             when(requirementRepository.findById(childId)).thenReturn(Optional.of(child));
-            when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(rel));
 
             var result = service.impactAnalysis(parentId);
@@ -264,7 +298,7 @@ class AnalysisServiceTest {
             when(requirementRepository.findById(aId)).thenReturn(Optional.of(a));
             when(requirementRepository.findById(bId)).thenReturn(Optional.of(b));
             when(requirementRepository.findById(cId)).thenReturn(Optional.of(c));
-            when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(relBA, relCB));
 
             var result = service.impactAnalysis(aId);
@@ -293,7 +327,7 @@ class AnalysisServiceTest {
             when(requirementRepository.findById(bId)).thenReturn(Optional.of(b));
             when(requirementRepository.findById(cId)).thenReturn(Optional.of(c));
             when(requirementRepository.findById(dId)).thenReturn(Optional.of(d));
-            when(relationRepository.findAllWithSourceAndTargetByRelationTypeIn(DAG_TYPES))
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(relBA, relCA, relDB, relDC));
 
             var result = service.impactAnalysis(aId);
@@ -312,38 +346,117 @@ class AnalysisServiceTest {
     }
 
     @Nested
+    class DetectConsistencyViolations {
+
+        @Test
+        void noViolations_returnsEmpty() {
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of());
+
+            var result = service.detectConsistencyViolations(PROJECT_ID);
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        void activeConflict_detected() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            var a = makeRequirement("REQ-A", aId);
+            var b = makeRequirement("REQ-B", bId);
+            setField(a, "status", Status.ACTIVE);
+            setField(b, "status", Status.ACTIVE);
+
+            var rel = new RequirementRelation(a, b, RelationType.CONFLICTS_WITH);
+
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(rel));
+
+            var result = service.detectConsistencyViolations(PROJECT_ID);
+
+            assertThat(result).hasSize(1);
+            ConsistencyViolation violation = result.get(0);
+            assertThat(violation.violationType()).isEqualTo("ACTIVE_CONFLICT");
+            assertThat(violation.relation()).isSameAs(rel);
+        }
+
+        @Test
+        void activeSupersedes_detected() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            var a = makeRequirement("REQ-A", aId);
+            var b = makeRequirement("REQ-B", bId);
+            setField(a, "status", Status.ACTIVE);
+            setField(b, "status", Status.ACTIVE);
+
+            var rel = new RequirementRelation(a, b, RelationType.SUPERSEDES);
+
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(rel));
+
+            var result = service.detectConsistencyViolations(PROJECT_ID);
+
+            assertThat(result).hasSize(1);
+            ConsistencyViolation violation = result.get(0);
+            assertThat(violation.violationType()).isEqualTo("ACTIVE_SUPERSEDES");
+            assertThat(violation.relation()).isSameAs(rel);
+        }
+
+        @Test
+        void draftConflict_notDetected() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            var a = makeRequirement("REQ-A", aId);
+            var b = makeRequirement("REQ-B", bId);
+            setField(a, "status", Status.ACTIVE);
+            // b remains DRAFT (default)
+
+            var rel = new RequirementRelation(a, b, RelationType.CONFLICTS_WITH);
+
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(rel));
+
+            var result = service.detectConsistencyViolations(PROJECT_ID);
+
+            assertThat(result).isEmpty();
+        }
+    }
+
+    @Nested
     class CrossWaveValidation {
 
         @Test
         void correctOrder_returnsEmpty() {
             UUID aId = UUID.randomUUID();
             UUID bId = UUID.randomUUID();
-            var a = makeRequirement("REQ-A", aId, 1);
-            var b = makeRequirement("REQ-B", bId, 2);
+            var a = makeRequirement("REQ-A", aId, 2);
+            var b = makeRequirement("REQ-B", bId, 1);
 
-            // Source wave 1, target wave 2 — correct order
+            // Source wave 2, target wave 1 — later depends on earlier, correct order
             var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
 
-            when(relationRepository.findAllWithSourceAndTarget()).thenReturn(List.of(rel));
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(rel));
 
-            var result = service.crossWaveValidation();
+            var result = service.crossWaveValidation(PROJECT_ID);
 
             assertThat(result).isEmpty();
         }
 
         @Test
-        void backwardDependency_detected() {
+        void forwardDependency_detected() {
             UUID aId = UUID.randomUUID();
             UUID bId = UUID.randomUUID();
-            var a = makeRequirement("REQ-A", aId, 3);
-            var b = makeRequirement("REQ-B", bId, 1);
+            var a = makeRequirement("REQ-A", aId, 1);
+            var b = makeRequirement("REQ-B", bId, 3);
 
-            // Source wave 3 > target wave 1 — backward dependency
+            // Source wave 1 < target wave 3 — earlier depends on later, forward dependency violation
             var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
 
-            when(relationRepository.findAllWithSourceAndTarget()).thenReturn(List.of(rel));
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(rel));
 
-            var result = service.crossWaveValidation();
+            var result = service.crossWaveValidation(PROJECT_ID);
 
             assertThat(result).containsExactly(rel);
         }
@@ -357,11 +470,160 @@ class AnalysisServiceTest {
 
             var rel = new RequirementRelation(a, b, RelationType.PARENT);
 
-            when(relationRepository.findAllWithSourceAndTarget()).thenReturn(List.of(rel));
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(rel));
 
-            var result = service.crossWaveValidation();
+            var result = service.crossWaveValidation(PROJECT_ID);
 
             assertThat(result).isEmpty();
+        }
+    }
+
+    @Nested
+    class AnalyzeCompleteness {
+
+        @Test
+        void emptyProject_returnsZero() {
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of());
+
+            CompletenessResult result = service.analyzeCompleteness(PROJECT_ID);
+
+            assertThat(result.total()).isZero();
+            assertThat(result.byStatus()).isEmpty();
+            assertThat(result.issues()).isEmpty();
+        }
+
+        @Test
+        void countsStatuses() {
+            var draft = makeRequirement("REQ-D", UUID.randomUUID());
+            var active = makeRequirement("REQ-A", UUID.randomUUID());
+            setField(active, "status", Status.ACTIVE);
+            var active2 = makeRequirement("REQ-A2", UUID.randomUUID());
+            setField(active2, "status", Status.ACTIVE);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(draft, active, active2));
+
+            CompletenessResult result = service.analyzeCompleteness(PROJECT_ID);
+
+            assertThat(result.total()).isEqualTo(3);
+            assertThat(result.byStatus()).containsEntry("DRAFT", 1);
+            assertThat(result.byStatus()).containsEntry("ACTIVE", 2);
+            assertThat(result.issues()).isEmpty();
+        }
+
+        @Test
+        void detectsMissingStatement() {
+            var req = makeRequirement("REQ-BLANK", UUID.randomUUID());
+            setField(req, "statement", "");
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
+
+            CompletenessResult result = service.analyzeCompleteness(PROJECT_ID);
+
+            assertThat(result.issues()).hasSize(1);
+            assertThat(result.issues().get(0).uid()).isEqualTo("REQ-BLANK");
+            assertThat(result.issues().get(0).issue()).isEqualTo("missing statement");
+        }
+
+        @Test
+        void detectsMissingTitle() {
+            var req = makeRequirement("REQ-NOTITLE", UUID.randomUUID());
+            setField(req, "title", "");
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
+
+            CompletenessResult result = service.analyzeCompleteness(PROJECT_ID);
+
+            assertThat(result.issues()).hasSize(1);
+            assertThat(result.issues().get(0).uid()).isEqualTo("REQ-NOTITLE");
+            assertThat(result.issues().get(0).issue()).isEqualTo("missing title");
+        }
+    }
+
+    @Nested
+    class GetDashboardStats {
+
+        @Test
+        void emptyProject_returnsZeroCounts() {
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of());
+            when(auditService.getRecentRequirementChanges(Set.of(), 10)).thenReturn(List.of());
+
+            DashboardStats result = service.getDashboardStats(PROJECT_ID);
+
+            assertThat(result.totalRequirements()).isZero();
+            assertThat(result.byStatus()).isEmpty();
+            assertThat(result.byWave()).isEmpty();
+            assertThat(result.coverageByLinkType()).hasSize(LinkType.values().length);
+            assertThat(result.recentChanges()).isEmpty();
+        }
+
+        @Test
+        void aggregatesByStatusAndWave() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            UUID cId = UUID.randomUUID();
+            var draft1 = makeRequirement("REQ-D1", aId, 1);
+            var active1 = makeRequirement("REQ-A1", bId, 1);
+            setField(active1, "status", Status.ACTIVE);
+            var active2 = makeRequirement("REQ-A2", cId, 2);
+            setField(active2, "status", Status.ACTIVE);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(draft1, active1, active2));
+            when(auditService.getRecentRequirementChanges(Set.of(aId, bId, cId), 10))
+                    .thenReturn(List.of());
+
+            DashboardStats result = service.getDashboardStats(PROJECT_ID);
+
+            assertThat(result.totalRequirements()).isEqualTo(3);
+            assertThat(result.byStatus()).containsEntry("DRAFT", 1);
+            assertThat(result.byStatus()).containsEntry("ACTIVE", 2);
+
+            // Wave 1: 2 reqs (1 DRAFT, 1 ACTIVE); Wave 2: 1 req (1 ACTIVE)
+            assertThat(result.byWave()).hasSize(2);
+            assertThat(result.byWave().get(0).wave()).isEqualTo(1);
+            assertThat(result.byWave().get(0).total()).isEqualTo(2);
+            assertThat(result.byWave().get(1).wave()).isEqualTo(2);
+            assertThat(result.byWave().get(1).total()).isEqualTo(1);
+        }
+
+        @Test
+        void coverageComputed() {
+            UUID reqId = UUID.randomUUID();
+            var req = makeRequirement("REQ-COV", reqId);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
+            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.IMPLEMENTS))
+                    .thenReturn(true);
+            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.TESTS))
+                    .thenReturn(false);
+            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.DOCUMENTS))
+                    .thenReturn(false);
+            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.CONSTRAINS))
+                    .thenReturn(false);
+            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.VERIFIES))
+                    .thenReturn(false);
+            when(auditService.getRecentRequirementChanges(Set.of(reqId), 10))
+                    .thenReturn(List.of(new RecentChange("REQ-COV", "Title", "ADD", Instant.now(), "test-actor")));
+
+            DashboardStats result = service.getDashboardStats(PROJECT_ID);
+
+            CoverageStats implCoverage = result.coverageByLinkType().get("IMPLEMENTS");
+            assertThat(implCoverage.total()).isEqualTo(1);
+            assertThat(implCoverage.covered()).isEqualTo(1);
+            assertThat(implCoverage.percentage()).isEqualTo(100.0);
+
+            CoverageStats testsCoverage = result.coverageByLinkType().get("TESTS");
+            assertThat(testsCoverage.covered()).isZero();
+            assertThat(testsCoverage.percentage()).isEqualTo(0.0);
+
+            assertThat(result.recentChanges()).hasSize(1);
         }
     }
 }

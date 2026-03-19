@@ -52,7 +52,7 @@ public class ImportService {
         this.importRepository = importRepository;
     }
 
-    public ImportResult importStrictdoc(String filename, String content) {
+    public ImportResult importStrictdoc(UUID projectId, String filename, String content) {
         List<SdocRequirement> parsed = SdocParser.parse(content);
         List<Map<String, Object>> errors = new ArrayList<>();
 
@@ -67,7 +67,7 @@ public class ImportService {
         Map<String, UUID> uidToId = new HashMap<>();
         for (SdocRequirement sdocReq : parsed) {
             try {
-                var existing = requirementRepository.findByUid(sdocReq.uid());
+                var existing = requirementRepository.findByProjectIdAndUid(projectId, sdocReq.uid());
                 UUID reqId;
                 if (existing.isPresent()) {
                     var cmd = new UpdateRequirementCommand(
@@ -82,6 +82,7 @@ public class ImportService {
                     requirementsUpdated++;
                 } else {
                     var cmd = new CreateRequirementCommand(
+                            projectId,
                             sdocReq.uid(),
                             sdocReq.title(),
                             sdocReq.statement(),
@@ -110,7 +111,7 @@ public class ImportService {
                 try {
                     UUID parentId = uidToId.get(parentUid);
                     if (parentId == null) {
-                        var parentOpt = requirementRepository.findByUid(parentUid);
+                        var parentOpt = requirementRepository.findByProjectIdAndUid(projectId, parentUid);
                         if (parentOpt.isEmpty()) {
                             errors.add(Map.of(
                                     "phase",

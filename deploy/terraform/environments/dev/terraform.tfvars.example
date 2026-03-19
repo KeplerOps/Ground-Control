@@ -1,1 +1,16 @@
-allowed_cidr = "YOUR_IP/32"  # Replace with your IP, e.g. "203.0.113.45/32"
+# AWS region and availability zone
+aws_region        = "us-east-2"
+availability_zone = "us-east-2a"
+
+# EC2 instance
+instance_type    = "t3a.small"
+data_volume_size = 20
+
+# Tailscale
+tailscale_hostname = "gc-dev"
+
+# Docker image (set to specific tag for pinned deploys)
+gc_image = "ghcr.io/keplerops/ground-control:latest"
+
+# S3 backup bucket
+backup_bucket_name = "groundcontrol-backups-catalyst-dev"

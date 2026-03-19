@@ -1,6 +1,7 @@
 package com.keplerops.groundcontrol.api.admin;
 
 import com.keplerops.groundcontrol.domain.exception.GroundControlException;
+import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.service.ImportService;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -16,13 +17,17 @@ import org.springframework.web.multipart.MultipartFile;
 public class ImportController {
 
     private final ImportService importService;
+    private final ProjectService projectService;
 
-    public ImportController(ImportService importService) {
+    public ImportController(ImportService importService, ProjectService projectService) {
         this.importService = importService;
+        this.projectService = projectService;
     }
 
     @PostMapping(value = "/strictdoc", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ImportResultResponse importStrictdoc(@RequestParam("file") MultipartFile file) {
+    public ImportResultResponse importStrictdoc(
+            @RequestParam("file") MultipartFile file, @RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
         byte[] bytes;
         try {
             bytes = file.getBytes();
@@ -31,6 +36,6 @@ public class ImportController {
         }
         var content = new String(bytes, StandardCharsets.UTF_8);
         var filename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "unknown.sdoc";
-        return ImportResultResponse.from(importService.importStrictdoc(filename, content));
+        return ImportResultResponse.from(importService.importStrictdoc(projectId, filename, content));
     }
 }

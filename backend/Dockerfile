@@ -1,9 +1,17 @@
+FROM node:22-alpine AS frontend
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ .
+RUN npm run build
+
 FROM eclipse-temurin:21-jdk-alpine AS build
 WORKDIR /app
-COPY gradle gradle
-COPY gradlew build.gradle.kts settings.gradle.kts gradle.properties ./
+COPY backend/gradle gradle
+COPY backend/gradlew backend/build.gradle.kts backend/settings.gradle.kts backend/gradle.properties ./
 RUN ./gradlew dependencies --no-daemon
-COPY src src
+COPY backend/src src
+COPY --from=frontend /app/dist src/main/resources/static/
 RUN ./gradlew bootJar --no-daemon -x test
 
 FROM eclipse-temurin:21-jre-alpine

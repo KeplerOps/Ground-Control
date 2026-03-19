@@ -51,6 +51,7 @@ const TO_CAMEL = {
   target_wave: "targetWave",
   requirement_uid: "requirementUid",
   extra_body: "extraBody",
+  project_identifier: "projectIdentifier",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -136,25 +137,47 @@ async function request(method, path, { body, params, formData } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// API functions
+// Project API functions
 // ---------------------------------------------------------------------------
 
-export async function getRequirementByUid(uid) {
-  return request("GET", `/api/v1/requirements/uid/${encodeURIComponent(uid)}`);
+export async function listProjects() {
+  return request("GET", "/api/v1/projects");
+}
+
+export async function getProject(identifier) {
+  return request("GET", `/api/v1/projects/${encodeURIComponent(identifier)}`);
+}
+
+export async function createProject(data) {
+  return request("POST", "/api/v1/projects", { body: data });
+}
+
+export async function updateProject(identifier, data) {
+  return request("PUT", `/api/v1/projects/${encodeURIComponent(identifier)}`, { body: data });
+}
+
+// ---------------------------------------------------------------------------
+// Requirement API functions
+// ---------------------------------------------------------------------------
+
+export async function getRequirementByUid(uid, project) {
+  return request("GET", `/api/v1/requirements/uid/${encodeURIComponent(uid)}`, {
+    params: { project },
+  });
 }
 
 export async function getRequirement(id) {
   return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}`);
 }
 
-export async function listRequirements({ status, type, priority, wave, search, page, size } = {}) {
+export async function listRequirements({ status, type, priority, wave, search, page, size, sort, project } = {}) {
   return request("GET", "/api/v1/requirements", {
-    params: { status, type, priority, wave, search, page, size },
+    params: { status, type, priority, wave, search, page, size, sort, project },
   });
 }
 
-export async function createRequirement(data) {
-  return request("POST", "/api/v1/requirements", { body: data });
+export async function createRequirement(data, project) {
+  return request("POST", "/api/v1/requirements", { body: data, params: { project } });
 }
 
 export async function updateRequirement(id, data) {
@@ -205,17 +228,17 @@ export async function createTraceabilityLink(requirementId, data) {
   );
 }
 
-export async function detectCycles() {
-  return request("GET", "/api/v1/analysis/cycles");
+export async function detectCycles(project) {
+  return request("GET", "/api/v1/analysis/cycles", { params: { project } });
 }
 
-export async function findOrphans() {
-  return request("GET", "/api/v1/analysis/orphans");
+export async function findOrphans(project) {
+  return request("GET", "/api/v1/analysis/orphans", { params: { project } });
 }
 
-export async function findCoverageGaps(linkType) {
+export async function findCoverageGaps(linkType, project) {
   return request("GET", "/api/v1/analysis/coverage-gaps", {
-    params: { linkType },
+    params: { linkType, project },
   });
 }
 
@@ -223,15 +246,29 @@ export async function impactAnalysis(id) {
   return request("GET", `/api/v1/analysis/impact/${encodeURIComponent(id)}`);
 }
 
-export async function crossWaveValidation() {
-  return request("GET", "/api/v1/analysis/cross-wave");
+export async function crossWaveValidation(project) {
+  return request("GET", "/api/v1/analysis/cross-wave", { params: { project } });
 }
 
-export async function importStrictdoc(filePath) {
+export async function detectConsistencyViolations(project) {
+  return request("GET", "/api/v1/analysis/consistency-violations", { params: { project } });
+}
+
+export async function analyzeCompleteness(project) {
+  return request("GET", "/api/v1/analysis/completeness", { params: { project } });
+}
+
+export async function getDashboardStats(project) {
+  return request("GET", "/api/v1/analysis/dashboard-stats", { params: { project } });
+}
+
+export async function importStrictdoc(filePath, project) {
   const content = readFileSync(filePath);
   const form = new FormData();
   form.append("file", new Blob([content]), basename(filePath));
-  return request("POST", "/api/v1/admin/import/strictdoc", { formData: form });
+  const params = {};
+  if (project) params.project = project;
+  return request("POST", "/api/v1/admin/import/strictdoc", { formData: form, params });
 }
 
 export async function syncGithub(owner, repo) {
@@ -276,21 +313,21 @@ export async function materializeGraph() {
   return request("POST", "/api/v1/admin/graph/materialize");
 }
 
-export async function getAncestors(uid, depth) {
+export async function getAncestors(uid, depth, project) {
   return request("GET", `/api/v1/graph/ancestors/${encodeURIComponent(uid)}`, {
-    params: { depth },
+    params: { depth, project },
   });
 }
 
-export async function getDescendants(uid, depth) {
+export async function getDescendants(uid, depth, project) {
   return request("GET", `/api/v1/graph/descendants/${encodeURIComponent(uid)}`, {
-    params: { depth },
+    params: { depth, project },
   });
 }
 
-export async function findPaths(source, target) {
+export async function findPaths(source, target, project) {
   return request("GET", "/api/v1/graph/paths", {
-    params: { source, target },
+    params: { source, target, project },
   });
 }
 
@@ -344,6 +381,6 @@ export async function createGitHubIssue({ title, body, labels, repo }) {
   return { url, number };
 }
 
-export async function createGitHubIssueViaApi(data) {
-  return request("POST", "/api/v1/admin/github/issues", { body: data });
+export async function createGitHubIssueViaApi(data, project) {
+  return request("POST", "/api/v1/admin/github/issues", { body: data, params: { project } });
 }

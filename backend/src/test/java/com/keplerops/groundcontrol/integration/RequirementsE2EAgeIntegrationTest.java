@@ -2,9 +2,12 @@ package com.keplerops.groundcontrol.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.GraphClient;
 import com.keplerops.groundcontrol.domain.requirements.service.ImportService;
 import java.nio.charset.StandardCharsets;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer.OrderAnnotation;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -24,6 +27,16 @@ class RequirementsE2EAgeIntegrationTest extends BaseAgeIntegrationTest {
     @Autowired
     private GraphClient graphClient;
 
+    @Autowired
+    private ProjectRepository projectRepository;
+
+    private Project testProject;
+
+    @BeforeAll
+    void setUpProject() {
+        testProject = projectRepository.findByIdentifier("ground-control").orElseThrow();
+    }
+
     @Test
     @Order(1)
     void importFixtureForGraph() throws Exception {
@@ -33,7 +46,7 @@ class RequirementsE2EAgeIntegrationTest extends BaseAgeIntegrationTest {
                         .readAllBytes(),
                 StandardCharsets.UTF_8);
 
-        var result = importService.importStrictdoc("test-requirements.sdoc", sdocContent);
+        var result = importService.importStrictdoc(testProject.getId(), "test-requirements.sdoc", sdocContent);
         assertThat(result.requirementsCreated()).isEqualTo(5);
         assertThat(result.relationsCreated()).isEqualTo(2);
     }

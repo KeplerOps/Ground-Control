@@ -2,6 +2,8 @@ package com.keplerops.groundcontrol.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.requirements.model.GitHubIssueSync;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementImport;
@@ -20,6 +22,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.hibernate.envers.AuditReaderFactory;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.transaction.TestTransaction;
@@ -43,9 +46,19 @@ class TraceabilityLinkIntegrationTest extends BaseIntegrationTest {
     @Autowired
     private EntityManager entityManager;
 
+    @Autowired
+    private ProjectRepository projectRepository;
+
+    private Project testProject;
+
+    @BeforeEach
+    void setUp() {
+        testProject = projectRepository.findByIdentifier("ground-control").orElseThrow();
+    }
+
     @Test
     void persistAndRetrieveWithRequirementFK() {
-        var req = new Requirement("REQ-LINK-001", "Linked requirement", "Statement");
+        var req = new Requirement(testProject, "REQ-LINK-001", "Linked requirement", "Statement");
         requirementRepository.save(req);
 
         var link = new TraceabilityLink(req, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
@@ -126,7 +139,7 @@ class TraceabilityLinkIntegrationTest extends BaseIntegrationTest {
     @Test
     void enversAuditTrailRecordsRevisions() {
         // Envers writes audit data on commit, so we must commit to see revisions
-        var req = new Requirement("REQ-AUDIT-001", "Audited req", "Statement");
+        var req = new Requirement(testProject, "REQ-AUDIT-001", "Audited req", "Statement");
         requirementRepository.save(req);
         var link = new TraceabilityLink(req, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
         traceabilityLinkRepository.save(link);
