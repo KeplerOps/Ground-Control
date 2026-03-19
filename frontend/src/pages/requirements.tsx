@@ -12,8 +12,10 @@ import {
 } from "@/hooks/use-requirements";
 import { cn } from "@/lib/utils";
 import type {
+  BulkStatusTransitionResponse,
   Priority,
   RequirementRequest,
+  RequirementResponse,
   RequirementType,
   Status,
   UpdateRequirementRequest,
@@ -128,7 +130,7 @@ export function Requirements() {
     bulkMutation.mutate(
       { ids: Array.from(selected), status: bulkStatus },
       {
-        onSuccess: (result) => {
+        onSuccess: (result: BulkStatusTransitionResponse) => {
           setSelected(new Set());
           toast({
             title: `Transitioned ${result.totalSucceeded} requirements`,
@@ -373,7 +375,7 @@ export function Requirements() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {content.map((req) => (
+            {content.map((req: RequirementResponse) => (
               <RequirementRow
                 key={req.id}
                 req={req}

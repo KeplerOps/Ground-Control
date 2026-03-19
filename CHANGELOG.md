@@ -39,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   push to `main`, added `id-token: write` permission for OIDC
 - Deployment docs updated with AWS deployment section
 
+### Fixed
+
+- TypeScript build errors in `requirements.tsx` — added explicit types for
+  `BulkStatusTransitionResponse` callback and `RequirementResponse` map parameter
+
 ### Removed
 
 - Terraform `rds` module (stale — RDS withdrawn per ADR-015)
