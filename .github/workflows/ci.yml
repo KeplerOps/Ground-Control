@@ -133,10 +133,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4
+        with:
+          role-to-assume: arn:aws:iam::516608939870:role/github-actions-terraform
+          aws-region: us-east-2
+
+      - name: Login to ECR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+        with:
+          registry: 516608939870.dkr.ecr.us-east-2.amazonaws.com
+
       - id: meta
         uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5
         with:
-          images: ghcr.io/keplerops/ground-control
+          images: |
+            ghcr.io/keplerops/ground-control
+            516608939870.dkr.ecr.us-east-2.amazonaws.com/ground-control
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}

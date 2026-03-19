@@ -9,8 +9,5 @@ data_volume_size = 20
 # Tailscale
 tailscale_hostname = "gc-dev"
 
-# Docker image (set to specific tag for pinned deploys)
-gc_image = "ghcr.io/keplerops/ground-control:latest"
-
 # S3 backup bucket
 backup_bucket_name = "groundcontrol-backups-catalyst-dev"

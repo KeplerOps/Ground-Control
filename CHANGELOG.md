@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.59.0] - 2026-03-18
+## [0.60.0] - 2026-03-18
 
 ### Added
 
@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   volume with cloud-init bootstrapping (Docker, Tailscale, compose)
 - Terraform `backup` module: S3 bucket for pg_dump backups (30-day lifecycle),
   DLM policy for daily EBS snapshots (7-day retention)
-- Production Docker Compose (`deploy/docker/docker-compose.prod.yml`) — GHCR
+- ECR container registry for deployment images — EC2 pulls via IAM role (no
+  tokens needed), CI pushes to both GHCR and ECR
+- Production Docker Compose (`deploy/docker/docker-compose.prod.yml`) — ECR
   image, EBS bind mounts, no Redis, JVM memory caps
 - Automated deployment: CI pushes to `main` trigger deploy to EC2 via SSM
   `SendCommand` after smoke test passes — no manual SSH needed
@@ -34,9 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Terraform `environments/dev` rewritten to wire compute + networking + backup
   + secrets modules (was RDS + networking + secrets)
 - Bootstrap IAM policy updated: replaced RDS permissions with EC2, IAM instance
-  profile, S3 backup bucket, DLM, and SSM SendCommand permissions
+  profile, S3 backup bucket, DLM, SSM SendCommand, and ECR permissions
 - CI workflow (`ci.yml`): added `deploy` job that auto-deploys to EC2 on
-  push to `main`, added `id-token: write` permission for OIDC
+  push to `main`, added `id-token: write` permission for OIDC, added ECR
+  push alongside GHCR
 - Deployment docs updated with AWS deployment section
 
 ### Fixed

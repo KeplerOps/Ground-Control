@@ -106,7 +106,16 @@ services:
     restart: unless-stopped
 COMPOSEEOF
 
+# --- ECR login helper (values baked by Terraform) ---
+cat > /opt/gc/ecr-login.sh <<ECREOF
+#!/bin/bash
+aws ecr get-login-password --region "${aws_region}" | docker login --username AWS --password-stdin "${ecr_registry_url}"
+ECREOF
+chmod +x /opt/gc/ecr-login.sh
+
 cd /opt/gc
+/opt/gc/ecr-login.sh
+docker compose pull
 docker compose up -d
 
 # --- Backup script ---
@@ -153,6 +162,7 @@ cat > /opt/gc/deploy.sh <<'DEPLOYEOF'
 #!/bin/bash
 set -euo pipefail
 cd /opt/gc
+source /opt/gc/ecr-login.sh
 docker compose pull
 docker compose up -d
 echo "Waiting for health check..."

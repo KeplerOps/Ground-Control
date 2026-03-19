@@ -28,6 +28,38 @@ module "backup" {
   bucket_name = var.backup_bucket_name
 }
 
+# --- Container Registry (ECR) ---
+
+resource "aws_ecr_repository" "app" {
+  name                 = "ground-control"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = false
+  }
+}
+
+resource "aws_ecr_lifecycle_policy" "app" {
+  repository = aws_ecr_repository.app.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Keep last 10 images"
+        selection = {
+          tagStatus   = "any"
+          countType   = "imageCountMoreThan"
+          countNumber = 10
+        }
+        action = {
+          type = "expire"
+        }
+      }
+    ]
+  })
+}
+
 # --- Compute (EC2 + IAM + EBS) ---
 
 module "compute" {
@@ -41,10 +73,11 @@ module "compute" {
   instance_type      = var.instance_type
   data_volume_size   = var.data_volume_size
   tailscale_hostname = var.tailscale_hostname
-  gc_image           = var.gc_image
+  gc_image           = "${aws_ecr_repository.app.repository_url}:latest"
 
   backup_bucket_name = module.backup.bucket_name
   backup_bucket_arn  = module.backup.bucket_arn
+  ecr_registry_url   = split("/", aws_ecr_repository.app.repository_url)[0]
 
   ssm_tailscale_key = module.secrets.tailscale_auth_key_name
   ssm_db_password   = module.secrets.db_password_name

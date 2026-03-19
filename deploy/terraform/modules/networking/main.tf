@@ -20,7 +20,7 @@ data "aws_subnets" "default" {
 
 resource "aws_security_group" "instance" {
   name        = "${var.name_prefix}-instance"
-  description = "Zero-ingress security group for ${var.name_prefix} — all access via Tailscale"
+  description = "Zero-ingress security group for ${var.name_prefix} - all access via Tailscale"
   vpc_id      = local.vpc_id
 }
 

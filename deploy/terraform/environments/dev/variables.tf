@@ -34,12 +34,6 @@ variable "tailscale_hostname" {
   default     = "gc-dev"
 }
 
-variable "gc_image" {
-  description = "Docker image for Ground Control backend"
-  type        = string
-  default     = "ghcr.io/keplerops/ground-control:latest"
-}
-
 variable "backup_bucket_name" {
   description = "S3 bucket name for database backups"
   type        = string
