@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - TypeScript build errors in `requirements.tsx` — added explicit types for
   `BulkStatusTransitionResponse` callback and `RequirementResponse` map parameter
+- Docker build failure: `.gitignore` pattern `lib/` was excluding
+  `frontend/src/lib/` (api-client, query-client, utils) from git — changed
+  to `/lib/` so it only matches the repo-root Python dist directory
 
 ### Removed
 
