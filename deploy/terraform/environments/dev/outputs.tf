@@ -1,39 +1,39 @@
-output "rds_endpoint" {
-  description = "RDS endpoint (host:port)"
-  value       = module.rds.endpoint
+output "instance_id" {
+  description = "EC2 instance ID"
+  value       = module.compute.instance_id
 }
 
-output "rds_address" {
-  description = "RDS hostname"
-  value       = module.rds.address
+output "private_ip" {
+  description = "EC2 private IP address"
+  value       = module.compute.private_ip
 }
 
-output "rds_port" {
-  description = "RDS port"
-  value       = module.rds.port
-}
-
-output "database_name" {
-  description = "Database name"
-  value       = module.rds.database_name
+output "tailscale_hostname" {
+  description = "Tailscale MagicDNS hostname"
+  value       = var.tailscale_hostname
 }
 
 output "security_group_id" {
-  description = "Database security group ID"
+  description = "Instance security group ID"
   value       = module.networking.security_group_id
 }
 
-output "ssm_parameter_db_host" {
-  description = "SSM parameter name for database host"
-  value       = module.secrets.parameter_host_name
+output "data_volume_id" {
+  description = "EBS data volume ID"
+  value       = module.compute.data_volume_id
 }
 
-output "ssm_parameter_db_username" {
-  description = "SSM parameter name for database username"
-  value       = module.secrets.parameter_username_name
+output "backup_bucket" {
+  description = "S3 backup bucket name"
+  value       = module.backup.bucket_name
 }
 
-output "ssm_parameter_db_password" {
+output "ssm_tailscale_key" {
+  description = "SSM parameter name for Tailscale auth key"
+  value       = module.secrets.tailscale_auth_key_name
+}
+
+output "ssm_db_password" {
   description = "SSM parameter name for database password"
-  value       = module.secrets.parameter_password_name
+  value       = module.secrets.db_password_name
 }

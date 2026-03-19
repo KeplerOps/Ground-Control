@@ -4,18 +4,16 @@ variable "parameter_prefix" {
   default     = "/gc/dev"
 }
 
-variable "db_host" {
-  description = "Database endpoint hostname"
+variable "tailscale_auth_key" {
+  description = "Initial Tailscale auth key (will be overwritten manually via AWS CLI)"
   type        = string
-}
-
-variable "db_username" {
-  description = "Database username"
-  type        = string
+  sensitive   = true
+  default     = "PLACEHOLDER"
 }
 
 variable "db_password" {
-  description = "Database password"
+  description = "Initial database password (will be overwritten manually via AWS CLI)"
   type        = string
   sensitive   = true
+  default     = "PLACEHOLDER"
 }

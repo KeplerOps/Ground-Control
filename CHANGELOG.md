@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.59.0] - 2026-03-18
+
+### Added
+
+- AWS EC2 deployment infrastructure — single `t3a.small` instance running
+  Docker Compose with Tailscale-only access (zero public ingress) (ADR-018)
+- Terraform `compute` module: EC2 instance, IAM instance profile, EBS data
+  volume with cloud-init bootstrapping (Docker, Tailscale, compose)
+- Terraform `backup` module: S3 bucket for pg_dump backups (30-day lifecycle),
+  DLM policy for daily EBS snapshots (7-day retention)
+- Production Docker Compose (`deploy/docker/docker-compose.prod.yml`) — GHCR
+  image, EBS bind mounts, no Redis, JVM memory caps
+- Automated deployment: CI pushes to `main` trigger deploy to EC2 via SSM
+  `SendCommand` after smoke test passes — no manual SSH needed
+- Operational scripts: `backup.sh` (pg_dump + S3), `watchdog.sh` (health check
+  + auto-restart), `deploy.sh` (pull + restart + verify)
+- Makefile targets: `deploy` (SSH deploy to EC2), `deploy-infra` (terraform
+  apply)
+- ADR-018: AWS EC2 Deployment — documents architecture, cost, and rationale
+
+### Changed
+
+- Terraform `networking` module rewritten for zero-ingress security group
+  (Tailscale-only, was CIDR-based ingress for RDS)
+- Terraform `secrets` module rewritten for Tailscale auth key + DB password
+  (was RDS host/user/pass)
+- Terraform `environments/dev` rewritten to wire compute + networking + backup
+  + secrets modules (was RDS + networking + secrets)
+- Bootstrap IAM policy updated: replaced RDS permissions with EC2, IAM instance
+  profile, S3 backup bucket, DLM, and SSM SendCommand permissions
+- CI workflow (`ci.yml`): added `deploy` job that auto-deploys to EC2 on
+  push to `main`, added `id-token: write` permission for OIDC
+- Deployment docs updated with AWS deployment section
+
+### Removed
+
+- Terraform `rds` module (stale — RDS withdrawn per ADR-015)
+
 ## [0.58.0] - 2026-03-18
 
 ### Added

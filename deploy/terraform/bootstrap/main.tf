@@ -137,9 +137,22 @@ resource "aws_iam_role_policy" "github_actions_terraform" {
         Resource = aws_dynamodb_table.lock.arn
       },
       {
-        Sid    = "EC2SecurityGroupManagement"
+        Sid    = "EC2Management"
         Effect = "Allow"
         Action = [
+          "ec2:RunInstances",
+          "ec2:TerminateInstances",
+          "ec2:StartInstances",
+          "ec2:StopInstances",
+          "ec2:DescribeInstances",
+          "ec2:DescribeInstanceTypes",
+          "ec2:DescribeInstanceStatus",
+          "ec2:CreateVolume",
+          "ec2:DeleteVolume",
+          "ec2:AttachVolume",
+          "ec2:DetachVolume",
+          "ec2:DescribeVolumes",
+          "ec2:DescribeVolumeStatus",
           "ec2:CreateSecurityGroup",
           "ec2:DeleteSecurityGroup",
           "ec2:DescribeSecurityGroups",
@@ -148,24 +161,96 @@ resource "aws_iam_role_policy" "github_actions_terraform" {
           "ec2:AuthorizeSecurityGroupEgress",
           "ec2:RevokeSecurityGroupEgress",
           "ec2:DescribeVpcs",
+          "ec2:DescribeSubnets",
           "ec2:DescribeNetworkInterfaces",
+          "ec2:DescribeImages",
+          "ec2:DescribeKeyPairs",
+          "ec2:DescribeAvailabilityZones",
           "ec2:CreateTags",
+          "ec2:DeleteTags",
+          "ec2:DescribeTags",
         ]
         Resource = "*"
       },
       {
-        Sid    = "RDSManagement"
+        Sid    = "IAMInstanceProfileManagement"
         Effect = "Allow"
         Action = [
-          "rds:Create*",
-          "rds:Delete*",
-          "rds:Describe*",
-          "rds:Modify*",
-          "rds:ListTagsForResource",
-          "rds:AddTagsToResource",
-          "rds:RemoveTagsFromResource",
+          "iam:CreateRole",
+          "iam:DeleteRole",
+          "iam:GetRole",
+          "iam:TagRole",
+          "iam:UntagRole",
+          "iam:ListRolePolicies",
+          "iam:ListAttachedRolePolicies",
+          "iam:ListInstanceProfilesForRole",
+          "iam:PutRolePolicy",
+          "iam:DeleteRolePolicy",
+          "iam:GetRolePolicy",
+          "iam:CreateInstanceProfile",
+          "iam:DeleteInstanceProfile",
+          "iam:GetInstanceProfile",
+          "iam:AddRoleToInstanceProfile",
+          "iam:RemoveRoleFromInstanceProfile",
+          "iam:PassRole",
+          "iam:TagInstanceProfile",
+          "iam:UntagInstanceProfile",
+        ]
+        Resource = [
+          "arn:aws:iam::*:role/groundcontrol-*",
+          "arn:aws:iam::*:instance-profile/groundcontrol-*",
+        ]
+      },
+      {
+        Sid    = "S3BackupBucketManagement"
+        Effect = "Allow"
+        Action = [
+          "s3:CreateBucket",
+          "s3:DeleteBucket",
+          "s3:ListBucket",
+          "s3:GetBucketLocation",
+          "s3:GetBucketVersioning",
+          "s3:PutBucketVersioning",
+          "s3:GetEncryptionConfiguration",
+          "s3:PutEncryptionConfiguration",
+          "s3:GetBucketPublicAccessBlock",
+          "s3:PutBucketPublicAccessBlock",
+          "s3:GetLifecycleConfiguration",
+          "s3:PutLifecycleConfiguration",
+          "s3:GetBucketTagging",
+          "s3:PutBucketTagging",
+          "s3:GetBucketPolicy",
+          "s3:PutBucketPolicy",
+          "s3:DeleteBucketPolicy",
+        ]
+        Resource = "arn:aws:s3:::groundcontrol-backups-*"
+      },
+      {
+        Sid    = "DLMManagement"
+        Effect = "Allow"
+        Action = [
+          "dlm:CreateLifecyclePolicy",
+          "dlm:DeleteLifecyclePolicy",
+          "dlm:GetLifecyclePolicy",
+          "dlm:GetLifecyclePolicies",
+          "dlm:UpdateLifecyclePolicy",
+          "dlm:TagResource",
+          "dlm:UntagResource",
         ]
         Resource = "*"
+      },
+      {
+        Sid    = "DLMServiceRole"
+        Effect = "Allow"
+        Action = [
+          "iam:CreateServiceLinkedRole",
+        ]
+        Resource = "arn:aws:iam::*:role/aws-service-role/dlm.amazonaws.com/*"
+        Condition = {
+          StringEquals = {
+            "iam:AWSServiceName" = "dlm.amazonaws.com"
+          }
+        }
       },
       {
         Sid    = "SSMParameterManagement"
@@ -181,6 +266,35 @@ resource "aws_iam_role_policy" "github_actions_terraform" {
           "ssm:RemoveTagsFromResource",
         ]
         Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/gc/*"
+      },
+      {
+        Sid    = "SSMDeployCommandDocument"
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand",
+        ]
+        Resource = "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript"
+      },
+      {
+        Sid    = "SSMDeployCommandInstance"
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand",
+        ]
+        Resource = "arn:aws:ec2:${var.aws_region}:*:instance/*"
+        Condition = {
+          StringEquals = {
+            "aws:ResourceTag/Project" = "ground-control"
+          }
+        }
+      },
+      {
+        Sid    = "SSMCommandStatus"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetCommandInvocation",
+        ]
+        Resource = "*"
       },
     ]
   })

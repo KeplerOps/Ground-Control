@@ -1,5 +1,6 @@
 .PHONY: rapid build test test-cov format lint check integration verify dev clean up down docker-build smoke \
-       frontend-install frontend-dev frontend-build frontend-lint frontend-format
+       frontend-install frontend-dev frontend-build frontend-lint frontend-format \
+       deploy deploy-infra
 
 # --- Rapid dev loop (< 5s) ---
 
@@ -100,6 +101,14 @@ smoke: docker-build ## Build Docker image and verify Flyway + health
 	fi; \
 	docker rm -f gc-smoke-db gc-smoke 2>/dev/null || true; \
 	[ "$$PASS" = "true" ]
+
+# --- AWS Deployment ---
+
+deploy: ## Deploy latest image to EC2 (pulls, restarts, verifies health)
+	ssh gc-dev /opt/gc/deploy.sh
+
+deploy-infra: ## Apply Terraform for dev environment
+	cd deploy/terraform/environments/dev && terraform apply
 
 clean: ## Remove build artifacts
 	cd backend && ./gradlew clean

@@ -1,29 +1,19 @@
-output "parameter_host_name" {
-  description = "SSM parameter name for database host"
-  value       = aws_ssm_parameter.db_host.name
+output "tailscale_auth_key_name" {
+  description = "SSM parameter name for Tailscale auth key"
+  value       = aws_ssm_parameter.tailscale_auth_key.name
 }
 
-output "parameter_host_arn" {
-  description = "SSM parameter ARN for database host"
-  value       = aws_ssm_parameter.db_host.arn
+output "tailscale_auth_key_arn" {
+  description = "SSM parameter ARN for Tailscale auth key"
+  value       = aws_ssm_parameter.tailscale_auth_key.arn
 }
 
-output "parameter_username_name" {
-  description = "SSM parameter name for database username"
-  value       = aws_ssm_parameter.db_username.name
-}
-
-output "parameter_username_arn" {
-  description = "SSM parameter ARN for database username"
-  value       = aws_ssm_parameter.db_username.arn
-}
-
-output "parameter_password_name" {
+output "db_password_name" {
   description = "SSM parameter name for database password"
   value       = aws_ssm_parameter.db_password.name
 }
 
-output "parameter_password_arn" {
+output "db_password_arn" {
   description = "SSM parameter ARN for database password"
   value       = aws_ssm_parameter.db_password.arn
 }

@@ -4,7 +4,44 @@ variable "aws_region" {
   default     = "us-east-2"
 }
 
-variable "allowed_cidr" {
-  description = "Developer IP CIDR for security group ingress"
+variable "availability_zone" {
+  description = "Availability zone for EC2 and EBS"
   type        = string
+  default     = "us-east-2a"
+}
+
+variable "subnet_id" {
+  description = "Subnet ID for EC2 instance. If null, uses first default VPC subnet."
+  type        = string
+  default     = null
+}
+
+variable "instance_type" {
+  description = "EC2 instance type"
+  type        = string
+  default     = "t3a.small"
+}
+
+variable "data_volume_size" {
+  description = "EBS data volume size in GiB"
+  type        = number
+  default     = 20
+}
+
+variable "tailscale_hostname" {
+  description = "Tailscale MagicDNS hostname"
+  type        = string
+  default     = "gc-dev"
+}
+
+variable "gc_image" {
+  description = "Docker image for Ground Control backend"
+  type        = string
+  default     = "ghcr.io/keplerops/ground-control:latest"
+}
+
+variable "backup_bucket_name" {
+  description = "S3 bucket name for database backups"
+  type        = string
+  default     = "groundcontrol-backups-catalyst-dev"
 }

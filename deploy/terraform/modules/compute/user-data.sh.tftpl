@@ -1,0 +1,179 @@
+#!/bin/bash
+set -euo pipefail
+exec > >(tee /var/log/gc-init.log) 2>&1
+
+echo "=== Ground Control EC2 initialization ==="
+
+# --- System packages ---
+dnf install -y docker aws-cli jq
+
+# --- Docker ---
+systemctl enable docker
+systemctl start docker
+usermod -aG docker ec2-user
+
+# Install docker compose plugin
+mkdir -p /usr/local/lib/docker/cli-plugins
+COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | jq -r .tag_name)
+curl -sL "https://github.com/docker/compose/releases/download/$${COMPOSE_VERSION}/docker-compose-linux-x86_64" \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+# --- Tailscale ---
+curl -fsSL https://tailscale.com/install.sh | sh
+TS_AUTH_KEY=$(aws ssm get-parameter \
+  --region "${aws_region}" \
+  --name "${ssm_tailscale_key}" \
+  --with-decryption \
+  --query 'Parameter.Value' \
+  --output text)
+tailscale up --authkey="$${TS_AUTH_KEY}" --hostname="${tailscale_hostname}" --ssh
+
+# --- EBS data volume ---
+DATA_DEVICE="${data_device}"
+# Nitro instances remap /dev/xvdf to /dev/nvme1n1
+if [ ! -b "$${DATA_DEVICE}" ] && [ -b /dev/nvme1n1 ]; then
+  DATA_DEVICE=/dev/nvme1n1
+fi
+
+# Format only if not already formatted
+if ! blkid "$${DATA_DEVICE}" | grep -q ext4; then
+  mkfs.ext4 -L gc-data "$${DATA_DEVICE}"
+fi
+
+mkdir -p /data
+echo "LABEL=gc-data /data ext4 defaults,nofail 0 2" >> /etc/fstab
+mount /data
+mkdir -p /data/postgres /data/backups
+chown 999:999 /data/postgres  # postgres container UID
+
+# --- Read secrets from SSM ---
+DB_PASSWORD=$(aws ssm get-parameter \
+  --region "${aws_region}" \
+  --name "${ssm_db_password}" \
+  --with-decryption \
+  --query 'Parameter.Value' \
+  --output text)
+
+# --- Deploy Ground Control ---
+mkdir -p /opt/gc
+cat > /opt/gc/.env <<ENVEOF
+GC_DATABASE_URL=jdbc:postgresql://db:5432/${gc_database_name}
+GC_DATABASE_USER=${gc_database_user}
+GC_DATABASE_PASSWORD=$${DB_PASSWORD}
+GC_SERVER_PORT=8000
+GC_CACHE_TYPE=none
+JAVA_TOOL_OPTIONS=-Xmx512m -Xms256m
+POSTGRES_DB=${gc_database_name}
+POSTGRES_USER=${gc_database_user}
+POSTGRES_PASSWORD=$${DB_PASSWORD}
+GC_IMAGE=${gc_image}
+ENVEOF
+chmod 600 /opt/gc/.env
+
+cat > /opt/gc/docker-compose.yml <<'COMPOSEEOF'
+services:
+  db:
+    image: apache/age:release_PG16_1.6.0
+    environment:
+      POSTGRES_DB: $${POSTGRES_DB}
+      POSTGRES_USER: $${POSTGRES_USER}
+      POSTGRES_PASSWORD: $${POSTGRES_PASSWORD}
+    volumes:
+      - /data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    image: $${GC_IMAGE}
+    environment:
+      GC_DATABASE_URL: $${GC_DATABASE_URL}
+      GC_DATABASE_USER: $${GC_DATABASE_USER}
+      GC_DATABASE_PASSWORD: $${GC_DATABASE_PASSWORD}
+      GC_SERVER_PORT: "8000"
+      GC_CACHE_TYPE: "none"
+      JAVA_TOOL_OPTIONS: $${JAVA_TOOL_OPTIONS}
+      SPRING_PROFILES_ACTIVE: prod
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+COMPOSEEOF
+
+cd /opt/gc
+docker compose up -d
+
+# --- Backup script ---
+cat > /opt/gc/backup.sh <<'BACKUPEOF'
+#!/bin/bash
+set -euo pipefail
+
+# Source env for DB credentials
+set -a; source /opt/gc/.env; set +a
+
+BACKUP_DIR=/data/backups
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+DUMP_FILE="$${BACKUP_DIR}/gc-$${TIMESTAMP}.dump"
+
+# pg_dump via the running container
+docker compose -f /opt/gc/docker-compose.yml exec -T db \
+  pg_dump -Fc -U "$${POSTGRES_USER}" "$${POSTGRES_DB}" > "$${DUMP_FILE}"
+
+# Upload to S3
+aws s3 cp "$${DUMP_FILE}" "s3://${backup_bucket}/pg-dumps/gc-$${TIMESTAMP}.dump"
+
+# Keep only last 3 local dumps
+ls -t "$${BACKUP_DIR}"/gc-*.dump 2>/dev/null | tail -n +4 | xargs -r rm
+
+echo "Backup complete: $${DUMP_FILE}"
+BACKUPEOF
+chmod +x /opt/gc/backup.sh
+
+# --- Watchdog script ---
+cat > /opt/gc/watchdog.sh <<'WATCHEOF'
+#!/bin/bash
+HEALTH=$(curl -sf http://localhost:8000/actuator/health 2>/dev/null || echo "DOWN")
+if echo "$${HEALTH}" | grep -q '"status":"UP"'; then
+  exit 0
+fi
+
+echo "$(date): Health check failed, restarting backend..." >> /var/log/gc-watchdog.log
+cd /opt/gc && docker compose restart backend
+WATCHEOF
+chmod +x /opt/gc/watchdog.sh
+
+# --- Deploy helper ---
+cat > /opt/gc/deploy.sh <<'DEPLOYEOF'
+#!/bin/bash
+set -euo pipefail
+cd /opt/gc
+docker compose pull
+docker compose up -d
+echo "Waiting for health check..."
+for i in $(seq 1 30); do
+  if curl -sf http://localhost:8000/actuator/health | grep -q '"status":"UP"'; then
+    echo "Deploy complete — application is UP"
+    exit 0
+  fi
+  sleep 2
+done
+echo "WARNING: Health check did not pass within 60s"
+docker compose logs --tail=50 backend
+exit 1
+DEPLOYEOF
+chmod +x /opt/gc/deploy.sh
+
+# --- Cron jobs ---
+# Backup at 03:00 UTC daily
+echo "0 3 * * * root /opt/gc/backup.sh >> /var/log/gc-backup.log 2>&1" > /etc/cron.d/gc-backup
+# Watchdog every 5 minutes
+echo "*/5 * * * * root /opt/gc/watchdog.sh" > /etc/cron.d/gc-watchdog
+chmod 644 /etc/cron.d/gc-backup /etc/cron.d/gc-watchdog
+
+echo "=== Ground Control initialization complete ==="
