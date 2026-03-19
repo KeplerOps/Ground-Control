@@ -37,3 +37,8 @@ output "ssm_db_password" {
   description = "SSM parameter name for database password"
   value       = module.secrets.db_password_name
 }
+
+output "ecr_repository_url" {
+  description = "ECR repository URL for Ground Control images"
+  value       = aws_ecr_repository.app.repository_url
+}

@@ -82,6 +82,11 @@ variable "gc_image" {
   default     = "ghcr.io/keplerops/ground-control:latest"
 }
 
+variable "ecr_registry_url" {
+  description = "ECR registry URL (e.g. 516608939870.dkr.ecr.us-east-2.amazonaws.com)"
+  type        = string
+}
+
 variable "gc_database_user" {
   description = "PostgreSQL database username"
   type        = string

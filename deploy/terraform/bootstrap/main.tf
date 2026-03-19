@@ -202,6 +202,49 @@ resource "aws_iam_role_policy" "github_actions_terraform" {
         ]
       },
       {
+        Sid    = "ECRManagement"
+        Effect = "Allow"
+        Action = [
+          "ecr:CreateRepository",
+          "ecr:DeleteRepository",
+          "ecr:DescribeRepositories",
+          "ecr:ListTagsForResource",
+          "ecr:TagResource",
+          "ecr:UntagResource",
+          "ecr:PutLifecyclePolicy",
+          "ecr:GetLifecyclePolicy",
+          "ecr:DeleteLifecyclePolicy",
+          "ecr:SetRepositoryPolicy",
+          "ecr:GetRepositoryPolicy",
+          "ecr:DeleteRepositoryPolicy",
+          "ecr:PutImageScanningConfiguration",
+          "ecr:PutImageTagMutability",
+        ]
+        Resource = "arn:aws:ecr:${var.aws_region}:*:repository/ground-control"
+      },
+      {
+        Sid    = "ECRPush"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRImagePush"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:PutImage",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+        ]
+        Resource = "arn:aws:ecr:${var.aws_region}:*:repository/ground-control"
+      },
+      {
         Sid    = "S3BackupBucketManagement"
         Effect = "Allow"
         Action = [

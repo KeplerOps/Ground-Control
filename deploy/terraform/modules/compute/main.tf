@@ -65,6 +65,35 @@ resource "aws_iam_role_policy" "s3_backup" {
   })
 }
 
+resource "aws_iam_role_policy" "ecr_pull" {
+  name = "ecr-pull"
+  role = aws_iam_role.instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ECRAuth"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRPull"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchCheckLayerAvailability",
+        ]
+        Resource = "arn:aws:ecr:${var.aws_region}:*:repository/ground-control"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy_attachment" "ssm_core" {
   role       = aws_iam_role.instance.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
@@ -132,6 +161,7 @@ resource "aws_instance" "this" {
     ssm_tailscale_key  = var.ssm_tailscale_key
     ssm_db_password    = var.ssm_db_password
     tailscale_hostname = var.tailscale_hostname
+    ecr_registry_url   = var.ecr_registry_url
     backup_bucket      = var.backup_bucket_name
     gc_image           = var.gc_image
     gc_database_user   = var.gc_database_user
