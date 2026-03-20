@@ -8,7 +8,18 @@ import { Graph } from "@/pages/graph";
 import { Projects } from "@/pages/projects";
 import { RequirementDetail } from "@/pages/requirement-detail";
 import { Requirements } from "@/pages/requirements";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Link, Navigate, Route, Routes } from "react-router-dom";
+
+function NotFound() {
+  return (
+    <div className="py-20 text-center text-muted-foreground">
+      <p>Page not found.</p>
+      <Link to="/projects" className="mt-4 inline-block text-primary underline">
+        Back to projects
+      </Link>
+    </div>
+  );
+}
 
 function RootRedirect() {
   const { data: projects = [], isLoading } = useProjects();
@@ -50,6 +61,10 @@ export function AppRoutes() {
         <Route path="graph" element={<Graph />} />
         <Route path="analysis" element={<Analysis />} />
         <Route path="admin" element={<Admin />} />
+        <Route path="*" element={<NotFound />} />
+      </Route>
+      <Route element={<AppLayout />}>
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
   );

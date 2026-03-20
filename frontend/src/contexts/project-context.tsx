@@ -30,6 +30,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     [projects, projectId],
   );
 
+  // toast is referentially stable (useCallback in ToastProvider)
   useEffect(() => {
     if (!isLoading && projects.length > 0 && projectId && !activeProject) {
       toast({ title: "Project not found", variant: "error" });

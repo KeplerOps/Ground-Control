@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.64.1] - 2026-03-20
+
+### Fixed
+
+- Project switcher now preserves query string (e.g., `?status=ACTIVE`) when
+  switching projects
+- Unknown routes (`/p/:projectId/bad-page`, `/random-path`) now render a
+  "Page not found" message instead of a blank page
+
 ## [0.64.0] - 2026-03-20
 
 ### Changed

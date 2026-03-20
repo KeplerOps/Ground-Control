@@ -25,7 +25,7 @@ export function ProjectSwitcher() {
         if (project) {
           const match = location.pathname.match(/^\/p\/[^/]+\/(.*)/);
           const subPath = match?.[1] ?? "";
-          navigate(`/p/${project.identifier}/${subPath}`);
+          navigate(`/p/${project.identifier}/${subPath}${location.search}`);
         }
       }}
     >
