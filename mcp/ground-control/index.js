@@ -39,6 +39,12 @@ import {
   getDescendants,
   findPaths,
   createGitHubIssueViaApi,
+  createBaseline,
+  listBaselines,
+  getBaseline,
+  getBaselineSnapshot,
+  compareBaselines,
+  deleteBaseline,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -710,6 +716,108 @@ server.tool(
       const paths = await findPaths(source, target, project);
       if (Array.isArray(paths) && paths.length === 0) return ok("No paths found.");
       return ok(JSON.stringify(paths, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Baseline tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_baseline",
+  "Create a named baseline — a point-in-time snapshot of the current requirement set. Captures the current Envers revision number.",
+  {
+    name: z.string().max(100).describe("Baseline name (e.g. 'v1.0', 'Sprint-3 freeze')"),
+    description: z.string().optional().describe("Description of what this baseline represents"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ name, description, project }) => {
+    try {
+      const data = { name };
+      if (description !== undefined) data.description = description;
+      return ok(JSON.stringify(await createBaseline(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_baselines",
+  "List all baselines for a project, ordered by creation date (newest first).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const baselines = await listBaselines(project);
+      if (Array.isArray(baselines) && baselines.length === 0) return ok("No baselines found.");
+      return ok(JSON.stringify(baselines, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_baseline",
+  "Get a baseline by its UUID.",
+  {
+    id: z.string().uuid().describe("Baseline UUID"),
+  },
+  async ({ id }) => {
+    try {
+      return ok(JSON.stringify(await getBaseline(id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_baseline_snapshot",
+  "Get the requirement snapshot for a baseline — reconstructs the full requirement set as it existed at that point in time.",
+  {
+    id: z.string().uuid().describe("Baseline UUID"),
+  },
+  async ({ id }) => {
+    try {
+      return ok(JSON.stringify(await getBaselineSnapshot(id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_compare_baselines",
+  "Compare two baselines to see what requirements were added, removed, or modified between them.",
+  {
+    baseline_id: z.string().uuid().describe("First baseline UUID (the 'before')"),
+    other_baseline_id: z.string().uuid().describe("Second baseline UUID (the 'after')"),
+  },
+  async ({ baseline_id, other_baseline_id }) => {
+    try {
+      return ok(JSON.stringify(await compareBaselines(baseline_id, other_baseline_id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_baseline",
+  "Delete a baseline. This does not affect the underlying requirement history.",
+  {
+    id: z.string().uuid().describe("Baseline UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteBaseline(id);
+      return ok("Baseline deleted successfully.");
     } catch (e) {
       return err(e);
     }

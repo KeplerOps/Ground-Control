@@ -58,6 +58,16 @@ const TO_CAMEL = {
   total_blocked: "totalBlocked",
   total_unconstrained: "totalUnconstrained",
   total_requirements: "totalRequirements",
+  created_by: "createdBy",
+  baseline_id: "baselineId",
+  baseline_name: "baselineName",
+  other_baseline_id: "otherBaselineId",
+  other_baseline_name: "otherBaselineName",
+  added_count: "addedCount",
+  removed_count: "removedCount",
+  modified_count: "modifiedCount",
+  requirement_count: "requirementCount",
+  requirement_id: "requirementId",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -339,6 +349,34 @@ export async function findPaths(source, target, project) {
   return request("GET", "/api/v1/graph/paths", {
     params: { source, target, project },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Baseline functions
+// ---------------------------------------------------------------------------
+
+export async function createBaseline(data, project) {
+  return request("POST", "/api/v1/baselines", { body: data, params: { project } });
+}
+
+export async function listBaselines(project) {
+  return request("GET", "/api/v1/baselines", { params: { project } });
+}
+
+export async function getBaseline(id) {
+  return request("GET", `/api/v1/baselines/${encodeURIComponent(id)}`);
+}
+
+export async function getBaselineSnapshot(id) {
+  return request("GET", `/api/v1/baselines/${encodeURIComponent(id)}/snapshot`);
+}
+
+export async function compareBaselines(id, otherId) {
+  return request("GET", `/api/v1/baselines/${encodeURIComponent(id)}/compare/${encodeURIComponent(otherId)}`);
+}
+
+export async function deleteBaseline(id) {
+  await request("DELETE", `/api/v1/baselines/${encodeURIComponent(id)}`);
 }
 
 // ---------------------------------------------------------------------------

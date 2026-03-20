@@ -29,7 +29,8 @@ MCP-driven AI workflows. The rest of the factory is coming.
 - **Pluggable verification** — Prover-agnostic architecture for design-level (TLA+, Alloy) and code-level (OpenJML, Frama-C, Verus) verification, with results stored as first-class graph nodes
 - **GitHub integration** — Sync issues into the traceability graph, or create issues from requirements with one command
 - **StrictDoc import** — Bulk-import from `.sdoc` files, idempotent
-- **MCP server** — 19 tools for Claude Code: manage requirements, run analysis, and build traceability without leaving your editor
+- **MCP server** — 25 tools for Claude Code: manage requirements, baselines, run analysis, and build traceability without leaving your editor
+- **Baseline management** — Named point-in-time snapshots of the requirement set for release management and specification evolution tracking
 - **Audit trail** — Every change to every entity is versioned via Hibernate Envers
 
 ## Near-Term Roadmap

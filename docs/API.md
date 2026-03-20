@@ -68,6 +68,43 @@ http://localhost:8000/api/v1/
 Each cycle lists the member UIDs (closing back to the start) and the edges that
 form it, including the relation type between each consecutive pair.
 
+### Baselines
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/baselines?project=` | BaselineRequest | 201 | Create baseline |
+| GET | `/baselines?project=` | — | 200 | List baselines |
+| GET | `/baselines/{id}` | — | 200 | Get baseline |
+| GET | `/baselines/{id}/snapshot` | — | 200 | Requirement snapshot at baseline |
+| GET | `/baselines/{id}/compare/{otherId}` | — | 200 | Compare two baselines |
+| DELETE | `/baselines/{id}` | — | 204 | Delete baseline |
+
+**BaselineRequest:**
+
+```json
+{
+  "name": "v1.0",
+  "description": "First release baseline"
+}
+```
+
+**BaselineComparisonResponse** (`GET /baselines/{id}/compare/{otherId}`):
+
+```json
+{
+  "baselineId": "uuid",
+  "baselineName": "v1.0",
+  "otherBaselineId": "uuid",
+  "otherBaselineName": "v2.0",
+  "addedCount": 2,
+  "removedCount": 0,
+  "modifiedCount": 1,
+  "added": [...],
+  "removed": [...],
+  "modified": [{ "requirementId": "uuid", "uid": "REQ-001", "before": {...}, "after": {...} }]
+}
+```
+
 ### Graph
 
 | Method | Path | Body | Status | Purpose |

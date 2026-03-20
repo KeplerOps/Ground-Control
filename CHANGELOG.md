@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.62.0] - 2026-03-20
+
+### Added
+
+- Baseline management — named point-in-time snapshots of the requirement set
+  for release management, audit trails, and specification evolution tracking
+- REST API: `POST/GET /baselines`, `GET /baselines/{id}`,
+  `GET /baselines/{id}/snapshot`, `GET /baselines/{id}/compare/{otherId}`,
+  `DELETE /baselines/{id}`
+- MCP tools: `gc_create_baseline`, `gc_list_baselines`, `gc_get_baseline`,
+  `gc_get_baseline_snapshot`, `gc_compare_baselines`, `gc_delete_baseline`
+- Baseline snapshots reconstruct requirements via Hibernate Envers
+  `forEntitiesAtRevision()`, filtered by project and non-archived status
+- Baseline comparison diffs two snapshots showing added, removed, and modified
+  requirements with before/after detail
+
 ## [0.61.1] - 2026-03-20
 
 ### Changed
