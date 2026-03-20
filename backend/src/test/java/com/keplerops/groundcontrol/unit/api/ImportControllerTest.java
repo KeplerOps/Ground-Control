@@ -86,4 +86,49 @@ class ImportControllerTest {
                     .hasMessageContaining("disk error");
         }
     }
+
+    @Nested
+    class ImportReqif {
+
+        @Test
+        void returns200WithStats() throws Exception {
+            var result = new ImportResult(UUID.randomUUID(), Instant.now(), 5, 4, 1, 3, 0, 0, 0, List.of());
+
+            when(projectService.resolveProjectId(any())).thenReturn(UUID.randomUUID());
+            when(importService.importReqif(any(UUID.class), anyString(), anyString()))
+                    .thenReturn(result);
+
+            var file = new MockMultipartFile(
+                    "file", "test.reqif", "application/xml", "<REQ-IF/>".getBytes(StandardCharsets.UTF_8));
+
+            mockMvc.perform(multipart("/api/v1/admin/import/reqif").file(file))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.importId", notNullValue()))
+                    .andExpect(jsonPath("$.requirementsParsed", is(5)))
+                    .andExpect(jsonPath("$.requirementsCreated", is(4)))
+                    .andExpect(jsonPath("$.requirementsUpdated", is(1)))
+                    .andExpect(jsonPath("$.relationsCreated", is(3)))
+                    .andExpect(jsonPath("$.relationsSkipped", is(0)))
+                    .andExpect(jsonPath("$.traceabilityLinksCreated", is(0)))
+                    .andExpect(jsonPath("$.traceabilityLinksSkipped", is(0)));
+        }
+
+        @Test
+        void withNoFile_returns400() throws Exception {
+            mockMvc.perform(multipart("/api/v1/admin/import/reqif")).andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void ioException_throwsGroundControlException() throws Exception {
+            var brokenFile = mock(MultipartFile.class);
+            when(brokenFile.getBytes()).thenThrow(new IOException("disk error"));
+            when(brokenFile.getOriginalFilename()).thenReturn("test.reqif");
+
+            var controller = new ImportController(importService, projectService);
+            assertThatThrownBy(() -> controller.importReqif(brokenFile, null))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("Failed to read uploaded file")
+                    .hasMessageContaining("disk error");
+        }
+    }
 }

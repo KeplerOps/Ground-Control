@@ -28,6 +28,7 @@ import {
   getDashboardStats,
   getWorkOrder,
   importStrictdoc,
+  importReqif,
   syncGithub,
   getRequirementHistory,
   getRelationHistory,
@@ -838,6 +839,22 @@ server.tool(
   async ({ file_path, project }) => {
     try {
       return ok(JSON.stringify(await importStrictdoc(file_path, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_import_reqif",
+  "Import requirements from a ReqIF 1.2 (.reqif) file. Idempotent: re-importing updates existing requirements by IDENTIFIER.",
+  {
+    file_path: z.string().describe("Absolute path to the .reqif file"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ file_path, project }) => {
+    try {
+      return ok(JSON.stringify(await importReqif(file_path, project), null, 2));
     } catch (e) {
       return err(e);
     }

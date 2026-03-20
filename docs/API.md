@@ -147,6 +147,7 @@ form it, including the relation type between each consecutive pair.
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
 | POST | `/admin/import/strictdoc` | multipart/form-data | 200 | Import .sdoc file |
+| POST | `/admin/import/reqif` | multipart/form-data | 200 | Import .reqif file |
 | POST | `/admin/sync/github?owner=X&repo=Y` | — | 200 | Sync GitHub issues |
 
 ## Request / Response Format

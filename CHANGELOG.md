@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.63.0] - 2026-03-20
+
+### Added
+
+- ReqIF 1.2 import — bulk-import requirements from `.reqif` files produced by
+  enterprise tools (IBM DOORS, Polarion, Jama)
+- REST API: `POST /admin/import/reqif` (multipart/form-data)
+- MCP tool: `gc_import_reqif` with `file_path` and optional `project` parameters
+- Parses SPEC-OBJECTS (title, statement), SPEC-RELATIONS (explicit relations),
+  and SPECIFICATION hierarchy (parent-child nesting)
+- XHTML attribute values stripped to plain text
+- XXE prevention: DTDs and external entities disabled
+- Relation type mapping from ReqIF type names via naming convention
+  (contains "parent" → PARENT, "depends" → DEPENDS_ON, etc.)
+- Deterministic UID truncation for identifiers exceeding 50 characters
+
 ## [0.62.1] - 2026-03-20
 
 ### Fixed

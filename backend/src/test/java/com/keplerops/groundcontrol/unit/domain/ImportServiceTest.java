@@ -19,6 +19,7 @@ import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRep
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateTraceabilityLinkCommand;
+import com.keplerops.groundcontrol.domain.requirements.service.ImportResult;
 import com.keplerops.groundcontrol.domain.requirements.service.ImportService;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementService;
 import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityService;
@@ -521,6 +522,321 @@ class ImportServiceTest {
             });
 
             service.importStrictdoc(PROJECT_ID, "test.sdoc", sdoc);
+
+            verify(importRepository).save(any(RequirementImport.class));
+        }
+    }
+
+    // =====================================================================
+    // ReqIF import tests
+    // =====================================================================
+
+    private static String minimalReqif(String identifier, String title) {
+        return """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <REQ-IF xmlns="http://www.omg.org/spec/ReqIF/20110401/reqif.xsd">
+                  <THE-HEADER>
+                    <REQ-IF-HEADER IDENTIFIER="h1"><TITLE>Test</TITLE></REQ-IF-HEADER>
+                  </THE-HEADER>
+                  <CORE-CONTENT>
+                    <REQ-IF-CONTENT>
+                      <DATATYPES/>
+                      <SPEC-TYPES/>
+                      <SPEC-OBJECTS>
+                        <SPEC-OBJECT IDENTIFIER="%s" LONG-NAME="%s"/>
+                      </SPEC-OBJECTS>
+                      <SPEC-RELATIONS/>
+                      <SPECIFICATIONS/>
+                    </REQ-IF-CONTENT>
+                  </CORE-CONTENT>
+                </REQ-IF>
+                """
+                .formatted(identifier, title);
+    }
+
+    private static String reqifWithHierarchy(String parentId, String parentTitle, String childId, String childTitle) {
+        return """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <REQ-IF xmlns="http://www.omg.org/spec/ReqIF/20110401/reqif.xsd">
+                  <THE-HEADER>
+                    <REQ-IF-HEADER IDENTIFIER="h1"><TITLE>Test</TITLE></REQ-IF-HEADER>
+                  </THE-HEADER>
+                  <CORE-CONTENT>
+                    <REQ-IF-CONTENT>
+                      <DATATYPES/>
+                      <SPEC-TYPES/>
+                      <SPEC-OBJECTS>
+                        <SPEC-OBJECT IDENTIFIER="%s" LONG-NAME="%s"/>
+                        <SPEC-OBJECT IDENTIFIER="%s" LONG-NAME="%s"/>
+                      </SPEC-OBJECTS>
+                      <SPEC-RELATIONS/>
+                      <SPECIFICATIONS>
+                        <SPECIFICATION IDENTIFIER="spec-1" LONG-NAME="Test Spec">
+                          <CHILDREN>
+                            <SPEC-HIERARCHY IDENTIFIER="sh-1">
+                              <OBJECT><OBJECT-REF>%s</OBJECT-REF></OBJECT>
+                              <CHILDREN>
+                                <SPEC-HIERARCHY IDENTIFIER="sh-2">
+                                  <OBJECT><OBJECT-REF>%s</OBJECT-REF></OBJECT>
+                                </SPEC-HIERARCHY>
+                              </CHILDREN>
+                            </SPEC-HIERARCHY>
+                          </CHILDREN>
+                        </SPECIFICATION>
+                      </SPECIFICATIONS>
+                    </REQ-IF-CONTENT>
+                  </CORE-CONTENT>
+                </REQ-IF>
+                """
+                .formatted(parentId, parentTitle, childId, childTitle, parentId, childId);
+    }
+
+    private static String reqifWithExplicitRelation(String sourceId, String targetId, String relTypeName) {
+        return """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <REQ-IF xmlns="http://www.omg.org/spec/ReqIF/20110401/reqif.xsd">
+                  <THE-HEADER>
+                    <REQ-IF-HEADER IDENTIFIER="h1"><TITLE>Test</TITLE></REQ-IF-HEADER>
+                  </THE-HEADER>
+                  <CORE-CONTENT>
+                    <REQ-IF-CONTENT>
+                      <DATATYPES/>
+                      <SPEC-TYPES>
+                        <SPEC-RELATION-TYPE IDENTIFIER="srt-1" LONG-NAME="%s"/>
+                      </SPEC-TYPES>
+                      <SPEC-OBJECTS>
+                        <SPEC-OBJECT IDENTIFIER="%s" LONG-NAME="Source"/>
+                        <SPEC-OBJECT IDENTIFIER="%s" LONG-NAME="Target"/>
+                      </SPEC-OBJECTS>
+                      <SPEC-RELATIONS>
+                        <SPEC-RELATION IDENTIFIER="rel-1">
+                          <TYPE><SPEC-RELATION-TYPE-REF>srt-1</SPEC-RELATION-TYPE-REF></TYPE>
+                          <SOURCE><SOURCE-REF>%s</SOURCE-REF></SOURCE>
+                          <TARGET><TARGET-REF>%s</TARGET-REF></TARGET>
+                        </SPEC-RELATION>
+                      </SPEC-RELATIONS>
+                      <SPECIFICATIONS/>
+                    </REQ-IF-CONTENT>
+                  </CORE-CONTENT>
+                </REQ-IF>
+                """
+                .formatted(relTypeName, sourceId, targetId, sourceId, targetId);
+    }
+
+    @Nested
+    class ReqifUpsertRequirements {
+
+        @Test
+        void createsNewRequirementsFromReqif() {
+            String reqif = minimalReqif("RIF-NEW", "New Requirement");
+            UUID newId = UUID.randomUUID();
+            var created = makeRequirement("RIF-NEW", newId);
+
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-NEW"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(created);
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
+
+            assertThat(result.requirementsCreated()).isEqualTo(1);
+            assertThat(result.requirementsUpdated()).isZero();
+            verify(requirementService).create(any(CreateRequirementCommand.class));
+        }
+
+        @Test
+        void updatesExistingRequirementsFromReqif() {
+            String reqif = minimalReqif("RIF-EXISTING", "Updated");
+            UUID existingId = UUID.randomUUID();
+            var existing = makeRequirement("RIF-EXISTING", existingId);
+
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-EXISTING"))
+                    .thenReturn(Optional.of(existing));
+            when(requirementService.update(eq(existingId), any(UpdateRequirementCommand.class)))
+                    .thenReturn(existing);
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
+
+            assertThat(result.requirementsUpdated()).isEqualTo(1);
+            assertThat(result.requirementsCreated()).isZero();
+        }
+    }
+
+    @Nested
+    class ReqifCreateRelations {
+
+        @Test
+        void createsHierarchyRelations() {
+            String reqif = reqifWithHierarchy("RIF-PARENT", "Parent", "RIF-CHILD", "Child");
+            UUID parentId = UUID.randomUUID();
+            UUID childId = UUID.randomUUID();
+            var parent = makeRequirement("RIF-PARENT", parentId);
+            var child = makeRequirement("RIF-CHILD", childId);
+
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-CHILD"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenReturn(parent)
+                    .thenReturn(child);
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(childId, parentId, RelationType.PARENT))
+                    .thenReturn(false);
+            when(requirementService.createRelation(childId, parentId, RelationType.PARENT))
+                    .thenReturn(new RequirementRelation(child, parent, RelationType.PARENT));
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
+
+            assertThat(result.relationsCreated()).isEqualTo(1);
+            verify(requirementService).createRelation(childId, parentId, RelationType.PARENT);
+        }
+
+        @Test
+        void createsExplicitSpecRelations() {
+            String reqif = reqifWithExplicitRelation("RIF-SRC", "RIF-TGT", "depends on");
+            UUID srcId = UUID.randomUUID();
+            UUID tgtId = UUID.randomUUID();
+            var src = makeRequirement("RIF-SRC", srcId);
+            var tgt = makeRequirement("RIF-TGT", tgtId);
+
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-SRC"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-TGT"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenReturn(src)
+                    .thenReturn(tgt);
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(srcId, tgtId, RelationType.DEPENDS_ON))
+                    .thenReturn(false);
+            when(requirementService.createRelation(srcId, tgtId, RelationType.DEPENDS_ON))
+                    .thenReturn(new RequirementRelation(src, tgt, RelationType.DEPENDS_ON));
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
+
+            assertThat(result.relationsCreated()).isEqualTo(1);
+            verify(requirementService).createRelation(srcId, tgtId, RelationType.DEPENDS_ON);
+        }
+
+        @Test
+        void skipsExistingRelationsFromReqif() {
+            String reqif = reqifWithHierarchy("RIF-PARENT", "Parent", "RIF-CHILD", "Child");
+            UUID parentId = UUID.randomUUID();
+            UUID childId = UUID.randomUUID();
+            var parent = makeRequirement("RIF-PARENT", parentId);
+            var child = makeRequirement("RIF-CHILD", childId);
+
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-CHILD"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenReturn(parent)
+                    .thenReturn(child);
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(childId, parentId, RelationType.PARENT))
+                    .thenReturn(true);
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
+
+            assertThat(result.relationsSkipped()).isEqualTo(1);
+            assertThat(result.relationsCreated()).isZero();
+            verify(requirementService, never()).createRelation(any(), any(), any());
+        }
+    }
+
+    @Nested
+    class ReqifErrorHandling {
+
+        @Test
+        void collectsErrorsAndContinuesForReqif() {
+            // Two requirements: first one throws, second succeeds
+            String reqif =
+                    """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <REQ-IF xmlns="http://www.omg.org/spec/ReqIF/20110401/reqif.xsd">
+                      <THE-HEADER>
+                        <REQ-IF-HEADER IDENTIFIER="h1"><TITLE>Test</TITLE></REQ-IF-HEADER>
+                      </THE-HEADER>
+                      <CORE-CONTENT>
+                        <REQ-IF-CONTENT>
+                          <DATATYPES/>
+                          <SPEC-TYPES/>
+                          <SPEC-OBJECTS>
+                            <SPEC-OBJECT IDENTIFIER="RIF-FAIL" LONG-NAME="Fail"/>
+                            <SPEC-OBJECT IDENTIFIER="RIF-OK" LONG-NAME="OK"/>
+                          </SPEC-OBJECTS>
+                          <SPEC-RELATIONS/>
+                          <SPECIFICATIONS/>
+                        </REQ-IF-CONTENT>
+                      </CORE-CONTENT>
+                    </REQ-IF>
+                    """;
+            UUID okId = UUID.randomUUID();
+            var okReq = makeRequirement("RIF-OK", okId);
+
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-FAIL"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-OK"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenThrow(new DomainValidationException("Simulated failure"))
+                    .thenReturn(okReq);
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
+
+            assertThat(result.requirementsCreated()).isEqualTo(1);
+            assertThat(result.errors()).hasSize(1);
+            assertThat(result.errors().get(0).get("uid")).isEqualTo("RIF-FAIL");
+        }
+    }
+
+    @Nested
+    class ReqifAuditRecord {
+
+        @Test
+        void savesReqifImportAuditRecord() {
+            String reqif = minimalReqif("RIF-AUDIT", "Audit Test");
+            UUID reqId = UUID.randomUUID();
+            var req = makeRequirement("RIF-AUDIT", reqId);
+
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-AUDIT"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(req);
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            service.importReqif(PROJECT_ID, "test.reqif", reqif);
 
             verify(importRepository).save(any(RequirementImport.class));
         }
