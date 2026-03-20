@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.64.1] - 2026-03-20
+
+### Fixed
+
+- Project switcher now preserves query string (e.g., `?status=ACTIVE`) when
+  switching projects
+- Unknown routes (`/p/:projectId/bad-page`, `/random-path`) now render a
+  "Page not found" message instead of a blank page
+
+## [0.64.0] - 2026-03-20
+
+### Changed
+
+- Move project identity from localStorage into URL path (`/p/:projectId/...`),
+  making the URL the single source of truth for project context
+- Route structure changed: project-scoped pages now live under `/p/:projectId/`
+  (e.g., `/p/my-project/requirements`); `/projects` stays at root level
+- `ProjectProvider` now derives `activeProject` from `useParams()` instead of
+  localStorage; `setActiveProject` navigates to the new project URL
+- Project switcher preserves the current sub-path when switching projects
+- Projects page uses `useProjects()` directly instead of `useProjectContext()`
+- Root `/` redirects to `/p/<first-project>/`; invalid project IDs redirect to
+  `/projects` with a toast
+- All `navigate()` and `Link` paths updated to use project-prefixed URLs across
+  dashboard, requirements, requirement detail, and analysis pages
+
+### Removed
+
+- localStorage-based project persistence (`gc-active-project` key)
+
 ## [0.63.2] - 2026-03-20
 
 ### Changed

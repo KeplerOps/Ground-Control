@@ -6,21 +6,19 @@ import {
 } from "@/components/ui/form-field";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
-import { useProjectContext } from "@/contexts/project-context";
+import { useProjects } from "@/hooks/use-projects";
+import type { ProjectResponse } from "@/hooks/use-projects";
 import { apiFetch } from "@/lib/api-client";
 import { queryClient } from "@/lib/query-client";
-import type {
-  ProjectRequest,
-  ProjectResponse,
-  UpdateProjectRequest,
-} from "@/types/api";
+import type { ProjectRequest, UpdateProjectRequest } from "@/types/api";
 import { useMutation } from "@tanstack/react-query";
 import { FolderOpen, Plus } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 export function Projects() {
-  const { projects, activeProject, setActiveProject, isLoading } =
-    useProjectContext();
+  const { data: projects = [], isLoading } = useProjects();
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<ProjectResponse | null>(null);
@@ -98,11 +96,7 @@ export function Projects() {
           {projects.map((p) => (
             <div
               key={p.id}
-              className={`flex items-center gap-4 rounded-lg border p-4 ${
-                activeProject?.id === p.id
-                  ? "border-primary bg-primary/5"
-                  : "border-border bg-card"
-              }`}
+              className="flex items-center gap-4 rounded-lg border border-border bg-card p-4"
             >
               <div className="flex-1">
                 <div className="flex items-center gap-2">
@@ -110,11 +104,6 @@ export function Projects() {
                     {p.identifier}
                   </span>
                   <span className="font-medium">{p.name}</span>
-                  {activeProject?.id === p.id && (
-                    <span className="rounded-full bg-primary/20 px-2 py-0.5 text-xs text-primary">
-                      Active
-                    </span>
-                  )}
                 </div>
                 {p.description && (
                   <p className="mt-1 text-sm text-muted-foreground">
@@ -126,15 +115,13 @@ export function Projects() {
                 </p>
               </div>
               <div className="flex gap-2">
-                {activeProject?.id !== p.id && (
-                  <button
-                    type="button"
-                    className={secondaryButton}
-                    onClick={() => setActiveProject(p)}
-                  >
-                    Switch
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className={secondaryButton}
+                  onClick={() => navigate(`/p/${p.identifier}/`)}
+                >
+                  Open
+                </button>
                 <button
                   type="button"
                   className={secondaryButton}

@@ -12,7 +12,7 @@ import type { CompletenessIssueResponse, LinkType } from "@/types/api";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Activity } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 
 export function Analysis() {
   const { activeProject, isLoading } = useProjectContext();
@@ -39,7 +39,14 @@ export function Analysis() {
 
       <Tabs.Root defaultValue="cycles">
         <Tabs.List className="flex gap-1 border-b border-border">
-          {["cycles", "orphans", "coverage", "cross-wave", "consistency", "completeness"].map((tab) => (
+          {[
+            "cycles",
+            "orphans",
+            "coverage",
+            "cross-wave",
+            "consistency",
+            "completeness",
+          ].map((tab) => (
             <Tabs.Trigger
               key={tab}
               value={tab}
@@ -127,6 +134,7 @@ function CyclesTab() {
 }
 
 function OrphansTab() {
+  const { projectId } = useParams<{ projectId: string }>();
   const { data: orphans = [], isLoading } = useOrphans();
 
   if (isLoading) return <div className="animate-pulse h-20 bg-muted rounded" />;
@@ -143,7 +151,7 @@ function OrphansTab() {
       {orphans.map((r) => (
         <Link
           key={r.id}
-          to={`/requirements/${r.id}`}
+          to={`/p/${projectId}/requirements/${r.id}`}
           className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 hover:bg-accent/30"
         >
           <span className="font-mono text-xs text-muted-foreground">
@@ -161,6 +169,7 @@ function OrphansTab() {
 }
 
 function CoverageTab() {
+  const { projectId } = useParams<{ projectId: string }>();
   const [linkType, setLinkType] = useState<LinkType>("IMPLEMENTS");
   const { data: gaps = [], isLoading } = useCoverageGaps(linkType);
 
@@ -195,7 +204,7 @@ function CoverageTab() {
           {gaps.map((r) => (
             <Link
               key={r.id}
-              to={`/requirements/${r.id}`}
+              to={`/p/${projectId}/requirements/${r.id}`}
               className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 hover:bg-accent/30"
             >
               <span className="font-mono text-xs text-muted-foreground">
@@ -212,6 +221,7 @@ function CoverageTab() {
 }
 
 function CrossWaveTab() {
+  const { projectId } = useParams<{ projectId: string }>();
   const { data: violations = [], isLoading } = useCrossWave();
 
   if (isLoading) return <div className="animate-pulse h-20 bg-muted rounded" />;
@@ -251,7 +261,7 @@ function CrossWaveTab() {
               <tr key={v.id} className="hover:bg-accent/30">
                 <td className="px-3 py-2">
                   <Link
-                    to={`/requirements/${v.sourceId}`}
+                    to={`/p/${projectId}/requirements/${v.sourceId}`}
                     className="font-mono text-xs text-primary hover:underline"
                   >
                     {v.sourceUid}
@@ -265,7 +275,7 @@ function CrossWaveTab() {
                 </td>
                 <td className="px-3 py-2">
                   <Link
-                    to={`/requirements/${v.targetId}`}
+                    to={`/p/${projectId}/requirements/${v.targetId}`}
                     className="font-mono text-xs text-primary hover:underline"
                   >
                     {v.targetUid}
@@ -284,15 +294,13 @@ function CrossWaveTab() {
 }
 
 function ConsistencyTab() {
+  const { projectId } = useParams<{ projectId: string }>();
   const { data: violations = [], isLoading } = useConsistencyViolations();
 
-  if (isLoading)
-    return <div className="animate-pulse h-20 bg-muted rounded" />;
+  if (isLoading) return <div className="animate-pulse h-20 bg-muted rounded" />;
 
   if (violations.length === 0) {
-    return (
-      <p className="text-sm text-green-400">No consistency violations.</p>
-    );
+    return <p className="text-sm text-green-400">No consistency violations.</p>;
   }
 
   return (
@@ -329,7 +337,7 @@ function ConsistencyTab() {
               <tr key={v.relationId} className="hover:bg-accent/30">
                 <td className="px-3 py-2">
                   <Link
-                    to={`/requirements/${v.sourceId}`}
+                    to={`/p/${projectId}/requirements/${v.sourceId}`}
                     className="font-mono text-xs text-primary hover:underline"
                   >
                     {v.sourceUid}
@@ -343,7 +351,7 @@ function ConsistencyTab() {
                 </td>
                 <td className="px-3 py-2">
                   <Link
-                    to={`/requirements/${v.targetId}`}
+                    to={`/p/${projectId}/requirements/${v.targetId}`}
                     className="font-mono text-xs text-primary hover:underline"
                   >
                     {v.targetUid}
@@ -367,11 +375,12 @@ function ConsistencyTab() {
 function CompletenessTab() {
   const { data, isLoading } = useCompleteness();
 
-  if (isLoading)
-    return <div className="animate-pulse h-20 bg-muted rounded" />;
+  if (isLoading) return <div className="animate-pulse h-20 bg-muted rounded" />;
 
   if (!data || data.total === 0) {
-    return <p className="text-sm text-muted-foreground">No requirements found.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">No requirements found.</p>
+    );
   }
 
   const statusEntries = Object.entries(data.byStatus);
@@ -418,10 +427,11 @@ function CompletenessTab() {
               </thead>
               <tbody className="divide-y divide-border">
                 {data.issues.map((issue: CompletenessIssueResponse) => (
-                  <tr key={`${issue.uid}-${issue.issue}`} className="hover:bg-accent/30">
-                    <td className="px-3 py-2 font-mono text-xs">
-                      {issue.uid}
-                    </td>
+                  <tr
+                    key={`${issue.uid}-${issue.issue}`}
+                    className="hover:bg-accent/30"
+                  >
+                    <td className="px-3 py-2 font-mono text-xs">{issue.uid}</td>
                     <td className="px-3 py-2 text-xs text-red-400">
                       {issue.issue}
                     </td>

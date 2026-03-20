@@ -2,10 +2,12 @@ import { useProjectContext } from "@/contexts/project-context";
 import { cn } from "@/lib/utils";
 import * as Select from "@radix-ui/react-select";
 import { ChevronDown, FolderOpen } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
 
 export function ProjectSwitcher() {
-  const { projects, activeProject, setActiveProject, isLoading } =
-    useProjectContext();
+  const { projects, activeProject, isLoading } = useProjectContext();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   if (isLoading) {
     return <div className="h-9 w-40 animate-pulse rounded-md bg-muted" />;
@@ -20,7 +22,11 @@ export function ProjectSwitcher() {
       value={activeProject?.identifier ?? ""}
       onValueChange={(value) => {
         const project = projects.find((p) => p.identifier === value);
-        if (project) setActiveProject(project);
+        if (project) {
+          const match = location.pathname.match(/^\/p\/[^/]+\/(.*)/);
+          const subPath = match?.[1] ?? "";
+          navigate(`/p/${project.identifier}/${subPath}${location.search}`);
+        }
       }}
     >
       <Select.Trigger
