@@ -3,6 +3,10 @@ package com.keplerops.groundcontrol.unit.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -14,9 +18,11 @@ import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
+import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import java.lang.reflect.Field;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -32,6 +38,7 @@ class BaselineServiceTest {
 
     private static final UUID PROJECT_ID = UUID.fromString("a0000000-0000-0000-0000-000000000001");
     private static final UUID BASELINE_ID = UUID.fromString("b0000000-0000-0000-0000-000000000001");
+    private static final UUID OTHER_BASELINE_ID = UUID.fromString("b0000000-0000-0000-0000-000000000002");
 
     @Mock
     private BaselineRepository baselineRepository;
@@ -58,11 +65,18 @@ class BaselineServiceTest {
         return project;
     }
 
-    private Baseline makeBaseline(String name, int revisionNumber) {
+    private Baseline makeBaseline(UUID id, String name, int revisionNumber) {
         var project = makeProject();
         var baseline = new Baseline(project, name, "desc", revisionNumber, "test-actor");
-        setField(baseline, "id", BASELINE_ID);
+        setField(baseline, "id", id);
+        setField(baseline, "createdAt", Instant.now());
         return baseline;
+    }
+
+    private static Requirement makeRequirement(UUID id, String uid, String title) {
+        var req = new Requirement(null, uid, title, "Statement for " + uid);
+        setField(req, "id", id);
+        return req;
     }
 
     private static void setField(Object target, String fieldName, Object value) {
@@ -123,7 +137,7 @@ class BaselineServiceTest {
 
         @Test
         void returnsBaselineWhenFound() {
-            var baseline = makeBaseline("v1.0", 10);
+            var baseline = makeBaseline(BASELINE_ID, "v1.0", 10);
             when(baselineRepository.findById(BASELINE_ID)).thenReturn(Optional.of(baseline));
 
             var result = service.getById(BASELINE_ID);
@@ -143,8 +157,8 @@ class BaselineServiceTest {
 
         @Test
         void returnsBaselinesForProject() {
-            var b1 = makeBaseline("v1.0", 10);
-            var b2 = makeBaseline("v2.0", 20);
+            var b1 = makeBaseline(BASELINE_ID, "v1.0", 10);
+            var b2 = makeBaseline(OTHER_BASELINE_ID, "v2.0", 20);
             when(baselineRepository.findByProjectIdOrderByCreatedAtDesc(PROJECT_ID))
                     .thenReturn(List.of(b2, b1));
 
@@ -154,11 +168,99 @@ class BaselineServiceTest {
     }
 
     @Nested
+    class GetSnapshot {
+
+        @Test
+        void returnsSnapshotWithRequirements() {
+            var baseline = makeBaseline(BASELINE_ID, "v1.0", 42);
+            when(baselineRepository.findById(BASELINE_ID)).thenReturn(Optional.of(baseline));
+
+            var req1 = makeRequirement(UUID.randomUUID(), "REQ-001", "First");
+            var req2 = makeRequirement(UUID.randomUUID(), "REQ-002", "Second");
+
+            var spyService = spy(service);
+            doReturn(List.of(req1, req2)).when(spyService).getRequirementsAtRevision(42, PROJECT_ID);
+
+            var snapshot = spyService.getSnapshot(BASELINE_ID);
+            assertThat(snapshot.baselineId()).isEqualTo(BASELINE_ID);
+            assertThat(snapshot.name()).isEqualTo("v1.0");
+            assertThat(snapshot.revisionNumber()).isEqualTo(42);
+            assertThat(snapshot.requirements()).hasSize(2);
+        }
+
+        @Test
+        void returnsEmptySnapshotAtRevisionZero() {
+            var baseline = makeBaseline(BASELINE_ID, "empty", 0);
+            when(baselineRepository.findById(BASELINE_ID)).thenReturn(Optional.of(baseline));
+
+            var spyService = spy(service);
+            doReturn(List.of()).when(spyService).getRequirementsAtRevision(0, PROJECT_ID);
+
+            var snapshot = spyService.getSnapshot(BASELINE_ID);
+            assertThat(snapshot.requirements()).isEmpty();
+        }
+    }
+
+    @Nested
+    class Compare {
+
+        @Test
+        void detectsAddedRemovedAndModifiedRequirements() {
+            var baseline = makeBaseline(BASELINE_ID, "v1.0", 10);
+            var other = makeBaseline(OTHER_BASELINE_ID, "v2.0", 20);
+            when(baselineRepository.findById(BASELINE_ID)).thenReturn(Optional.of(baseline));
+            when(baselineRepository.findById(OTHER_BASELINE_ID)).thenReturn(Optional.of(other));
+
+            var sharedId = UUID.randomUUID();
+            var removedId = UUID.randomUUID();
+            var addedId = UUID.randomUUID();
+
+            var baseReq = makeRequirement(sharedId, "REQ-001", "Original Title");
+            var removedReq = makeRequirement(removedId, "REQ-002", "Removed");
+            var modifiedReq = makeRequirement(sharedId, "REQ-001", "Modified Title");
+            var addedReq = makeRequirement(addedId, "REQ-003", "Added");
+
+            var spyService = spy(service);
+            doReturn(List.of(baseReq, removedReq)).when(spyService).getRequirementsAtRevision(10, PROJECT_ID);
+            doReturn(List.of(modifiedReq, addedReq)).when(spyService).getRequirementsAtRevision(20, PROJECT_ID);
+
+            var comparison = spyService.compare(BASELINE_ID, OTHER_BASELINE_ID);
+
+            assertThat(comparison.baselineName()).isEqualTo("v1.0");
+            assertThat(comparison.otherBaselineName()).isEqualTo("v2.0");
+            assertThat(comparison.added()).hasSize(1);
+            assertThat(comparison.added().getFirst().getUid()).isEqualTo("REQ-003");
+            assertThat(comparison.removed()).hasSize(1);
+            assertThat(comparison.removed().getFirst().getUid()).isEqualTo("REQ-002");
+            assertThat(comparison.modified()).hasSize(1);
+            assertThat(comparison.modified().getFirst().uid()).isEqualTo("REQ-001");
+        }
+
+        @Test
+        void returnsEmptyDiffForIdenticalBaselines() {
+            var baseline = makeBaseline(BASELINE_ID, "v1.0", 10);
+            var other = makeBaseline(OTHER_BASELINE_ID, "v1.0-copy", 10);
+            when(baselineRepository.findById(BASELINE_ID)).thenReturn(Optional.of(baseline));
+            when(baselineRepository.findById(OTHER_BASELINE_ID)).thenReturn(Optional.of(other));
+
+            var req = makeRequirement(UUID.randomUUID(), "REQ-001", "Same");
+
+            var spyService = spy(service);
+            doReturn(List.of(req)).when(spyService).getRequirementsAtRevision(anyInt(), eq(PROJECT_ID));
+
+            var comparison = spyService.compare(BASELINE_ID, OTHER_BASELINE_ID);
+            assertThat(comparison.added()).isEmpty();
+            assertThat(comparison.removed()).isEmpty();
+            assertThat(comparison.modified()).isEmpty();
+        }
+    }
+
+    @Nested
     class Delete {
 
         @Test
         void deletesBaselineSuccessfully() {
-            var baseline = makeBaseline("v1.0", 10);
+            var baseline = makeBaseline(BASELINE_ID, "v1.0", 10);
             when(baselineRepository.findById(BASELINE_ID)).thenReturn(Optional.of(baseline));
 
             service.delete(BASELINE_ID);
@@ -170,6 +272,24 @@ class BaselineServiceTest {
             when(baselineRepository.findById(BASELINE_ID)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.delete(BASELINE_ID)).isInstanceOf(NotFoundException.class);
+        }
+    }
+
+    @Nested
+    class HasChanged {
+
+        @Test
+        void returnsFalseForIdenticalRequirements() {
+            var a = makeRequirement(UUID.randomUUID(), "REQ-001", "Same");
+            var b = makeRequirement(UUID.randomUUID(), "REQ-001", "Same");
+            assertThat(service.hasChanged(a, b)).isFalse();
+        }
+
+        @Test
+        void returnsTrueForDifferentTitle() {
+            var a = makeRequirement(UUID.randomUUID(), "REQ-001", "Title A");
+            var b = makeRequirement(UUID.randomUUID(), "REQ-001", "Title B");
+            assertThat(service.hasChanged(a, b)).isTrue();
         }
     }
 }

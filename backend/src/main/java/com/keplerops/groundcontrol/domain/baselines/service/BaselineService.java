@@ -133,10 +133,18 @@ public class BaselineService {
     }
 
     @SuppressWarnings("unchecked")
-    private List<Requirement> getRequirementsAtRevision(int revisionNumber, UUID projectId) {
+    // Visible for testing (spy-based unit tests stub this Envers-dependent method)
+    public List<Requirement> getRequirementsAtRevision(int revisionNumber, UUID projectId) {
         if (revisionNumber == 0) {
             return List.of();
         }
+
+        // Project is @NotAudited, so Envers-reconstructed entities have null project.
+        // Get the project's requirement IDs from the main table to filter.
+        var projectReqIds = new java.util.HashSet<>(entityManager
+                .createQuery("SELECT r.id FROM Requirement r WHERE r.project.id = :pid", UUID.class)
+                .setParameter("pid", projectId)
+                .getResultList());
 
         var auditReader = AuditReaderFactory.get(entityManager);
 
@@ -146,12 +154,13 @@ public class BaselineService {
                 .getResultList();
 
         return allAtRevision.stream()
-                .filter(r -> r.getProject() != null && r.getProject().getId().equals(projectId))
+                .filter(r -> projectReqIds.contains(r.getId()))
                 .filter(r -> r.getStatus() != Status.ARCHIVED)
                 .toList();
     }
 
-    private boolean hasChanged(Requirement a, Requirement b) {
+    // Visible for testing
+    public boolean hasChanged(Requirement a, Requirement b) {
         return !equalsNullSafe(a.getTitle(), b.getTitle())
                 || !equalsNullSafe(a.getStatement(), b.getStatement())
                 || !equalsNullSafe(a.getRationale(), b.getRationale())
