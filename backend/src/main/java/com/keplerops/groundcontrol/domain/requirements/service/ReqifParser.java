@@ -133,7 +133,7 @@ public final class ReqifParser {
             String statement = resolveStatement(attrValues);
             String uid = sanitizeUid(identifier);
 
-            result.put(identifier, new ReqifRequirement(uid, title, statement, List.of(), List.of()));
+            result.put(identifier, new ReqifRequirement(uid, title, statement, List.of()));
         }
         return result;
     }
@@ -203,11 +203,7 @@ public final class ReqifParser {
                     requirements.put(
                             objRef,
                             new ReqifRequirement(
-                                    existing.identifier(),
-                                    existing.title(),
-                                    existing.statement(),
-                                    newParents,
-                                    existing.relations()));
+                                    existing.identifier(), existing.title(), existing.statement(), newParents));
                 }
             }
 
@@ -271,7 +267,7 @@ public final class ReqifParser {
     private static String extractAttrValueText(Element attrValue) {
         // For ATTRIBUTE-VALUE-STRING / ATTRIBUTE-VALUE-INTEGER, use THE-VALUE attribute
         String theValue = attrValue.getAttribute("THE-VALUE");
-        if (theValue != null && !theValue.isBlank()) {
+        if (!theValue.isBlank()) {
             return theValue;
         }
         // For ATTRIBUTE-VALUE-XHTML, look for THE-VALUE child containing XHTML
@@ -281,7 +277,7 @@ public final class ReqifParser {
         return null;
     }
 
-    static String stripXhtml(Element element) {
+    private static String stripXhtml(Element element) {
         return element.getTextContent().replaceAll("\\s+", " ").trim();
     }
 

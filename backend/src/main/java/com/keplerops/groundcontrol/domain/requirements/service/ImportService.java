@@ -303,7 +303,9 @@ public class ImportService {
             }
         }
 
-        // Phase 2b: Create relations from explicit SpecRelations
+        // Phase 2b: Create relations from explicit SpecRelations.
+        // If a relation was already created from hierarchy nesting (Phase 2), the existsBy... check
+        // will skip it here — the skipped count may include these overlapping relations.
         for (ReqifRelation rel : parsed.relations()) {
             try {
                 UUID sourceId = uidToId.get(rel.sourceIdentifier());

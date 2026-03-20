@@ -737,6 +737,83 @@ class ImportServiceTest {
         }
 
         @Test
+        void skipsExplicitRelationWhenHierarchyAlreadyCreatedIt() {
+            // ReqIF with both hierarchy parent AND an explicit SpecRelation expressing the same
+            // PARENT relationship — Phase 2 creates it from hierarchy, Phase 2b skips the duplicate.
+            String reqif =
+                    """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <REQ-IF xmlns="http://www.omg.org/spec/ReqIF/20110401/reqif.xsd">
+                      <THE-HEADER>
+                        <REQ-IF-HEADER IDENTIFIER="h1"><TITLE>Test</TITLE></REQ-IF-HEADER>
+                      </THE-HEADER>
+                      <CORE-CONTENT>
+                        <REQ-IF-CONTENT>
+                          <DATATYPES/>
+                          <SPEC-TYPES>
+                            <SPEC-RELATION-TYPE IDENTIFIER="srt-1" LONG-NAME="Parent Relationship"/>
+                          </SPEC-TYPES>
+                          <SPEC-OBJECTS>
+                            <SPEC-OBJECT IDENTIFIER="RIF-PARENT" LONG-NAME="Parent"/>
+                            <SPEC-OBJECT IDENTIFIER="RIF-CHILD" LONG-NAME="Child"/>
+                          </SPEC-OBJECTS>
+                          <SPEC-RELATIONS>
+                            <SPEC-RELATION IDENTIFIER="rel-dup">
+                              <TYPE><SPEC-RELATION-TYPE-REF>srt-1</SPEC-RELATION-TYPE-REF></TYPE>
+                              <SOURCE><SOURCE-REF>RIF-CHILD</SOURCE-REF></SOURCE>
+                              <TARGET><TARGET-REF>RIF-PARENT</TARGET-REF></TARGET>
+                            </SPEC-RELATION>
+                          </SPEC-RELATIONS>
+                          <SPECIFICATIONS>
+                            <SPECIFICATION IDENTIFIER="spec-1" LONG-NAME="Spec">
+                              <CHILDREN>
+                                <SPEC-HIERARCHY IDENTIFIER="sh-1">
+                                  <OBJECT><OBJECT-REF>RIF-PARENT</OBJECT-REF></OBJECT>
+                                  <CHILDREN>
+                                    <SPEC-HIERARCHY IDENTIFIER="sh-2">
+                                      <OBJECT><OBJECT-REF>RIF-CHILD</OBJECT-REF></OBJECT>
+                                    </SPEC-HIERARCHY>
+                                  </CHILDREN>
+                                </SPEC-HIERARCHY>
+                              </CHILDREN>
+                            </SPECIFICATION>
+                          </SPECIFICATIONS>
+                        </REQ-IF-CONTENT>
+                      </CORE-CONTENT>
+                    </REQ-IF>
+                    """;
+            UUID parentId = UUID.randomUUID();
+            UUID childId = UUID.randomUUID();
+            var parent = makeRequirement("RIF-PARENT", parentId);
+            var child = makeRequirement("RIF-CHILD", childId);
+
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-CHILD"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenReturn(parent)
+                    .thenReturn(child);
+            // First call (Phase 2 hierarchy): relation does not exist yet → create
+            // Second call (Phase 2b explicit): relation already exists → skip
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(childId, parentId, RelationType.PARENT))
+                    .thenReturn(false)
+                    .thenReturn(true);
+            when(requirementService.createRelation(childId, parentId, RelationType.PARENT))
+                    .thenReturn(new RequirementRelation(child, parent, RelationType.PARENT));
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
+
+            assertThat(result.relationsCreated()).isEqualTo(1);
+            assertThat(result.relationsSkipped()).isEqualTo(1);
+        }
+
+        @Test
         void skipsExistingRelationsFromReqif() {
             String reqif = reqifWithHierarchy("RIF-PARENT", "Parent", "RIF-CHILD", "Child");
             UUID parentId = UUID.randomUUID();

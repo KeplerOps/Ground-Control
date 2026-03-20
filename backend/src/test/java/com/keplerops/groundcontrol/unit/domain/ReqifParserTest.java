@@ -74,6 +74,54 @@ class ReqifParserTest {
         }
 
         @Test
+        void resolvesTitleFromAttributeWhenLongNameMissing() {
+            String xml =
+                    """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <REQ-IF xmlns="http://www.omg.org/spec/ReqIF/20110401/reqif.xsd">
+                      <THE-HEADER>
+                        <REQ-IF-HEADER IDENTIFIER="h1"><TITLE>Test</TITLE></REQ-IF-HEADER>
+                      </THE-HEADER>
+                      <CORE-CONTENT>
+                        <REQ-IF-CONTENT>
+                          <DATATYPES>
+                            <DATATYPE-DEFINITION-STRING IDENTIFIER="dt-s" LONG-NAME="String" MAX-LENGTH="4000"/>
+                          </DATATYPES>
+                          <SPEC-TYPES>
+                            <SPEC-OBJECT-TYPE IDENTIFIER="sot-1" LONG-NAME="Requirement">
+                              <SPEC-ATTRIBUTES>
+                                <ATTRIBUTE-DEFINITION-STRING IDENTIFIER="ad-name" LONG-NAME="ReqIF.Name">
+                                  <TYPE><DATATYPE-DEFINITION-STRING-REF>dt-s</DATATYPE-DEFINITION-STRING-REF></TYPE>
+                                </ATTRIBUTE-DEFINITION-STRING>
+                              </SPEC-ATTRIBUTES>
+                            </SPEC-OBJECT-TYPE>
+                          </SPEC-TYPES>
+                          <SPEC-OBJECTS>
+                            <SPEC-OBJECT IDENTIFIER="REQ-NO-LONG" LONG-NAME="">
+                              <TYPE><SPEC-OBJECT-TYPE-REF>sot-1</SPEC-OBJECT-TYPE-REF></TYPE>
+                              <VALUES>
+                                <ATTRIBUTE-VALUE-STRING THE-VALUE="Title From Attribute">
+                                  <DEFINITION>
+                                    <ATTRIBUTE-DEFINITION-STRING-REF>ad-name</ATTRIBUTE-DEFINITION-STRING-REF>
+                                  </DEFINITION>
+                                </ATTRIBUTE-VALUE-STRING>
+                              </VALUES>
+                            </SPEC-OBJECT>
+                          </SPEC-OBJECTS>
+                          <SPEC-RELATIONS/>
+                          <SPECIFICATIONS/>
+                        </REQ-IF-CONTENT>
+                      </CORE-CONTENT>
+                    </REQ-IF>
+                    """;
+
+            ReqifParseResult result = ReqifParser.parse(xml);
+
+            assertThat(result.requirements()).hasSize(1);
+            assertThat(result.requirements().get(0).title()).isEqualTo("Title From Attribute");
+        }
+
+        @Test
         void handlesXhtmlAttributeValues() throws IOException {
             String xml = readFixture();
             ReqifParseResult result = ReqifParser.parse(xml);

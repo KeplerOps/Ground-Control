@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.63.1] - 2026-03-20
+
+### Fixed
+
+- Remove dead `relations` field from `ReqifRequirement` record (was never populated)
+- Remove redundant null check in `extractAttrValueText` (`getAttribute` never returns null)
+- Make `stripXhtml` method private (only used internally)
+- Add comment clarifying hierarchy + SpecRelation overlap behavior in Phase 2b
+
+### Added
+
+- Test: title fallback from `LONG-NAME` to `ReqIF.Name` attribute value
+- Test: hierarchy + explicit SpecRelation overlap correctly skips duplicate
+
 ## [0.63.0] - 2026-03-20
 
 ### Added
