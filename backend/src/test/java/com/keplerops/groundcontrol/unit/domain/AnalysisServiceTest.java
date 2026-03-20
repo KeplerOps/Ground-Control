@@ -13,6 +13,7 @@ import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRep
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
 import com.keplerops.groundcontrol.domain.requirements.service.AuditService;
+import com.keplerops.groundcontrol.domain.requirements.service.BlockingStatus;
 import com.keplerops.groundcontrol.domain.requirements.service.CompletenessResult;
 import com.keplerops.groundcontrol.domain.requirements.service.ConsistencyViolation;
 import com.keplerops.groundcontrol.domain.requirements.service.CoverageStats;
@@ -20,7 +21,11 @@ import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
 import com.keplerops.groundcontrol.domain.requirements.service.DashboardStats;
 import com.keplerops.groundcontrol.domain.requirements.service.RecentChange;
+import com.keplerops.groundcontrol.domain.requirements.service.WorkOrderItem;
+import com.keplerops.groundcontrol.domain.requirements.service.WorkOrderResult;
+import com.keplerops.groundcontrol.domain.requirements.service.WorkOrderWave;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
+import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import java.lang.reflect.Field;
@@ -624,6 +629,226 @@ class AnalysisServiceTest {
             assertThat(testsCoverage.percentage()).isEqualTo(0.0);
 
             assertThat(result.recentChanges()).hasSize(1);
+        }
+    }
+
+    @Nested
+    class GetWorkOrder {
+
+        @Test
+        void emptyProject_returnsEmptyResult() {
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of());
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+                    .thenReturn(List.of());
+
+            WorkOrderResult result = service.getWorkOrder(PROJECT_ID);
+
+            assertThat(result.totalRequirements()).isZero();
+            assertThat(result.totalUnblocked()).isZero();
+            assertThat(result.totalBlocked()).isZero();
+            assertThat(result.totalUnconstrained()).isZero();
+            assertThat(result.waves()).isEmpty();
+        }
+
+        @Test
+        void blockedRequirement_identifiedWithBlockers() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            var a = makeRequirement("REQ-A", aId, 1);
+            var b = makeRequirement("REQ-B", bId, 1);
+            // b is DRAFT (default), a depends on b -> a is BLOCKED
+            var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(a, b));
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+                    .thenReturn(List.of(rel));
+
+            WorkOrderResult result = service.getWorkOrder(PROJECT_ID);
+
+            assertThat(result.totalRequirements()).isEqualTo(2);
+            assertThat(result.totalBlocked()).isEqualTo(1);
+            assertThat(result.totalUnconstrained()).isEqualTo(1);
+
+            WorkOrderWave wave = result.waves().get(0);
+            WorkOrderItem blockedItem = wave.items().stream()
+                    .filter(i -> i.uid().equals("REQ-A"))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(blockedItem.blockingStatus()).isEqualTo(BlockingStatus.BLOCKED);
+            assertThat(blockedItem.blockedBy()).containsExactly("REQ-B");
+
+            WorkOrderItem unconstrainedItem = wave.items().stream()
+                    .filter(i -> i.uid().equals("REQ-B"))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(unconstrainedItem.blockingStatus()).isEqualTo(BlockingStatus.UNCONSTRAINED);
+        }
+
+        @Test
+        void satisfiedDependency_isUnblocked() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            var a = makeRequirement("REQ-A", aId, 1);
+            var b = makeRequirement("REQ-B", bId, 1);
+            setField(b, "status", Status.ACTIVE);
+            // a depends on b, b is ACTIVE -> a is UNBLOCKED
+            var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(a, b));
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+                    .thenReturn(List.of(rel));
+
+            WorkOrderResult result = service.getWorkOrder(PROJECT_ID);
+
+            assertThat(result.totalUnblocked()).isEqualTo(1);
+
+            WorkOrderItem unblockedItem = result.waves().get(0).items().stream()
+                    .filter(i -> i.uid().equals("REQ-A"))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(unblockedItem.blockingStatus()).isEqualTo(BlockingStatus.UNBLOCKED);
+            assertThat(unblockedItem.blockedBy()).isEmpty();
+        }
+
+        @Test
+        void singleWave_sortedByDependencyThenPriority() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            UUID cId = UUID.randomUUID();
+            // c (COULD) depends on a (MUST). b (SHOULD) is independent.
+            var a = makeRequirement("REQ-A", aId, 1);
+            a.setPriority(Priority.MUST);
+            var b = makeRequirement("REQ-B", bId, 1);
+            b.setPriority(Priority.SHOULD);
+            var c = makeRequirement("REQ-C", cId, 1);
+            c.setPriority(Priority.COULD);
+            setField(a, "status", Status.ACTIVE);
+
+            var rel = new RequirementRelation(c, a, RelationType.DEPENDS_ON);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(a, b, c));
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+                    .thenReturn(List.of(rel));
+
+            WorkOrderResult result = service.getWorkOrder(PROJECT_ID);
+
+            List<String> uids = result.waves().get(0).items().stream()
+                    .map(WorkOrderItem::uid)
+                    .toList();
+            // a comes before c (dependency). b is independent with SHOULD priority.
+            // Topo sort: a (MUST, no deps) and b (SHOULD, no deps) first, then c (COULD, depends on a)
+            // Priority tie-breaking: a (MUST=0) before b (SHOULD=1)
+            assertThat(uids).containsExactly("REQ-A", "REQ-B", "REQ-C");
+        }
+
+        @Test
+        void multipleWaves_groupedSeparately() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            var a = makeRequirement("REQ-A", aId, 1);
+            var b = makeRequirement("REQ-B", bId, 2);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(a, b));
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+                    .thenReturn(List.of());
+
+            WorkOrderResult result = service.getWorkOrder(PROJECT_ID);
+
+            assertThat(result.waves()).hasSize(2);
+            assertThat(result.waves().get(0).wave()).isEqualTo(1);
+            assertThat(result.waves().get(0).items()).hasSize(1);
+            assertThat(result.waves().get(0).items().get(0).uid()).isEqualTo("REQ-A");
+            assertThat(result.waves().get(1).wave()).isEqualTo(2);
+            assertThat(result.waves().get(1).items()).hasSize(1);
+            assertThat(result.waves().get(1).items().get(0).uid()).isEqualTo("REQ-B");
+        }
+
+        @Test
+        void nullWave_sortedLast() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            var a = makeRequirement("REQ-A", aId, 1);
+            var b = makeRequirement("REQ-B", bId); // null wave
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(a, b));
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+                    .thenReturn(List.of());
+
+            WorkOrderResult result = service.getWorkOrder(PROJECT_ID);
+
+            assertThat(result.waves()).hasSize(2);
+            assertThat(result.waves().get(0).wave()).isEqualTo(1);
+            assertThat(result.waves().get(1).wave()).isNull();
+        }
+
+        @Test
+        void cycleParticipants_appendedSortedByPriority() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            UUID cId = UUID.randomUUID();
+            // a and b form a cycle within wave 1; c is independent
+            var a = makeRequirement("REQ-A", aId, 1);
+            a.setPriority(Priority.SHOULD);
+            var b = makeRequirement("REQ-B", bId, 1);
+            b.setPriority(Priority.MUST);
+            var c = makeRequirement("REQ-C", cId, 1);
+            c.setPriority(Priority.COULD);
+
+            // a -> b -> a (cycle)
+            var ab = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
+            var ba = new RequirementRelation(b, a, RelationType.DEPENDS_ON);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(a, b, c));
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+                    .thenReturn(List.of(ab, ba));
+
+            WorkOrderResult result = service.getWorkOrder(PROJECT_ID);
+
+            List<String> uids = result.waves().get(0).items().stream()
+                    .map(WorkOrderItem::uid)
+                    .toList();
+            // c (COULD, no deps) is topo-sorted first; a and b are cycle participants appended by priority
+            // b (MUST=0) before a (SHOULD=1)
+            assertThat(uids).containsExactly("REQ-C", "REQ-B", "REQ-A");
+        }
+
+        @Test
+        void crossWaveDependency_excludedFromIntraWaveSort() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            // a in wave 1 depends on b in wave 2 (cross-wave edge)
+            var a = makeRequirement("REQ-A", aId, 1);
+            a.setPriority(Priority.MUST);
+            var b = makeRequirement("REQ-B", bId, 2);
+            b.setPriority(Priority.MUST);
+
+            var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(a, b));
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+                    .thenReturn(List.of(rel));
+
+            WorkOrderResult result = service.getWorkOrder(PROJECT_ID);
+
+            // Both requirements appear, each in their own wave
+            assertThat(result.waves()).hasSize(2);
+            assertThat(result.waves().get(0).wave()).isEqualTo(1);
+            assertThat(result.waves().get(0).items()).hasSize(1);
+            assertThat(result.waves().get(0).items().get(0).uid()).isEqualTo("REQ-A");
+            assertThat(result.waves().get(1).wave()).isEqualTo(2);
+            assertThat(result.waves().get(1).items()).hasSize(1);
+            assertThat(result.waves().get(1).items().get(0).uid()).isEqualTo("REQ-B");
+
+            // a is BLOCKED (b is DRAFT), cross-wave edge doesn't break intra-wave sort
+            assertThat(result.waves().get(0).items().get(0).blockingStatus()).isEqualTo(BlockingStatus.BLOCKED);
         }
     }
 }

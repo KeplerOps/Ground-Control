@@ -52,6 +52,12 @@ const TO_CAMEL = {
   requirement_uid: "requirementUid",
   extra_body: "extraBody",
   project_identifier: "projectIdentifier",
+  blocking_status: "blockingStatus",
+  blocked_by: "blockedBy",
+  total_unblocked: "totalUnblocked",
+  total_blocked: "totalBlocked",
+  total_unconstrained: "totalUnconstrained",
+  total_requirements: "totalRequirements",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -260,6 +266,10 @@ export async function analyzeCompleteness(project) {
 
 export async function getDashboardStats(project) {
   return request("GET", "/api/v1/analysis/dashboard-stats", { params: { project } });
+}
+
+export async function getWorkOrder(project) {
+  return request("GET", "/api/v1/analysis/work-order", { params: { project } });
 }
 
 export async function importStrictdoc(filePath, project) {

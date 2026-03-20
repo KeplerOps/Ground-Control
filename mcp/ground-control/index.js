@@ -26,6 +26,7 @@ import {
   detectConsistencyViolations,
   analyzeCompleteness,
   getDashboardStats,
+  getWorkOrder,
   importStrictdoc,
   syncGithub,
   getRequirementHistory,
@@ -614,6 +615,26 @@ server.tool(
     try {
       const stats = await getDashboardStats(project);
       return ok(JSON.stringify(stats, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Work order tool
+// ==========================================================================
+
+server.tool(
+  "gc_get_work_order",
+  "Get a topologically-sorted work order derived from the requirements DAG. Shows what is unblocked and ready to work on, grouped by wave, sorted by dependency order and MoSCoW priority.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await getWorkOrder(project);
+      return ok(JSON.stringify(result, null, 2));
     } catch (e) {
       return err(e);
     }

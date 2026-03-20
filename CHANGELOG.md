@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.61.1] - 2026-03-20
+
+### Changed
+
+- Move `SATISFIED_STATUSES` and `PRIORITY_ORDER` static fields to top of
+  `AnalysisService` alongside other static constants
+
+### Added
+
+- Test: cycle participants appended sorted by priority in work order
+- Test: cross-wave dependencies excluded from intra-wave topological sort
+
+## [0.61.0] - 2026-03-19
+
+### Added
+
+- Work order API (`GET /api/v1/analysis/work-order`) — topologically-sorted,
+  DAG-derived work order grouped by wave, with MoSCoW priority tie-breaking
+- `gc_get_work_order` MCP tool with REST/MCP parity
+- `GraphAlgorithms.topologicalSort()` — Kahn's algorithm with priority
+  tie-breaking for deterministic ordering
+- Blocking status detection: each requirement classified as UNBLOCKED, BLOCKED,
+  or UNCONSTRAINED based on dependency satisfaction
+
 ## [0.60.0] - 2026-03-18
 
 ### Added
