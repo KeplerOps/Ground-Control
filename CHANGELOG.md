@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.65.0] - 2026-03-20
+
+### Added
+
+- Slide-out detail panel on the requirements explorer: clicking a table row
+  opens an inline panel showing requirement details, status transitions, and
+  editing — without navigating away from the list
+- Reusable `SlidePanel` UI component (right-edge drawer with slide animation)
+- Selected row highlight in requirements table when detail panel is open
+
 ## [0.64.1] - 2026-03-20
 
 ### Fixed
