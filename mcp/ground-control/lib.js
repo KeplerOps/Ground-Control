@@ -291,6 +291,15 @@ export async function importStrictdoc(filePath, project) {
   return request("POST", "/api/v1/admin/import/strictdoc", { formData: form, params });
 }
 
+export async function importReqif(filePath, project) {
+  const content = readFileSync(filePath);
+  const form = new FormData();
+  form.append("file", new Blob([content]), basename(filePath));
+  const params = {};
+  if (project) params.project = project;
+  return request("POST", "/api/v1/admin/import/reqif", { formData: form, params });
+}
+
 export async function syncGithub(owner, repo) {
   return request("POST", "/api/v1/admin/sync/github", {
     params: { owner, repo },

@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.63.2] - 2026-03-20
+
+### Changed
+
+- Refactor `ImportService`: extract shared helpers (`upsertRequirements`, `createParentRelations`,
+  `resolveRequirementId`, `createExplicitRelations`, `createTraceabilityLinks`, `saveAuditAndBuildResult`)
+  to reduce cognitive complexity and duplication between `importStrictdoc` and `importReqif`
+- Extract `ParsedRequirement` record and `ImportCounters` accumulator as shared types
+- Extract `ATTR_IDENTIFIER` and `ATTR_LONG_NAME` string constants in `ReqifParser`
+
+### Added
+
+- 7 new tests for uncovered reqif relation paths (DB fallback, missing parent/source/target,
+  creation errors for hierarchy and explicit relations)
+- `@SuppressWarnings("java:S2187")` on `ReqifParserTest` to suppress false positive
+
+### Fixed
+
+- Fix SonarCloud S1751 bug in `ReqifParser.extractAttrValueText` — unconditional `return` inside
+  `for` loop replaced with explicit first-element check
+
+## [0.63.1] - 2026-03-20
+
+### Fixed
+
+- Remove dead `relations` field from `ReqifRequirement` record (was never populated)
+- Remove redundant null check in `extractAttrValueText` (`getAttribute` never returns null)
+- Make `stripXhtml` method private (only used internally)
+- Add comment clarifying hierarchy + SpecRelation overlap behavior in Phase 2b
+
+### Added
+
+- Test: title fallback from `LONG-NAME` to `ReqIF.Name` attribute value
+- Test: hierarchy + explicit SpecRelation overlap correctly skips duplicate
+
+## [0.63.0] - 2026-03-20
+
+### Added
+
+- ReqIF 1.2 import — bulk-import requirements from `.reqif` files produced by
+  enterprise tools (IBM DOORS, Polarion, Jama)
+- REST API: `POST /admin/import/reqif` (multipart/form-data)
+- MCP tool: `gc_import_reqif` with `file_path` and optional `project` parameters
+- Parses SPEC-OBJECTS (title, statement), SPEC-RELATIONS (explicit relations),
+  and SPECIFICATION hierarchy (parent-child nesting)
+- XHTML attribute values stripped to plain text
+- XXE prevention: DTDs and external entities disabled
+- Relation type mapping from ReqIF type names via naming convention
+  (contains "parent" → PARENT, "depends" → DEPENDS_ON, etc.)
+- Deterministic UID truncation for identifiers exceeding 50 characters
+
 ## [0.62.1] - 2026-03-20
 
 ### Fixed
