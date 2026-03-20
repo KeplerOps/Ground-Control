@@ -171,6 +171,11 @@ export function Requirements() {
   const totalElements = data?.totalElements ?? 0;
   const totalPages = data?.totalPages ?? 0;
 
+  // Keep panel in sync with query cache so mutations don't show stale data
+  const displayedReq = detailReq
+    ? (content.find((r) => r.id === detailReq.id) ?? detailReq)
+    : null;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -457,16 +462,18 @@ export function Requirements() {
 
       {/* Detail slide panel */}
       <SlidePanel
-        open={detailReq !== null}
+        open={displayedReq !== null}
         onOpenChange={(open) => {
           if (!open) setDetailReq(null);
         }}
-        title={detailReq ? `${detailReq.uid} — ${detailReq.title}` : ""}
+        title={
+          displayedReq ? `${displayedReq.uid} — ${displayedReq.title}` : ""
+        }
       >
-        {detailReq && (
+        {displayedReq && (
           <RequirementDetailPanel
-            key={detailReq.id}
-            requirement={detailReq}
+            key={displayedReq.id}
+            requirement={displayedReq}
             onClose={() => setDetailReq(null)}
           />
         )}

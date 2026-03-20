@@ -8,6 +8,7 @@ import {
   useUpdateRequirement,
 } from "@/hooks/use-requirements";
 import type {
+  RequirementRequest,
   RequirementResponse,
   UpdateRequirementRequest,
 } from "@/types/api";
@@ -33,7 +34,7 @@ export function RequirementDetailPanel({
   const archiveMutation = useArchiveRequirement(req.id);
 
   const handleUpdate = useCallback(
-    (data: unknown) => {
+    (data: RequirementRequest | UpdateRequirementRequest) => {
       updateMutation.mutate(data as UpdateRequirementRequest, {
         onSuccess: () => {
           setEditing(false);
@@ -98,7 +99,7 @@ export function RequirementDetailPanel({
           <ExternalLink className="h-3.5 w-3.5" />
           Full Detail
         </Link>
-        {req.status !== "ARCHIVED" && (
+        {(req.status === "ACTIVE" || req.status === "DEPRECATED") && (
           <button
             type="button"
             className="ml-auto rounded-md border border-destructive/30 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10"
@@ -112,26 +113,24 @@ export function RequirementDetailPanel({
 
       {/* Metadata */}
       <div className="flex flex-wrap items-center gap-2">
-        <div data-no-row-click>
-          <StatusBadgeDropdown
-            status={req.status}
-            onTransition={(s) =>
-              transition.mutate(s, {
-                onSuccess: () =>
-                  toast({
-                    title: `Status changed to ${s}`,
-                    variant: "success",
-                  }),
-                onError: (err) =>
-                  toast({
-                    title: "Transition failed",
-                    description: err.message,
-                    variant: "error",
-                  }),
-              })
-            }
-          />
-        </div>
+        <StatusBadgeDropdown
+          status={req.status}
+          onTransition={(s) =>
+            transition.mutate(s, {
+              onSuccess: () =>
+                toast({
+                  title: `Status changed to ${s}`,
+                  variant: "success",
+                }),
+              onError: (err) =>
+                toast({
+                  title: "Transition failed",
+                  description: err.message,
+                  variant: "error",
+                }),
+            })
+          }
+        />
         <PriorityBadge priority={req.priority} />
         <TypeBadge type={req.requirementType} />
         {req.wave != null && (
