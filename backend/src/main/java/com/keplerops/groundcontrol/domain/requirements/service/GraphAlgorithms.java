@@ -2,10 +2,12 @@ package com.keplerops.groundcontrol.domain.requirements.service;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
@@ -85,6 +87,63 @@ public final class GraphAlgorithms {
         }
         cycle.addFirst(cycleStart);
         return List.copyOf(cycle);
+    }
+
+    /**
+     * Topological sort using Kahn's algorithm with priority tie-breaking.
+     * Nodes involved in cycles are omitted from the result.
+     *
+     * @param dependsOn map from node to the list of nodes it depends on
+     * @param tieBreaker comparator used to pick among zero-in-degree nodes
+     * @return topologically ordered list of node UUIDs
+     */
+    /*@ ensures \result != null; @*/
+    public static List<UUID> topologicalSort(Map<UUID, List<UUID>> dependsOn, Comparator<UUID> tieBreaker) {
+
+        // Collect all nodes
+        Set<UUID> allNodes = new HashSet<>(dependsOn.keySet());
+        for (List<UUID> deps : dependsOn.values()) {
+            allNodes.addAll(deps);
+        }
+
+        // Compute in-degree (number of dependencies each node has)
+        Map<UUID, Integer> inDegree = new HashMap<>();
+        // Build reverse map: for each dependency target, who depends on it
+        Map<UUID, List<UUID>> dependedOnBy = new HashMap<>();
+
+        for (UUID node : allNodes) {
+            inDegree.put(node, 0);
+        }
+        for (Map.Entry<UUID, List<UUID>> entry : dependsOn.entrySet()) {
+            UUID node = entry.getKey();
+            inDegree.put(node, entry.getValue().size());
+            for (UUID dep : entry.getValue()) {
+                dependedOnBy.computeIfAbsent(dep, k -> new ArrayList<>()).add(node);
+            }
+        }
+
+        // Seed the queue with zero-in-degree nodes
+        PriorityQueue<UUID> queue = new PriorityQueue<>(tieBreaker);
+        for (Map.Entry<UUID, Integer> entry : inDegree.entrySet()) {
+            if (entry.getValue() == 0) {
+                queue.add(entry.getKey());
+            }
+        }
+
+        List<UUID> result = new ArrayList<>();
+        while (!queue.isEmpty()) {
+            UUID node = queue.poll();
+            result.add(node);
+            for (UUID dependent : dependedOnBy.getOrDefault(node, List.of())) {
+                int newDegree = inDegree.get(dependent) - 1;
+                inDegree.put(dependent, newDegree);
+                if (newDegree == 0) {
+                    queue.add(dependent);
+                }
+            }
+        }
+
+        return result;
     }
 
     /**

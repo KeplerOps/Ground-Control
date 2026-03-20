@@ -78,6 +78,12 @@ public class AnalysisController {
                 .toList();
     }
 
+    @GetMapping("/work-order")
+    public WorkOrderResponse getWorkOrder(@RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return WorkOrderResponse.from(analysisService.getWorkOrder(projectId));
+    }
+
     @GetMapping("/dashboard-stats")
     public DashboardStatsResponse getDashboardStats(@RequestParam(required = false) String project) {
         var projectId = projectService.resolveProjectId(project);
