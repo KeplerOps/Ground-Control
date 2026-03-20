@@ -1,7 +1,9 @@
+import { RequirementDetailPanel } from "@/components/requirement-detail-panel";
 import { RequirementForm } from "@/components/requirement-form";
 import { StatusBadgeDropdown } from "@/components/status-badge";
 import { PriorityBadge, TypeBadge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
+import { SlidePanel } from "@/components/ui/slide-panel";
 import { useToast } from "@/components/ui/toast";
 import { useProjectContext } from "@/contexts/project-context";
 import {
@@ -23,7 +25,6 @@ import type {
 import * as Checkbox from "@radix-ui/react-checkbox";
 import { Check, ChevronDown, ChevronUp, FileText, Plus } from "lucide-react";
 import { useCallback, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
 
 type SortField =
   | "uid"
@@ -37,8 +38,6 @@ type SortDir = "asc" | "desc";
 
 export function Requirements() {
   const { activeProject, isLoading: projectLoading } = useProjectContext();
-  const { projectId } = useParams<{ projectId: string }>();
-  const navigate = useNavigate();
   const { toast } = useToast();
 
   const [page, setPage] = useState(0);
@@ -53,6 +52,7 @@ export function Requirements() {
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkStatus, setBulkStatus] = useState<Status>("ACTIVE");
+  const [detailReq, setDetailReq] = useState<RequirementResponse | null>(null);
 
   const sort = `${sortField},${sortDir}`;
 
@@ -381,10 +381,9 @@ export function Requirements() {
                 key={req.id}
                 req={req}
                 selected={selected.has(req.id)}
+                active={detailReq?.id === req.id}
                 onToggle={() => toggleSelected(req.id)}
-                onClick={() =>
-                  navigate(`/p/${projectId}/requirements/${req.id}`)
-                }
+                onClick={() => setDetailReq(req)}
               />
             ))}
             {content.length === 0 && (
@@ -455,6 +454,23 @@ export function Requirements() {
           loading={createMutation.isPending}
         />
       </Modal>
+
+      {/* Detail slide panel */}
+      <SlidePanel
+        open={detailReq !== null}
+        onOpenChange={(open) => {
+          if (!open) setDetailReq(null);
+        }}
+        title={detailReq ? `${detailReq.uid} — ${detailReq.title}` : ""}
+      >
+        {detailReq && (
+          <RequirementDetailPanel
+            key={detailReq.id}
+            requirement={detailReq}
+            onClose={() => setDetailReq(null)}
+          />
+        )}
+      </SlidePanel>
     </div>
   );
 }
@@ -462,6 +478,7 @@ export function Requirements() {
 function RequirementRow({
   req,
   selected,
+  active,
   onToggle,
   onClick,
 }: {
@@ -476,6 +493,7 @@ function RequirementRow({
     updatedAt: string;
   };
   selected: boolean;
+  active?: boolean;
   onToggle: () => void;
   onClick: () => void;
 }) {
@@ -497,7 +515,10 @@ function RequirementRow({
 
   return (
     <tr
-      className="hover:bg-accent/30 cursor-pointer"
+      className={cn(
+        "hover:bg-accent/30 cursor-pointer",
+        active && "bg-accent/50",
+      )}
       onClick={handleRowClick}
       onKeyDown={handleRowKeyDown}
       tabIndex={0}
