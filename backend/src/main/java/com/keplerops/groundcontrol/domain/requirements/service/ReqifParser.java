@@ -273,8 +273,9 @@ public final class ReqifParser {
             return theValue;
         }
         // For ATTRIBUTE-VALUE-XHTML, look for THE-VALUE child containing XHTML
-        for (Element theValueEl : directChildElements(attrValue, "THE-VALUE")) {
-            return stripXhtml(theValueEl);
+        List<Element> theValueElements = directChildElements(attrValue, "THE-VALUE");
+        if (!theValueElements.isEmpty()) {
+            return stripXhtml(theValueElements.get(0));
         }
         return null;
     }

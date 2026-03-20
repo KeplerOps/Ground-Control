@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation errors for hierarchy and explicit relations)
 - `@SuppressWarnings("java:S2187")` on `ReqifParserTest` to suppress false positive
 
+### Fixed
+
+- Fix SonarCloud S1751 bug in `ReqifParser.extractAttrValueText` — unconditional `return` inside
+  `for` loop replaced with explicit first-element check
+
 ## [0.63.1] - 2026-03-20
 
 ### Fixed
