@@ -786,5 +786,69 @@ class AnalysisServiceTest {
             assertThat(result.waves().get(0).wave()).isEqualTo(1);
             assertThat(result.waves().get(1).wave()).isNull();
         }
+
+        @Test
+        void cycleParticipants_appendedSortedByPriority() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            UUID cId = UUID.randomUUID();
+            // a and b form a cycle within wave 1; c is independent
+            var a = makeRequirement("REQ-A", aId, 1);
+            a.setPriority(Priority.SHOULD);
+            var b = makeRequirement("REQ-B", bId, 1);
+            b.setPriority(Priority.MUST);
+            var c = makeRequirement("REQ-C", cId, 1);
+            c.setPriority(Priority.COULD);
+
+            // a -> b -> a (cycle)
+            var ab = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
+            var ba = new RequirementRelation(b, a, RelationType.DEPENDS_ON);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(a, b, c));
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+                    .thenReturn(List.of(ab, ba));
+
+            WorkOrderResult result = service.getWorkOrder(PROJECT_ID);
+
+            List<String> uids = result.waves().get(0).items().stream()
+                    .map(WorkOrderItem::uid)
+                    .toList();
+            // c (COULD, no deps) is topo-sorted first; a and b are cycle participants appended by priority
+            // b (MUST=0) before a (SHOULD=1)
+            assertThat(uids).containsExactly("REQ-C", "REQ-B", "REQ-A");
+        }
+
+        @Test
+        void crossWaveDependency_excludedFromIntraWaveSort() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            // a in wave 1 depends on b in wave 2 (cross-wave edge)
+            var a = makeRequirement("REQ-A", aId, 1);
+            a.setPriority(Priority.MUST);
+            var b = makeRequirement("REQ-B", bId, 2);
+            b.setPriority(Priority.MUST);
+
+            var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(a, b));
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+                    .thenReturn(List.of(rel));
+
+            WorkOrderResult result = service.getWorkOrder(PROJECT_ID);
+
+            // Both requirements appear, each in their own wave
+            assertThat(result.waves()).hasSize(2);
+            assertThat(result.waves().get(0).wave()).isEqualTo(1);
+            assertThat(result.waves().get(0).items()).hasSize(1);
+            assertThat(result.waves().get(0).items().get(0).uid()).isEqualTo("REQ-A");
+            assertThat(result.waves().get(1).wave()).isEqualTo(2);
+            assertThat(result.waves().get(1).items()).hasSize(1);
+            assertThat(result.waves().get(1).items().get(0).uid()).isEqualTo("REQ-B");
+
+            // a is BLOCKED (b is DRAFT), cross-wave edge doesn't break intra-wave sort
+            assertThat(result.waves().get(0).items().get(0).blockingStatus()).isEqualTo(BlockingStatus.BLOCKED);
+        }
     }
 }

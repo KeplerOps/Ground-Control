@@ -31,6 +31,11 @@ public class AnalysisService {
     private static final List<RelationType> DAG_TYPES =
             List.of(RelationType.PARENT, RelationType.DEPENDS_ON, RelationType.REFINES);
 
+    private static final Set<Status> SATISFIED_STATUSES = Set.of(Status.ACTIVE, Status.DEPRECATED, Status.ARCHIVED);
+
+    private static final Map<Priority, Integer> PRIORITY_ORDER =
+            Map.of(Priority.MUST, 0, Priority.SHOULD, 1, Priority.COULD, 2, Priority.WONT, 3);
+
     private final RequirementRepository requirementRepository;
     private final RequirementRelationRepository relationRepository;
     private final TraceabilityLinkRepository traceabilityLinkRepository;
@@ -196,11 +201,6 @@ public class AnalysisService {
 
         return violations;
     }
-
-    private static final Set<Status> SATISFIED_STATUSES = Set.of(Status.ACTIVE, Status.DEPRECATED, Status.ARCHIVED);
-
-    private static final Map<Priority, Integer> PRIORITY_ORDER =
-            Map.of(Priority.MUST, 0, Priority.SHOULD, 1, Priority.COULD, 2, Priority.WONT, 3);
 
     public WorkOrderResult getWorkOrder(UUID projectId) {
         List<Requirement> allRequirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
