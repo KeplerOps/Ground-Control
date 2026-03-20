@@ -23,7 +23,7 @@ import type {
 import * as Checkbox from "@radix-ui/react-checkbox";
 import { Check, ChevronDown, ChevronUp, FileText, Plus } from "lucide-react";
 import { useCallback, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 type SortField =
   | "uid"
@@ -37,6 +37,7 @@ type SortDir = "asc" | "desc";
 
 export function Requirements() {
   const { activeProject, isLoading: projectLoading } = useProjectContext();
+  const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -381,7 +382,9 @@ export function Requirements() {
                 req={req}
                 selected={selected.has(req.id)}
                 onToggle={() => toggleSelected(req.id)}
-                onClick={() => navigate(`/requirements/${req.id}`)}
+                onClick={() =>
+                  navigate(`/p/${projectId}/requirements/${req.id}`)
+                }
               />
             ))}
             {content.length === 0 && (

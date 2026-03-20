@@ -49,7 +49,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 export function RequirementDetail() {
-  const { id } = useParams<{ id: string }>();
+  const { id, projectId } = useParams<{ id: string; projectId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { data: req, isLoading } = useRequirement(id);
@@ -85,7 +85,7 @@ export function RequirementDetail() {
       <div className="flex items-start justify-between">
         <div>
           <Link
-            to="/requirements"
+            to={`/p/${projectId}/requirements`}
             className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="h-4 w-4" /> Back to Requirements
@@ -231,7 +231,9 @@ export function RequirementDetail() {
         open={cloneOpen}
         onOpenChange={setCloneOpen}
         requirementId={req.id}
-        onCloned={(newReq) => navigate(`/requirements/${newReq.id}`)}
+        onCloned={(newReq) =>
+          navigate(`/p/${projectId}/requirements/${newReq.id}`)
+        }
       />
     </div>
   );
@@ -395,6 +397,7 @@ function RelationRow({
   currentId: string;
   onDelete: () => void;
 }) {
+  const { projectId } = useParams<{ projectId: string }>();
   const isSource = rel.sourceId === currentId;
   const otherUid = isSource ? rel.targetUid : rel.sourceUid;
   const otherId = isSource ? rel.targetId : rel.sourceId;
@@ -406,7 +409,7 @@ function RelationRow({
       </td>
       <td className="px-3 py-2">
         <Link
-          to={`/requirements/${otherId}`}
+          to={`/p/${projectId}/requirements/${otherId}`}
           className="font-mono text-xs text-primary hover:underline"
         >
           {otherUid}
@@ -644,6 +647,7 @@ function HistoryTab({ requirementId }: { requirementId: string }) {
 }
 
 function ImpactTab({ requirementId }: { requirementId: string }) {
+  const { projectId } = useParams<{ projectId: string }>();
   const { data: impacted = [], isLoading } = useImpact(requirementId);
 
   if (isLoading) return <div className="animate-pulse h-20 bg-muted rounded" />;
@@ -665,7 +669,7 @@ function ImpactTab({ requirementId }: { requirementId: string }) {
       {impacted.map((r: RequirementSummaryResponse) => (
         <Link
           key={r.id}
-          to={`/requirements/${r.id}`}
+          to={`/p/${projectId}/requirements/${r.id}`}
           className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 hover:bg-accent/30"
         >
           <span className="font-mono text-xs text-muted-foreground">

@@ -1,16 +1,14 @@
+import { useToast } from "@/components/ui/toast";
 import type { ProjectResponse } from "@/hooks/use-projects";
 import { useProjects } from "@/hooks/use-projects";
-import { queryClient } from "@/lib/query-client";
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
   useMemo,
-  useState,
 } from "react";
-
-const STORAGE_KEY = "gc-active-project";
+import { useNavigate, useParams } from "react-router-dom";
 
 interface ProjectContextValue {
   projects: ProjectResponse[];
@@ -22,37 +20,29 @@ interface ProjectContextValue {
 const ProjectContext = createContext<ProjectContextValue | null>(null);
 
 export function ProjectProvider({ children }: { children: React.ReactNode }) {
+  const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
+  const { toast } = useToast();
   const { data: projects = [], isLoading } = useProjects();
-  const [activeProject, setActiveProjectState] =
-    useState<ProjectResponse | null>(null);
 
-  const setActiveProject = useCallback((project: ProjectResponse) => {
-    setActiveProjectState(project);
-    localStorage.setItem(STORAGE_KEY, project.identifier);
-    queryClient.invalidateQueries({
-      predicate: (query) => {
-        const key = query.queryKey[0];
-        return key !== "projects";
-      },
-    });
-  }, []);
+  const activeProject = useMemo(
+    () => projects.find((p) => p.identifier === projectId) ?? null,
+    [projects, projectId],
+  );
 
   useEffect(() => {
-    if (projects.length === 0) return;
-
-    const stored = localStorage.getItem(STORAGE_KEY);
-    const match = projects.find((p) => p.identifier === stored);
-
-    if (match) {
-      setActiveProjectState(match);
-    } else if (projects.length === 1) {
-      const only = projects[0];
-      if (only) {
-        setActiveProjectState(only);
-        localStorage.setItem(STORAGE_KEY, only.identifier);
-      }
+    if (!isLoading && projects.length > 0 && projectId && !activeProject) {
+      toast({ title: "Project not found", variant: "error" });
+      navigate("/projects", { replace: true });
     }
-  }, [projects]);
+  }, [isLoading, projects, projectId, activeProject, navigate, toast]);
+
+  const setActiveProject = useCallback(
+    (project: ProjectResponse) => {
+      navigate(`/p/${project.identifier}/`);
+    },
+    [navigate],
+  );
 
   const value = useMemo(
     () => ({
