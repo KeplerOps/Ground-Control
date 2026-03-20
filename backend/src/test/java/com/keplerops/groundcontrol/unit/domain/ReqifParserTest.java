@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+@SuppressWarnings("java:S2187")
 class ReqifParserTest {
 
     @Nested

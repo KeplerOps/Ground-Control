@@ -25,6 +25,8 @@ import org.w3c.dom.NodeList;
 public final class ReqifParser {
 
     private static final int MAX_UID_LENGTH = 50;
+    private static final String ATTR_IDENTIFIER = "IDENTIFIER";
+    private static final String ATTR_LONG_NAME = "LONG-NAME";
 
     private ReqifParser() {}
 
@@ -74,7 +76,7 @@ public final class ReqifParser {
     private static Map<String, Map<String, String>> parseSpecTypes(Element root) {
         Map<String, Map<String, String>> result = new HashMap<>();
         for (Element specType : findElements(root, "SPEC-OBJECT-TYPE")) {
-            String typeId = specType.getAttribute("IDENTIFIER");
+            String typeId = specType.getAttribute(ATTR_IDENTIFIER);
             Map<String, String> attrDefs = new HashMap<>();
             // Collect from all ATTRIBUTE-DEFINITION-* elements
             collectAttrDefs(specType, attrDefs);
@@ -82,14 +84,14 @@ public final class ReqifParser {
         }
         // Also parse SPEC-RELATION-TYPE for relation type names
         for (Element relType : findElements(root, "SPEC-RELATION-TYPE")) {
-            String typeId = relType.getAttribute("IDENTIFIER");
+            String typeId = relType.getAttribute(ATTR_IDENTIFIER);
             Map<String, String> attrDefs = new HashMap<>();
             collectAttrDefs(relType, attrDefs);
             result.put(typeId, attrDefs);
         }
         // Also parse SPECIFICATION-TYPE
         for (Element specType : findElements(root, "SPECIFICATION-TYPE")) {
-            String typeId = specType.getAttribute("IDENTIFIER");
+            String typeId = specType.getAttribute(ATTR_IDENTIFIER);
             Map<String, String> attrDefs = new HashMap<>();
             collectAttrDefs(specType, attrDefs);
             result.put(typeId, attrDefs);
@@ -102,7 +104,7 @@ public final class ReqifParser {
         for (int i = 0; i < children.getLength(); i++) {
             if (children.item(i) instanceof Element el) {
                 if (el.getTagName().startsWith("ATTRIBUTE-DEFINITION-")) {
-                    attrDefs.put(el.getAttribute("IDENTIFIER"), el.getAttribute("LONG-NAME"));
+                    attrDefs.put(el.getAttribute(ATTR_IDENTIFIER), el.getAttribute(ATTR_LONG_NAME));
                 }
                 // Recurse into containers like SPEC-ATTRIBUTES
                 collectAttrDefs(el, attrDefs);
@@ -114,12 +116,12 @@ public final class ReqifParser {
             Element root, Map<String, Map<String, String>> specTypeAttrDefs) {
         Map<String, ReqifRequirement> result = new LinkedHashMap<>();
         for (Element specObj : findElements(root, "SPEC-OBJECT")) {
-            String identifier = specObj.getAttribute("IDENTIFIER");
+            String identifier = specObj.getAttribute(ATTR_IDENTIFIER);
             if (identifier == null || identifier.isBlank()) {
                 continue;
             }
 
-            String longName = specObj.getAttribute("LONG-NAME");
+            String longName = specObj.getAttribute(ATTR_LONG_NAME);
 
             // Resolve the spec type for this object
             String specTypeId = resolveTypeRef(specObj, "SPEC-OBJECT-TYPE-REF");
@@ -155,7 +157,7 @@ public final class ReqifParser {
                 typeName = resolveRelationTypeName(root, relTypeId);
             }
             if (typeName.isBlank()) {
-                typeName = specRel.getAttribute("LONG-NAME");
+                typeName = specRel.getAttribute(ATTR_LONG_NAME);
             }
 
             RelationType relationType = mapRelationType(typeName);
@@ -167,8 +169,8 @@ public final class ReqifParser {
 
     private static String resolveRelationTypeName(Element root, String typeId) {
         for (Element relType : findElements(root, "SPEC-RELATION-TYPE")) {
-            if (typeId.equals(relType.getAttribute("IDENTIFIER"))) {
-                return relType.getAttribute("LONG-NAME");
+            if (typeId.equals(relType.getAttribute(ATTR_IDENTIFIER))) {
+                return relType.getAttribute(ATTR_LONG_NAME);
             }
         }
         return "";

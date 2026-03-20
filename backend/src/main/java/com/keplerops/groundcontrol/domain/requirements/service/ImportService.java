@@ -29,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ImportService {
 
     private static final Logger log = LoggerFactory.getLogger(ImportService.class);
+    private static final String LOG_RELATION_FAILED = "import_relation_failed: source={} target={} error={}";
 
     private final RequirementService requirementService;
     private final TraceabilityService traceabilityService;
@@ -54,96 +55,174 @@ public class ImportService {
 
     public ImportResult importStrictdoc(UUID projectId, String filename, String content) {
         List<SdocRequirement> parsed = SdocParser.parse(content);
+        var reqs = parsed.stream()
+                .map(r -> new ParsedRequirement(r.uid(), r.title(), r.statement(), r.wave(), r.parentUids()))
+                .toList();
+        var counters = new ImportCounters();
         List<Map<String, Object>> errors = new ArrayList<>();
 
-        int requirementsCreated = 0;
-        int requirementsUpdated = 0;
-        int relationsCreated = 0;
-        int relationsSkipped = 0;
-        int traceabilityLinksCreated = 0;
-        int traceabilityLinksSkipped = 0;
+        var uidToId = upsertRequirements(projectId, reqs, counters, errors);
+        createParentRelations(projectId, reqs, uidToId, counters, errors);
+        createTraceabilityLinks(parsed, uidToId, counters, errors);
 
-        // Phase 1: Upsert requirements
+        return saveAuditAndBuildResult(ImportSourceType.STRICTDOC, filename, reqs.size(), counters, errors);
+    }
+
+    public ImportResult importReqif(UUID projectId, String filename, String content) {
+        ReqifParseResult parsed = ReqifParser.parse(content);
+        var reqs = parsed.requirements().stream()
+                .map(r -> new ParsedRequirement(r.identifier(), r.title(), r.statement(), null, r.parentIdentifiers()))
+                .toList();
+        var counters = new ImportCounters();
+        List<Map<String, Object>> errors = new ArrayList<>();
+
+        var uidToId = upsertRequirements(projectId, reqs, counters, errors);
+        createParentRelations(projectId, reqs, uidToId, counters, errors);
+        createExplicitRelations(projectId, parsed.relations(), uidToId, counters, errors);
+
+        return saveAuditAndBuildResult(ImportSourceType.REQIF, filename, reqs.size(), counters, errors);
+    }
+
+    private Map<String, UUID> upsertRequirements(
+            UUID projectId,
+            List<ParsedRequirement> requirements,
+            ImportCounters counters,
+            List<Map<String, Object>> errors) {
         Map<String, UUID> uidToId = new HashMap<>();
-        for (SdocRequirement sdocReq : parsed) {
+        for (ParsedRequirement req : requirements) {
             try {
-                var existing = requirementRepository.findByProjectIdAndUid(projectId, sdocReq.uid());
+                var existing = requirementRepository.findByProjectIdAndUid(projectId, req.uid());
                 UUID reqId;
                 if (existing.isPresent()) {
                     var cmd = new UpdateRequirementCommand(
-                            sdocReq.title(),
-                            sdocReq.statement(),
-                            null,
-                            RequirementType.FUNCTIONAL,
-                            Priority.MUST,
-                            sdocReq.wave());
+                            req.title(), req.statement(), null, RequirementType.FUNCTIONAL, Priority.MUST, req.wave());
                     var updated = requirementService.update(existing.get().getId(), cmd);
                     reqId = updated.getId();
-                    requirementsUpdated++;
+                    counters.requirementsUpdated++;
                 } else {
                     var cmd = new CreateRequirementCommand(
                             projectId,
-                            sdocReq.uid(),
-                            sdocReq.title(),
-                            sdocReq.statement(),
+                            req.uid(),
+                            req.title(),
+                            req.statement(),
                             null,
                             RequirementType.FUNCTIONAL,
                             Priority.MUST,
-                            sdocReq.wave());
+                            req.wave());
                     var created = requirementService.create(cmd);
                     reqId = created.getId();
-                    requirementsCreated++;
+                    counters.requirementsCreated++;
                 }
-                uidToId.put(sdocReq.uid(), reqId);
+                uidToId.put(req.uid(), reqId);
             } catch (ConflictException | NotFoundException | DomainValidationException e) {
-                log.warn("import_requirement_failed: uid={} error={}", sdocReq.uid(), e.getMessage());
-                errors.add(Map.of("phase", "requirements", "uid", sdocReq.uid(), "error", e.getMessage()));
+                log.warn("import_requirement_failed: uid={} error={}", req.uid(), e.getMessage());
+                errors.add(Map.of("phase", "requirements", "uid", req.uid(), "error", e.getMessage()));
             }
         }
+        return uidToId;
+    }
 
-        // Phase 2: Create relations
-        for (SdocRequirement sdocReq : parsed) {
-            UUID childId = uidToId.get(sdocReq.uid());
+    private void createParentRelations(
+            UUID projectId,
+            List<ParsedRequirement> requirements,
+            Map<String, UUID> uidToId,
+            ImportCounters counters,
+            List<Map<String, Object>> errors) {
+        for (ParsedRequirement req : requirements) {
+            UUID childId = uidToId.get(req.uid());
             if (childId == null) {
                 continue;
             }
-            for (String parentUid : sdocReq.parentUids()) {
+            for (String parentUid : req.parentUids()) {
                 try {
-                    UUID parentId = uidToId.get(parentUid);
+                    UUID parentId = resolveRequirementId(projectId, parentUid, uidToId);
                     if (parentId == null) {
-                        var parentOpt = requirementRepository.findByProjectIdAndUid(projectId, parentUid);
-                        if (parentOpt.isEmpty()) {
-                            errors.add(Map.of(
-                                    "phase",
-                                    "relations",
-                                    "uid",
-                                    sdocReq.uid(),
-                                    "error",
-                                    "Parent not found: " + parentUid));
-                            continue;
-                        }
-                        parentId = parentOpt.get().getId();
+                        errors.add(Map.of(
+                                "phase", "relations", "uid", req.uid(), "error", "Parent not found: " + parentUid));
+                        continue;
                     }
                     if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(
                             childId, parentId, RelationType.PARENT)) {
-                        relationsSkipped++;
+                        counters.relationsSkipped++;
                         continue;
                     }
                     requirementService.createRelation(childId, parentId, RelationType.PARENT);
-                    relationsCreated++;
+                    counters.relationsCreated++;
                 } catch (ConflictException | NotFoundException | DomainValidationException e) {
-                    log.warn(
-                            "import_relation_failed: source={} target={} error={}",
-                            sdocReq.uid(),
-                            parentUid,
-                            e.getMessage());
+                    log.warn(LOG_RELATION_FAILED, req.uid(), parentUid, e.getMessage());
                     errors.add(Map.of(
-                            "phase", "relations", "uid", sdocReq.uid(), "parent", parentUid, "error", e.getMessage()));
+                            "phase", "relations", "uid", req.uid(), "parent", parentUid, "error", e.getMessage()));
                 }
             }
         }
+    }
 
-        // Phase 3: Create traceability links
+    private UUID resolveRequirementId(UUID projectId, String uid, Map<String, UUID> uidToId) {
+        UUID id = uidToId.get(uid);
+        if (id != null) {
+            return id;
+        }
+        var opt = requirementRepository.findByProjectIdAndUid(projectId, uid);
+        return opt.map(r -> r.getId()).orElse(null);
+    }
+
+    private void createExplicitRelations(
+            UUID projectId,
+            List<ReqifRelation> relations,
+            Map<String, UUID> uidToId,
+            ImportCounters counters,
+            List<Map<String, Object>> errors) {
+        for (ReqifRelation rel : relations) {
+            try {
+                UUID sourceId = resolveRequirementId(projectId, rel.sourceIdentifier(), uidToId);
+                if (sourceId == null) {
+                    errors.add(Map.of(
+                            "phase",
+                            "relations",
+                            "uid",
+                            rel.sourceIdentifier(),
+                            "error",
+                            "Source not found: " + rel.sourceIdentifier()));
+                    continue;
+                }
+                UUID targetId = resolveRequirementId(projectId, rel.targetIdentifier(), uidToId);
+                if (targetId == null) {
+                    errors.add(Map.of(
+                            "phase",
+                            "relations",
+                            "uid",
+                            rel.targetIdentifier(),
+                            "error",
+                            "Target not found: " + rel.targetIdentifier()));
+                    continue;
+                }
+                if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(
+                        sourceId, targetId, rel.relationType())) {
+                    counters.relationsSkipped++;
+                    continue;
+                }
+                requirementService.createRelation(sourceId, targetId, rel.relationType());
+                counters.relationsCreated++;
+            } catch (ConflictException | NotFoundException | DomainValidationException e) {
+                log.warn(LOG_RELATION_FAILED, rel.sourceIdentifier(), rel.targetIdentifier(), e.getMessage());
+                errors.add(Map.of(
+                        "phase",
+                        "relations",
+                        "uid",
+                        rel.sourceIdentifier(),
+                        "target",
+                        rel.targetIdentifier(),
+                        "error",
+                        e.getMessage()));
+            }
+        }
+    }
+
+    private void createTraceabilityLinks(
+            List<SdocRequirement> parsed,
+            Map<String, UUID> uidToId,
+            ImportCounters counters,
+            List<Map<String, Object>> errors) {
         for (SdocRequirement sdocReq : parsed) {
             UUID reqId = uidToId.get(sdocReq.uid());
             if (reqId == null) {
@@ -154,13 +233,13 @@ public class ImportService {
                     String artifactId = String.valueOf(issueNum);
                     if (traceabilityLinkRepository.existsByRequirementIdAndArtifactTypeAndArtifactIdentifierAndLinkType(
                             reqId, ArtifactType.GITHUB_ISSUE, artifactId, LinkType.IMPLEMENTS)) {
-                        traceabilityLinksSkipped++;
+                        counters.traceabilityLinksSkipped++;
                         continue;
                     }
                     var cmd = new CreateTraceabilityLinkCommand(
                             ArtifactType.GITHUB_ISSUE, artifactId, null, null, LinkType.IMPLEMENTS);
                     traceabilityService.createLink(reqId, cmd);
-                    traceabilityLinksCreated++;
+                    counters.traceabilityLinksCreated++;
                 } catch (ConflictException | NotFoundException | DomainValidationException e) {
                     log.warn(
                             "import_traceability_link_failed: uid={} issue={} error={}",
@@ -179,218 +258,37 @@ public class ImportService {
                 }
             }
         }
-
-        // Save audit record
-        var audit = new RequirementImport(ImportSourceType.STRICTDOC);
-        audit.setSourceFile(filename);
-        audit.setStats(Map.of(
-                "requirementsParsed", parsed.size(),
-                "requirementsCreated", requirementsCreated,
-                "requirementsUpdated", requirementsUpdated,
-                "relationsCreated", relationsCreated,
-                "relationsSkipped", relationsSkipped,
-                "traceabilityLinksCreated", traceabilityLinksCreated,
-                "traceabilityLinksSkipped", traceabilityLinksSkipped));
-        audit.setErrors(errors);
-        var savedAudit = importRepository.save(audit);
-
-        return new ImportResult(
-                savedAudit.getId(),
-                savedAudit.getImportedAt(),
-                parsed.size(),
-                requirementsCreated,
-                requirementsUpdated,
-                relationsCreated,
-                relationsSkipped,
-                traceabilityLinksCreated,
-                traceabilityLinksSkipped,
-                errors);
     }
 
-    public ImportResult importReqif(UUID projectId, String filename, String content) {
-        ReqifParseResult parsed = ReqifParser.parse(content);
-        List<Map<String, Object>> errors = new ArrayList<>();
-
-        int requirementsCreated = 0;
-        int requirementsUpdated = 0;
-        int relationsCreated = 0;
-        int relationsSkipped = 0;
-
-        // Phase 1: Upsert requirements
-        Map<String, UUID> uidToId = new HashMap<>();
-        for (ReqifRequirement reqifReq : parsed.requirements()) {
-            try {
-                var existing = requirementRepository.findByProjectIdAndUid(projectId, reqifReq.identifier());
-                UUID reqId;
-                if (existing.isPresent()) {
-                    var cmd = new UpdateRequirementCommand(
-                            reqifReq.title(),
-                            reqifReq.statement(),
-                            null,
-                            RequirementType.FUNCTIONAL,
-                            Priority.MUST,
-                            null);
-                    var updated = requirementService.update(existing.get().getId(), cmd);
-                    reqId = updated.getId();
-                    requirementsUpdated++;
-                } else {
-                    var cmd = new CreateRequirementCommand(
-                            projectId,
-                            reqifReq.identifier(),
-                            reqifReq.title(),
-                            reqifReq.statement(),
-                            null,
-                            RequirementType.FUNCTIONAL,
-                            Priority.MUST,
-                            null);
-                    var created = requirementService.create(cmd);
-                    reqId = created.getId();
-                    requirementsCreated++;
-                }
-                uidToId.put(reqifReq.identifier(), reqId);
-            } catch (ConflictException | NotFoundException | DomainValidationException e) {
-                log.warn("import_requirement_failed: uid={} error={}", reqifReq.identifier(), e.getMessage());
-                errors.add(Map.of("phase", "requirements", "uid", reqifReq.identifier(), "error", e.getMessage()));
-            }
-        }
-
-        // Phase 2: Create relations from hierarchy parents
-        for (ReqifRequirement reqifReq : parsed.requirements()) {
-            UUID childId = uidToId.get(reqifReq.identifier());
-            if (childId == null) {
-                continue;
-            }
-            for (String parentUid : reqifReq.parentIdentifiers()) {
-                try {
-                    UUID parentId = uidToId.get(parentUid);
-                    if (parentId == null) {
-                        var parentOpt = requirementRepository.findByProjectIdAndUid(projectId, parentUid);
-                        if (parentOpt.isEmpty()) {
-                            errors.add(Map.of(
-                                    "phase",
-                                    "relations",
-                                    "uid",
-                                    reqifReq.identifier(),
-                                    "error",
-                                    "Parent not found: " + parentUid));
-                            continue;
-                        }
-                        parentId = parentOpt.get().getId();
-                    }
-                    if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(
-                            childId, parentId, RelationType.PARENT)) {
-                        relationsSkipped++;
-                        continue;
-                    }
-                    requirementService.createRelation(childId, parentId, RelationType.PARENT);
-                    relationsCreated++;
-                } catch (ConflictException | NotFoundException | DomainValidationException e) {
-                    log.warn(
-                            "import_relation_failed: source={} target={} error={}",
-                            reqifReq.identifier(),
-                            parentUid,
-                            e.getMessage());
-                    errors.add(Map.of(
-                            "phase",
-                            "relations",
-                            "uid",
-                            reqifReq.identifier(),
-                            "parent",
-                            parentUid,
-                            "error",
-                            e.getMessage()));
-                }
-            }
-        }
-
-        // Phase 2b: Create relations from explicit SpecRelations.
-        // If a relation was already created from hierarchy nesting (Phase 2), the existsBy... check
-        // will skip it here — the skipped count may include these overlapping relations.
-        for (ReqifRelation rel : parsed.relations()) {
-            try {
-                UUID sourceId = uidToId.get(rel.sourceIdentifier());
-                UUID targetId = uidToId.get(rel.targetIdentifier());
-                if (sourceId == null) {
-                    var opt = requirementRepository.findByProjectIdAndUid(projectId, rel.sourceIdentifier());
-                    if (opt.isEmpty()) {
-                        errors.add(Map.of(
-                                "phase",
-                                "relations",
-                                "uid",
-                                rel.sourceIdentifier(),
-                                "error",
-                                "Source not found: " + rel.sourceIdentifier()));
-                        continue;
-                    }
-                    sourceId = opt.get().getId();
-                }
-                if (targetId == null) {
-                    var opt = requirementRepository.findByProjectIdAndUid(projectId, rel.targetIdentifier());
-                    if (opt.isEmpty()) {
-                        errors.add(Map.of(
-                                "phase",
-                                "relations",
-                                "uid",
-                                rel.targetIdentifier(),
-                                "error",
-                                "Target not found: " + rel.targetIdentifier()));
-                        continue;
-                    }
-                    targetId = opt.get().getId();
-                }
-                if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(
-                        sourceId, targetId, rel.relationType())) {
-                    relationsSkipped++;
-                    continue;
-                }
-                requirementService.createRelation(sourceId, targetId, rel.relationType());
-                relationsCreated++;
-            } catch (ConflictException | NotFoundException | DomainValidationException e) {
-                log.warn(
-                        "import_relation_failed: source={} target={} error={}",
-                        rel.sourceIdentifier(),
-                        rel.targetIdentifier(),
-                        e.getMessage());
-                errors.add(Map.of(
-                        "phase",
-                        "relations",
-                        "uid",
-                        rel.sourceIdentifier(),
-                        "target",
-                        rel.targetIdentifier(),
-                        "error",
-                        e.getMessage()));
-            }
-        }
-
-        // Phase 3: No-op — ReqIF has no GitHub issue references
-        int traceabilityLinksCreated = 0;
-        int traceabilityLinksSkipped = 0;
-
-        // Save audit record
-        var audit = new RequirementImport(ImportSourceType.REQIF);
+    private ImportResult saveAuditAndBuildResult(
+            ImportSourceType sourceType,
+            String filename,
+            int parsedCount,
+            ImportCounters counters,
+            List<Map<String, Object>> errors) {
+        var audit = new RequirementImport(sourceType);
         audit.setSourceFile(filename);
         audit.setStats(Map.of(
-                "requirementsParsed", parsed.requirements().size(),
-                "requirementsCreated", requirementsCreated,
-                "requirementsUpdated", requirementsUpdated,
-                "relationsCreated", relationsCreated,
-                "relationsSkipped", relationsSkipped,
-                "traceabilityLinksCreated", traceabilityLinksCreated,
-                "traceabilityLinksSkipped", traceabilityLinksSkipped));
+                "requirementsParsed", parsedCount,
+                "requirementsCreated", counters.requirementsCreated,
+                "requirementsUpdated", counters.requirementsUpdated,
+                "relationsCreated", counters.relationsCreated,
+                "relationsSkipped", counters.relationsSkipped,
+                "traceabilityLinksCreated", counters.traceabilityLinksCreated,
+                "traceabilityLinksSkipped", counters.traceabilityLinksSkipped));
         audit.setErrors(errors);
         var savedAudit = importRepository.save(audit);
 
         return new ImportResult(
                 savedAudit.getId(),
                 savedAudit.getImportedAt(),
-                parsed.requirements().size(),
-                requirementsCreated,
-                requirementsUpdated,
-                relationsCreated,
-                relationsSkipped,
-                traceabilityLinksCreated,
-                traceabilityLinksSkipped,
+                parsedCount,
+                counters.requirementsCreated,
+                counters.requirementsUpdated,
+                counters.relationsCreated,
+                counters.relationsSkipped,
+                counters.traceabilityLinksCreated,
+                counters.traceabilityLinksSkipped,
                 errors);
     }
 }

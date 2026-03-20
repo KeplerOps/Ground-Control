@@ -814,6 +814,258 @@ class ImportServiceTest {
         }
 
         @Test
+        void lookupParentFromDb_whenNotInBatch_reqif() {
+            // Parent creation fails in Phase 1 but exists in DB for Phase 2 fallback
+            String reqifWithMissingParent =
+                    """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <REQ-IF xmlns="http://www.omg.org/spec/ReqIF/20110401/reqif.xsd">
+                      <THE-HEADER>
+                        <REQ-IF-HEADER IDENTIFIER="h1"><TITLE>Test</TITLE></REQ-IF-HEADER>
+                      </THE-HEADER>
+                      <CORE-CONTENT>
+                        <REQ-IF-CONTENT>
+                          <DATATYPES/>
+                          <SPEC-TYPES/>
+                          <SPEC-OBJECTS>
+                            <SPEC-OBJECT IDENTIFIER="RIF-PARENT-DB" LONG-NAME="Parent"/>
+                            <SPEC-OBJECT IDENTIFIER="RIF-CHILD-DB" LONG-NAME="Child"/>
+                          </SPEC-OBJECTS>
+                          <SPEC-RELATIONS/>
+                          <SPECIFICATIONS>
+                            <SPECIFICATION IDENTIFIER="spec-1" LONG-NAME="Spec">
+                              <CHILDREN>
+                                <SPEC-HIERARCHY IDENTIFIER="sh-1">
+                                  <OBJECT><OBJECT-REF>RIF-PARENT-DB</OBJECT-REF></OBJECT>
+                                  <CHILDREN>
+                                    <SPEC-HIERARCHY IDENTIFIER="sh-2">
+                                      <OBJECT><OBJECT-REF>RIF-CHILD-DB</OBJECT-REF></OBJECT>
+                                    </SPEC-HIERARCHY>
+                                  </CHILDREN>
+                                </SPEC-HIERARCHY>
+                              </CHILDREN>
+                            </SPECIFICATION>
+                          </SPECIFICATIONS>
+                        </REQ-IF-CONTENT>
+                      </CORE-CONTENT>
+                    </REQ-IF>
+                    """;
+            UUID childId = UUID.randomUUID();
+            UUID parentId = UUID.randomUUID();
+            var child = makeRequirement("RIF-CHILD-DB", childId);
+            var parentReq = makeRequirement("RIF-PARENT-DB", parentId);
+
+            // Phase 1: child is new, parent creation fails (simulating parent only in DB)
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT-DB"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-CHILD-DB"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenThrow(new DomainValidationException("Simulated failure"))
+                    .thenReturn(child);
+            // Phase 2: parent not in batch, so lookup from DB
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT-DB"))
+                    .thenReturn(Optional.empty()) // Phase 1 call
+                    .thenReturn(Optional.of(parentReq)); // Phase 2 DB fallback
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(childId, parentId, RelationType.PARENT))
+                    .thenReturn(false);
+            when(requirementService.createRelation(childId, parentId, RelationType.PARENT))
+                    .thenReturn(new RequirementRelation(child, parentReq, RelationType.PARENT));
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqifWithMissingParent);
+
+            assertThat(result.relationsCreated()).isEqualTo(1);
+            verify(requirementService).createRelation(childId, parentId, RelationType.PARENT);
+        }
+
+        @Test
+        void parentNotFoundAnywhere_collectsError_reqif() {
+            String reqif = reqifWithHierarchy("RIF-PARENT-MISS", "Parent", "RIF-CHILD-MISS", "Child");
+            UUID childId = UUID.randomUUID();
+            var child = makeRequirement("RIF-CHILD-MISS", childId);
+
+            // Only child gets created; parent creation fails
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT-MISS"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-CHILD-MISS"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenThrow(new DomainValidationException("Simulated failure"))
+                    .thenReturn(child);
+            // Phase 2: parent not in batch and not in DB
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT-MISS"))
+                    .thenReturn(Optional.empty());
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
+
+            assertThat(result.relationsCreated()).isZero();
+            // One error from Phase 1 (parent create failed) + one from Phase 2 (parent not found)
+            assertThat(result.errors().stream()
+                            .filter(e -> e.get("error").toString().contains("Parent not found"))
+                            .count())
+                    .isEqualTo(1);
+        }
+
+        @Test
+        void relationCreationError_collectsError_reqif() {
+            String reqif = reqifWithHierarchy("RIF-PARENT-ERR", "Parent", "RIF-CHILD-ERR", "Child");
+            UUID parentId = UUID.randomUUID();
+            UUID childId = UUID.randomUUID();
+            var parent = makeRequirement("RIF-PARENT-ERR", parentId);
+            var child = makeRequirement("RIF-CHILD-ERR", childId);
+
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT-ERR"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-CHILD-ERR"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenReturn(parent)
+                    .thenReturn(child);
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(childId, parentId, RelationType.PARENT))
+                    .thenReturn(false);
+            when(requirementService.createRelation(childId, parentId, RelationType.PARENT))
+                    .thenThrow(new DomainValidationException("Simulated relation failure"));
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
+
+            assertThat(result.relationsCreated()).isZero();
+            assertThat(result.errors())
+                    .anyMatch(e -> e.get("phase").equals("relations")
+                            && e.get("error").toString().contains("Simulated relation failure"));
+        }
+
+        @Test
+        void sourceNotFoundForExplicitRelation_collectsError() {
+            String reqif = reqifWithExplicitRelation("RIF-MISSING-SRC", "RIF-TGT-OK", "depends on");
+            UUID tgtId = UUID.randomUUID();
+            var tgt = makeRequirement("RIF-TGT-OK", tgtId);
+
+            // Only target gets created; source creation fails
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-MISSING-SRC"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-TGT-OK"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenThrow(new DomainValidationException("Simulated failure"))
+                    .thenReturn(tgt);
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
+
+            assertThat(result.errors()).anyMatch(e -> e.get("error").toString().contains("Source not found"));
+        }
+
+        @Test
+        void targetNotFoundForExplicitRelation_collectsError() {
+            String reqif = reqifWithExplicitRelation("RIF-SRC-OK", "RIF-MISSING-TGT", "depends on");
+            UUID srcId = UUID.randomUUID();
+            var src = makeRequirement("RIF-SRC-OK", srcId);
+
+            // Only source gets created; target creation fails
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-SRC-OK"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-MISSING-TGT"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenReturn(src)
+                    .thenThrow(new DomainValidationException("Simulated failure"));
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
+
+            assertThat(result.errors()).anyMatch(e -> e.get("error").toString().contains("Target not found"));
+        }
+
+        @Test
+        void explicitRelationSourceLookedUpFromDb() {
+            String reqif = reqifWithExplicitRelation("RIF-DB-SRC", "RIF-BATCH-TGT", "depends on");
+            UUID srcId = UUID.randomUUID();
+            UUID tgtId = UUID.randomUUID();
+            var srcReq = makeRequirement("RIF-DB-SRC", srcId);
+            var tgtReq = makeRequirement("RIF-BATCH-TGT", tgtId);
+
+            // Source creation fails, target succeeds
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-DB-SRC"))
+                    .thenReturn(Optional.empty()) // Phase 1
+                    .thenReturn(Optional.of(srcReq)); // Phase 2b DB fallback
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-BATCH-TGT"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenThrow(new DomainValidationException("Simulated failure"))
+                    .thenReturn(tgtReq);
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(srcId, tgtId, RelationType.DEPENDS_ON))
+                    .thenReturn(false);
+            when(requirementService.createRelation(srcId, tgtId, RelationType.DEPENDS_ON))
+                    .thenReturn(new RequirementRelation(srcReq, tgtReq, RelationType.DEPENDS_ON));
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
+
+            assertThat(result.relationsCreated()).isEqualTo(1);
+            verify(requirementService).createRelation(srcId, tgtId, RelationType.DEPENDS_ON);
+        }
+
+        @Test
+        void explicitRelationCreationError_collectsError() {
+            String reqif = reqifWithExplicitRelation("RIF-SRC-REL", "RIF-TGT-REL", "depends on");
+            UUID srcId = UUID.randomUUID();
+            UUID tgtId = UUID.randomUUID();
+            var src = makeRequirement("RIF-SRC-REL", srcId);
+            var tgt = makeRequirement("RIF-TGT-REL", tgtId);
+
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-SRC-REL"))
+                    .thenReturn(Optional.empty());
+            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-TGT-REL"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenReturn(src)
+                    .thenReturn(tgt);
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(srcId, tgtId, RelationType.DEPENDS_ON))
+                    .thenReturn(false);
+            when(requirementService.createRelation(srcId, tgtId, RelationType.DEPENDS_ON))
+                    .thenThrow(new DomainValidationException("Simulated SpecRelation failure"));
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+
+            ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
+
+            assertThat(result.relationsCreated()).isZero();
+            assertThat(result.errors())
+                    .anyMatch(e -> e.get("phase").equals("relations")
+                            && e.get("error").toString().contains("Simulated SpecRelation failure"));
+        }
+
+        @Test
         void skipsExistingRelationsFromReqif() {
             String reqif = reqifWithHierarchy("RIF-PARENT", "Parent", "RIF-CHILD", "Child");
             UUID parentId = UUID.randomUUID();
