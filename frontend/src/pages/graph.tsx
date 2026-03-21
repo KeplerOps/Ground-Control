@@ -12,7 +12,7 @@ import {
 } from "@/lib/graph-constants";
 import { cn } from "@/lib/utils";
 import type cytoscape from "cytoscape";
-import { Loader2, Maximize, RotateCcw } from "lucide-react";
+import { Filter, Loader2, Maximize, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 interface RequirementData {
@@ -51,6 +51,11 @@ export function Graph() {
   const [loading, setLoading] = useState(true);
   const [loadMsg, setLoadMsg] = useState("Fetching requirements...");
   const [error, setError] = useState<string | null>(null);
+
+  const [filterStatus, setFilterStatus] = useState("");
+  const [filterPriority, setFilterPriority] = useState("");
+  const [filterSeries, setFilterSeries] = useState("");
+  const [filterWave, setFilterWave] = useState("");
 
   const [requirements, setRequirements] = useState<RequirementData[]>([]);
   const [relations, setRelations] = useState<RelationData[]>([]);
@@ -177,6 +182,62 @@ export function Graph() {
       }));
   }, [relations]);
 
+  const filterOptions = useMemo(() => {
+    const statuses = new Set<string>();
+    const priorities = new Set<string>();
+    const series = new Set<string>();
+    const waves = new Set<number>();
+    for (const r of requirements) {
+      statuses.add(r.status);
+      priorities.add(r.priority);
+      series.add(getSeries(r.uid));
+      waves.add(r.wave || 0);
+    }
+    return {
+      statuses: [...statuses].sort(),
+      priorities: [...priorities].sort(),
+      series: [...series].sort(),
+      waves: [...waves].sort((a, b) => a - b),
+    };
+  }, [requirements]);
+
+  const hasFilters =
+    filterStatus !== "" ||
+    filterPriority !== "" ||
+    filterSeries !== "" ||
+    filterWave !== "";
+
+  const filteredRequirements = useMemo(() => {
+    if (!hasFilters) return requirements;
+    return requirements.filter((r) => {
+      if (filterStatus && r.status !== filterStatus) return false;
+      if (filterPriority && r.priority !== filterPriority) return false;
+      if (filterSeries && getSeries(r.uid) !== filterSeries) return false;
+      if (filterWave && String(r.wave || 0) !== filterWave) return false;
+      return true;
+    });
+  }, [
+    requirements,
+    hasFilters,
+    filterStatus,
+    filterPriority,
+    filterSeries,
+    filterWave,
+  ]);
+
+  const filteredRelations = useMemo(() => {
+    if (!hasFilters) return relations;
+    const ids = new Set(filteredRequirements.map((r) => r.id));
+    return relations.filter((r) => ids.has(r.sourceId) && ids.has(r.targetId));
+  }, [relations, filteredRequirements, hasFilters]);
+
+  function clearFilters() {
+    setFilterStatus("");
+    setFilterPriority("");
+    setFilterSeries("");
+    setFilterWave("");
+  }
+
   // Build tooltip content using safe DOM methods
   const populateTooltip = useCallback(
     (container: HTMLDivElement, d: Record<string, unknown>) => {
@@ -230,7 +291,8 @@ export function Graph() {
   );
 
   useEffect(() => {
-    if (loading || !containerRef.current || requirements.length === 0) return;
+    if (loading || !containerRef.current || filteredRequirements.length === 0)
+      return;
 
     let cancelled = false;
 
@@ -247,7 +309,7 @@ export function Graph() {
 
       if (cancelled) return;
 
-      const nodes = requirements.map((r) => ({
+      const nodes = filteredRequirements.map((r) => ({
         data: {
           id: r.id,
           uid: r.uid,
@@ -263,7 +325,7 @@ export function Graph() {
         },
       }));
 
-      const edges = relations.map((rel) => {
+      const edges = filteredRelations.map((rel) => {
         const style =
           RELATION_STYLES[rel.relationType] ?? RELATION_STYLES.RELATED;
         return {
@@ -282,22 +344,32 @@ export function Graph() {
         cyRef.current.destroy();
       }
 
-      const layoutConfig =
-        layoutId === "dagre-tb"
-          ? {
-              name: "dagre",
-              rankDir: "BT",
-              nodeSep: 30,
-              rankSep: 60,
-              edgeSep: 10,
+      const isWaveOrdered = layoutId.startsWith("dagre-wave");
+      const isTopBottom =
+        layoutId === "dagre-tb" || layoutId === "dagre-wave-tb";
+      const rankDir = isTopBottom ? "BT" : "RL";
+
+      const waveSpacing = 120;
+      // cytoscape-dagre layout options extend base LayoutOptions
+      const layoutConfig = {
+        name: "dagre" as const,
+        rankDir,
+        nodeSep: 30,
+        rankSep: isWaveOrdered ? 80 : 60,
+        edgeSep: 10,
+        ...(isWaveOrdered && {
+          transform: (
+            node: cytoscape.NodeSingular,
+            pos: { x: number; y: number },
+          ) => {
+            const wave = (node.data("wave") as number) || 0;
+            if (isTopBottom) {
+              return { x: pos.x, y: -wave * waveSpacing };
             }
-          : {
-              name: "dagre",
-              rankDir: "RL",
-              nodeSep: 30,
-              rankSep: 60,
-              edgeSep: 10,
-            };
+            return { x: -wave * waveSpacing, y: pos.y };
+          },
+        }),
+      };
 
       const cy = cytoscape({
         container: containerRef.current,
@@ -425,8 +497,8 @@ export function Graph() {
     };
   }, [
     loading,
-    requirements,
-    relations,
+    filteredRequirements,
+    filteredRelations,
     colorScheme,
     layoutId,
     populateTooltip,
@@ -513,6 +585,8 @@ export function Graph() {
           >
             <option value="dagre-lr">DAG (left to right)</option>
             <option value="dagre-tb">DAG (top to bottom)</option>
+            <option value="dagre-wave-lr">Wave-ordered (L-R)</option>
+            <option value="dagre-wave-tb">Wave-ordered (T-B)</option>
           </select>
         </div>
         <button
@@ -533,18 +607,120 @@ export function Graph() {
         </button>
       </div>
 
+      {/* Filters */}
+      <div className="flex items-center gap-4 border-b border-border bg-card px-4 py-1.5">
+        <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+        <div className="flex items-center gap-2">
+          <label
+            htmlFor="graph-filter-status"
+            className="text-xs text-muted-foreground"
+          >
+            Status
+          </label>
+          <select
+            id="graph-filter-status"
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
+          >
+            <option value="">All</option>
+            {filterOptions.statuses.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label
+            htmlFor="graph-filter-priority"
+            className="text-xs text-muted-foreground"
+          >
+            Priority
+          </label>
+          <select
+            id="graph-filter-priority"
+            value={filterPriority}
+            onChange={(e) => setFilterPriority(e.target.value)}
+            className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
+          >
+            <option value="">All</option>
+            {filterOptions.priorities.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label
+            htmlFor="graph-filter-series"
+            className="text-xs text-muted-foreground"
+          >
+            Series
+          </label>
+          <select
+            id="graph-filter-series"
+            value={filterSeries}
+            onChange={(e) => setFilterSeries(e.target.value)}
+            className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
+          >
+            <option value="">All</option>
+            {filterOptions.series.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label
+            htmlFor="graph-filter-wave"
+            className="text-xs text-muted-foreground"
+          >
+            Wave
+          </label>
+          <select
+            id="graph-filter-wave"
+            value={filterWave}
+            onChange={(e) => setFilterWave(e.target.value)}
+            className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
+          >
+            <option value="">All</option>
+            {filterOptions.waves.map((w) => (
+              <option key={w} value={String(w)}>
+                {w}
+              </option>
+            ))}
+          </select>
+        </div>
+        {hasFilters && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="flex items-center gap-1 rounded border border-input bg-background px-2 py-0.5 text-xs text-muted-foreground hover:border-primary hover:text-foreground"
+          >
+            <X className="h-3 w-3" /> Clear
+          </button>
+        )}
+      </div>
+
       {/* Stats */}
       {!loading && (
         <div className="flex gap-4 border-b border-border bg-card px-4 py-1.5 text-[11px]">
           <span className="text-muted-foreground">
             <strong className="text-foreground text-[13px] mr-0.5">
-              {stats.requirements}
+              {hasFilters
+                ? `${filteredRequirements.length} of ${stats.requirements}`
+                : stats.requirements}
             </strong>
             requirements
           </span>
           <span className="text-muted-foreground">
             <strong className="text-foreground text-[13px] mr-0.5">
-              {stats.relations}
+              {hasFilters
+                ? `${filteredRelations.length} of ${stats.relations}`
+                : stats.relations}
             </strong>
             relations
           </span>

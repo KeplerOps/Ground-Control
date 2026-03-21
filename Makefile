@@ -1,5 +1,5 @@
 .PHONY: rapid build test test-cov format lint check integration verify dev clean up down docker-build smoke \
-       frontend-install frontend-dev frontend-build frontend-lint frontend-format \
+       frontend-install frontend-dev frontend-build frontend-lint frontend-format frontend-test \
        deploy deploy-infra
 
 # --- Rapid dev loop (< 5s) ---
@@ -51,6 +51,9 @@ frontend-lint: ## Lint frontend code (Biome)
 
 frontend-format: ## Format frontend code (Biome)
 	cd frontend && npm run format
+
+frontend-test: ## Run frontend unit tests (Vitest)
+	cd frontend && npm test
 
 # --- Infrastructure ---
 
