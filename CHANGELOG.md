@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.68.0] - 2026-03-21
+
+### Added
+
+- Interactive dependency graph enhancements (GC-Q005): explicit filter controls
+  for status, priority, series, and wave that remove non-matching nodes from
+  the graph layout (distinct from legend click-to-filter visual highlighting)
+- Wave-ordered DAG layout modes (`dagre-wave-tb`, `dagre-wave-lr`) that group
+  nodes by wave number while preserving dagre's edge-based ordering
+- Frontend test infrastructure: vitest with `make frontend-test` target
+- Unit tests for graph-constants module (`getSeries`, `getNodeColor`, `getColorMap`)
+
+### Removed
+
+- Standalone roadmap-viewer prototype (`tools/roadmap-viewer/`) and its nginx
+  service from docker-compose — superseded by the React graph page
+
 ## [0.67.0] - 2026-03-21
 
 ### Added
