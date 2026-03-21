@@ -40,6 +40,8 @@ interface PagedResponse {
 
 type CytoscapeInstance = cytoscape.Core;
 
+const WAVE_SPACING = 120;
+
 export function Graph() {
   const { activeProject } = useProjectContext();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -139,49 +141,6 @@ export function Graph() {
     };
   }, [requirements, relations]);
 
-  const legendItems = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const r of requirements) {
-      let key: string;
-      switch (colorScheme) {
-        case "priority":
-          key = r.priority;
-          break;
-        case "status":
-          key = r.status;
-          break;
-        case "wave":
-          key = `Wave ${r.wave || 0}`;
-          break;
-        default:
-          key = getSeries(r.uid);
-      }
-      counts[key] = (counts[key] ?? 0) + 1;
-    }
-    const colorMap = getColorMap(colorScheme);
-    return Object.keys(counts)
-      .sort()
-      .map((key) => ({
-        key,
-        count: counts[key] ?? 0,
-        color: colorMap[key] ?? "#555",
-      }));
-  }, [requirements, colorScheme]);
-
-  const relationLegend = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const r of relations) {
-      counts[r.relationType] = (counts[r.relationType] ?? 0) + 1;
-    }
-    return Object.entries(RELATION_STYLES)
-      .filter(([type]) => (counts[type] ?? 0) > 0)
-      .map(([type, style]) => ({
-        type,
-        ...style,
-        count: counts[type] ?? 0,
-      }));
-  }, [relations]);
-
   const filterOptions = useMemo(() => {
     const statuses = new Set<string>();
     const priorities = new Set<string>();
@@ -230,6 +189,50 @@ export function Graph() {
     const ids = new Set(filteredRequirements.map((r) => r.id));
     return relations.filter((r) => ids.has(r.sourceId) && ids.has(r.targetId));
   }, [relations, filteredRequirements, hasFilters]);
+
+  // Legend counts reflect the filtered graph so they match what's visible
+  const legendItems = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const r of filteredRequirements) {
+      let key: string;
+      switch (colorScheme) {
+        case "priority":
+          key = r.priority;
+          break;
+        case "status":
+          key = r.status;
+          break;
+        case "wave":
+          key = `Wave ${r.wave || 0}`;
+          break;
+        default:
+          key = getSeries(r.uid);
+      }
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    const colorMap = getColorMap(colorScheme);
+    return Object.keys(counts)
+      .sort()
+      .map((key) => ({
+        key,
+        count: counts[key] ?? 0,
+        color: colorMap[key] ?? "#555",
+      }));
+  }, [filteredRequirements, colorScheme]);
+
+  const relationLegend = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const r of filteredRelations) {
+      counts[r.relationType] = (counts[r.relationType] ?? 0) + 1;
+    }
+    return Object.entries(RELATION_STYLES)
+      .filter(([type]) => (counts[type] ?? 0) > 0)
+      .map(([type, style]) => ({
+        type,
+        ...style,
+        count: counts[type] ?? 0,
+      }));
+  }, [filteredRelations]);
 
   function clearFilters() {
     setFilterStatus("");
@@ -291,8 +294,14 @@ export function Graph() {
   );
 
   useEffect(() => {
-    if (loading || !containerRef.current || filteredRequirements.length === 0)
+    if (loading || !containerRef.current || filteredRequirements.length === 0) {
+      // Destroy stale graph when filters exclude all nodes
+      if (filteredRequirements.length === 0 && cyRef.current) {
+        cyRef.current.destroy();
+        cyRef.current = null;
+      }
       return;
+    }
 
     let cancelled = false;
 
@@ -349,7 +358,6 @@ export function Graph() {
         layoutId === "dagre-tb" || layoutId === "dagre-wave-tb";
       const rankDir = isTopBottom ? "BT" : "RL";
 
-      const waveSpacing = 120;
       // cytoscape-dagre layout options extend base LayoutOptions
       const layoutConfig = {
         name: "dagre" as const,
@@ -364,9 +372,9 @@ export function Graph() {
           ) => {
             const wave = (node.data("wave") as number) || 0;
             if (isTopBottom) {
-              return { x: pos.x, y: -wave * waveSpacing };
+              return { x: pos.x, y: -wave * WAVE_SPACING };
             }
-            return { x: -wave * waveSpacing, y: pos.y };
+            return { x: -wave * WAVE_SPACING, y: pos.y };
           },
         }),
       };
@@ -608,102 +616,104 @@ export function Graph() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-4 border-b border-border bg-card px-4 py-1.5">
-        <Filter className="h-3.5 w-3.5 text-muted-foreground" />
-        <div className="flex items-center gap-2">
-          <label
-            htmlFor="graph-filter-status"
-            className="text-xs text-muted-foreground"
-          >
-            Status
-          </label>
-          <select
-            id="graph-filter-status"
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
-          >
-            <option value="">All</option>
-            {filterOptions.statuses.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
+      {!loading && (
+        <div className="flex items-center gap-4 border-b border-border bg-card px-4 py-1.5">
+          <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="graph-filter-status"
+              className="text-xs text-muted-foreground"
+            >
+              Status
+            </label>
+            <select
+              id="graph-filter-status"
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
+            >
+              <option value="">All</option>
+              {filterOptions.statuses.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="graph-filter-priority"
+              className="text-xs text-muted-foreground"
+            >
+              Priority
+            </label>
+            <select
+              id="graph-filter-priority"
+              value={filterPriority}
+              onChange={(e) => setFilterPriority(e.target.value)}
+              className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
+            >
+              <option value="">All</option>
+              {filterOptions.priorities.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="graph-filter-series"
+              className="text-xs text-muted-foreground"
+            >
+              Series
+            </label>
+            <select
+              id="graph-filter-series"
+              value={filterSeries}
+              onChange={(e) => setFilterSeries(e.target.value)}
+              className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
+            >
+              <option value="">All</option>
+              {filterOptions.series.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="graph-filter-wave"
+              className="text-xs text-muted-foreground"
+            >
+              Wave
+            </label>
+            <select
+              id="graph-filter-wave"
+              value={filterWave}
+              onChange={(e) => setFilterWave(e.target.value)}
+              className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
+            >
+              <option value="">All</option>
+              {filterOptions.waves.map((w) => (
+                <option key={w} value={String(w)}>
+                  {w}
+                </option>
+              ))}
+            </select>
+          </div>
+          {hasFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="flex items-center gap-1 rounded border border-input bg-background px-2 py-0.5 text-xs text-muted-foreground hover:border-primary hover:text-foreground"
+            >
+              <X className="h-3 w-3" /> Clear
+            </button>
+          )}
         </div>
-        <div className="flex items-center gap-2">
-          <label
-            htmlFor="graph-filter-priority"
-            className="text-xs text-muted-foreground"
-          >
-            Priority
-          </label>
-          <select
-            id="graph-filter-priority"
-            value={filterPriority}
-            onChange={(e) => setFilterPriority(e.target.value)}
-            className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
-          >
-            <option value="">All</option>
-            {filterOptions.priorities.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <label
-            htmlFor="graph-filter-series"
-            className="text-xs text-muted-foreground"
-          >
-            Series
-          </label>
-          <select
-            id="graph-filter-series"
-            value={filterSeries}
-            onChange={(e) => setFilterSeries(e.target.value)}
-            className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
-          >
-            <option value="">All</option>
-            {filterOptions.series.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <label
-            htmlFor="graph-filter-wave"
-            className="text-xs text-muted-foreground"
-          >
-            Wave
-          </label>
-          <select
-            id="graph-filter-wave"
-            value={filterWave}
-            onChange={(e) => setFilterWave(e.target.value)}
-            className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
-          >
-            <option value="">All</option>
-            {filterOptions.waves.map((w) => (
-              <option key={w} value={String(w)}>
-                {w}
-              </option>
-            ))}
-          </select>
-        </div>
-        {hasFilters && (
-          <button
-            type="button"
-            onClick={clearFilters}
-            className="flex items-center gap-1 rounded border border-input bg-background px-2 py-0.5 text-xs text-muted-foreground hover:border-primary hover:text-foreground"
-          >
-            <X className="h-3 w-3" /> Clear
-          </button>
-        )}
-      </div>
+      )}
 
       {/* Stats */}
       {!loading && (
@@ -799,6 +809,23 @@ export function Graph() {
             </span>
           </div>
         )}
+        {!loading &&
+          !error &&
+          requirements.length > 0 &&
+          filteredRequirements.length === 0 && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background">
+              <span className="text-sm text-muted-foreground">
+                No requirements match the current filters.
+              </span>
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="rounded border border-input bg-card px-3 py-1.5 text-xs hover:border-primary"
+              >
+                Clear filters
+              </button>
+            </div>
+          )}
         <div ref={containerRef} className="h-full w-full" />
       </div>
 
