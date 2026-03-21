@@ -41,9 +41,21 @@ management:
         include: health,info,metrics
 
 groundcontrol:
+  github:
+    gh-path: ${GC_GH_PATH:}
   age:
     enabled: ${GC_AGE_ENABLED:false}
     graph-name: ${GC_AGE_GRAPH_NAME:requirements}
+  sweep:
+    enabled: ${GC_SWEEP_ENABLED:false}
+    cron: ${GC_SWEEP_CRON:0 0 6 * * *}
+    github:
+      enabled: ${GC_SWEEP_GITHUB_ENABLED:false}
+      repo: ${GC_SWEEP_GITHUB_REPO:}
+      labels: ${GC_SWEEP_GITHUB_LABELS:analysis-sweep}
+    webhook:
+      enabled: ${GC_SWEEP_WEBHOOK_ENABLED:false}
+      url: ${GC_SWEEP_WEBHOOK_URL:}
 
 springdoc:
   api-docs:

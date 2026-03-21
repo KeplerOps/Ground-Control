@@ -40,6 +40,8 @@ import {
   getDescendants,
   findPaths,
   createGitHubIssueViaApi,
+  runSweep,
+  runSweepAll,
   createBaseline,
   listBaselines,
   getBaseline,
@@ -871,6 +873,42 @@ server.tool(
   async ({ owner, repo }) => {
     try {
       return ok(JSON.stringify(await syncGithub(owner, repo), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Analysis sweep tools
+// ==========================================================================
+
+server.tool(
+  "gc_run_sweep",
+  "Run a full analysis sweep (orphans, coverage gaps, cross-wave, cycles, consistency) on a project. Returns a report of all detected problems. Optionally triggers configured notifications (GitHub issues, webhooks).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await runSweep(project);
+      if (!result.has_problems) return ok("Sweep complete. No problems detected.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_run_sweep_all",
+  "Run a full analysis sweep across ALL projects. Returns a list of reports, one per project.",
+  {},
+  async () => {
+    try {
+      const results = await runSweepAll();
+      if (Array.isArray(results) && results.length === 0) return ok("No projects to sweep.");
+      return ok(JSON.stringify(results, null, 2));
     } catch (e) {
       return err(e);
     }
