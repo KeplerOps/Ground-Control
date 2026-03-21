@@ -112,7 +112,7 @@ class GraphControllerTest {
 
             when(projectService.resolveProjectId("test")).thenReturn(projectId);
             when(analysisService.getGraphVisualization(projectId))
-                    .thenReturn(new GraphVisualizationResult(List.of(a, b), List.of(rel), 2, 1));
+                    .thenReturn(new GraphVisualizationResult(List.of(a, b), List.of(rel)));
 
             mockMvc.perform(get("/api/v1/graph/visualization").param("project", "test"))
                     .andExpect(status().isOk())

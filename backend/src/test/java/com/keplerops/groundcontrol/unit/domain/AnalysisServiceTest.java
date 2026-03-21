@@ -870,14 +870,12 @@ class AnalysisServiceTest {
 
             var result = service.getGraphVisualization(PROJECT_ID);
 
-            assertThat(result.totalRequirements()).isEqualTo(2);
-            assertThat(result.totalRelations()).isEqualTo(1);
             assertThat(result.requirements()).containsExactly(a, b);
             assertThat(result.relations()).containsExactly(rel);
         }
 
         @Test
-        void emptyProject_returnsZeroCounts() {
+        void emptyProject_returnsEmptyLists() {
             when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
                     .thenReturn(List.of());
             when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
@@ -885,8 +883,6 @@ class AnalysisServiceTest {
 
             var result = service.getGraphVisualization(PROJECT_ID);
 
-            assertThat(result.totalRequirements()).isZero();
-            assertThat(result.totalRelations()).isZero();
             assertThat(result.requirements()).isEmpty();
             assertThat(result.relations()).isEmpty();
         }
