@@ -146,7 +146,21 @@ form it, including the relation type between each consecutive pair.
 | POST | `/admin/graph/materialize` | — | 200 | Materialize graph (AGE) |
 | GET | `/graph/ancestors/{uid}?depth=N` | — | 200 | Ancestor UIDs |
 | GET | `/graph/descendants/{uid}?depth=N` | — | 200 | Descendant UIDs |
-| GET | `/graph/paths?source=X&target=Y` | — | 200 | All paths between two UIDs |
+| GET | `/graph/paths?source=X&target=Y` | — | 200 | All paths between two UIDs (with edges) |
+
+**Path response shape:**
+
+```json
+[
+  {
+    "nodes": ["REQ-A", "REQ-B", "REQ-C"],
+    "edges": [
+      { "sourceUid": "REQ-A", "targetUid": "REQ-B", "relationType": "DEPENDS_ON" },
+      { "sourceUid": "REQ-B", "targetUid": "REQ-C", "relationType": "PARENT" }
+    ]
+  }
+]
+```
 
 ### GitHub Issues
 

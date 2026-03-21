@@ -151,11 +151,11 @@ class AgeGraphServiceTest {
         }
 
         @Test
-        void findPaths_queriesGraph() {
+        void findPaths_queriesGraphWithRelationships() {
             enabledService.findPaths("REQ-001", "REQ-002");
 
             verify(jdbcTemplate, times(2)).execute(anyString());
-            verify(jdbcTemplate).query(contains("nodes(path)"), any(RowCallbackHandler.class));
+            verify(jdbcTemplate).query(contains("label(r)"), any(RowCallbackHandler.class));
         }
     }
 }
