@@ -732,7 +732,7 @@ server.tool(
 
 server.tool(
   "gc_find_paths",
-  "Find all paths between two requirements in the dependency graph.",
+  "Find all paths between two requirements in the dependency graph. Returns nodes (requirement UIDs) and edges (with source, target, and relation type) for each path.",
   {
     source: z.string().describe("Source requirement UID"),
     target: z.string().describe("Target requirement UID"),

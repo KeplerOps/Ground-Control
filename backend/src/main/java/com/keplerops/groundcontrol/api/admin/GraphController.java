@@ -58,11 +58,13 @@ public class GraphController {
     }
 
     @GetMapping("/api/v1/graph/paths")
-    public List<List<String>> findPaths(
+    public List<PathResponse> findPaths(
             @RequestParam String source, @RequestParam String target, @RequestParam(required = false) String project) {
         if (project != null) {
             projectService.resolveProjectId(project);
         }
-        return graphClient.findPaths(source, target);
+        return graphClient.findPaths(source, target).stream()
+                .map(PathResponse::from)
+                .toList();
     }
 }

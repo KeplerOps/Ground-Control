@@ -79,5 +79,8 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
 
         var paths = graphClient.findPaths("AGE-A", "AGE-C2");
         assertThat(paths).isNotEmpty();
+        var firstPath = paths.get(0);
+        assertThat(firstPath.nodeUids()).containsExactly("AGE-A", "AGE-B", "AGE-C2");
+        assertThat(firstPath.edgeLabels()).containsExactly("DEPENDS_ON", "DEPENDS_ON");
     }
 }

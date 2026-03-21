@@ -19,6 +19,7 @@ import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
 import com.keplerops.groundcontrol.domain.requirements.service.GraphClient;
 import com.keplerops.groundcontrol.domain.requirements.service.GraphVisualizationResult;
+import com.keplerops.groundcontrol.domain.requirements.service.PathResult;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import java.util.List;
 import java.util.UUID;
@@ -88,14 +89,21 @@ class GraphControllerTest {
     class FindPaths {
 
         @Test
-        void returns200() throws Exception {
+        void returns200WithNodesAndEdges() throws Exception {
             when(graphClient.findPaths(anyString(), anyString()))
-                    .thenReturn(List.of(List.of("REQ-A", "REQ-B", "REQ-C")));
+                    .thenReturn(List.of(
+                            new PathResult(List.of("REQ-A", "REQ-B", "REQ-C"), List.of("DEPENDS_ON", "PARENT"))));
 
             mockMvc.perform(get("/api/v1/graph/paths").param("source", "REQ-A").param("target", "REQ-C"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$", hasSize(1)))
-                    .andExpect(jsonPath("$[0]", hasSize(3)));
+                    .andExpect(jsonPath("$[0].nodes", hasSize(3)))
+                    .andExpect(jsonPath("$[0].nodes[0]", is("REQ-A")))
+                    .andExpect(jsonPath("$[0].edges", hasSize(2)))
+                    .andExpect(jsonPath("$[0].edges[0].sourceUid", is("REQ-A")))
+                    .andExpect(jsonPath("$[0].edges[0].targetUid", is("REQ-B")))
+                    .andExpect(jsonPath("$[0].edges[0].relationType", is("DEPENDS_ON")))
+                    .andExpect(jsonPath("$[0].edges[1].relationType", is("PARENT")));
         }
     }
 
