@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.69.0] - 2026-03-21
+
+### Added
+
+- Unified graph visualization endpoint `GET /api/v1/graph/visualization` (GC-G005):
+  returns all requirement nodes and relation edges in a single response
+- MCP tool `gc_get_graph_visualization` for API/MCP parity
+
+### Changed
+
+- Frontend graph page fetches all data in a single API call instead of N+1
+  separate requests (paginated requirements + per-requirement relation fetches)
+
 ## [0.68.0] - 2026-03-21
 
 ### Added

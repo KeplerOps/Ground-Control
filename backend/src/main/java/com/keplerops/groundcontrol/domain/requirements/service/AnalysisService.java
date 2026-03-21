@@ -389,4 +389,10 @@ public class AnalysisService {
 
         return new DashboardStats(total, byStatus, byWave, coverageByLinkType, recentChanges);
     }
+
+    public GraphVisualizationResult getGraphVisualization(UUID projectId) {
+        List<Requirement> requirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
+        List<RequirementRelation> relations = relationRepository.findActiveWithSourceAndTargetByProjectId(projectId);
+        return new GraphVisualizationResult(requirements, relations);
+    }
 }

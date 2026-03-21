@@ -40,6 +40,7 @@ import {
   getAncestors,
   getDescendants,
   findPaths,
+  getGraphVisualization,
   createGitHubIssueViaApi,
   runSweep,
   runSweepAll,
@@ -742,6 +743,22 @@ server.tool(
       const paths = await findPaths(source, target, project);
       if (Array.isArray(paths) && paths.length === 0) return ok("No paths found.");
       return ok(JSON.stringify(paths, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_graph_visualization",
+  "Get the full graph visualization data (all requirement nodes and relation edges with metadata) for a project. Returns data suitable for rendering dependency diagrams.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const data = await getGraphVisualization(project);
+      return ok(JSON.stringify(data, null, 2));
     } catch (e) {
       return err(e);
     }
