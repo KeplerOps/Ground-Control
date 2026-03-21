@@ -33,6 +33,7 @@ import {
   getRequirementHistory,
   getRelationHistory,
   getTraceabilityLinkHistory,
+  getRequirementTimeline,
   deleteRelation,
   deleteTraceabilityLink,
   materializeGraph,
@@ -476,6 +477,26 @@ server.tool(
       const history = await getTraceabilityLinkHistory(requirement_id, link_id);
       if (Array.isArray(history) && history.length === 0) return ok("No history found.");
       return ok(JSON.stringify(history, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_timeline",
+  "Get a unified audit timeline for a requirement, merging requirement, relation, and traceability link changes with field-level diffs.",
+  {
+    id: z.string().uuid().describe("Requirement UUID"),
+    change_type: z.enum(["REQUIREMENT", "RELATION", "TRACEABILITY_LINK"]).optional().describe("Filter by change category"),
+    from: z.string().optional().describe("Start of date range (ISO-8601 instant)"),
+    to: z.string().optional().describe("End of date range (ISO-8601 instant)"),
+  },
+  async ({ id, change_type, from, to }) => {
+    try {
+      const timeline = await getRequirementTimeline(id, change_type, from, to);
+      if (Array.isArray(timeline) && timeline.length === 0) return ok("No timeline entries found.");
+      return ok(JSON.stringify(timeline, null, 2));
     } catch (e) {
       return err(e);
     }

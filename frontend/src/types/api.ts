@@ -115,6 +115,24 @@ export interface TraceabilityLinkHistoryResponse {
   snapshot: TraceabilityLinkResponse;
 }
 
+export type ChangeCategory = "REQUIREMENT" | "RELATION" | "TRACEABILITY_LINK";
+
+export interface FieldChangeResponse {
+  oldValue: unknown;
+  newValue: unknown;
+}
+
+export interface TimelineEntryResponse {
+  revisionNumber: number;
+  revisionType: RevisionType;
+  timestamp: string;
+  actor: string;
+  changeCategory: ChangeCategory;
+  entityId: string;
+  snapshot: Record<string, unknown>;
+  changes: Record<string, FieldChangeResponse> | null;
+}
+
 export interface RequirementSummaryResponse {
   id: string;
   uid: string;

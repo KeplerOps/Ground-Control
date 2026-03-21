@@ -322,6 +322,15 @@ export async function getTraceabilityLinkHistory(reqId, linkId) {
   return request("GET", `/api/v1/requirements/${encodeURIComponent(reqId)}/traceability/${encodeURIComponent(linkId)}/history`);
 }
 
+export async function getRequirementTimeline(id, changeType, from, to) {
+  const params = new URLSearchParams();
+  if (changeType) params.set("changeType", changeType);
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  const qs = params.toString();
+  return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}/timeline${qs ? `?${qs}` : ""}`);
+}
+
 // ---------------------------------------------------------------------------
 // Delete functions
 // ---------------------------------------------------------------------------

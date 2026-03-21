@@ -13,6 +13,7 @@ import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import jakarta.validation.Valid;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -126,6 +127,17 @@ public class RequirementController {
     public List<RequirementHistoryResponse> getHistory(@PathVariable UUID id) {
         return auditService.getRequirementHistory(id).stream()
                 .map(RequirementHistoryResponse::from)
+                .toList();
+    }
+
+    @GetMapping("/{id}/timeline")
+    public List<TimelineEntryResponse> getTimeline(
+            @PathVariable UUID id,
+            @RequestParam(required = false) String changeType,
+            @RequestParam(required = false) Instant from,
+            @RequestParam(required = false) Instant to) {
+        return auditService.getRequirementTimeline(id, changeType, from, to).stream()
+                .map(TimelineEntryResponse::from)
                 .toList();
     }
 
