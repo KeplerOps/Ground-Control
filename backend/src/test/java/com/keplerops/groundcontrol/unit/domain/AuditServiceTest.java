@@ -6,8 +6,8 @@ import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
-import com.keplerops.groundcontrol.domain.requirements.service.AuditService;
 import com.keplerops.groundcontrol.domain.requirements.service.FieldChange;
+import com.keplerops.groundcontrol.domain.requirements.service.SnapshotMapper;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
@@ -38,20 +38,19 @@ class AuditServiceTest {
             var previous = Map.<String, Object>of("title", "Old Title", "status", "DRAFT", "wave", 1);
             var current = Map.<String, Object>of("title", "New Title", "status", "DRAFT", "wave", 1);
 
-            var diff = AuditService.computeDiff(previous, current);
+            var diff = SnapshotMapper.computeDiff(previous, current);
 
-            assertThat(diff).isNotNull();
             assertThat(diff).containsOnlyKeys("title");
             assertThat(diff.get("title")).isEqualTo(new FieldChange("Old Title", "New Title"));
         }
 
         @Test
-        void returnsNullWhenNoChanges() {
+        void returnsEmptyMapWhenNoChanges() {
             var snapshot = Map.<String, Object>of("title", "Same", "status", "DRAFT");
 
-            var diff = AuditService.computeDiff(snapshot, snapshot);
+            var diff = SnapshotMapper.computeDiff(snapshot, snapshot);
 
-            assertThat(diff).isNull();
+            assertThat(diff).isEmpty();
         }
 
         @Test
@@ -59,9 +58,8 @@ class AuditServiceTest {
             var previous = Map.<String, Object>of("title", "Old", "status", "DRAFT", "priority", "SHOULD");
             var current = Map.<String, Object>of("title", "New", "status", "ACTIVE", "priority", "SHOULD");
 
-            var diff = AuditService.computeDiff(previous, current);
+            var diff = SnapshotMapper.computeDiff(previous, current);
 
-            assertThat(diff).isNotNull();
             assertThat(diff).hasSize(2);
             assertThat(diff).containsKeys("title", "status");
         }
@@ -76,9 +74,8 @@ class AuditServiceTest {
             current.put("wave", 2);
             current.put("title", "Title");
 
-            var diff = AuditService.computeDiff(previous, current);
+            var diff = SnapshotMapper.computeDiff(previous, current);
 
-            assertThat(diff).isNotNull();
             assertThat(diff).containsOnlyKeys("wave");
             assertThat(diff.get("wave")).isEqualTo(new FieldChange(null, 2));
         }
@@ -91,9 +88,9 @@ class AuditServiceTest {
             var current = new LinkedHashMap<String, Object>();
             current.put("wave", null);
 
-            var diff = AuditService.computeDiff(previous, current);
+            var diff = SnapshotMapper.computeDiff(previous, current);
 
-            assertThat(diff).isNull();
+            assertThat(diff).isEmpty();
         }
     }
 
@@ -107,7 +104,7 @@ class AuditServiceTest {
             var req = new Requirement(project, "REQ-001", "My Title", "My Statement");
             req.setRationale("My Rationale");
 
-            var snapshot = AuditService.requirementToSnapshot(req);
+            var snapshot = SnapshotMapper.fromRequirement(req);
 
             assertThat(snapshot)
                     .containsEntry("uid", "REQ-001")
@@ -133,7 +130,7 @@ class AuditServiceTest {
             setField(target, "id", UUID.randomUUID());
             var rel = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
 
-            var snapshot = AuditService.relationToSnapshot(rel);
+            var snapshot = SnapshotMapper.fromRelation(rel);
 
             assertThat(snapshot)
                     .containsEntry("sourceId", source.getId().toString())
@@ -156,7 +153,7 @@ class AuditServiceTest {
             link.setArtifactUrl("https://example.com");
             link.setArtifactTitle("Foo implementation");
 
-            var snapshot = AuditService.traceabilityLinkToSnapshot(link);
+            var snapshot = SnapshotMapper.fromTraceabilityLink(link);
 
             assertThat(snapshot)
                     .containsEntry("artifactType", "CODE_FILE")

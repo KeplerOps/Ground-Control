@@ -130,7 +130,7 @@ export interface TimelineEntryResponse {
   changeCategory: ChangeCategory;
   entityId: string;
   snapshot: Record<string, unknown>;
-  changes: Record<string, FieldChangeResponse> | null;
+  changes: Record<string, FieldChangeResponse>;
 }
 
 export interface RequirementSummaryResponse {

@@ -53,9 +53,11 @@ http://localhost:8000/api/v1/
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `changeType` | enum | REQUIREMENT, RELATION, TRACEABILITY_LINK |
+| `changeCategory` | enum | REQUIREMENT, RELATION, TRACEABILITY_LINK |
 | `from` | ISO-8601 instant | Start of date range |
 | `to` | ISO-8601 instant | End of date range |
+| `limit` | integer | Max entries to return (default 100) |
+| `offset` | integer | Number of entries to skip (default 0) |
 
 **TimelineEntryResponse:**
 

@@ -2,6 +2,7 @@ package com.keplerops.groundcontrol.api.requirements;
 
 import com.keplerops.groundcontrol.domain.requirements.service.FieldChange;
 import com.keplerops.groundcontrol.domain.requirements.service.TimelineEntry;
+import com.keplerops.groundcontrol.domain.requirements.state.ChangeCategory;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -11,7 +12,7 @@ public record TimelineEntryResponse(
         String revisionType,
         Instant timestamp,
         String actor,
-        String changeCategory,
+        ChangeCategory changeCategory,
         UUID entityId,
         Map<String, Object> snapshot,
         Map<String, FieldChange> changes) {

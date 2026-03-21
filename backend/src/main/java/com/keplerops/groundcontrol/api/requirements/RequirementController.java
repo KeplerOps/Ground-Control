@@ -9,6 +9,7 @@ import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementService;
 import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityService;
 import com.keplerops.groundcontrol.domain.requirements.service.UpdateRequirementCommand;
+import com.keplerops.groundcontrol.domain.requirements.state.ChangeCategory;
 import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
@@ -133,10 +134,12 @@ public class RequirementController {
     @GetMapping("/{id}/timeline")
     public List<TimelineEntryResponse> getTimeline(
             @PathVariable UUID id,
-            @RequestParam(required = false) String changeType,
+            @RequestParam(required = false) ChangeCategory changeCategory,
             @RequestParam(required = false) Instant from,
-            @RequestParam(required = false) Instant to) {
-        return auditService.getRequirementTimeline(id, changeType, from, to).stream()
+            @RequestParam(required = false) Instant to,
+            @RequestParam(defaultValue = "100") int limit,
+            @RequestParam(defaultValue = "0") int offset) {
+        return auditService.getRequirementTimeline(id, changeCategory, from, to, limit, offset).stream()
                 .map(TimelineEntryResponse::from)
                 .toList();
     }

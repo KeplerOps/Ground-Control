@@ -727,7 +727,7 @@ function TimelineEntryCard({ entry }: { entry: TimelineEntryResponse }) {
         )}
 
         {/* Expandable diff */}
-        {hasChanges && entry.changes && (
+        {hasChanges && (
           <>
             <button
               type="button"
@@ -780,12 +780,12 @@ function HistoryTab({ requirementId }: { requirementId: string }) {
             <label key={cat} className="flex items-center gap-1.5 text-xs">
               <input
                 type="radio"
-                name="changeType"
-                checked={filters.changeType === cat}
+                name="changeCategory"
+                checked={filters.changeCategory === cat}
                 onChange={() =>
                   setFilters((f) => ({
                     ...f,
-                    changeType: f.changeType === cat ? undefined : cat,
+                    changeCategory: f.changeCategory === cat ? undefined : cat,
                   }))
                 }
                 className="accent-primary"
@@ -793,11 +793,11 @@ function HistoryTab({ requirementId }: { requirementId: string }) {
               {CATEGORY_LABELS[cat]}
             </label>
           ))}
-          {filters.changeType && (
+          {filters.changeCategory && (
             <button
               type="button"
               onClick={() =>
-                setFilters((f) => ({ ...f, changeType: undefined }))
+                setFilters((f) => ({ ...f, changeCategory: undefined }))
               }
               className="text-xs text-muted-foreground hover:text-foreground"
             >

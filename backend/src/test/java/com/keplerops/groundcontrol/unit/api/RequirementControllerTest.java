@@ -41,6 +41,7 @@ import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityLinkR
 import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityService;
 import com.keplerops.groundcontrol.domain.requirements.service.UpdateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
+import com.keplerops.groundcontrol.domain.requirements.state.ChangeCategory;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
@@ -617,11 +618,11 @@ class RequirementControllerTest {
                     "ADD",
                     Instant.parse("2026-03-21T04:00:00Z"),
                     "test-user",
-                    "REQUIREMENT",
+                    ChangeCategory.REQUIREMENT,
                     reqId,
                     Map.of("title", "My Requirement", "status", "DRAFT"),
-                    null);
-            when(auditService.getRequirementTimeline(eq(reqId), any(), any(), any()))
+                    Map.of());
+            when(auditService.getRequirementTimeline(eq(reqId), any(), any(), any(), eq(100), eq(0)))
                     .thenReturn(List.of(entry));
 
             mockMvc.perform(get("/api/v1/requirements/" + reqId + "/timeline"))
@@ -642,11 +643,11 @@ class RequirementControllerTest {
                     "MOD",
                     Instant.parse("2026-03-21T05:00:00Z"),
                     "test-user",
-                    "REQUIREMENT",
+                    ChangeCategory.REQUIREMENT,
                     reqId,
                     Map.of("title", "New Title", "status", "ACTIVE"),
                     changes);
-            when(auditService.getRequirementTimeline(eq(reqId), any(), any(), any()))
+            when(auditService.getRequirementTimeline(eq(reqId), any(), any(), any(), eq(100), eq(0)))
                     .thenReturn(List.of(entry));
 
             mockMvc.perform(get("/api/v1/requirements/" + reqId + "/timeline"))
@@ -659,20 +660,33 @@ class RequirementControllerTest {
         void passesFilterParams() throws Exception {
             var reqId = UUID.randomUUID();
             when(auditService.getRequirementTimeline(
-                            eq(reqId), eq("RELATION"), eq(Instant.parse("2026-01-01T00:00:00Z")), any()))
+                            eq(reqId),
+                            eq(ChangeCategory.RELATION),
+                            eq(Instant.parse("2026-01-01T00:00:00Z")),
+                            any(),
+                            eq(100),
+                            eq(0)))
                     .thenReturn(List.of());
 
             mockMvc.perform(get("/api/v1/requirements/" + reqId + "/timeline")
-                            .param("changeType", "RELATION")
+                            .param("changeCategory", "RELATION")
                             .param("from", "2026-01-01T00:00:00Z"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.length()", is(0)));
         }
 
         @Test
+        void invalidChangeCategory_returns400() throws Exception {
+            var reqId = UUID.randomUUID();
+
+            mockMvc.perform(get("/api/v1/requirements/" + reqId + "/timeline").param("changeCategory", "INVALID"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
         void notFound_returns404() throws Exception {
             var reqId = UUID.randomUUID();
-            when(auditService.getRequirementTimeline(eq(reqId), any(), any(), any()))
+            when(auditService.getRequirementTimeline(eq(reqId), any(), any(), any(), eq(100), eq(0)))
                     .thenThrow(new NotFoundException("Not found"));
 
             mockMvc.perform(get("/api/v1/requirements/" + reqId + "/timeline"))

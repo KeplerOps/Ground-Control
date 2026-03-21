@@ -48,7 +48,7 @@ export function useTraceabilityLinkHistory(
 }
 
 export interface TimelineFilters {
-  changeType?: ChangeCategory;
+  changeCategory?: ChangeCategory;
   from?: string;
   to?: string;
 }
@@ -64,7 +64,7 @@ export function useRequirementTimeline(
         `/requirements/${requirementId}/timeline`,
         {
           params: {
-            changeType: filters?.changeType,
+            changeCategory: filters?.changeCategory,
             from: filters?.from,
             to: filters?.to,
           },
