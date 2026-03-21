@@ -22,6 +22,7 @@ public record SweepReport(
                 || !consistencyViolations.isEmpty();
     }
 
+    /** Counts each distinct finding; a requirement may appear in multiple categories. */
     public int totalProblems() {
         int count = cycles.size() + orphans.size() + crossWaveViolations.size() + consistencyViolations.size();
         for (List<RequirementSummary> gaps : coverageGaps.values()) {

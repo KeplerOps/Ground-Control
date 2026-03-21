@@ -35,6 +35,7 @@ public class GitHubCliClient implements GitHubClient {
         log.info("github_cli_path: {}", this.ghPath);
     }
 
+    // Common Linux/macOS install locations; Windows is not supported.
     private static String resolveGhPath() {
         for (String candidate : List.of("/usr/bin/gh", "/usr/local/bin/gh", "/opt/homebrew/bin/gh")) {
             if (java.nio.file.Files.isExecutable(java.nio.file.Path.of(candidate))) {

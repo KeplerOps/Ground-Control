@@ -19,6 +19,7 @@ public class ScheduledSweepRunner {
         this.analysisSweepService = analysisSweepService;
     }
 
+    // Runs synchronously on the scheduling thread; a long sweep blocks the next scheduled tick.
     @Scheduled(cron = "${groundcontrol.sweep.cron:0 0 6 * * *}")
     public void runScheduledSweep() {
         log.info("scheduled_sweep_triggered");

@@ -3,6 +3,7 @@ package com.keplerops.groundcontrol.infrastructure.sweep;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepNotifier;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport;
+import jakarta.annotation.PostConstruct;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -14,7 +15,9 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Component
-@ConditionalOnProperty(name = "groundcontrol.sweep.webhook.enabled", havingValue = "true")
+@ConditionalOnProperty(
+        name = {"groundcontrol.sweep.enabled", "groundcontrol.sweep.webhook.enabled"},
+        havingValue = "true")
 public class WebhookSweepNotifier implements SweepNotifier {
 
     private static final Logger log = LoggerFactory.getLogger(WebhookSweepNotifier.class);
@@ -28,6 +31,14 @@ public class WebhookSweepNotifier implements SweepNotifier {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder().connectTimeout(TIMEOUT).build();
+    }
+
+    @PostConstruct
+    void validate() {
+        if (properties.webhook().url() == null || properties.webhook().url().isBlank()) {
+            throw new IllegalStateException(
+                    "groundcontrol.sweep.webhook.url must be set when webhook notifications are enabled");
+        }
     }
 
     @Override

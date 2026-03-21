@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - GitHub CLI (`gh`) not found by Java backend: now auto-resolves the binary
   path from common locations (`/usr/bin/gh`, `/usr/local/bin/gh`,
-  `//opt/homebrew/bin/gh`) and supports explicit override via `GC_GH_PATH`
+  `/opt/homebrew/bin/gh`) and supports explicit override via `GC_GH_PATH`
   environment variable
 
 ## [0.65.0] - 2026-03-20

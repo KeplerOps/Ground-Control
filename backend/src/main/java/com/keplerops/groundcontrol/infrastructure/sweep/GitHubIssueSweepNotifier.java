@@ -1,11 +1,13 @@
 package com.keplerops.groundcontrol.infrastructure.sweep;
 
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
+import com.keplerops.groundcontrol.domain.requirements.service.GitHubClient;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepNotifier;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport.ConsistencyViolationSummary;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport.CrossWaveViolationSummary;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport.RequirementSummary;
+import jakarta.annotation.PostConstruct;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -16,25 +18,35 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Component
-@ConditionalOnProperty(name = "groundcontrol.sweep.github.enabled", havingValue = "true")
+@ConditionalOnProperty(
+        name = {"groundcontrol.sweep.enabled", "groundcontrol.sweep.github.enabled"},
+        havingValue = "true")
 public class GitHubIssueSweepNotifier implements SweepNotifier {
 
     private static final Logger log = LoggerFactory.getLogger(GitHubIssueSweepNotifier.class);
     private static final DateTimeFormatter TIMESTAMP_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC);
 
-    private final com.keplerops.groundcontrol.domain.requirements.service.GitHubClient gitHubClient;
+    private final GitHubClient gitHubClient;
     private final SweepProperties properties;
 
-    public GitHubIssueSweepNotifier(
-            com.keplerops.groundcontrol.domain.requirements.service.GitHubClient gitHubClient,
-            SweepProperties properties) {
+    public GitHubIssueSweepNotifier(GitHubClient gitHubClient, SweepProperties properties) {
         this.gitHubClient = gitHubClient;
         this.properties = properties;
     }
 
+    @PostConstruct
+    void validate() {
+        if (properties.github().repo() == null || properties.github().repo().isBlank()) {
+            throw new IllegalStateException(
+                    "groundcontrol.sweep.github.repo must be set when GitHub notifications are enabled");
+        }
+    }
+
     @Override
     public void notify(SweepReport report) {
+        // Each sweep creates a new issue; deduplication is not yet implemented.
+        // TODO: search for open sweep issues before creating a new one to avoid duplicates.
         var title =
                 String.format("[Sweep] %d problems detected in %s", report.totalProblems(), report.projectIdentifier());
         var body = formatBody(report);
