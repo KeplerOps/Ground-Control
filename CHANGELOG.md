@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.67.0] - 2026-03-21
+
+### Added
+
+- Audit history timeline (GC-Q006): unified timeline endpoint
+  `GET /api/v1/requirements/{id}/timeline` that merges requirement, relation,
+  and traceability link changes into a single chronologically-sorted view with
+  field-level diffs between consecutive revisions
+- Timeline supports filtering by change category (REQUIREMENT, RELATION,
+  TRACEABILITY_LINK) and date range (from/to)
+- MCP tool `gc_get_timeline` for querying the unified audit timeline
+- Frontend timeline UI on the requirement detail History tab with visual
+  vertical timeline, expandable field-level diff views, and filter controls
+
 ## [0.66.0] - 2026-03-21
 
 ### Added

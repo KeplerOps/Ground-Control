@@ -40,6 +40,40 @@ http://localhost:8000/api/v1/
 | GET | `/requirements/{id}/traceability` | — | 200 | List traceability links |
 | DELETE | `/requirements/{id}/traceability/{linkId}` | — | 204 | Delete traceability link |
 
+### Audit History
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| GET | `/requirements/{id}/history` | — | 200 | Requirement revision history |
+| GET | `/requirements/{id}/relations/{relationId}/history` | — | 200 | Relation revision history |
+| GET | `/requirements/{id}/traceability/{linkId}/history` | — | 200 | Traceability link revision history |
+| GET | `/requirements/{id}/timeline` | — | 200 | Unified audit timeline |
+
+`GET /requirements/{id}/timeline` accepts query parameters:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `changeCategory` | enum | REQUIREMENT, RELATION, TRACEABILITY_LINK |
+| `from` | ISO-8601 instant | Start of date range |
+| `to` | ISO-8601 instant | End of date range |
+| `limit` | integer | Max entries to return (default 100) |
+| `offset` | integer | Number of entries to skip (default 0) |
+
+**TimelineEntryResponse:**
+
+```json
+{
+  "revisionNumber": 3,
+  "revisionType": "MOD",
+  "timestamp": "2026-03-21T04:00:00Z",
+  "actor": "user@example.com",
+  "changeCategory": "REQUIREMENT",
+  "entityId": "uuid",
+  "snapshot": { "title": "New Title", "status": "ACTIVE", "..." : "..." },
+  "changes": { "title": { "oldValue": "Old Title", "newValue": "New Title" } }
+}
+```
+
 ### Analysis
 
 | Method | Path | Body | Status | Purpose |

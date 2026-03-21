@@ -9,10 +9,12 @@ import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementService;
 import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityService;
 import com.keplerops.groundcontrol.domain.requirements.service.UpdateRequirementCommand;
+import com.keplerops.groundcontrol.domain.requirements.state.ChangeCategory;
 import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import jakarta.validation.Valid;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -126,6 +128,19 @@ public class RequirementController {
     public List<RequirementHistoryResponse> getHistory(@PathVariable UUID id) {
         return auditService.getRequirementHistory(id).stream()
                 .map(RequirementHistoryResponse::from)
+                .toList();
+    }
+
+    @GetMapping("/{id}/timeline")
+    public List<TimelineEntryResponse> getTimeline(
+            @PathVariable UUID id,
+            @RequestParam(required = false) ChangeCategory changeCategory,
+            @RequestParam(required = false) Instant from,
+            @RequestParam(required = false) Instant to,
+            @RequestParam(defaultValue = "100") int limit,
+            @RequestParam(defaultValue = "0") int offset) {
+        return auditService.getRequirementTimeline(id, changeCategory, from, to, limit, offset).stream()
+                .map(TimelineEntryResponse::from)
                 .toList();
     }
 
