@@ -1,5 +1,6 @@
 import { useProjectContext } from "@/contexts/project-context";
 import { apiFetch } from "@/lib/api-client";
+import type { GraphVisualizationResponse } from "@/types/api";
 import {
   type ColorScheme,
   type LayoutId,
@@ -33,10 +34,6 @@ interface RelationData {
   relationType: string;
 }
 
-interface PagedResponse {
-  content: RequirementData[];
-  totalPages: number;
-}
 
 type CytoscapeInstance = cytoscape.Core;
 
@@ -51,7 +48,6 @@ export function Graph() {
   const [colorScheme, setColorScheme] = useState<ColorScheme>("status");
   const [layoutId, setLayoutId] = useState<LayoutId>("dagre-tb");
   const [loading, setLoading] = useState(true);
-  const [loadMsg, setLoadMsg] = useState("Fetching requirements...");
   const [error, setError] = useState<string | null>(null);
 
   const [filterStatus, setFilterStatus] = useState("");
@@ -68,45 +64,19 @@ export function Graph() {
     setError(null);
 
     try {
-      const reqs: RequirementData[] = [];
-      let page = 0;
-      let totalPages = 1;
-      while (page < totalPages) {
-        const data = await apiFetch<PagedResponse>("/requirements", {
-          params: {
-            project: activeProject.identifier,
-            page: String(page),
-            size: "200",
-          },
-        });
-        reqs.push(...data.content);
-        totalPages = data.totalPages;
-        page++;
-      }
-      setRequirements(reqs);
-      setLoadMsg(`Loaded ${reqs.length} requirements. Fetching relations...`);
-
-      const allRels = new Map<string, RelationData>();
-      const batchSize = 20;
-      for (let i = 0; i < reqs.length; i += batchSize) {
-        const batch = reqs.slice(i, i + batchSize);
-        const results = await Promise.all(
-          batch.map((r) =>
-            apiFetch<RelationData[]>(`/requirements/${r.id}/relations`, {
-              params: { project: activeProject.identifier },
-            }),
-          ),
-        );
-        for (const rels of results) {
-          for (const rel of rels) {
-            allRels.set(rel.id, rel);
-          }
-        }
-        setLoadMsg(
-          `Fetching relations... ${Math.min(i + batchSize, reqs.length)}/${reqs.length}`,
-        );
-      }
-      setRelations(Array.from(allRels.values()));
+      const data = await apiFetch<GraphVisualizationResponse>(
+        "/graph/visualization",
+        { params: { project: activeProject.identifier } },
+      );
+      setRequirements(data.nodes);
+      setRelations(
+        data.edges.map((e) => ({
+          id: e.id,
+          sourceId: e.sourceId,
+          targetId: e.targetId,
+          relationType: e.relationType,
+        })),
+      );
       setLoading(false);
     } catch (err) {
       setError(
@@ -798,7 +768,7 @@ export function Graph() {
         {loading && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <span className="text-sm text-muted-foreground">{loadMsg}</span>
+            <span className="text-sm text-muted-foreground">Loading graph...</span>
           </div>
         )}
         {error && (

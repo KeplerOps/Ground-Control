@@ -371,6 +371,12 @@ export async function findPaths(source, target, project) {
   });
 }
 
+export async function getGraphVisualization(project) {
+  return request("GET", "/api/v1/graph/visualization", {
+    params: { project },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Baseline functions
 // ---------------------------------------------------------------------------

@@ -70,6 +70,24 @@ export interface RelationResponse {
   createdAt: string;
 }
 
+export interface GraphVisualizationNodeResponse {
+  id: string;
+  uid: string;
+  title: string;
+  statement: string;
+  priority: string;
+  status: string;
+  requirementType: string;
+  wave: number;
+}
+
+export interface GraphVisualizationResponse {
+  nodes: GraphVisualizationNodeResponse[];
+  edges: RelationResponse[];
+  totalNodes: number;
+  totalEdges: number;
+}
+
 export interface TraceabilityLinkResponse {
   id: string;
   requirementId: string;

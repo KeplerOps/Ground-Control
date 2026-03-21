@@ -851,4 +851,44 @@ class AnalysisServiceTest {
             assertThat(result.waves().get(0).items().get(0).blockingStatus()).isEqualTo(BlockingStatus.BLOCKED);
         }
     }
+
+    @Nested
+    class GetGraphVisualization {
+
+        @Test
+        void returnsNodesAndEdges() {
+            var aId = UUID.randomUUID();
+            var bId = UUID.randomUUID();
+            var a = makeRequirement("REQ-A", aId, 1);
+            var b = makeRequirement("REQ-B", bId, 2);
+            var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(a, b));
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(rel));
+
+            var result = service.getGraphVisualization(PROJECT_ID);
+
+            assertThat(result.totalRequirements()).isEqualTo(2);
+            assertThat(result.totalRelations()).isEqualTo(1);
+            assertThat(result.requirements()).containsExactly(a, b);
+            assertThat(result.relations()).containsExactly(rel);
+        }
+
+        @Test
+        void emptyProject_returnsZeroCounts() {
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of());
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of());
+
+            var result = service.getGraphVisualization(PROJECT_ID);
+
+            assertThat(result.totalRequirements()).isZero();
+            assertThat(result.totalRelations()).isZero();
+            assertThat(result.requirements()).isEmpty();
+            assertThat(result.relations()).isEmpty();
+        }
+    }
 }
