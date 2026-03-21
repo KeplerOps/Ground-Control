@@ -1,5 +1,7 @@
 package com.keplerops.groundcontrol.integration;
 
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -218,5 +220,91 @@ class AuditHistoryIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$[0].snapshot.requirementId", is(requirementId.toString())))
                 .andExpect(jsonPath("$[0].snapshot.artifactType", is("CODE_FILE")))
                 .andExpect(jsonPath("$[0].snapshot.artifactIdentifier", is("src/main/java/Example.java")));
+    }
+
+    // --- Timeline endpoint tests (builds on data from steps 1-5) ---
+
+    @Test
+    @Order(6)
+    void timeline_mergesAllChangeTypes() throws Exception {
+        // requirementId has: 2 requirement revisions (ADD + MOD), 1 relation, 1 traceability link
+        mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/timeline"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(greaterThanOrEqualTo(4))))
+                .andExpect(jsonPath("$[0].timestamp", notNullValue()))
+                .andExpect(jsonPath("$[0].actor", is("test-user")))
+                .andExpect(jsonPath("$[0].changeCategory", notNullValue()))
+                .andExpect(jsonPath("$[0].entityId", notNullValue()))
+                .andExpect(jsonPath("$[0].snapshot", notNullValue()));
+    }
+
+    @Test
+    @Order(7)
+    void timeline_filterByChangeCategory() throws Exception {
+        // Filter to only REQUIREMENT changes — should get 2 (ADD + MOD)
+        mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/timeline")
+                        .param("changeCategory", "REQUIREMENT"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].changeCategory", is("REQUIREMENT")))
+                .andExpect(jsonPath("$[1].changeCategory", is("REQUIREMENT")));
+
+        // Filter to only RELATION changes
+        mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/timeline")
+                        .param("changeCategory", "RELATION"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].changeCategory", is("RELATION")));
+
+        // Filter to only TRACEABILITY_LINK changes
+        mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/timeline")
+                        .param("changeCategory", "TRACEABILITY_LINK"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].changeCategory", is("TRACEABILITY_LINK")));
+    }
+
+    @Test
+    @Order(8)
+    void timeline_computesFieldDiffs() throws Exception {
+        // MOD revision should have changes computed (title was updated in step 1)
+        mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/timeline")
+                        .param("changeCategory", "REQUIREMENT"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].revisionType", is("MOD")))
+                .andExpect(jsonPath("$[0].changes.title.oldValue", is("Audit test requirement")))
+                .andExpect(jsonPath("$[0].changes.title.newValue", is("Updated audit title")));
+    }
+
+    @Test
+    @Order(9)
+    void timeline_invalidChangeCategory_returns400() throws Exception {
+        mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/timeline")
+                        .param("changeCategory", "INVALID"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @Order(10)
+    void timeline_nonexistentRequirement_returns404() throws Exception {
+        mockMvc.perform(get("/api/v1/requirements/" + UUID.randomUUID() + "/timeline"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code", is("not_found")));
+    }
+
+    @Test
+    @Order(11)
+    void timeline_paginationLimitAndOffset() throws Exception {
+        // Limit to 2 entries
+        mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/timeline")
+                        .param("limit", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)));
+
+        // Offset past all entries
+        mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/timeline")
+                        .param("offset", "100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
     }
 }
