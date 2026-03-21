@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.66.0] - 2026-03-21
+
+### Added
+
+- Scheduled analysis sweeps (GC-C013): configurable cron-based execution of the
+  full analysis suite (orphan detection, coverage gaps, cross-wave validation,
+  cycle detection, consistency checks) with GitHub issue and webhook notification
+  support for detected problems
+- REST API endpoints: `POST /api/v1/analysis/sweep` (single project) and
+  `POST /api/v1/analysis/sweep/all` (all projects) for manual sweep triggering
+- MCP tool `gc_run_sweep` for triggering analysis sweeps via MCP
+- Configurable notification channels: GitHub issue creation and webhook POST
+  for sweep results with problems
+
+### Fixed
+
+- GitHub CLI (`gh`) not found by Java backend: now auto-resolves the binary
+  path from common locations (`/usr/bin/gh`, `/usr/local/bin/gh`,
+  `//opt/homebrew/bin/gh`) and supports explicit override via `GC_GH_PATH`
+  environment variable
+
 ## [0.65.0] - 2026-03-20
 
 ### Added

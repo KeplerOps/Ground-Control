@@ -441,3 +441,15 @@ export async function createGitHubIssue({ title, body, labels, repo }) {
 export async function createGitHubIssueViaApi(data, project) {
   return request("POST", "/api/v1/admin/github/issues", { body: data, params: { project } });
 }
+
+// ---------------------------------------------------------------------------
+// Analysis sweep API functions
+// ---------------------------------------------------------------------------
+
+export async function runSweep(project) {
+  return request("POST", "/api/v1/analysis/sweep", { params: { project } });
+}
+
+export async function runSweepAll() {
+  return request("POST", "/api/v1/analysis/sweep/all");
+}
