@@ -22,6 +22,7 @@ public class GitHubCliClient implements GitHubClient {
 
     private static final Logger log = LoggerFactory.getLogger(GitHubCliClient.class);
     private static final long TIMEOUT_SECONDS = 60;
+    private static final int PAGE_SIZE = 100;
     private static final Pattern ISSUE_URL_RE = Pattern.compile("/issues/(\\d+)$");
 
     private final ObjectMapper objectMapper;
@@ -47,19 +48,44 @@ public class GitHubCliClient implements GitHubClient {
 
     @Override
     public List<GitHubIssueData> fetchAllIssues(String owner, String repo) {
+        List<GitHubIssueData> allIssues = new ArrayList<>();
+        int page = 1;
+
+        while (true) {
+            List<GitHubIssueData> batch = fetchIssuePage(owner, repo, page);
+            allIssues.addAll(batch);
+
+            if (batch.size() < PAGE_SIZE) {
+                break;
+            }
+
+            log.info(
+                    "github_issues_page_full: page={} size={} repo={}/{}, fetching next page",
+                    page,
+                    batch.size(),
+                    owner,
+                    repo);
+            page++;
+        }
+
+        log.info("github_issues_fetched: count={} pages={} repo={}/{}", allIssues.size(), page, owner, repo);
+        return allIssues;
+    }
+
+    List<GitHubIssueData> fetchIssuePage(String owner, String repo, int page) {
         try {
             ProcessBuilder pb = new ProcessBuilder(
                     ghPath,
-                    "issue",
-                    "list",
-                    "--repo",
-                    owner + "/" + repo,
-                    "--state",
-                    "all",
-                    "--limit",
-                    "500",
-                    "--json",
-                    "number,title,labels,body,state,url");
+                    "api",
+                    String.format("repos/%s/%s/issues", owner, repo),
+                    "--method",
+                    "GET",
+                    "-f",
+                    "state=all",
+                    "-f",
+                    "per_page=" + PAGE_SIZE,
+                    "-f",
+                    "page=" + page);
             pb.redirectErrorStream(false);
             Process process = pb.start();
 
@@ -84,10 +110,16 @@ public class GitHubCliClient implements GitHubClient {
 
             List<GitHubIssueData> result = new ArrayList<>();
             for (Map<String, Object> raw : rawIssues) {
+                // GitHub REST API returns PRs in the issues endpoint; skip them
+                if (raw.containsKey("pull_request")) {
+                    continue;
+                }
+
                 int number = ((Number) raw.get("number")).intValue();
                 String title = (String) raw.get("title");
-                String state = (String) raw.get("state");
-                String url = (String) raw.get("url");
+                String apiState = (String) raw.get("state");
+                String state = apiState.equalsIgnoreCase("open") ? "OPEN" : "CLOSED";
+                String url = (String) raw.get("html_url");
                 String body = raw.get("body") != null ? (String) raw.get("body") : "";
 
                 @SuppressWarnings("unchecked")
@@ -102,7 +134,6 @@ public class GitHubCliClient implements GitHubClient {
                 result.add(new GitHubIssueData(number, title, state, url, body, labels));
             }
 
-            log.info("github_issues_fetched: count={} repo={}/{}", result.size(), owner, repo);
             return result;
         } catch (IOException e) {
             throw new GroundControlException("Failed to execute gh CLI: " + e.getMessage(), "github_cli_error", e);
