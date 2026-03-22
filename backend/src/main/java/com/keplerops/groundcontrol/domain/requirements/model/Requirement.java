@@ -20,6 +20,7 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import org.hibernate.envers.Audited;
 import org.hibernate.envers.NotAudited;
@@ -214,6 +215,18 @@ public class Requirement {
 
     public Instant getArchivedAt() {
         return archivedAt;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Requirement other)) return false;
+        return uid != null && uid.equals(other.uid);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(uid);
     }
 
     @Override

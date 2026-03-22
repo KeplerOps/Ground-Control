@@ -18,6 +18,7 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 import org.hibernate.envers.Audited;
 
@@ -156,5 +157,27 @@ public class TraceabilityLink {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof TraceabilityLink other)) return false;
+        return artifactType != null
+                && artifactIdentifier != null
+                && linkType != null
+                && Objects.equals(requirement != null ? requirement.getId() : null, other.requirement != null ? other.requirement.getId() : null)
+                && artifactType.equals(other.artifactType)
+                && artifactIdentifier.equals(other.artifactIdentifier)
+                && linkType.equals(other.linkType);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(
+                requirement != null ? requirement.getId() : null,
+                artifactType,
+                artifactIdentifier,
+                linkType);
     }
 }

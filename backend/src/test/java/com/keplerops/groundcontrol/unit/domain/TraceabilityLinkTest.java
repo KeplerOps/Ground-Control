@@ -85,6 +85,65 @@ class TraceabilityLinkTest {
     }
 
     @Nested
+    class Equality {
+
+        private static Requirement createRequirementWithId(String uid, UUID id) {
+            var req = new Requirement(TEST_PROJECT, uid, "Title", "Statement");
+            try {
+                var f = Requirement.class.getDeclaredField("id");
+                f.setAccessible(true);
+                f.set(req, id);
+            } catch (ReflectiveOperationException e) {
+                throw new RuntimeException(e);
+            }
+            return req;
+        }
+
+        @Test
+        void linksWithSameNaturalKeyAreEqual() {
+            var reqId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+            var req1 = createRequirementWithId("REQ-001", reqId);
+            var req2 = createRequirementWithId("REQ-001", reqId);
+            var link1 = new TraceabilityLink(req1, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
+            var link2 = new TraceabilityLink(req2, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
+            assertThat(link1).isEqualTo(link2);
+        }
+
+        @Test
+        void differentLinkTypeIsNotEqual() {
+            var reqId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+            var req1 = createRequirementWithId("REQ-001", reqId);
+            var req2 = createRequirementWithId("REQ-001", reqId);
+            var link1 = new TraceabilityLink(req1, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
+            var link2 = new TraceabilityLink(req2, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.TESTS);
+            assertThat(link1).isNotEqualTo(link2);
+        }
+
+        @Test
+        void equalLinksHaveSameHashCode() {
+            var reqId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+            var req1 = createRequirementWithId("REQ-001", reqId);
+            var req2 = createRequirementWithId("REQ-001", reqId);
+            var link1 = new TraceabilityLink(req1, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
+            var link2 = new TraceabilityLink(req2, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
+            assertThat(link1.hashCode()).isEqualTo(link2.hashCode());
+        }
+
+        @Test
+        void sameNaturalKeyInSetDeduplicates() {
+            var reqId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+            var req1 = createRequirementWithId("REQ-001", reqId);
+            var req2 = createRequirementWithId("REQ-001", reqId);
+            var link1 = new TraceabilityLink(req1, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
+            var link2 = new TraceabilityLink(req2, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
+            var set = new java.util.HashSet<TraceabilityLink>();
+            set.add(link1);
+            set.add(link2);
+            assertThat(set).hasSize(1);
+        }
+    }
+
+    @Nested
     class Accessors {
 
         @Test

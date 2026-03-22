@@ -188,6 +188,96 @@ class RequirementTest {
     }
 
     @Nested
+    class Equality {
+
+        @Test
+        void sameInstanceIsEqual() {
+            var req = createRequirement("REQ-001");
+            assertThat(req).isEqualTo(req);
+        }
+
+        @Test
+        void twoInstancesWithSameUidAreEqual() {
+            var req1 = createRequirement("REQ-001");
+            var req2 = createRequirement("REQ-001");
+            assertThat(req1).isEqualTo(req2);
+        }
+
+        @Test
+        void differentUidsAreNotEqual() {
+            var req1 = createRequirement("REQ-001");
+            var req2 = createRequirement("REQ-002");
+            assertThat(req1).isNotEqualTo(req2);
+        }
+
+        @Test
+        void equalRequirementsHaveSameHashCode() {
+            var req1 = createRequirement("REQ-001");
+            var req2 = createRequirement("REQ-001");
+            assertThat(req1.hashCode()).isEqualTo(req2.hashCode());
+        }
+
+        @Test
+        void requirementIsNotEqualToNull() {
+            var req = createRequirement("REQ-001");
+            assertThat(req).isNotEqualTo(null);
+        }
+
+        @Test
+        void requirementIsNotEqualToDifferentType() {
+            var req = createRequirement("REQ-001");
+            assertThat(req).isNotEqualTo("REQ-001");
+        }
+
+        @Test
+        void sameUidInSetDeduplicates() {
+            var req1 = createRequirement("REQ-001");
+            var req2 = createRequirement("REQ-001");
+            var set = new java.util.HashSet<Requirement>();
+            set.add(req1);
+            set.add(req2);
+            assertThat(set).hasSize(1);
+        }
+    }
+
+    @Nested
+    class RelationEquality {
+
+        @Test
+        void sameSourceTargetTypeIsEqual() {
+            var source = createRequirement("REQ-001");
+            var target = createRequirement("REQ-002");
+            setId(source, UUID.fromString("00000000-0000-0000-0000-000000000010"));
+            setId(target, UUID.fromString("00000000-0000-0000-0000-000000000020"));
+            var rel1 = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
+            var rel2 = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
+            assertThat(rel1).isEqualTo(rel2);
+        }
+
+        @Test
+        void differentRelationTypeIsNotEqual() {
+            var source = createRequirement("REQ-001");
+            var target = createRequirement("REQ-002");
+            setId(source, UUID.fromString("00000000-0000-0000-0000-000000000010"));
+            setId(target, UUID.fromString("00000000-0000-0000-0000-000000000020"));
+            var rel1 = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
+            var rel2 = new RequirementRelation(source, target, RelationType.REFINES);
+            assertThat(rel1).isNotEqualTo(rel2);
+        }
+
+        @Test
+        void equalRelationsHaveSameHashCode() {
+            var source = createRequirement("REQ-001");
+            var target = createRequirement("REQ-002");
+            setId(source, UUID.fromString("00000000-0000-0000-0000-000000000010"));
+            setId(target, UUID.fromString("00000000-0000-0000-0000-000000000020"));
+            var rel1 = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
+            var rel2 = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
+            assertThat(rel1.hashCode()).isEqualTo(rel2.hashCode());
+        }
+    }
+
+    @Nested
     class Relations {
 
         @Test
