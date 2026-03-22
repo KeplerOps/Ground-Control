@@ -2,6 +2,7 @@ package com.keplerops.groundcontrol.infrastructure.sweep;
 
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubClient;
+import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepNotifier;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport.ConsistencyViolationSummary;
@@ -26,6 +27,7 @@ public class GitHubIssueSweepNotifier implements SweepNotifier {
     private static final Logger log = LoggerFactory.getLogger(GitHubIssueSweepNotifier.class);
     private static final DateTimeFormatter TIMESTAMP_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC);
+    private static final String SWEEP_TITLE_PREFIX = "[Sweep]";
 
     private final GitHubClient gitHubClient;
     private final SweepProperties properties;
@@ -45,16 +47,39 @@ public class GitHubIssueSweepNotifier implements SweepNotifier {
 
     @Override
     public void notify(SweepReport report) {
-        // Each sweep creates a new issue; deduplication is not yet implemented.
-        // TODO: search for open sweep issues before creating a new one to avoid duplicates.
-        var title =
-                String.format("[Sweep] %d problems detected in %s", report.totalProblems(), report.projectIdentifier());
-        var body = formatBody(report);
         var repo = properties.github().repo();
+        var projectIdentifier = report.projectIdentifier();
+
+        if (hasOpenSweepIssue(repo, projectIdentifier)) {
+            log.info(
+                    "sweep_github_issue_skipped: project={} open sweep issue already exists",
+                    projectIdentifier);
+            return;
+        }
+
+        var title = String.format(
+                "%s %d problems detected in %s", SWEEP_TITLE_PREFIX, report.totalProblems(), projectIdentifier);
+        var body = formatBody(report);
         var labels = properties.github().labels();
 
         var issue = gitHubClient.createIssue(repo, title, body, labels);
-        log.info("sweep_github_issue_created: project={} issue={}", report.projectIdentifier(), issue.number());
+        log.info("sweep_github_issue_created: project={} issue={}", projectIdentifier, issue.number());
+    }
+
+    private boolean hasOpenSweepIssue(String repo, String projectIdentifier) {
+        String[] parts = repo.split("/", 2);
+        if (parts.length != 2) {
+            log.warn("sweep_github_dedup_skipped: cannot parse owner/repo from '{}'", repo);
+            return false;
+        }
+        String owner = parts[0];
+        String repoName = parts[1];
+
+        List<GitHubIssueData> issues = gitHubClient.fetchAllIssues(owner, repoName);
+        return issues.stream()
+                .filter(i -> "OPEN".equalsIgnoreCase(i.state()))
+                .anyMatch(i -> i.title().startsWith(SWEEP_TITLE_PREFIX)
+                        && i.title().contains(projectIdentifier));
     }
 
     static String formatBody(SweepReport report) {
