@@ -35,6 +35,7 @@ services:
       GC_DATABASE_PASSWORD: ${GC_DATABASE_PASSWORD:?Set GC_DATABASE_PASSWORD in .env}
       GC_REDIS_URL: redis://redis:6379
       GC_SERVER_PORT: "8000"
+      GC_GITHUB_TOKEN: ${GC_GITHUB_TOKEN:-}
       SPRING_PROFILES_ACTIVE: dev
     ports:
       - "8000:8000"

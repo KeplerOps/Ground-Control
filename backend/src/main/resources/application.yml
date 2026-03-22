@@ -42,7 +42,7 @@ management:
 
 groundcontrol:
   github:
-    gh-path: ${GC_GH_PATH:}
+    token: ${GC_GITHUB_TOKEN:}
   age:
     enabled: ${GC_AGE_ENABLED:false}
     graph-name: ${GC_AGE_GRAPH_NAME:requirements}

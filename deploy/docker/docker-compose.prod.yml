@@ -3,9 +3,10 @@
 #   - Backend uses pre-built GHCR image (not local build)
 #   - PostgreSQL data bind-mounted to /data/postgres/ (EBS volume)
 #   - Redis omitted (unused, GC_CACHE_TYPE=none)
-#   - Roadmap viewer omitted
 #   - restart: unless-stopped on all services
 #   - JVM memory capped via JAVA_TOOL_OPTIONS
+#   - Backend reads secrets (API keys, tokens) directly from AWS SSM
+#     Parameter Store via Spring Cloud AWS — no secret env vars here
 
 services:
   db:
@@ -31,13 +32,9 @@ services:
       GC_DATABASE_PASSWORD: ${GC_DATABASE_PASSWORD}
       GC_SERVER_PORT: "8000"
       GC_CACHE_TYPE: "none"
-      GC_EMBEDDING_PROVIDER: ${GC_EMBEDDING_PROVIDER:-none}
-      GC_EMBEDDING_API_KEY: ${GC_EMBEDDING_API_KEY:-}
-      GC_EMBEDDING_MODEL: ${GC_EMBEDDING_MODEL:-text-embedding-3-small}
-      GC_EMBEDDING_DIMENSIONS: ${GC_EMBEDDING_DIMENSIONS:-1536}
-      GC_EMBEDDING_SIMILARITY_THRESHOLD: ${GC_EMBEDDING_SIMILARITY_THRESHOLD:-0.85}
       JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS}
       SPRING_PROFILES_ACTIVE: prod
+      AWS_REGION: ${AWS_REGION:-us-east-2}
     ports:
       - "8000:8000"
     depends_on:

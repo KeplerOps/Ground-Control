@@ -27,3 +27,13 @@ output "embedding_api_key_arn" {
   description = "SSM parameter ARN for embedding API key"
   value       = aws_ssm_parameter.embedding_api_key.arn
 }
+
+output "github_token_name" {
+  description = "SSM parameter name for GitHub token"
+  value       = aws_ssm_parameter.github_token.name
+}
+
+output "github_token_arn" {
+  description = "SSM parameter ARN for GitHub token"
+  value       = aws_ssm_parameter.github_token.arn
+}

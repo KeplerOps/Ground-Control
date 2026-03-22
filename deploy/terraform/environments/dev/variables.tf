@@ -40,12 +40,6 @@ variable "backup_bucket_name" {
   default     = "groundcontrol-backups-catalyst-dev"
 }
 
-variable "gc_embedding_provider" {
-  description = "Embedding provider name (openai or none)"
-  type        = string
-  default     = "none"
-}
-
 variable "embedding_api_key" {
   description = "API key for the embedding provider (stored in SSM SecureString)"
   type        = string

@@ -46,6 +46,10 @@ dependencies {
     // Logging (JSON output in production)
     implementation("net.logstash.logback:logstash-logback-encoder:8.0")
 
+    // AWS Parameter Store (secrets from SSM in prod)
+    implementation(platform("io.awspring.cloud:spring-cloud-aws-dependencies:3.3.0"))
+    implementation("io.awspring.cloud:spring-cloud-aws-starter-parameter-store")
+
     // API docs
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.5")
 

@@ -57,19 +57,7 @@ variable "ssm_tailscale_key" {
 variable "ssm_db_password" {
   description = "SSM parameter path for database password"
   type        = string
-  default     = "/gc/dev/db_password"
-}
-
-variable "ssm_embedding_api_key" {
-  description = "SSM parameter path for embedding API key"
-  type        = string
-  default     = "/gc/dev/embedding_api_key"
-}
-
-variable "gc_embedding_provider" {
-  description = "Embedding provider name (openai or none)"
-  type        = string
-  default     = "none"
+  default     = "/gc/dev/spring.datasource.password"
 }
 
 variable "tailscale_hostname" {

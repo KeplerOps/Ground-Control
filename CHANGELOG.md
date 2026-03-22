@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.75.0] - 2026-03-22
+
+### Changed
+
+- Replace `GitHubCliClient` (ProcessBuilder/`gh` CLI) with `GitHubApiClient`
+  using Java's built-in HttpClient to call the GitHub REST API directly,
+  fixing GitHub issue creation in Docker containers where `gh` is not installed (#379)
+- Replace `refresh-env.sh` secret management with Spring Cloud AWS Parameter
+  Store — backend reads secrets (DB password, API keys, GitHub token) directly
+  from AWS SSM at startup instead of from `.env` files written to disk
+- SSM parameter names now match Spring property names (e.g.
+  `/gc/dev/spring.datasource.password`, `/gc/dev/groundcontrol.github.token`)
+- Enable IMDSv2 with hop limit 2 on EC2 so Docker containers can access
+  instance metadata for AWS credentials
+
+### Removed
+
+- `refresh-env.sh` script and `.env.template` — secrets no longer written to disk
+- `GC_GH_PATH` configuration property (no longer needed)
+- Secret environment variables from production docker-compose (backend reads
+  from SSM directly)
+
 ## [0.74.0] - 2026-03-22
 
 ### Added

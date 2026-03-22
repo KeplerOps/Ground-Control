@@ -1,0 +1,7 @@
+spring:
+  config:
+    import: aws-parameterstore:/gc/dev/
+  cloud:
+    aws:
+      parameterstore:
+        region: ${AWS_REGION:us-east-2}
