@@ -49,6 +49,9 @@ class AnalysisControllerTest {
     @MockitoBean
     private ProjectService projectService;
 
+    @MockitoBean
+    private com.keplerops.groundcontrol.domain.requirements.service.SimilarityService similarityService;
+
     private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final Project TEST_PROJECT = createTestProject();
 

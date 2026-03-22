@@ -49,6 +49,7 @@ import {
   getEmbeddingStatus,
   embedProject,
   deleteEmbedding,
+  analyzeSemanticSimilarity,
   createBaseline,
   listBaselines,
   getBaseline,
@@ -1023,6 +1024,38 @@ server.tool(
   async ({ project, force }) => {
     try {
       const result = await embedProject(project, force);
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Semantic analysis tools
+// ==========================================================================
+
+server.tool(
+  "gc_analyze_similarity",
+  "Find semantically similar requirement pairs by computing cosine similarity across requirement embeddings. Returns pairs exceeding the threshold, sorted by similarity score descending. Requires embeddings to exist (run gc_embed_project first).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    threshold: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe("Minimum similarity score (0-1). Defaults to server-configured threshold (0.85)"),
+  },
+  async ({ project, threshold }) => {
+    try {
+      const result = await analyzeSemanticSimilarity(project, threshold);
+      if (result.pairs && result.pairs.length === 0) {
+        return ok(
+          `No similar requirement pairs found above threshold ${result.threshold}. ` +
+            `(${result.embedded_count}/${result.total_requirements} requirements embedded, ${result.pairs_analyzed} pairs analyzed)`,
+        );
+      }
       return ok(JSON.stringify(result, null, 2));
     } catch (e) {
       return err(e);

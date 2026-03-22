@@ -63,6 +63,7 @@ groundcontrol:
     model: ${GC_EMBEDDING_MODEL:text-embedding-3-small}
     dimensions: ${GC_EMBEDDING_DIMENSIONS:1536}
     batch-size: ${GC_EMBEDDING_BATCH_SIZE:100}
+    similarity-threshold: ${GC_EMBEDDING_SIMILARITY_THRESHOLD:0.85}
 
 springdoc:
   api-docs:
