@@ -31,7 +31,8 @@ MCP-driven AI workflows. The rest of the factory is coming.
 - **StrictDoc import** — Bulk-import from `.sdoc` files, idempotent
 - **ReqIF import** — Bulk-import from ReqIF 1.2 `.reqif` files (IBM DOORS, Polarion, Jama), idempotent
 - **Text embeddings** — Pluggable vector embedding of requirement text with content-hash staleness detection, batch embedding, and graceful degradation when no provider is configured
-- **MCP server** — 29 tools for Claude Code: manage requirements, baselines, run analysis, embed text, and build traceability without leaving your editor
+- **Semantic similarity** — Pairwise cosine similarity analysis across requirement embeddings to detect near-duplicate requirements with configurable threshold
+- **MCP server** — 30 tools for Claude Code: manage requirements, baselines, run analysis, embed text, and build traceability without leaving your editor
 - **Baseline management** — Named point-in-time snapshots of the requirement set for release management and specification evolution tracking
 - **Audit trail** — Every change to every entity is versioned via Hibernate Envers
 

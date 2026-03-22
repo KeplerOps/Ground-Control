@@ -62,6 +62,9 @@ const TO_CAMEL = {
   current_model_id: "currentModelId",
   embedding_model_id: "embeddingModelId",
   embedded_at: "embeddedAt",
+  pairs_analyzed: "pairsAnalyzed",
+  embedded_count: "embeddedCount",
+  similarity_threshold: "similarityThreshold",
   total_unblocked: "totalUnblocked",
   total_blocked: "totalBlocked",
   total_unconstrained: "totalUnconstrained",
@@ -505,4 +508,10 @@ export async function embedProject(project, force) {
 
 export async function deleteEmbedding(requirementId) {
   await request("DELETE", `/api/v1/embeddings/${encodeURIComponent(requirementId)}`);
+}
+
+export async function analyzeSemanticSimilarity(project, threshold) {
+  return request("GET", "/api/v1/analysis/semantic-similarity", {
+    params: { project, threshold },
+  });
 }

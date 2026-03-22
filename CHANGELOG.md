@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.74.0] - 2026-03-22
+
+### Added
+
+- Semantic similarity detection (GC-C016): pairwise cosine similarity analysis
+  across requirement embeddings, returning overlap candidates above a configurable
+  threshold sorted by similarity score
+- REST API endpoint: `GET /api/v1/analysis/semantic-similarity?threshold=0.85&project=...`
+- MCP tool: `gc_analyze_similarity` with optional threshold and project parameters
+- Configurable default threshold via `GC_EMBEDDING_SIMILARITY_THRESHOLD` (default 0.85)
+
 ## [0.73.0] - 2026-03-22
 
 ### Added

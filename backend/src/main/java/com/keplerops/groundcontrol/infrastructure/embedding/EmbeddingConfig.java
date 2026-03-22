@@ -25,8 +25,11 @@ public class EmbeddingConfig {
     @Value("${groundcontrol.embedding.batch-size:100}")
     private int batchSize;
 
+    @Value("${groundcontrol.embedding.similarity-threshold:0.85}")
+    private double similarityThreshold;
+
     @Bean
     EmbeddingProperties embeddingProperties() {
-        return new EmbeddingProperties(provider, apiKey, apiUrl, model, dimensions, batchSize);
+        return new EmbeddingProperties(provider, apiKey, apiUrl, model, dimensions, batchSize, similarityThreshold);
     }
 }
