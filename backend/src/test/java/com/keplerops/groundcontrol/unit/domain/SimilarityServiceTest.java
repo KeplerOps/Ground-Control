@@ -111,9 +111,10 @@ class SimilarityServiceTest {
 
         @Test
         void noEmbeddings_returnsEmptyResult() {
-            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+            when(requirementRepository.countByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(0L);
+            when(embeddingRepository.findByRequirementProjectIdWithRequirement(PROJECT_ID))
                     .thenReturn(List.of());
-            when(embeddingRepository.findByRequirementProjectId(PROJECT_ID)).thenReturn(List.of());
 
             var result = service.findSimilarRequirements(PROJECT_ID, 0.85);
 
@@ -127,9 +128,10 @@ class SimilarityServiceTest {
             var req = makeRequirement("REQ-001", UUID.randomUUID());
             var emb = makeEmbedding(req, new float[] {1.0f, 0.0f, 0.0f});
 
-            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
-                    .thenReturn(List.of(req));
-            when(embeddingRepository.findByRequirementProjectId(PROJECT_ID)).thenReturn(List.of(emb));
+            when(requirementRepository.countByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(1L);
+            when(embeddingRepository.findByRequirementProjectIdWithRequirement(PROJECT_ID))
+                    .thenReturn(List.of(emb));
 
             var result = service.findSimilarRequirements(PROJECT_ID, 0.85);
 
@@ -144,9 +146,10 @@ class SimilarityServiceTest {
             var emb1 = makeEmbedding(req1, new float[] {1.0f, 0.0f, 0.0f});
             var emb2 = makeEmbedding(req2, new float[] {0.95f, 0.05f, 0.0f});
 
-            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
-                    .thenReturn(List.of(req1, req2));
-            when(embeddingRepository.findByRequirementProjectId(PROJECT_ID)).thenReturn(List.of(emb1, emb2));
+            when(requirementRepository.countByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(2L);
+            when(embeddingRepository.findByRequirementProjectIdWithRequirement(PROJECT_ID))
+                    .thenReturn(List.of(emb1, emb2));
 
             var result = service.findSimilarRequirements(PROJECT_ID, 0.9);
 
@@ -164,9 +167,10 @@ class SimilarityServiceTest {
             var emb1 = makeEmbedding(req1, new float[] {1.0f, 0.0f, 0.0f});
             var emb2 = makeEmbedding(req2, new float[] {0.0f, 1.0f, 0.0f});
 
-            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
-                    .thenReturn(List.of(req1, req2));
-            when(embeddingRepository.findByRequirementProjectId(PROJECT_ID)).thenReturn(List.of(emb1, emb2));
+            when(requirementRepository.countByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(2L);
+            when(embeddingRepository.findByRequirementProjectIdWithRequirement(PROJECT_ID))
+                    .thenReturn(List.of(emb1, emb2));
 
             var result = service.findSimilarRequirements(PROJECT_ID, 0.85);
 
@@ -183,9 +187,10 @@ class SimilarityServiceTest {
             var emb2 = makeEmbedding(req2, new float[] {0.9f, 0.1f, 0.0f});
             var emb3 = makeEmbedding(req3, new float[] {0.99f, 0.01f, 0.0f});
 
-            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
-                    .thenReturn(List.of(req1, req2, req3));
-            when(embeddingRepository.findByRequirementProjectId(PROJECT_ID)).thenReturn(List.of(emb1, emb2, emb3));
+            when(requirementRepository.countByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(3L);
+            when(embeddingRepository.findByRequirementProjectIdWithRequirement(PROJECT_ID))
+                    .thenReturn(List.of(emb1, emb2, emb3));
 
             var result = service.findSimilarRequirements(PROJECT_ID, 0.8);
 
@@ -203,9 +208,10 @@ class SimilarityServiceTest {
             var emb1 = makeEmbedding(req1, new float[] {1.0f, 0.0f});
             var emb2 = makeEmbedding(req2, new float[] {1.0f, 0.0f, 0.0f});
 
-            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
-                    .thenReturn(List.of(req1, req2));
-            when(embeddingRepository.findByRequirementProjectId(PROJECT_ID)).thenReturn(List.of(emb1, emb2));
+            when(requirementRepository.countByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(2L);
+            when(embeddingRepository.findByRequirementProjectIdWithRequirement(PROJECT_ID))
+                    .thenReturn(List.of(emb1, emb2));
 
             var result = service.findSimilarRequirements(PROJECT_ID, 0.5);
 

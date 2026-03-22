@@ -29,4 +29,6 @@ public interface RequirementRepository extends JpaRepository<Requirement, UUID>,
     List<Requirement> findByProjectId(UUID projectId);
 
     List<Requirement> findByProjectIdAndArchivedAtIsNull(UUID projectId);
+
+    long countByProjectIdAndArchivedAtIsNull(UUID projectId);
 }

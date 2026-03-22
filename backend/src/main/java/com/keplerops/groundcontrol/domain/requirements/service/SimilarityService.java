@@ -27,14 +27,18 @@ public class SimilarityService {
     }
 
     public SimilarityResult findSimilarRequirements(UUID projectId, double threshold) {
-        var totalRequirements = requirementRepository
-                .findByProjectIdAndArchivedAtIsNull(projectId)
-                .size();
-        var embeddings = embeddingRepository.findByRequirementProjectId(projectId);
+        var totalRequirements = (int) requirementRepository.countByProjectIdAndArchivedAtIsNull(projectId);
+        var embeddings = embeddingRepository.findByRequirementProjectIdWithRequirement(projectId);
 
         if (embeddings.size() < 2) {
             log.debug("similarity_skipped: reason=insufficient_embeddings count={}", embeddings.size());
             return new SimilarityResult(totalRequirements, embeddings.size(), 0, threshold, List.of());
+        }
+
+        // Cache vectors to avoid repeated BYTEA → float[] deserialization in O(n^2) loop
+        var vectors = new float[embeddings.size()][];
+        for (int i = 0; i < embeddings.size(); i++) {
+            vectors[i] = embeddings.get(i).getEmbeddingVector();
         }
 
         var pairs = new ArrayList<SimilarityPair>();
@@ -43,11 +47,9 @@ public class SimilarityService {
         for (int i = 0; i < embeddings.size(); i++) {
             for (int j = i + 1; j < embeddings.size(); j++) {
                 pairsAnalyzed++;
-                var a = embeddings.get(i);
-                var b = embeddings.get(j);
 
-                var vecA = a.getEmbeddingVector();
-                var vecB = b.getEmbeddingVector();
+                var vecA = vectors[i];
+                var vecB = vectors[j];
 
                 if (vecA.length != vecB.length || vecA.length == 0) {
                     continue;
@@ -55,6 +57,8 @@ public class SimilarityService {
 
                 double score = cosineSimilarity(vecA, vecB);
                 if (score >= threshold) {
+                    var a = embeddings.get(i);
+                    var b = embeddings.get(j);
                     pairs.add(new SimilarityPair(
                             a.getRequirement().getUid(),
                             a.getRequirement().getTitle(),
