@@ -158,7 +158,7 @@ class ImportServiceTest {
             UUID newId = UUID.randomUUID();
             var created = makeRequirement("REQ-NEW", newId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-NEW"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-NEW"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(created);
             when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
@@ -180,7 +180,7 @@ class ImportServiceTest {
             UUID existingId = UUID.randomUUID();
             var existing = makeRequirement("REQ-EXISTING", existingId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-EXISTING"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-EXISTING"))
                     .thenReturn(Optional.of(existing));
             when(requirementService.update(eq(existingId), any(UpdateRequirementCommand.class)))
                     .thenReturn(existing);
@@ -209,9 +209,9 @@ class ImportServiceTest {
             var parent = makeRequirement("REQ-PARENT", parentId);
             var child = makeRequirement("REQ-CHILD", childId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-PARENT"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-PARENT"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-CHILD"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-CHILD"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenReturn(parent)
@@ -240,9 +240,9 @@ class ImportServiceTest {
             var parent = makeRequirement("REQ-PARENT", parentId);
             var child = makeRequirement("REQ-CHILD", childId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-PARENT"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-PARENT"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-CHILD"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-CHILD"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenReturn(parent)
@@ -282,11 +282,11 @@ class ImportServiceTest {
             var child = makeRequirement("REQ-CHILD", childId);
             var parentReq = makeRequirement("REQ-PREEXISTING-PARENT", parentId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-CHILD"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-CHILD"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(child);
             // Parent not in batch, so Phase 2 looks it up in the DB
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-PREEXISTING-PARENT"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-PREEXISTING-PARENT"))
                     .thenReturn(Optional.of(parentReq));
             when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(childId, parentId, RelationType.PARENT))
                     .thenReturn(false);
@@ -322,10 +322,10 @@ class ImportServiceTest {
             UUID childId = UUID.randomUUID();
             var child = makeRequirement("REQ-CHILD", childId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-CHILD"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-CHILD"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(child);
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-MISSING-PARENT"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-MISSING-PARENT"))
                     .thenReturn(Optional.empty());
             when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
                 var audit = inv.<RequirementImport>getArgument(0);
@@ -348,9 +348,9 @@ class ImportServiceTest {
             var parent = makeRequirement("REQ-PARENT", parentId);
             var child = makeRequirement("REQ-CHILD", childId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-PARENT"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-PARENT"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-CHILD"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-CHILD"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenReturn(parent)
@@ -383,7 +383,7 @@ class ImportServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-TRACE", reqId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-TRACE"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-TRACE"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(req);
             when(traceabilityLinkRepository.existsByRequirementIdAndArtifactTypeAndArtifactIdentifierAndLinkType(
@@ -409,7 +409,7 @@ class ImportServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-TRACE", reqId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-TRACE"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-TRACE"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(req);
             when(traceabilityLinkRepository.existsByRequirementIdAndArtifactTypeAndArtifactIdentifierAndLinkType(
@@ -434,7 +434,7 @@ class ImportServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-TRACE", reqId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-TRACE"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-TRACE"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(req);
             when(traceabilityLinkRepository.existsByRequirementIdAndArtifactTypeAndArtifactIdentifierAndLinkType(
@@ -482,9 +482,9 @@ class ImportServiceTest {
             UUID okId = UUID.randomUUID();
             var okReq = makeRequirement("REQ-OK", okId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-FAIL"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-FAIL"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-OK"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-OK"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenThrow(new DomainValidationException("Simulated failure"))
@@ -512,7 +512,7 @@ class ImportServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-AUDIT", reqId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-AUDIT"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-AUDIT"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(req);
             when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
@@ -632,7 +632,7 @@ class ImportServiceTest {
             UUID newId = UUID.randomUUID();
             var created = makeRequirement("RIF-NEW", newId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-NEW"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-NEW"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(created);
             when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
@@ -654,7 +654,7 @@ class ImportServiceTest {
             UUID existingId = UUID.randomUUID();
             var existing = makeRequirement("RIF-EXISTING", existingId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-EXISTING"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-EXISTING"))
                     .thenReturn(Optional.of(existing));
             when(requirementService.update(eq(existingId), any(UpdateRequirementCommand.class)))
                     .thenReturn(existing);
@@ -682,9 +682,9 @@ class ImportServiceTest {
             var parent = makeRequirement("RIF-PARENT", parentId);
             var child = makeRequirement("RIF-CHILD", childId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-PARENT"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-CHILD"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-CHILD"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenReturn(parent)
@@ -713,9 +713,9 @@ class ImportServiceTest {
             var src = makeRequirement("RIF-SRC", srcId);
             var tgt = makeRequirement("RIF-TGT", tgtId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-SRC"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-SRC"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-TGT"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-TGT"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenReturn(src)
@@ -787,9 +787,9 @@ class ImportServiceTest {
             var parent = makeRequirement("RIF-PARENT", parentId);
             var child = makeRequirement("RIF-CHILD", childId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-PARENT"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-CHILD"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-CHILD"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenReturn(parent)
@@ -856,15 +856,15 @@ class ImportServiceTest {
             var parentReq = makeRequirement("RIF-PARENT-DB", parentId);
 
             // Phase 1: child is new, parent creation fails (simulating parent only in DB)
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT-DB"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-PARENT-DB"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-CHILD-DB"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-CHILD-DB"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenThrow(new DomainValidationException("Simulated failure"))
                     .thenReturn(child);
             // Phase 2: parent not in batch, so lookup from DB
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT-DB"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-PARENT-DB"))
                     .thenReturn(Optional.empty()) // Phase 1 call
                     .thenReturn(Optional.of(parentReq)); // Phase 2 DB fallback
             when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(childId, parentId, RelationType.PARENT))
@@ -890,15 +890,15 @@ class ImportServiceTest {
             var child = makeRequirement("RIF-CHILD-MISS", childId);
 
             // Only child gets created; parent creation fails
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT-MISS"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-PARENT-MISS"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-CHILD-MISS"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-CHILD-MISS"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenThrow(new DomainValidationException("Simulated failure"))
                     .thenReturn(child);
             // Phase 2: parent not in batch and not in DB
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT-MISS"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-PARENT-MISS"))
                     .thenReturn(Optional.empty());
             when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
                 var audit = inv.<RequirementImport>getArgument(0);
@@ -924,9 +924,9 @@ class ImportServiceTest {
             var parent = makeRequirement("RIF-PARENT-ERR", parentId);
             var child = makeRequirement("RIF-CHILD-ERR", childId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT-ERR"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-PARENT-ERR"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-CHILD-ERR"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-CHILD-ERR"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenReturn(parent)
@@ -956,9 +956,9 @@ class ImportServiceTest {
             var tgt = makeRequirement("RIF-TGT-OK", tgtId);
 
             // Only target gets created; source creation fails
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-MISSING-SRC"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-MISSING-SRC"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-TGT-OK"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-TGT-OK"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenThrow(new DomainValidationException("Simulated failure"))
@@ -981,9 +981,9 @@ class ImportServiceTest {
             var src = makeRequirement("RIF-SRC-OK", srcId);
 
             // Only source gets created; target creation fails
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-SRC-OK"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-SRC-OK"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-MISSING-TGT"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-MISSING-TGT"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenReturn(src)
@@ -1008,10 +1008,10 @@ class ImportServiceTest {
             var tgtReq = makeRequirement("RIF-BATCH-TGT", tgtId);
 
             // Source creation fails, target succeeds
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-DB-SRC"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-DB-SRC"))
                     .thenReturn(Optional.empty()) // Phase 1
                     .thenReturn(Optional.of(srcReq)); // Phase 2b DB fallback
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-BATCH-TGT"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-BATCH-TGT"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenThrow(new DomainValidationException("Simulated failure"))
@@ -1040,9 +1040,9 @@ class ImportServiceTest {
             var src = makeRequirement("RIF-SRC-REL", srcId);
             var tgt = makeRequirement("RIF-TGT-REL", tgtId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-SRC-REL"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-SRC-REL"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-TGT-REL"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-TGT-REL"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenReturn(src)
@@ -1073,9 +1073,9 @@ class ImportServiceTest {
             var parent = makeRequirement("RIF-PARENT", parentId);
             var child = makeRequirement("RIF-CHILD", childId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-PARENT"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-PARENT"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-CHILD"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-CHILD"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenReturn(parent)
@@ -1126,9 +1126,9 @@ class ImportServiceTest {
             UUID okId = UUID.randomUUID();
             var okReq = makeRequirement("RIF-OK", okId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-FAIL"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-FAIL"))
                     .thenReturn(Optional.empty());
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-OK"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-OK"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class)))
                     .thenThrow(new DomainValidationException("Simulated failure"))
@@ -1156,7 +1156,7 @@ class ImportServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("RIF-AUDIT", reqId);
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "RIF-AUDIT"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "RIF-AUDIT"))
                     .thenReturn(Optional.empty());
             when(requirementService.create(any(CreateRequirementCommand.class))).thenReturn(req);
             when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {

@@ -41,6 +41,7 @@ import {
   getDescendants,
   findPaths,
   getGraphVisualization,
+  extractSubgraph,
   createGitHubIssueViaApi,
   runSweep,
   runSweepAll,
@@ -758,6 +759,23 @@ server.tool(
   async ({ project }) => {
     try {
       const data = await getGraphVisualization(project);
+      return ok(JSON.stringify(data, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_extract_subgraph",
+  "Extract a subgraph starting from one or more root requirements. Returns all transitively reachable requirements and their relations as a self-contained graph.",
+  {
+    roots: z.array(z.string()).describe("Root requirement UIDs to start traversal from (e.g. ['GC-G001', 'GC-G002'])"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ roots, project }) => {
+    try {
+      const data = await extractSubgraph(roots, project);
       return ok(JSON.stringify(data, null, 2));
     } catch (e) {
       return err(e);

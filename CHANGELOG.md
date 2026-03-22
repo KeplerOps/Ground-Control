@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.72.0] - 2026-03-22
+
+### Fixed
+
+- Requirement UID uniqueness is now case-insensitive per project: `OBS-001` and
+  `obs-001` can no longer coexist as separate requirements
+- Flyway migration V014 normalizes existing UIDs to uppercase and replaces the
+  composite unique constraint with a functional index on `LOWER(uid)`
+- Service layer normalizes UIDs to uppercase on create and clone
+- All UID lookups (create, clone, import, GitHub sync, getByUid) use
+  case-insensitive matching
+
+## [0.71.0] - 2026-03-22
+
+### Added
+
+- Subgraph extraction endpoint `GET /api/v1/graph/subgraph?roots=UID1,UID2` (GC-G003):
+  given a set of root requirements, returns all transitively reachable requirements and
+  their relations as a self-contained graph
+- MCP tool `gc_extract_subgraph` for API/MCP parity
+
 ## [0.70.0] - 2026-03-21
 
 ### Changed

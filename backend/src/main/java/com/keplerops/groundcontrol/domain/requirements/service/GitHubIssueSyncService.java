@@ -154,7 +154,7 @@ public class GitHubIssueSyncService {
 
     public CreateGitHubIssueResult createIssueFromRequirement(CreateGitHubIssueCommand command) {
         var requirement = requirementRepository
-                .findByProjectIdAndUid(command.projectId(), command.requirementUid())
+                .findByProjectIdAndUidIgnoreCase(command.projectId(), command.requirementUid())
                 .orElseThrow(() -> new NotFoundException("Requirement not found: " + command.requirementUid()));
 
         String title = requirement.getUid() + ": " + requirement.getTitle();

@@ -57,6 +57,14 @@ public class GraphController {
         return GraphVisualizationResponse.from(analysisService.getGraphVisualization(projectId));
     }
 
+    @GetMapping("/api/v1/graph/subgraph")
+    public SubgraphResponse extractSubgraph(
+            @RequestParam List<String> roots, @RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        var result = analysisService.extractSubgraph(projectId, roots);
+        return SubgraphResponse.from(result, roots);
+    }
+
     @GetMapping("/api/v1/graph/paths")
     public List<PathResponse> findPaths(
             @RequestParam String source, @RequestParam String target, @RequestParam(required = false) String project) {

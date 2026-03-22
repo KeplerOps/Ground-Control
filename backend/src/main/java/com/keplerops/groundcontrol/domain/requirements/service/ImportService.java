@@ -91,7 +91,7 @@ public class ImportService {
         Map<String, UUID> uidToId = new HashMap<>();
         for (ParsedRequirement req : requirements) {
             try {
-                var existing = requirementRepository.findByProjectIdAndUid(projectId, req.uid());
+                var existing = requirementRepository.findByProjectIdAndUidIgnoreCase(projectId, req.uid());
                 UUID reqId;
                 if (existing.isPresent()) {
                     var cmd = new UpdateRequirementCommand(
@@ -162,7 +162,7 @@ public class ImportService {
         if (id != null) {
             return id;
         }
-        var opt = requirementRepository.findByProjectIdAndUid(projectId, uid);
+        var opt = requirementRepository.findByProjectIdAndUidIgnoreCase(projectId, uid);
         return opt.map(r -> r.getId()).orElse(null);
     }
 
