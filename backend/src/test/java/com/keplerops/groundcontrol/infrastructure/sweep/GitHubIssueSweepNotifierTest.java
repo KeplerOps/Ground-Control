@@ -1,15 +1,23 @@
 package com.keplerops.groundcontrol.infrastructure.sweep;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.requirements.service.CompletenessResult;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
+import com.keplerops.groundcontrol.domain.requirements.service.GitHubClient;
+import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class GitHubIssueSweepNotifierTest {
@@ -65,5 +73,80 @@ class GitHubIssueSweepNotifierTest {
         assertThat(body).doesNotContain("### Coverage Gaps");
         assertThat(body).doesNotContain("### Cross-Wave Violations");
         assertThat(body).doesNotContain("### Consistency Violations");
+    }
+
+    @Nested
+    class Deduplication {
+
+        private final GitHubClient gitHubClient = mock(GitHubClient.class);
+        private final SweepProperties properties = new SweepProperties(
+                true,
+                "0 0 * * * *",
+                new SweepProperties.GitHubNotification(true, "owner/repo", List.of("sweep")),
+                null);
+        private final GitHubIssueSweepNotifier notifier = new GitHubIssueSweepNotifier(gitHubClient, properties);
+
+        private SweepReport minimalReport(String project) {
+            return new SweepReport(
+                    project,
+                    Instant.parse("2026-03-20T06:00:00Z"),
+                    List.of(),
+                    List.of(new SweepReport.RequirementSummary("GC-1", "Req")),
+                    Map.of(),
+                    List.of(),
+                    List.of(),
+                    new CompletenessResult(1, Map.of("DRAFT", 1), List.of()));
+        }
+
+        @Test
+        void createsIssueWhenNoOpenSweepIssueExists() {
+            when(gitHubClient.fetchAllIssues("owner", "repo")).thenReturn(List.of());
+            when(gitHubClient.createIssue(any(), any(), any(), any()))
+                    .thenReturn(new GitHubIssueData(42, "[Sweep] 1 problems detected in my-project", "OPEN", "url",
+                            "body", List.of("sweep")));
+
+            notifier.notify(minimalReport("my-project"));
+
+            verify(gitHubClient).createIssue(any(), any(), any(), any());
+        }
+
+        @Test
+        void skipsCreatingIssueWhenOpenSweepIssueAlreadyExists() {
+            var existing = new GitHubIssueData(
+                    10, "[Sweep] 3 problems detected in my-project", "OPEN", "url", "body", List.of("sweep"));
+            when(gitHubClient.fetchAllIssues("owner", "repo")).thenReturn(List.of(existing));
+
+            notifier.notify(minimalReport("my-project"));
+
+            verify(gitHubClient, never()).createIssue(any(), any(), any(), any());
+        }
+
+        @Test
+        void createsIssueWhenExistingSweepIssueIsClosed() {
+            var closed = new GitHubIssueData(
+                    10, "[Sweep] 3 problems detected in my-project", "CLOSED", "url", "body", List.of("sweep"));
+            when(gitHubClient.fetchAllIssues("owner", "repo")).thenReturn(List.of(closed));
+            when(gitHubClient.createIssue(any(), any(), any(), any()))
+                    .thenReturn(new GitHubIssueData(11, "[Sweep] 1 problems detected in my-project", "OPEN", "url",
+                            "body", List.of("sweep")));
+
+            notifier.notify(minimalReport("my-project"));
+
+            verify(gitHubClient).createIssue(any(), any(), any(), any());
+        }
+
+        @Test
+        void doesNotSuppressIssuesForDifferentProject() {
+            var otherProject = new GitHubIssueData(
+                    10, "[Sweep] 3 problems detected in other-project", "OPEN", "url", "body", List.of("sweep"));
+            when(gitHubClient.fetchAllIssues("owner", "repo")).thenReturn(List.of(otherProject));
+            when(gitHubClient.createIssue(any(), any(), any(), any()))
+                    .thenReturn(new GitHubIssueData(11, "[Sweep] 1 problems detected in my-project", "OPEN", "url",
+                            "body", List.of("sweep")));
+
+            notifier.notify(minimalReport("my-project"));
+
+            verify(gitHubClient).createIssue(any(), any(), any(), any());
+        }
     }
 }
