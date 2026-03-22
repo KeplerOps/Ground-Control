@@ -11,7 +11,9 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 @Service
 @Transactional
@@ -181,5 +183,15 @@ public class EmbeddingService {
     private String computeHash(Requirement requirement) {
         return RequirementEmbedding.computeContentHash(
                 requirement.getTitle(), requirement.getStatement(), requirement.getRationale());
+    }
+
+    @TransactionalEventListener
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void onRequirementTextChanged(RequirementTextChangedEvent event) {
+        try {
+            embedRequirement(event.requirementId());
+        } catch (Exception e) {
+            log.warn("auto_embedding_failed: requirement_id={} error={}", event.requirementId(), e.getMessage());
+        }
     }
 }

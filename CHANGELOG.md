@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - REST API endpoint: `GET /api/v1/analysis/semantic-similarity?threshold=0.85&project=...`
 - MCP tool: `gc_analyze_similarity` with optional threshold and project parameters
 - Configurable default threshold via `GC_EMBEDDING_SIMILARITY_THRESHOLD` (default 0.85)
+- Auto-re-embed on requirement text change: updating title, statement, or rationale
+  automatically triggers re-embedding after the transaction commits (fire-and-forget,
+  gracefully skipped when no provider is configured)
 
 ## [0.73.0] - 2026-03-22
 

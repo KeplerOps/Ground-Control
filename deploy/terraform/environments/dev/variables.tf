@@ -45,3 +45,10 @@ variable "gc_embedding_provider" {
   type        = string
   default     = "none"
 }
+
+variable "embedding_api_key" {
+  description = "API key for the embedding provider (stored in SSM SecureString)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

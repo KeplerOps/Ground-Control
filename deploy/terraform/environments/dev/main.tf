@@ -18,7 +18,8 @@ module "networking" {
 # --- Secrets (SSM parameters) ---
 
 module "secrets" {
-  source = "../../modules/secrets"
+  source            = "../../modules/secrets"
+  embedding_api_key = var.embedding_api_key
 }
 
 # --- Backup (S3 bucket + DLM snapshots) ---

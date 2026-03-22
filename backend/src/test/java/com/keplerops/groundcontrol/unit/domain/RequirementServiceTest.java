@@ -66,11 +66,14 @@ class RequirementServiceTest {
     @Mock
     private ProjectRepository projectRepository;
 
+    @Mock
+    private org.springframework.context.ApplicationEventPublisher eventPublisher;
+
     private RequirementService service;
 
     @BeforeEach
     void setUp() {
-        service = new RequirementService(requirementRepository, relationRepository, projectRepository);
+        service = new RequirementService(requirementRepository, relationRepository, projectRepository, eventPublisher);
     }
 
     private static Requirement makeRequirement(String uid) {
