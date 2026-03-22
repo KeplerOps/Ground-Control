@@ -8,6 +8,8 @@ import com.keplerops.groundcontrol.domain.requirements.service.GraphClient;
 import com.keplerops.groundcontrol.domain.requirements.service.PathResult;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -49,31 +51,57 @@ public class AgeGraphService implements GraphClient {
         jdbcTemplate.execute(
                 "SELECT * FROM ag_catalog.cypher('" + graph + "', $$ MATCH (n) DETACH DELETE n $$) AS (v agtype)");
 
-        // Create nodes for all requirements
+        // Batch-create nodes for all requirements in a single Cypher statement
         List<Requirement> requirements = requirementRepository.findAll();
-        for (Requirement req : requirements) {
-            String cypher = String.format(
-                    "SELECT * FROM ag_catalog.cypher('%s', $$ CREATE (:Requirement {uid: '%s', title: '%s', status: '%s', wave: %s, requirement_type: '%s', priority: '%s'}) $$) AS (v agtype)",
-                    graph,
-                    escapeCypher(req.getUid()),
-                    escapeCypher(req.getTitle()),
-                    req.getStatus().name(),
-                    req.getWave() != null ? req.getWave().toString() : "null",
-                    req.getRequirementType().name(),
-                    req.getPriority().name());
-            jdbcTemplate.execute(cypher);
+        if (!requirements.isEmpty()) {
+            StringBuilder nodesCypher = new StringBuilder("SELECT * FROM ag_catalog.cypher('")
+                    .append(graph)
+                    .append("', $$ CREATE ");
+            for (int i = 0; i < requirements.size(); i++) {
+                if (i > 0) nodesCypher.append(", ");
+                Requirement req = requirements.get(i);
+                nodesCypher
+                        .append("(:Requirement {uid: '")
+                        .append(escapeCypher(req.getUid()))
+                        .append("', title: '")
+                        .append(escapeCypher(req.getTitle()))
+                        .append("', status: '")
+                        .append(req.getStatus().name())
+                        .append("', wave: ")
+                        .append(req.getWave() != null ? req.getWave().toString() : "null")
+                        .append(", requirement_type: '")
+                        .append(req.getRequirementType().name())
+                        .append("', priority: '")
+                        .append(req.getPriority().name())
+                        .append("'})");
+            }
+            nodesCypher.append(" $$) AS (v agtype)");
+            jdbcTemplate.execute(nodesCypher.toString());
         }
 
-        // Create edges for all relations
+        // Batch-create edges grouped by relation type: one UNWIND query per type
         List<RequirementRelation> relations = relationRepository.findAllWithSourceAndTarget();
-        for (RequirementRelation rel : relations) {
-            String cypher = String.format(
-                    "SELECT * FROM ag_catalog.cypher('%s', $$ MATCH (s:Requirement {uid: '%s'}), (t:Requirement {uid: '%s'}) CREATE (s)-[:%s]->(t) $$) AS (v agtype)",
-                    graph,
-                    escapeCypher(rel.getSource().getUid()),
-                    escapeCypher(rel.getTarget().getUid()),
-                    rel.getRelationType().name());
-            jdbcTemplate.execute(cypher);
+        Map<String, List<RequirementRelation>> byType = relations.stream()
+                .collect(Collectors.groupingBy(r -> r.getRelationType().name()));
+        for (Map.Entry<String, List<RequirementRelation>> entry : byType.entrySet()) {
+            String relType = entry.getKey();
+            StringBuilder pairList = new StringBuilder("[");
+            List<RequirementRelation> relList = entry.getValue();
+            for (int i = 0; i < relList.size(); i++) {
+                if (i > 0) pairList.append(", ");
+                RequirementRelation rel = relList.get(i);
+                pairList
+                        .append("['")
+                        .append(escapeCypher(rel.getSource().getUid()))
+                        .append("', '")
+                        .append(escapeCypher(rel.getTarget().getUid()))
+                        .append("']");
+            }
+            pairList.append("]");
+            String edgeCypher = String.format(
+                    "SELECT * FROM ag_catalog.cypher('%s', $$ UNWIND %s AS pair MATCH (s:Requirement {uid: pair[0]}), (t:Requirement {uid: pair[1]}) CREATE (s)-[:%s]->(t) $$) AS (v agtype)",
+                    graph, pairList, relType);
+            jdbcTemplate.execute(edgeCypher);
         }
 
         log.info("graph_materialized: nodes={} edges={} graph={}", requirements.size(), relations.size(), graph);

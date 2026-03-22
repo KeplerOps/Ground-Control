@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -12,8 +13,10 @@ import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
+import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
+import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.infrastructure.age.AgeGraphService;
 import com.keplerops.groundcontrol.infrastructure.age.AgeProperties;
 import java.util.List;
@@ -129,8 +132,52 @@ class AgeGraphServiceTest {
 
             enabledService.materializeGraph();
 
-            // LOAD, SET, DETACH DELETE, and one CREATE for the requirement
+            // LOAD, SET, DETACH DELETE, and one bulk CREATE for the requirement
             verify(jdbcTemplate, atLeast(4)).execute(anyString());
+        }
+
+        @Test
+        void materializeGraph_batchesAllNodesIntoOneCypherStatement() {
+            var req1 = new Requirement(TEST_PROJECT, "GC-A001", "Req One", "Statement");
+            var req2 = new Requirement(TEST_PROJECT, "GC-A002", "Req Two", "Statement");
+            var req3 = new Requirement(TEST_PROJECT, "GC-A003", "Req Three", "Statement");
+            when(requirementRepository.findAll()).thenReturn(List.of(req1, req2, req3));
+            when(relationRepository.findAllWithSourceAndTarget()).thenReturn(List.of());
+
+            enabledService.materializeGraph();
+
+            // Exactly one CREATE statement regardless of node count (LOAD + SET + DETACH DELETE + 1 bulk CREATE = 4)
+            verify(jdbcTemplate, times(4)).execute(anyString());
+            verify(jdbcTemplate).execute(contains("GC-A001"));
+        }
+
+        @Test
+        void materializeGraph_batchesEdgesByRelationType() {
+            var req1 = new Requirement(TEST_PROJECT, "GC-A001", "Req One", "Statement");
+            var req2 = new Requirement(TEST_PROJECT, "GC-A002", "Req Two", "Statement");
+            var req3 = new Requirement(TEST_PROJECT, "GC-A003", "Req Three", "Statement");
+            var rel1 = new RequirementRelation(req1, req2, RelationType.PARENT);
+            var rel2 = new RequirementRelation(req2, req3, RelationType.PARENT);
+            var rel3 = new RequirementRelation(req1, req3, RelationType.DEPENDS_ON);
+            when(requirementRepository.findAll()).thenReturn(List.of(req1, req2, req3));
+            when(relationRepository.findAllWithSourceAndTarget()).thenReturn(List.of(rel1, rel2, rel3));
+
+            enabledService.materializeGraph();
+
+            // LOAD + SET + DETACH DELETE + 1 node CREATE + 2 edge UNWIND (one per relation type) = 6
+            verify(jdbcTemplate, times(6)).execute(anyString());
+        }
+
+        @Test
+        void materializeGraph_skipsNodeCreateWhenNoRequirements() {
+            when(requirementRepository.findAll()).thenReturn(List.of());
+            when(relationRepository.findAllWithSourceAndTarget()).thenReturn(List.of());
+
+            enabledService.materializeGraph();
+
+            // Only LOAD + SET + DETACH DELETE, no CREATE
+            verify(jdbcTemplate, times(3)).execute(anyString());
+            verify(jdbcTemplate, never()).execute(contains("CREATE"));
         }
 
         @Test
