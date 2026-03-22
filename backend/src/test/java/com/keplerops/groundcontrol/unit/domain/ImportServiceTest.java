@@ -337,7 +337,7 @@ class ImportServiceTest {
 
             assertThat(result.relationsCreated()).isZero();
             assertThat(result.errors()).hasSize(1);
-            assertThat(result.errors().get(0).get("error").toString()).contains("Parent not found");
+            assertThat(result.errors().get(0).error()).contains("Parent not found");
         }
 
         @Test
@@ -369,8 +369,8 @@ class ImportServiceTest {
 
             assertThat(result.relationsCreated()).isZero();
             assertThat(result.errors()).hasSize(1);
-            assertThat(result.errors().get(0).get("phase")).isEqualTo("relations");
-            assertThat(result.errors().get(0).get("error").toString()).contains("Simulated relation failure");
+            assertThat(result.errors().get(0).phase()).isEqualTo("relations");
+            assertThat(result.errors().get(0).error()).contains("Simulated relation failure");
         }
     }
 
@@ -452,8 +452,8 @@ class ImportServiceTest {
 
             assertThat(result.traceabilityLinksCreated()).isZero();
             assertThat(result.errors()).hasSize(1);
-            assertThat(result.errors().get(0).get("phase")).isEqualTo("traceability");
-            assertThat(result.errors().get(0).get("error").toString()).contains("Simulated traceability failure");
+            assertThat(result.errors().get(0).phase()).isEqualTo("traceability");
+            assertThat(result.errors().get(0).error()).contains("Simulated traceability failure");
         }
     }
 
@@ -499,7 +499,7 @@ class ImportServiceTest {
 
             assertThat(result.requirementsCreated()).isEqualTo(1);
             assertThat(result.errors()).hasSize(1);
-            assertThat(result.errors().get(0).get("uid")).isEqualTo("REQ-FAIL");
+            assertThat(result.errors().get(0).uid()).isEqualTo("REQ-FAIL");
         }
     }
 
@@ -911,7 +911,7 @@ class ImportServiceTest {
             assertThat(result.relationsCreated()).isZero();
             // One error from Phase 1 (parent create failed) + one from Phase 2 (parent not found)
             assertThat(result.errors().stream()
-                            .filter(e -> e.get("error").toString().contains("Parent not found"))
+                            .filter(e -> e.error().contains("Parent not found"))
                             .count())
                     .isEqualTo(1);
         }
@@ -945,8 +945,8 @@ class ImportServiceTest {
 
             assertThat(result.relationsCreated()).isZero();
             assertThat(result.errors())
-                    .anyMatch(e -> e.get("phase").equals("relations")
-                            && e.get("error").toString().contains("Simulated relation failure"));
+                    .anyMatch(e -> e.phase().equals("relations")
+                            && e.error().contains("Simulated relation failure"));
         }
 
         @Test
@@ -971,7 +971,7 @@ class ImportServiceTest {
 
             ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
 
-            assertThat(result.errors()).anyMatch(e -> e.get("error").toString().contains("Source not found"));
+            assertThat(result.errors()).anyMatch(e -> e.error().contains("Source not found"));
         }
 
         @Test
@@ -996,7 +996,7 @@ class ImportServiceTest {
 
             ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
 
-            assertThat(result.errors()).anyMatch(e -> e.get("error").toString().contains("Target not found"));
+            assertThat(result.errors()).anyMatch(e -> e.error().contains("Target not found"));
         }
 
         @Test
@@ -1061,8 +1061,8 @@ class ImportServiceTest {
 
             assertThat(result.relationsCreated()).isZero();
             assertThat(result.errors())
-                    .anyMatch(e -> e.get("phase").equals("relations")
-                            && e.get("error").toString().contains("Simulated SpecRelation failure"));
+                    .anyMatch(e -> e.phase().equals("relations")
+                            && e.error().contains("Simulated SpecRelation failure"));
         }
 
         @Test
@@ -1143,7 +1143,7 @@ class ImportServiceTest {
 
             assertThat(result.requirementsCreated()).isEqualTo(1);
             assertThat(result.errors()).hasSize(1);
-            assertThat(result.errors().get(0).get("uid")).isEqualTo("RIF-FAIL");
+            assertThat(result.errors().get(0).uid()).isEqualTo("RIF-FAIL");
         }
     }
 
