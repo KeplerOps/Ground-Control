@@ -9,6 +9,12 @@ GC_DIR=/opt/gc
 
 cd "${GC_DIR}"
 
+# Refresh secrets from SSM (regenerates .env with latest values)
+if [ -x "${GC_DIR}/refresh-env.sh" ]; then
+  echo "Refreshing secrets from SSM..."
+  "${GC_DIR}/refresh-env.sh"
+fi
+
 # Update image tag if specified
 if [ "${TAG}" != "latest" ]; then
   sed -i "s|GC_IMAGE=.*|GC_IMAGE=ghcr.io/keplerops/ground-control:${TAG}|" .env

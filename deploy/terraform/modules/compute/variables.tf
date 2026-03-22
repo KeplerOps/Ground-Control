@@ -60,6 +60,18 @@ variable "ssm_db_password" {
   default     = "/gc/dev/db_password"
 }
 
+variable "ssm_embedding_api_key" {
+  description = "SSM parameter path for embedding API key"
+  type        = string
+  default     = "/gc/dev/embedding_api_key"
+}
+
+variable "gc_embedding_provider" {
+  description = "Embedding provider name (openai or none)"
+  type        = string
+  default     = "none"
+}
+
 variable "tailscale_hostname" {
   description = "Tailscale MagicDNS hostname for the instance"
   type        = string

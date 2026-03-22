@@ -1,7 +1,8 @@
 # Ground Control MCP Server
 
-MCP server wrapping the Ground Control REST API. Provides 19 tools for
-requirements management, traceability, and graph analysis.
+MCP server wrapping the Ground Control REST API. Provides 30 tools for
+requirements management, traceability, graph analysis, embeddings, and
+semantic analysis.
 
 ## Setup
 
@@ -39,8 +40,10 @@ be related, linked, or analyzed.
 2. **Create relations** — `gc_create_relation` between two existing requirements
 3. **Add traceability links** — `gc_create_traceability_link` to connect code, tests, issues, ADRs
 4. **Run analysis** — `gc_analyze_cycles`, `gc_analyze_orphans`, `gc_analyze_coverage_gaps`, `gc_analyze_impact`, `gc_analyze_cross_wave`, `gc_analyze_consistency`, `gc_analyze_completeness`
-5. **Transition status** — `gc_transition_status` moves requirements forward: DRAFT → ACTIVE → DEPRECATED → ARCHIVED
-6. **Bulk operations** — `gc_import_strictdoc` for .sdoc files, `gc_sync_github` for issue sync
+5. **Embed requirements** — `gc_embed_project` to generate vector embeddings, `gc_analyze_similarity` to find near-duplicates
+6. **Transition status** — `gc_transition_status` moves requirements forward: DRAFT → ACTIVE → DEPRECATED → ARCHIVED
+7. **Bulk operations** — `gc_import_strictdoc` for .sdoc files, `gc_import_reqif` for .reqif files, `gc_sync_github` for issue sync
+8. **Manage baselines** — `gc_create_baseline`, `gc_compare_baselines` for release management
 
 ## Tool Reference
 
@@ -64,8 +67,38 @@ be related, linked, or analyzed.
 | `gc_analyze_consistency` | `project` (optional) | Detect consistency violations (active conflicts, active supersedes) |
 | `gc_analyze_completeness` | `project` (optional) | Analyze completeness: status distribution and missing fields |
 | `gc_dashboard_stats` | `project` (optional) | Aggregate project health: counts by status/wave, coverage percentages, recent changes |
-| `gc_import_strictdoc` | `file_path` (required) | Import requirements from a .sdoc file. Idempotent |
+| `gc_get_work_order` | `project` (optional) | Topological work order with MoSCoW priority |
+| `gc_dashboard_stats` | `project` (optional) | Aggregate project health: counts, coverage, recent changes |
+| `gc_run_sweep` | `project` (optional) | Run full analysis sweep on one project |
+| `gc_run_sweep_all` | _(none)_ | Run analysis sweep across all projects |
+| `gc_import_strictdoc` | `file_path` (required), `project` (optional) | Import requirements from a .sdoc file. Idempotent |
+| `gc_import_reqif` | `file_path` (required), `project` (optional) | Import requirements from a .reqif file. Idempotent |
 | `gc_sync_github` | `owner` (required), `repo` (required) | Sync GitHub issues as traceability links |
+| `gc_create_github_issue` | `uid` (required), `repo`, `labels`, `extra_body` | Create GitHub issue from requirement and auto-link |
+| `gc_embed_requirement` | `requirement_id` (required) | Generate embedding for a requirement's text |
+| `gc_get_embedding_status` | `requirement_id` (required) | Check embedding status (stale, model mismatch) |
+| `gc_embed_project` | `project` (optional), `force` (optional) | Batch-embed all requirements in a project |
+| `gc_analyze_similarity` | `project` (optional), `threshold` (optional) | Find semantically similar requirement pairs |
+| `gc_get_graph_visualization` | `project` (optional) | Get all requirements and relations for visualization |
+| `gc_materialize_graph` | _(none)_ | Materialize Apache AGE graph |
+| `gc_get_ancestors` | `uid` (required), `depth` (optional) | Get ancestor UIDs via graph traversal |
+| `gc_get_descendants` | `uid` (required), `depth` (optional) | Get descendant UIDs via graph traversal |
+| `gc_find_paths` | `source` (required), `target` (required) | Find all paths between two requirements |
+| `gc_extract_subgraph` | `roots` (required) | Extract subgraph from root UIDs |
+| `gc_create_baseline` | `name` (required), `description`, `project` (optional) | Create point-in-time baseline |
+| `gc_list_baselines` | `project` (optional) | List all baselines |
+| `gc_get_baseline` | `id` (required) | Get baseline details |
+| `gc_get_baseline_snapshot` | `id` (required) | Get requirement snapshot at baseline |
+| `gc_compare_baselines` | `id` (required), `other_id` (required) | Compare two baselines |
+| `gc_delete_baseline` | `id` (required) | Delete a baseline |
+| `gc_clone_requirement` | `id` (required), `new_uid` (required), `copy_relations` (optional) | Clone a requirement |
+| `gc_bulk_transition_status` | `ids` (required), `status` (required) | Bulk transition multiple requirements |
+| `gc_delete_relation` | `requirement_id` (required), `relation_id` (required) | Delete a relation |
+| `gc_delete_traceability_link` | `requirement_id` (required), `link_id` (required) | Delete a traceability link |
+| `gc_get_requirement_history` | `id` (required) | Get requirement revision history |
+| `gc_get_relation_history` | `requirement_id` (required), `relation_id` (required) | Get relation revision history |
+| `gc_get_traceability_link_history` | `requirement_id` (required), `link_id` (required) | Get link revision history |
+| `gc_get_timeline` | `id` (required), `change_category`, `from`, `to`, `limit`, `offset` | Unified audit timeline |
 
 ## Enums
 
@@ -75,7 +108,7 @@ be related, linked, or analyzed.
 
 **Priority (MoSCoW):** `MUST`, `SHOULD`, `COULD`, `WONT`
 
-**Relation type:** `PARENT`, `DEPENDS_ON`, `CONFLICTS_WITH`, `REFINES`
+**Relation type:** `PARENT`, `DEPENDS_ON`, `CONFLICTS_WITH`, `REFINES`, `SUPERSEDES`, `RELATED`
 
 **Artifact type:** `GITHUB_ISSUE`, `CODE_FILE`, `ADR`, `CONFIG`, `POLICY`, `TEST`, `SPEC`, `PROOF`, `DOCUMENTATION`
 

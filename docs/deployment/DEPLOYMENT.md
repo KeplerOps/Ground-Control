@@ -43,6 +43,16 @@ All settings use the `GC_` prefix. See `.env.example`.
 | `GC_DATABASE_PASSWORD` | `gc` | Database password |
 | `GC_REDIS_URL` | `redis://localhost:6379` | Redis connection URL (unused by app currently) |
 | `GC_SERVER_PORT` | `8000` | HTTP server port |
+| `GC_AGE_ENABLED` | `false` | Enable Apache AGE graph queries |
+| `GC_SWEEP_ENABLED` | `false` | Enable scheduled analysis sweeps |
+| `GC_SWEEP_CRON` | `0 0 6 * * *` | Cron expression for sweep schedule |
+| `GC_EMBEDDING_PROVIDER` | `none` | Embedding provider (`openai` or `none`) |
+| `GC_EMBEDDING_API_KEY` | _(empty)_ | API key for the embedding provider |
+| `GC_EMBEDDING_API_URL` | `https://api.openai.com/v1` | Embedding API base URL |
+| `GC_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model identifier |
+| `GC_EMBEDDING_DIMENSIONS` | `1536` | Embedding vector dimensions |
+| `GC_EMBEDDING_BATCH_SIZE` | `100` | Max texts per batch embedding request |
+| `GC_EMBEDDING_SIMILARITY_THRESHOLD` | `0.85` | Default cosine similarity threshold |
 
 ### Makefile Targets
 

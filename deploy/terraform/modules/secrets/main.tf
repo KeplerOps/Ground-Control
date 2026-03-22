@@ -29,3 +29,13 @@ resource "aws_ssm_parameter" "db_password" {
     ignore_changes = [value]
   }
 }
+
+resource "aws_ssm_parameter" "embedding_api_key" {
+  name  = "${var.parameter_prefix}/embedding_api_key"
+  type  = "SecureString"
+  value = var.embedding_api_key
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}

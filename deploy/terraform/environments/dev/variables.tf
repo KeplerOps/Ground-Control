@@ -39,3 +39,9 @@ variable "backup_bucket_name" {
   type        = string
   default     = "groundcontrol-backups-catalyst-dev"
 }
+
+variable "gc_embedding_provider" {
+  description = "Embedding provider name (openai or none)"
+  type        = string
+  default     = "none"
+}
