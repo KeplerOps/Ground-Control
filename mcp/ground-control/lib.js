@@ -54,6 +54,14 @@ const TO_CAMEL = {
   project_identifier: "projectIdentifier",
   blocking_status: "blockingStatus",
   blocked_by: "blockedBy",
+  content_hash: "contentHash",
+  model_id: "modelId",
+  has_embedding: "hasEmbedding",
+  is_stale: "isStale",
+  model_mismatch: "modelMismatch",
+  current_model_id: "currentModelId",
+  embedding_model_id: "embeddingModelId",
+  embedded_at: "embeddedAt",
   total_unblocked: "totalUnblocked",
   total_blocked: "totalBlocked",
   total_unconstrained: "totalUnconstrained",
@@ -475,4 +483,26 @@ export async function runSweep(project) {
 
 export async function runSweepAll() {
   return request("POST", "/api/v1/analysis/sweep/all");
+}
+
+// ---------------------------------------------------------------------------
+// Embedding API functions
+// ---------------------------------------------------------------------------
+
+export async function embedRequirement(requirementId) {
+  return request("POST", `/api/v1/embeddings/${encodeURIComponent(requirementId)}`);
+}
+
+export async function getEmbeddingStatus(requirementId) {
+  return request("GET", `/api/v1/embeddings/${encodeURIComponent(requirementId)}/status`);
+}
+
+export async function embedProject(project, force) {
+  return request("POST", "/api/v1/embeddings/batch", {
+    params: { project, force: force ? "true" : undefined },
+  });
+}
+
+export async function deleteEmbedding(requirementId) {
+  await request("DELETE", `/api/v1/embeddings/${encodeURIComponent(requirementId)}`);
 }
