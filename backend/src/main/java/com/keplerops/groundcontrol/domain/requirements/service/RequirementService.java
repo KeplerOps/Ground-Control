@@ -44,11 +44,13 @@ public class RequirementService {
                 .findById(command.projectId())
                 .orElseThrow(() -> new NotFoundException("Project not found: " + command.projectId()));
 
-        if (requirementRepository.existsByProjectIdAndUid(project.getId(), command.uid())) {
-            throw new ConflictException("Requirement with UID '" + command.uid() + "' already exists in project");
+        String normalizedUid = command.uid().toUpperCase(java.util.Locale.ROOT);
+        if (requirementRepository.existsByProjectIdAndUidIgnoreCase(project.getId(), normalizedUid)) {
+            throw new ConflictException(
+                    "Requirement with UID '" + command.uid() + "' already exists in project (case-insensitive)");
         }
 
-        var requirement = new Requirement(project, command.uid(), command.title(), command.statement());
+        var requirement = new Requirement(project, normalizedUid, command.title(), command.statement());
         if (command.rationale() != null) {
             requirement.setRationale(command.rationale());
         }
@@ -72,7 +74,7 @@ public class RequirementService {
     @Transactional(readOnly = true)
     public Requirement getByUid(UUID projectId, String uid) {
         return requirementRepository
-                .findByProjectIdAndUid(projectId, uid)
+                .findByProjectIdAndUidIgnoreCase(projectId, uid)
                 .orElseThrow(() -> new NotFoundException("Requirement not found: " + uid));
     }
 
@@ -186,11 +188,13 @@ public class RequirementService {
         var source = getById(sourceId);
         var project = source.getProject();
 
-        if (requirementRepository.existsByProjectIdAndUid(project.getId(), command.newUid())) {
-            throw new ConflictException("Requirement with UID '" + command.newUid() + "' already exists in project");
+        String normalizedUid = command.newUid().toUpperCase(java.util.Locale.ROOT);
+        if (requirementRepository.existsByProjectIdAndUidIgnoreCase(project.getId(), normalizedUid)) {
+            throw new ConflictException(
+                    "Requirement with UID '" + command.newUid() + "' already exists in project (case-insensitive)");
         }
 
-        var clone = new Requirement(project, command.newUid(), source.getTitle(), source.getStatement());
+        var clone = new Requirement(project, normalizedUid, source.getTitle(), source.getStatement());
         clone.setRationale(source.getRationale());
         clone.setRequirementType(source.getRequirementType());
         clone.setPriority(source.getPriority());

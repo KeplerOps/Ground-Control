@@ -390,6 +390,48 @@ public class AnalysisService {
         return new DashboardStats(total, byStatus, byWave, coverageByLinkType, recentChanges);
     }
 
+    public SubgraphResult extractSubgraph(UUID projectId, List<String> rootUids) {
+        List<Requirement> allRequirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
+        List<RequirementRelation> allRelations = relationRepository.findActiveWithSourceAndTargetByProjectId(projectId);
+
+        // Resolve root UUIDs from UIDs
+        Map<String, UUID> uidToId = new HashMap<>();
+        for (Requirement req : allRequirements) {
+            uidToId.put(req.getUid(), req.getId());
+        }
+
+        Set<UUID> roots = new HashSet<>();
+        for (String uid : rootUids) {
+            UUID id = uidToId.get(uid);
+            if (id == null) {
+                throw new NotFoundException("Requirement not found: " + uid);
+            }
+            roots.add(id);
+        }
+
+        // Build bidirectional adjacency list (all relation types)
+        Map<UUID, List<UUID>> adjacencyList = new HashMap<>();
+        for (RequirementRelation rel : allRelations) {
+            UUID sourceId = rel.getSource().getId();
+            UUID targetId = rel.getTarget().getId();
+            adjacencyList.computeIfAbsent(sourceId, k -> new ArrayList<>()).add(targetId);
+            adjacencyList.computeIfAbsent(targetId, k -> new ArrayList<>()).add(sourceId);
+        }
+
+        Set<UUID> reachableIds = GraphAlgorithms.findReachableFromMultiple(roots, adjacencyList);
+
+        List<Requirement> subgraphRequirements = allRequirements.stream()
+                .filter(req -> reachableIds.contains(req.getId()))
+                .toList();
+
+        List<RequirementRelation> subgraphRelations = allRelations.stream()
+                .filter(rel -> reachableIds.contains(rel.getSource().getId())
+                        && reachableIds.contains(rel.getTarget().getId()))
+                .toList();
+
+        return new SubgraphResult(subgraphRequirements, subgraphRelations);
+    }
+
     public GraphVisualizationResult getGraphVisualization(UUID projectId) {
         List<Requirement> requirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
         List<RequirementRelation> relations = relationRepository.findActiveWithSourceAndTargetByProjectId(projectId);

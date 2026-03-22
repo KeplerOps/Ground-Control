@@ -887,4 +887,66 @@ class AnalysisServiceTest {
             assertThat(result.relations()).isEmpty();
         }
     }
+
+    @Nested
+    class ExtractSubgraph {
+
+        @Test
+        void returnsTransitivelyReachableNodesAndEdges() {
+            var aId = UUID.randomUUID();
+            var bId = UUID.randomUUID();
+            var cId = UUID.randomUUID();
+            var dId = UUID.randomUUID();
+            var a = makeRequirement("REQ-A", aId, 1);
+            var b = makeRequirement("REQ-B", bId, 1);
+            var c = makeRequirement("REQ-C", cId, 1);
+            var d = makeRequirement("REQ-D", dId, 2);
+            var relAB = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
+            var relBC = new RequirementRelation(b, c, RelationType.PARENT);
+            // D is disconnected from A->B->C
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(a, b, c, d));
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(relAB, relBC));
+
+            var result = service.extractSubgraph(PROJECT_ID, List.of("REQ-A"));
+
+            assertThat(result.requirements()).containsExactlyInAnyOrder(a, b, c);
+            assertThat(result.relations()).containsExactlyInAnyOrder(relAB, relBC);
+        }
+
+        @Test
+        void multipleRoots_unionsReachableSets() {
+            var aId = UUID.randomUUID();
+            var bId = UUID.randomUUID();
+            var cId = UUID.randomUUID();
+            var a = makeRequirement("REQ-A", aId, 1);
+            var b = makeRequirement("REQ-B", bId, 1);
+            var c = makeRequirement("REQ-C", cId, 1);
+            // A->B and C is separate
+            var relAB = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(a, b, c));
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of(relAB));
+
+            var result = service.extractSubgraph(PROJECT_ID, List.of("REQ-A", "REQ-C"));
+
+            assertThat(result.requirements()).containsExactlyInAnyOrder(a, b, c);
+            assertThat(result.relations()).containsExactlyInAnyOrder(relAB);
+        }
+
+        @Test
+        void unknownRoot_throwsNotFoundException() {
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of());
+            when(relationRepository.findActiveWithSourceAndTargetByProjectId(PROJECT_ID))
+                    .thenReturn(List.of());
+
+            assertThatThrownBy(() -> service.extractSubgraph(PROJECT_ID, List.of("REQ-UNKNOWN")))
+                    .isInstanceOf(NotFoundException.class);
+        }
+    }
 }

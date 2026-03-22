@@ -377,6 +377,12 @@ export async function getGraphVisualization(project) {
   });
 }
 
+export async function extractSubgraph(roots, project) {
+  return request("GET", "/api/v1/graph/subgraph", {
+    params: { roots: roots.join(","), project },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Baseline functions
 // ---------------------------------------------------------------------------

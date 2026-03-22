@@ -2,6 +2,7 @@ package com.keplerops.groundcontrol.unit.api;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
@@ -20,6 +21,7 @@ import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
 import com.keplerops.groundcontrol.domain.requirements.service.GraphClient;
 import com.keplerops.groundcontrol.domain.requirements.service.GraphVisualizationResult;
 import com.keplerops.groundcontrol.domain.requirements.service.PathResult;
+import com.keplerops.groundcontrol.domain.requirements.service.SubgraphResult;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import java.util.List;
 import java.util.UUID;
@@ -128,6 +130,36 @@ class GraphControllerTest {
                     .andExpect(jsonPath("$.edges", hasSize(1)))
                     .andExpect(jsonPath("$.totalNodes", is(2)))
                     .andExpect(jsonPath("$.totalEdges", is(1)))
+                    .andExpect(jsonPath("$.nodes[0].uid", is("REQ-A")))
+                    .andExpect(jsonPath("$.edges[0].relationType", is("DEPENDS_ON")));
+        }
+    }
+
+    @Nested
+    class Subgraph {
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void returns200WithSubgraphNodesAndEdges() throws Exception {
+            var projectId = UUID.randomUUID();
+            var project = new Project("test", "Test");
+            var a = new Requirement(project, "REQ-A", "Title A", "Statement A");
+            var b = new Requirement(project, "REQ-B", "Title B", "Statement B");
+            var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
+
+            when(projectService.resolveProjectId("test")).thenReturn(projectId);
+            when(analysisService.extractSubgraph(any(UUID.class), any(List.class)))
+                    .thenReturn(new SubgraphResult(List.of(a, b), List.of(rel)));
+
+            mockMvc.perform(get("/api/v1/graph/subgraph")
+                            .param("roots", "REQ-A", "REQ-B")
+                            .param("project", "test"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.nodes", hasSize(2)))
+                    .andExpect(jsonPath("$.edges", hasSize(1)))
+                    .andExpect(jsonPath("$.totalNodes", is(2)))
+                    .andExpect(jsonPath("$.totalEdges", is(1)))
+                    .andExpect(jsonPath("$.rootUids", hasSize(2)))
                     .andExpect(jsonPath("$.nodes[0].uid", is("REQ-A")))
                     .andExpect(jsonPath("$.edges[0].relationType", is("DEPENDS_ON")));
         }

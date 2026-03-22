@@ -147,6 +147,37 @@ public final class GraphAlgorithms {
     }
 
     /**
+     * Find all nodes reachable from any of the given root nodes via BFS.
+     *
+     * @param roots the set of starting nodes
+     * @param adjacencyList map from node to its outgoing neighbors
+     * @return set of all reachable nodes (always includes all roots present in the graph)
+     */
+    /*@ requires roots != null;
+    @ ensures \result != null; @*/
+    public static Set<UUID> findReachableFromMultiple(Set<UUID> roots, Map<UUID, List<UUID>> adjacencyList) {
+        Set<UUID> visited = new HashSet<>();
+        Queue<UUID> queue = new ArrayDeque<>();
+
+        for (UUID root : roots) {
+            if (visited.add(root)) {
+                queue.add(root);
+            }
+        }
+
+        while (!queue.isEmpty()) {
+            UUID node = queue.poll();
+            for (UUID neighbor : adjacencyList.getOrDefault(node, List.of())) {
+                if (visited.add(neighbor)) {
+                    queue.add(neighbor);
+                }
+            }
+        }
+
+        return visited;
+    }
+
+    /**
      * Find all nodes reachable from the start node via BFS, including the start node itself.
      *
      * @param start the starting node

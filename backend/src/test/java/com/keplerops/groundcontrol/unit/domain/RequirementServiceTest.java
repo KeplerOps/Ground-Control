@@ -103,7 +103,7 @@ class RequirementServiceTest {
                     1);
 
             when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
-            when(requirementRepository.existsByProjectIdAndUid(PROJECT_ID, "REQ-001"))
+            when(requirementRepository.existsByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-001"))
                     .thenReturn(false);
             when(requirementRepository.save(any(Requirement.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -118,7 +118,7 @@ class RequirementServiceTest {
             var cmd = new CreateRequirementCommand(PROJECT_ID, "REQ-002", "Title", "Statement", null, null, null, null);
 
             when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
-            when(requirementRepository.existsByProjectIdAndUid(PROJECT_ID, "REQ-002"))
+            when(requirementRepository.existsByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-002"))
                     .thenReturn(false);
             when(requirementRepository.save(any(Requirement.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -133,7 +133,7 @@ class RequirementServiceTest {
             var cmd = new CreateRequirementCommand(PROJECT_ID, "REQ-001", "Title", "Statement", null, null, null, null);
 
             when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
-            when(requirementRepository.existsByProjectIdAndUid(PROJECT_ID, "REQ-001"))
+            when(requirementRepository.existsByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-001"))
                     .thenReturn(true);
 
             assertThatThrownBy(() -> service.create(cmd)).isInstanceOf(ConflictException.class);
@@ -169,7 +169,7 @@ class RequirementServiceTest {
         @Test
         void returnsExistingRequirement() {
             var req = makeRequirement("REQ-001");
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "REQ-001"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-001"))
                     .thenReturn(Optional.of(req));
 
             var result = service.getByUid(PROJECT_ID, "REQ-001");
@@ -178,7 +178,7 @@ class RequirementServiceTest {
 
         @Test
         void throwsNotFoundForMissingUid() {
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "NOPE"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "NOPE"))
                     .thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.getByUid(PROJECT_ID, "NOPE")).isInstanceOf(NotFoundException.class);
@@ -559,7 +559,7 @@ class RequirementServiceTest {
             var outgoingRelation = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
 
             when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
-            when(requirementRepository.existsByProjectIdAndUid(PROJECT_ID, "REQ-001-CLONE"))
+            when(requirementRepository.existsByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-001-CLONE"))
                     .thenReturn(false);
             when(requirementRepository.save(any(Requirement.class))).thenAnswer(inv -> {
                 var r = (Requirement) inv.getArgument(0);
@@ -595,7 +595,7 @@ class RequirementServiceTest {
             source.setWave(2);
 
             when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
-            when(requirementRepository.existsByProjectIdAndUid(PROJECT_ID, "REQ-001-CLONE"))
+            when(requirementRepository.existsByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-001-CLONE"))
                     .thenReturn(false);
             when(requirementRepository.save(any(Requirement.class))).thenAnswer(inv -> {
                 var r = (Requirement) inv.getArgument(0);
@@ -623,7 +623,7 @@ class RequirementServiceTest {
             var sourceId = UUID.randomUUID();
             var source = makeRequirement("REQ-001");
             when(requirementRepository.findById(sourceId)).thenReturn(Optional.of(source));
-            when(requirementRepository.existsByProjectIdAndUid(PROJECT_ID, "REQ-EXISTING"))
+            when(requirementRepository.existsByProjectIdAndUidIgnoreCase(PROJECT_ID, "REQ-EXISTING"))
                     .thenReturn(true);
 
             var cmd = new CloneRequirementCommand("REQ-EXISTING", false);

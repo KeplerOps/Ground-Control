@@ -347,7 +347,7 @@ class GitHubIssueSyncServiceTest {
             var requirement = new Requirement(TEST_PROJECT, "GC-A001", "Test Title", "Test statement");
             setField(requirement, "id", UUID.randomUUID());
 
-            when(requirementRepository.findByProjectIdAndUid(PROJECT_ID, "GC-A001"))
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "GC-A001"))
                     .thenReturn(Optional.of(requirement));
 
             var issueData = new GitHubIssueData(
