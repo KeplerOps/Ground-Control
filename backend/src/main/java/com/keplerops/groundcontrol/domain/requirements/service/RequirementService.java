@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -29,14 +30,17 @@ public class RequirementService {
     private final RequirementRepository requirementRepository;
     private final RequirementRelationRepository relationRepository;
     private final ProjectRepository projectRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     public RequirementService(
             RequirementRepository requirementRepository,
             RequirementRelationRepository relationRepository,
-            ProjectRepository projectRepository) {
+            ProjectRepository projectRepository,
+            ApplicationEventPublisher eventPublisher) {
         this.requirementRepository = requirementRepository;
         this.relationRepository = relationRepository;
         this.projectRepository = projectRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     public Requirement create(CreateRequirementCommand command) {
@@ -44,11 +48,13 @@ public class RequirementService {
                 .findById(command.projectId())
                 .orElseThrow(() -> new NotFoundException("Project not found: " + command.projectId()));
 
-        if (requirementRepository.existsByProjectIdAndUid(project.getId(), command.uid())) {
-            throw new ConflictException("Requirement with UID '" + command.uid() + "' already exists in project");
+        String normalizedUid = command.uid().toUpperCase(java.util.Locale.ROOT);
+        if (requirementRepository.existsByProjectIdAndUidIgnoreCase(project.getId(), normalizedUid)) {
+            throw new ConflictException(
+                    "Requirement with UID '" + command.uid() + "' already exists in project (case-insensitive)");
         }
 
-        var requirement = new Requirement(project, command.uid(), command.title(), command.statement());
+        var requirement = new Requirement(project, normalizedUid, command.title(), command.statement());
         if (command.rationale() != null) {
             requirement.setRationale(command.rationale());
         }
@@ -72,20 +78,24 @@ public class RequirementService {
     @Transactional(readOnly = true)
     public Requirement getByUid(UUID projectId, String uid) {
         return requirementRepository
-                .findByProjectIdAndUid(projectId, uid)
+                .findByProjectIdAndUidIgnoreCase(projectId, uid)
                 .orElseThrow(() -> new NotFoundException("Requirement not found: " + uid));
     }
 
     public Requirement update(UUID id, UpdateRequirementCommand command) {
         var requirement = getById(id);
-        if (command.title() != null) {
+        boolean textChanged = false;
+        if (command.title() != null && !command.title().equals(requirement.getTitle())) {
             requirement.setTitle(command.title());
+            textChanged = true;
         }
-        if (command.statement() != null) {
+        if (command.statement() != null && !command.statement().equals(requirement.getStatement())) {
             requirement.setStatement(command.statement());
+            textChanged = true;
         }
-        if (command.rationale() != null) {
+        if (command.rationale() != null && !command.rationale().equals(requirement.getRationale())) {
             requirement.setRationale(command.rationale());
+            textChanged = true;
         }
         if (command.requirementType() != null) {
             requirement.setRequirementType(command.requirementType());
@@ -96,7 +106,11 @@ public class RequirementService {
         if (command.wave() != null) {
             requirement.setWave(command.wave());
         }
-        return requirementRepository.save(requirement);
+        var saved = requirementRepository.save(requirement);
+        if (textChanged) {
+            eventPublisher.publishEvent(new RequirementTextChangedEvent(saved.getId()));
+        }
+        return saved;
     }
 
     /*@ requires id != null;
@@ -186,11 +200,13 @@ public class RequirementService {
         var source = getById(sourceId);
         var project = source.getProject();
 
-        if (requirementRepository.existsByProjectIdAndUid(project.getId(), command.newUid())) {
-            throw new ConflictException("Requirement with UID '" + command.newUid() + "' already exists in project");
+        String normalizedUid = command.newUid().toUpperCase(java.util.Locale.ROOT);
+        if (requirementRepository.existsByProjectIdAndUidIgnoreCase(project.getId(), normalizedUid)) {
+            throw new ConflictException(
+                    "Requirement with UID '" + command.newUid() + "' already exists in project (case-insensitive)");
         }
 
-        var clone = new Requirement(project, command.newUid(), source.getTitle(), source.getStatement());
+        var clone = new Requirement(project, normalizedUid, source.getTitle(), source.getStatement());
         clone.setRationale(source.getRationale());
         clone.setRequirementType(source.getRequirementType());
         clone.setPriority(source.getPriority());

@@ -1,6 +1,7 @@
 package com.keplerops.groundcontrol.api.admin;
 
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
+import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
 import com.keplerops.groundcontrol.domain.requirements.service.GraphClient;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,10 +15,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class GraphController {
 
     private final GraphClient graphClient;
+    private final AnalysisService analysisService;
     private final ProjectService projectService;
 
-    public GraphController(GraphClient graphClient, ProjectService projectService) {
+    public GraphController(GraphClient graphClient, AnalysisService analysisService, ProjectService projectService) {
         this.graphClient = graphClient;
+        this.analysisService = analysisService;
         this.projectService = projectService;
     }
 
@@ -48,12 +51,28 @@ public class GraphController {
         return graphClient.getDescendants(uid, depth);
     }
 
+    @GetMapping("/api/v1/graph/visualization")
+    public GraphVisualizationResponse getVisualization(@RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return GraphVisualizationResponse.from(analysisService.getGraphVisualization(projectId));
+    }
+
+    @GetMapping("/api/v1/graph/subgraph")
+    public SubgraphResponse extractSubgraph(
+            @RequestParam List<String> roots, @RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        var result = analysisService.extractSubgraph(projectId, roots);
+        return SubgraphResponse.from(result, roots);
+    }
+
     @GetMapping("/api/v1/graph/paths")
-    public List<List<String>> findPaths(
+    public List<PathResponse> findPaths(
             @RequestParam String source, @RequestParam String target, @RequestParam(required = false) String project) {
         if (project != null) {
             projectService.resolveProjectId(project);
         }
-        return graphClient.findPaths(source, target);
+        return graphClient.findPaths(source, target).stream()
+                .map(PathResponse::from)
+                .toList();
     }
 }

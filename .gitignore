@@ -199,6 +199,9 @@ dist/
 .nuxt/
 .turbo/
 
+# TypeScript build cache
+*.tsbuildinfo
+
 # Vite
 *.local
 

@@ -7,10 +7,7 @@ import {
   useOrphans,
 } from "@/hooks/use-analysis";
 import { cn } from "@/lib/utils";
-import type {
-  DashboardStatsResponse,
-  RecentChangeResponse,
-} from "@/types/api";
+import type { DashboardStatsResponse, RecentChangeResponse } from "@/types/api";
 import {
   AlertTriangle,
   ArrowRight,
@@ -21,10 +18,11 @@ import {
   Rocket,
   Unlink,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 export function Dashboard() {
   const { activeProject, isLoading } = useProjectContext();
+  const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
 
   if (isLoading) return <LoadingSkeleton />;
@@ -52,15 +50,17 @@ export function Dashboard() {
         )}
       </div>
 
-      <DashboardContent navigate={navigate} />
+      <DashboardContent navigate={navigate} projectId={projectId ?? ""} />
     </div>
   );
 }
 
 function DashboardContent({
   navigate,
+  projectId,
 }: {
   navigate: (path: string) => void;
+  projectId: string;
 }) {
   const { data: stats, isLoading } = useDashboardStats();
 
@@ -70,11 +70,19 @@ function DashboardContent({
 
   return (
     <div className="space-y-6">
-      <StatusOverview stats={stats} navigate={navigate} />
-      <WaveProgress stats={stats} navigate={navigate} />
-      <TraceabilityCoverage stats={stats} navigate={navigate} />
-      <RecentChanges changes={stats.recentChanges} navigate={navigate} />
-      <AnalysisAlerts navigate={navigate} />
+      <StatusOverview stats={stats} navigate={navigate} projectId={projectId} />
+      <WaveProgress stats={stats} navigate={navigate} projectId={projectId} />
+      <TraceabilityCoverage
+        stats={stats}
+        navigate={navigate}
+        projectId={projectId}
+      />
+      <RecentChanges
+        changes={stats.recentChanges}
+        navigate={navigate}
+        projectId={projectId}
+      />
+      <AnalysisAlerts navigate={navigate} projectId={projectId} />
     </div>
   );
 }
@@ -82,9 +90,11 @@ function DashboardContent({
 function StatusOverview({
   stats,
   navigate,
+  projectId,
 }: {
   stats: DashboardStatsResponse;
   navigate: (path: string) => void;
+  projectId: string;
 }) {
   const statCards = [
     {
@@ -93,10 +103,30 @@ function StatusOverview({
       color: "text-foreground",
       filter: undefined,
     },
-    { label: "Draft", value: stats.byStatus.DRAFT ?? 0, color: "text-gray-400", filter: "DRAFT" },
-    { label: "Active", value: stats.byStatus.ACTIVE ?? 0, color: "text-green-400", filter: "ACTIVE" },
-    { label: "Deprecated", value: stats.byStatus.DEPRECATED ?? 0, color: "text-orange-400", filter: "DEPRECATED" },
-    { label: "Archived", value: stats.byStatus.ARCHIVED ?? 0, color: "text-gray-500", filter: "ARCHIVED" },
+    {
+      label: "Draft",
+      value: stats.byStatus.DRAFT ?? 0,
+      color: "text-gray-400",
+      filter: "DRAFT",
+    },
+    {
+      label: "Active",
+      value: stats.byStatus.ACTIVE ?? 0,
+      color: "text-green-400",
+      filter: "ACTIVE",
+    },
+    {
+      label: "Deprecated",
+      value: stats.byStatus.DEPRECATED ?? 0,
+      color: "text-orange-400",
+      filter: "DEPRECATED",
+    },
+    {
+      label: "Archived",
+      value: stats.byStatus.ARCHIVED ?? 0,
+      color: "text-gray-500",
+      filter: "ARCHIVED",
+    },
   ];
 
   return (
@@ -109,8 +139,8 @@ function StatusOverview({
           onClick={() =>
             navigate(
               s.filter
-                ? `/requirements?status=${s.filter}`
-                : "/requirements",
+                ? `/p/${projectId}/requirements?status=${s.filter}`
+                : `/p/${projectId}/requirements`,
             )
           }
         >
@@ -134,9 +164,11 @@ const STATUS_BAR_COLORS: Record<string, string> = {
 function WaveProgress({
   stats,
   navigate,
+  projectId,
 }: {
   stats: DashboardStatsResponse;
   navigate: (path: string) => void;
+  projectId: string;
 }) {
   if (stats.byWave.length === 0) return null;
 
@@ -152,8 +184,8 @@ function WaveProgress({
             onClick={() =>
               navigate(
                 wave.wave != null
-                  ? `/requirements?wave=${wave.wave}`
-                  : "/requirements",
+                  ? `/p/${projectId}/requirements?wave=${wave.wave}`
+                  : `/p/${projectId}/requirements`,
               )
             }
           >
@@ -164,7 +196,10 @@ function WaveProgress({
               {Object.entries(wave.byStatus).map(([status, count]) => (
                 <div
                   key={status}
-                  className={cn("h-full", STATUS_BAR_COLORS[status] ?? "bg-blue-400")}
+                  className={cn(
+                    "h-full",
+                    STATUS_BAR_COLORS[status] ?? "bg-blue-400",
+                  )}
                   style={{ width: `${(count / wave.total) * 100}%` }}
                   title={`${status}: ${count}`}
                 />
@@ -179,7 +214,9 @@ function WaveProgress({
       <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
         {Object.entries(STATUS_BAR_COLORS).map(([status, color]) => (
           <span key={status} className="flex items-center gap-1">
-            <span className={cn("inline-block h-2.5 w-2.5 rounded-full", color)} />
+            <span
+              className={cn("inline-block h-2.5 w-2.5 rounded-full", color)}
+            />
             {status}
           </span>
         ))}
@@ -191,9 +228,11 @@ function WaveProgress({
 function TraceabilityCoverage({
   stats,
   navigate,
+  projectId,
 }: {
   stats: DashboardStatsResponse;
   navigate: (path: string) => void;
+  projectId: string;
 }) {
   const entries = Object.entries(stats.coverageByLinkType);
   if (entries.length === 0) return null;
@@ -207,7 +246,7 @@ function TraceabilityCoverage({
             key={linkType}
             type="button"
             className="flex w-full items-center gap-4 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-accent/30"
-            onClick={() => navigate("/analysis")}
+            onClick={() => navigate(`/p/${projectId}/analysis`)}
           >
             <span className="w-28 shrink-0 text-sm font-medium text-muted-foreground">
               {linkType}
@@ -258,9 +297,11 @@ function formatRelativeTime(timestamp: string): string {
 function RecentChanges({
   changes,
   navigate,
+  projectId,
 }: {
   changes: RecentChangeResponse[];
   navigate: (path: string) => void;
+  projectId: string;
 }) {
   if (changes.length === 0) return null;
 
@@ -277,13 +318,16 @@ function RecentChanges({
             type="button"
             className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent/30"
             onClick={() =>
-              navigate(`/requirements?search=${encodeURIComponent(change.uid)}`)
+              navigate(
+                `/p/${projectId}/requirements?search=${encodeURIComponent(change.uid)}`,
+              )
             }
           >
             <span
               className={cn(
                 "inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-xs font-medium",
-                REVISION_TYPE_COLORS[change.revisionType] ?? "bg-muted text-muted-foreground",
+                REVISION_TYPE_COLORS[change.revisionType] ??
+                  "bg-muted text-muted-foreground",
               )}
             >
               {change.revisionType}
@@ -311,8 +355,10 @@ function RecentChanges({
 
 function AnalysisAlerts({
   navigate,
+  projectId,
 }: {
   navigate: (path: string) => void;
+  projectId: string;
 }) {
   const { data: cycles } = useCycles();
   const { data: orphans } = useOrphans();
@@ -326,7 +372,7 @@ function AnalysisAlerts({
       count: cycles?.length ?? 0,
       color: "text-red-400",
       bgColor: "border-red-500/20 bg-red-500/5",
-      path: "/analysis",
+      path: `/p/${projectId}/analysis`,
     },
     {
       icon: Unlink,
@@ -334,7 +380,7 @@ function AnalysisAlerts({
       count: orphans?.length ?? 0,
       color: "text-yellow-400",
       bgColor: "border-yellow-500/20 bg-yellow-500/5",
-      path: "/analysis",
+      path: `/p/${projectId}/analysis`,
     },
     {
       icon: Link2Off,
@@ -342,7 +388,7 @@ function AnalysisAlerts({
       count: coverageGaps?.length ?? 0,
       color: "text-orange-400",
       bgColor: "border-orange-500/20 bg-orange-500/5",
-      path: "/analysis",
+      path: `/p/${projectId}/analysis`,
     },
     {
       icon: Layers,
@@ -350,7 +396,7 @@ function AnalysisAlerts({
       count: crossWave?.length ?? 0,
       color: "text-violet-400",
       bgColor: "border-violet-500/20 bg-violet-500/5",
-      path: "/analysis",
+      path: `/p/${projectId}/analysis`,
     },
   ];
 

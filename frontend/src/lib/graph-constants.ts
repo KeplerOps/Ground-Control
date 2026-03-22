@@ -64,7 +64,11 @@ export const RELATION_STYLES: Record<
 };
 
 export type ColorScheme = "series" | "priority" | "status" | "wave";
-export type LayoutId = "dagre-lr" | "dagre-tb";
+export type LayoutId =
+  | "dagre-lr"
+  | "dagre-tb"
+  | "dagre-wave-lr"
+  | "dagre-wave-tb";
 
 export function getSeries(uid: string): string {
   const m = uid.match(/^GC-([A-Z])/);

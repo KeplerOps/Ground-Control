@@ -52,6 +52,33 @@ const TO_CAMEL = {
   requirement_uid: "requirementUid",
   extra_body: "extraBody",
   project_identifier: "projectIdentifier",
+  blocking_status: "blockingStatus",
+  blocked_by: "blockedBy",
+  content_hash: "contentHash",
+  model_id: "modelId",
+  has_embedding: "hasEmbedding",
+  is_stale: "isStale",
+  model_mismatch: "modelMismatch",
+  current_model_id: "currentModelId",
+  embedding_model_id: "embeddingModelId",
+  embedded_at: "embeddedAt",
+  pairs_analyzed: "pairsAnalyzed",
+  embedded_count: "embeddedCount",
+  similarity_threshold: "similarityThreshold",
+  total_unblocked: "totalUnblocked",
+  total_blocked: "totalBlocked",
+  total_unconstrained: "totalUnconstrained",
+  total_requirements: "totalRequirements",
+  created_by: "createdBy",
+  baseline_id: "baselineId",
+  baseline_name: "baselineName",
+  other_baseline_id: "otherBaselineId",
+  other_baseline_name: "otherBaselineName",
+  added_count: "addedCount",
+  removed_count: "removedCount",
+  modified_count: "modifiedCount",
+  requirement_count: "requirementCount",
+  requirement_id: "requirementId",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -262,6 +289,10 @@ export async function getDashboardStats(project) {
   return request("GET", "/api/v1/analysis/dashboard-stats", { params: { project } });
 }
 
+export async function getWorkOrder(project) {
+  return request("GET", "/api/v1/analysis/work-order", { params: { project } });
+}
+
 export async function importStrictdoc(filePath, project) {
   const content = readFileSync(filePath);
   const form = new FormData();
@@ -269,6 +300,15 @@ export async function importStrictdoc(filePath, project) {
   const params = {};
   if (project) params.project = project;
   return request("POST", "/api/v1/admin/import/strictdoc", { formData: form, params });
+}
+
+export async function importReqif(filePath, project) {
+  const content = readFileSync(filePath);
+  const form = new FormData();
+  form.append("file", new Blob([content]), basename(filePath));
+  const params = {};
+  if (project) params.project = project;
+  return request("POST", "/api/v1/admin/import/reqif", { formData: form, params });
 }
 
 export async function syncGithub(owner, repo) {
@@ -291,6 +331,17 @@ export async function getRelationHistory(reqId, relId) {
 
 export async function getTraceabilityLinkHistory(reqId, linkId) {
   return request("GET", `/api/v1/requirements/${encodeURIComponent(reqId)}/traceability/${encodeURIComponent(linkId)}/history`);
+}
+
+export async function getRequirementTimeline(id, changeCategory, from, to, limit, offset) {
+  const params = new URLSearchParams();
+  if (changeCategory) params.set("changeCategory", changeCategory);
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  if (limit != null) params.set("limit", String(limit));
+  if (offset != null) params.set("offset", String(offset));
+  const qs = params.toString();
+  return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}/timeline${qs ? `?${qs}` : ""}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +380,46 @@ export async function findPaths(source, target, project) {
   return request("GET", "/api/v1/graph/paths", {
     params: { source, target, project },
   });
+}
+
+export async function getGraphVisualization(project) {
+  return request("GET", "/api/v1/graph/visualization", {
+    params: { project },
+  });
+}
+
+export async function extractSubgraph(roots, project) {
+  return request("GET", "/api/v1/graph/subgraph", {
+    params: { roots: roots.join(","), project },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Baseline functions
+// ---------------------------------------------------------------------------
+
+export async function createBaseline(data, project) {
+  return request("POST", "/api/v1/baselines", { body: data, params: { project } });
+}
+
+export async function listBaselines(project) {
+  return request("GET", "/api/v1/baselines", { params: { project } });
+}
+
+export async function getBaseline(id) {
+  return request("GET", `/api/v1/baselines/${encodeURIComponent(id)}`);
+}
+
+export async function getBaselineSnapshot(id) {
+  return request("GET", `/api/v1/baselines/${encodeURIComponent(id)}/snapshot`);
+}
+
+export async function compareBaselines(id, otherId) {
+  return request("GET", `/api/v1/baselines/${encodeURIComponent(id)}/compare/${encodeURIComponent(otherId)}`);
+}
+
+export async function deleteBaseline(id) {
+  await request("DELETE", `/api/v1/baselines/${encodeURIComponent(id)}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -383,4 +474,44 @@ export async function createGitHubIssue({ title, body, labels, repo }) {
 
 export async function createGitHubIssueViaApi(data, project) {
   return request("POST", "/api/v1/admin/github/issues", { body: data, params: { project } });
+}
+
+// ---------------------------------------------------------------------------
+// Analysis sweep API functions
+// ---------------------------------------------------------------------------
+
+export async function runSweep(project) {
+  return request("POST", "/api/v1/analysis/sweep", { params: { project } });
+}
+
+export async function runSweepAll() {
+  return request("POST", "/api/v1/analysis/sweep/all");
+}
+
+// ---------------------------------------------------------------------------
+// Embedding API functions
+// ---------------------------------------------------------------------------
+
+export async function embedRequirement(requirementId) {
+  return request("POST", `/api/v1/embeddings/${encodeURIComponent(requirementId)}`);
+}
+
+export async function getEmbeddingStatus(requirementId) {
+  return request("GET", `/api/v1/embeddings/${encodeURIComponent(requirementId)}/status`);
+}
+
+export async function embedProject(project, force) {
+  return request("POST", "/api/v1/embeddings/batch", {
+    params: { project, force: force ? "true" : undefined },
+  });
+}
+
+export async function deleteEmbedding(requirementId) {
+  await request("DELETE", `/api/v1/embeddings/${encodeURIComponent(requirementId)}`);
+}
+
+export async function analyzeSemanticSimilarity(project, threshold) {
+  return request("GET", "/api/v1/analysis/semantic-similarity", {
+    params: { project, threshold },
+  });
 }

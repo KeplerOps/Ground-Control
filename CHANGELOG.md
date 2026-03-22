@@ -5,6 +5,267 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.74.0] - 2026-03-22
+
+### Added
+
+- Semantic similarity detection (GC-C016): pairwise cosine similarity analysis
+  across requirement embeddings, returning overlap candidates above a configurable
+  threshold sorted by similarity score
+- REST API endpoint: `GET /api/v1/analysis/semantic-similarity?threshold=0.85&project=...`
+- MCP tool: `gc_analyze_similarity` with optional threshold and project parameters
+- Configurable default threshold via `GC_EMBEDDING_SIMILARITY_THRESHOLD` (default 0.85)
+- Auto-re-embed on requirement text change: updating title, statement, or rationale
+  automatically triggers re-embedding after the transaction commits (fire-and-forget,
+  gracefully skipped when no provider is configured)
+
+## [0.73.0] - 2026-03-22
+
+### Added
+
+- Requirement text embedding infrastructure (GC-C015): pluggable vector embedding
+  of requirement text content (title, statement, rationale) with content-hash-based
+  staleness detection and batch embedding support
+- `EmbeddingProvider` domain interface with `NoOpEmbeddingProvider` (default, graceful
+  degradation) and `OpenAiEmbeddingProvider` (conditional on `GC_EMBEDDING_PROVIDER=openai`)
+- REST API endpoints: `POST /api/v1/embeddings/{id}`, `GET /api/v1/embeddings/{id}/status`,
+  `POST /api/v1/embeddings/batch`, `DELETE /api/v1/embeddings/{id}`
+- MCP tools: `gc_embed_requirement`, `gc_get_embedding_status`, `gc_embed_project`
+- Flyway migration V015 creates `requirement_embedding` table with BYTEA storage,
+  SHA-256 content hash, and model tracking
+- Configuration via `GC_EMBEDDING_PROVIDER`, `GC_EMBEDDING_API_KEY`,
+  `GC_EMBEDDING_MODEL`, `GC_EMBEDDING_DIMENSIONS`, `GC_EMBEDDING_BATCH_SIZE`
+
+## [0.72.0] - 2026-03-22
+
+### Fixed
+
+- Requirement UID uniqueness is now case-insensitive per project: `OBS-001` and
+  `obs-001` can no longer coexist as separate requirements
+- Flyway migration V014 normalizes existing UIDs to uppercase and replaces the
+  composite unique constraint with a functional index on `LOWER(uid)`
+- Service layer normalizes UIDs to uppercase on create and clone
+- All UID lookups (create, clone, import, GitHub sync, getByUid) use
+  case-insensitive matching
+
+## [0.71.0] - 2026-03-22
+
+### Added
+
+- Subgraph extraction endpoint `GET /api/v1/graph/subgraph?roots=UID1,UID2` (GC-G003):
+  given a set of root requirements, returns all transitively reachable requirements and
+  their relations as a self-contained graph
+- MCP tool `gc_extract_subgraph` for API/MCP parity
+
+## [0.70.0] - 2026-03-21
+
+### Changed
+
+- Path finding endpoint `GET /api/v1/graph/paths` now returns structured response
+  with nodes and edges (including relation types) instead of flat UID arrays (GC-G002)
+
+## [0.69.0] - 2026-03-21
+
+### Added
+
+- Unified graph visualization endpoint `GET /api/v1/graph/visualization` (GC-G005):
+  returns all requirement nodes and relation edges in a single response
+- MCP tool `gc_get_graph_visualization` for API/MCP parity
+
+### Changed
+
+- Frontend graph page fetches all data in a single API call instead of N+1
+  separate requests (paginated requirements + per-requirement relation fetches)
+
+## [0.68.0] - 2026-03-21
+
+### Added
+
+- Interactive dependency graph enhancements (GC-Q005): explicit filter controls
+  for status, priority, series, and wave that remove non-matching nodes from
+  the graph layout (distinct from legend click-to-filter visual highlighting)
+- Wave-ordered DAG layout modes (`dagre-wave-tb`, `dagre-wave-lr`) that group
+  nodes by wave number while preserving dagre's edge-based ordering
+- Frontend test infrastructure: vitest with `make frontend-test` target
+- Unit tests for graph-constants module (`getSeries`, `getNodeColor`, `getColorMap`)
+
+### Removed
+
+- Standalone roadmap-viewer prototype (`tools/roadmap-viewer/`) and its nginx
+  service from docker-compose — superseded by the React graph page
+
+## [0.67.0] - 2026-03-21
+
+### Added
+
+- Audit history timeline (GC-Q006): unified timeline endpoint
+  `GET /api/v1/requirements/{id}/timeline` that merges requirement, relation,
+  and traceability link changes into a single chronologically-sorted view with
+  field-level diffs between consecutive revisions
+- Timeline supports filtering by change category (REQUIREMENT, RELATION,
+  TRACEABILITY_LINK) and date range (from/to)
+- MCP tool `gc_get_timeline` for querying the unified audit timeline
+- Frontend timeline UI on the requirement detail History tab with visual
+  vertical timeline, expandable field-level diff views, and filter controls
+
+## [0.66.0] - 2026-03-21
+
+### Added
+
+- Scheduled analysis sweeps (GC-C013): configurable cron-based execution of the
+  full analysis suite (orphan detection, coverage gaps, cross-wave validation,
+  cycle detection, consistency checks) with GitHub issue and webhook notification
+  support for detected problems
+- REST API endpoints: `POST /api/v1/analysis/sweep` (single project) and
+  `POST /api/v1/analysis/sweep/all` (all projects) for manual sweep triggering
+- MCP tool `gc_run_sweep` for triggering analysis sweeps via MCP
+- Configurable notification channels: GitHub issue creation and webhook POST
+  for sweep results with problems
+
+### Fixed
+
+- GitHub CLI (`gh`) not found by Java backend: now auto-resolves the binary
+  path from common locations (`/usr/bin/gh`, `/usr/local/bin/gh`,
+  `/opt/homebrew/bin/gh`) and supports explicit override via `GC_GH_PATH`
+  environment variable
+
+## [0.65.0] - 2026-03-20
+
+### Added
+
+- Slide-out detail panel on the requirements explorer: clicking a table row
+  opens an inline panel showing requirement details, status transitions, and
+  editing — without navigating away from the list
+- Reusable `SlidePanel` UI component (right-edge drawer with slide animation)
+- Selected row highlight in requirements table when detail panel is open
+
+## [0.64.1] - 2026-03-20
+
+### Fixed
+
+- Project switcher now preserves query string (e.g., `?status=ACTIVE`) when
+  switching projects
+- Unknown routes (`/p/:projectId/bad-page`, `/random-path`) now render a
+  "Page not found" message instead of a blank page
+
+## [0.64.0] - 2026-03-20
+
+### Changed
+
+- Move project identity from localStorage into URL path (`/p/:projectId/...`),
+  making the URL the single source of truth for project context
+- Route structure changed: project-scoped pages now live under `/p/:projectId/`
+  (e.g., `/p/my-project/requirements`); `/projects` stays at root level
+- `ProjectProvider` now derives `activeProject` from `useParams()` instead of
+  localStorage; `setActiveProject` navigates to the new project URL
+- Project switcher preserves the current sub-path when switching projects
+- Projects page uses `useProjects()` directly instead of `useProjectContext()`
+- Root `/` redirects to `/p/<first-project>/`; invalid project IDs redirect to
+  `/projects` with a toast
+- All `navigate()` and `Link` paths updated to use project-prefixed URLs across
+  dashboard, requirements, requirement detail, and analysis pages
+
+### Removed
+
+- localStorage-based project persistence (`gc-active-project` key)
+
+## [0.63.2] - 2026-03-20
+
+### Changed
+
+- Refactor `ImportService`: extract shared helpers (`upsertRequirements`, `createParentRelations`,
+  `resolveRequirementId`, `createExplicitRelations`, `createTraceabilityLinks`, `saveAuditAndBuildResult`)
+  to reduce cognitive complexity and duplication between `importStrictdoc` and `importReqif`
+- Extract `ParsedRequirement` record and `ImportCounters` accumulator as shared types
+- Extract `ATTR_IDENTIFIER` and `ATTR_LONG_NAME` string constants in `ReqifParser`
+
+### Added
+
+- 7 new tests for uncovered reqif relation paths (DB fallback, missing parent/source/target,
+  creation errors for hierarchy and explicit relations)
+- `@SuppressWarnings("java:S2187")` on `ReqifParserTest` to suppress false positive
+
+### Fixed
+
+- Fix SonarCloud S1751 bug in `ReqifParser.extractAttrValueText` — unconditional `return` inside
+  `for` loop replaced with explicit first-element check
+
+## [0.63.1] - 2026-03-20
+
+### Fixed
+
+- Remove dead `relations` field from `ReqifRequirement` record (was never populated)
+- Remove redundant null check in `extractAttrValueText` (`getAttribute` never returns null)
+- Make `stripXhtml` method private (only used internally)
+- Add comment clarifying hierarchy + SpecRelation overlap behavior in Phase 2b
+
+### Added
+
+- Test: title fallback from `LONG-NAME` to `ReqIF.Name` attribute value
+- Test: hierarchy + explicit SpecRelation overlap correctly skips duplicate
+
+## [0.63.0] - 2026-03-20
+
+### Added
+
+- ReqIF 1.2 import — bulk-import requirements from `.reqif` files produced by
+  enterprise tools (IBM DOORS, Polarion, Jama)
+- REST API: `POST /admin/import/reqif` (multipart/form-data)
+- MCP tool: `gc_import_reqif` with `file_path` and optional `project` parameters
+- Parses SPEC-OBJECTS (title, statement), SPEC-RELATIONS (explicit relations),
+  and SPECIFICATION hierarchy (parent-child nesting)
+- XHTML attribute values stripped to plain text
+- XXE prevention: DTDs and external entities disabled
+- Relation type mapping from ReqIF type names via naming convention
+  (contains "parent" → PARENT, "depends" → DEPENDS_ON, etc.)
+- Deterministic UID truncation for identifiers exceeding 50 characters
+
+## [0.62.1] - 2026-03-20
+
+### Fixed
+
+- Update integration test migration assertions to include V013 (`create_baseline`)
+
+## [0.62.0] - 2026-03-20
+
+### Added
+
+- Baseline management — named point-in-time snapshots of the requirement set
+  for release management, audit trails, and specification evolution tracking
+- REST API: `POST/GET /baselines`, `GET /baselines/{id}`,
+  `GET /baselines/{id}/snapshot`, `GET /baselines/{id}/compare/{otherId}`,
+  `DELETE /baselines/{id}`
+- MCP tools: `gc_create_baseline`, `gc_list_baselines`, `gc_get_baseline`,
+  `gc_get_baseline_snapshot`, `gc_compare_baselines`, `gc_delete_baseline`
+- Baseline snapshots reconstruct requirements via Hibernate Envers
+  `forEntitiesAtRevision()`, filtered by project and non-archived status
+- Baseline comparison diffs two snapshots showing added, removed, and modified
+  requirements with before/after detail
+
+## [0.61.1] - 2026-03-20
+
+### Changed
+
+- Move `SATISFIED_STATUSES` and `PRIORITY_ORDER` static fields to top of
+  `AnalysisService` alongside other static constants
+
+### Added
+
+- Test: cycle participants appended sorted by priority in work order
+- Test: cross-wave dependencies excluded from intra-wave topological sort
+
+## [0.61.0] - 2026-03-19
+
+### Added
+
+- Work order API (`GET /api/v1/analysis/work-order`) — topologically-sorted,
+  DAG-derived work order grouped by wave, with MoSCoW priority tie-breaking
+- `gc_get_work_order` MCP tool with REST/MCP parity
+- `GraphAlgorithms.topologicalSort()` — Kahn's algorithm with priority
+  tie-breaking for deterministic ordering
+- Blocking status detection: each requirement classified as UNBLOCKED, BLOCKED,
+  or UNCONSTRAINED based on dependency satisfaction
+
 ## [0.60.0] - 2026-03-18
 
 ### Added

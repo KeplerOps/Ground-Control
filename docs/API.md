@@ -40,6 +40,40 @@ http://localhost:8000/api/v1/
 | GET | `/requirements/{id}/traceability` | — | 200 | List traceability links |
 | DELETE | `/requirements/{id}/traceability/{linkId}` | — | 204 | Delete traceability link |
 
+### Audit History
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| GET | `/requirements/{id}/history` | — | 200 | Requirement revision history |
+| GET | `/requirements/{id}/relations/{relationId}/history` | — | 200 | Relation revision history |
+| GET | `/requirements/{id}/traceability/{linkId}/history` | — | 200 | Traceability link revision history |
+| GET | `/requirements/{id}/timeline` | — | 200 | Unified audit timeline |
+
+`GET /requirements/{id}/timeline` accepts query parameters:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `changeCategory` | enum | REQUIREMENT, RELATION, TRACEABILITY_LINK |
+| `from` | ISO-8601 instant | Start of date range |
+| `to` | ISO-8601 instant | End of date range |
+| `limit` | integer | Max entries to return (default 100) |
+| `offset` | integer | Number of entries to skip (default 0) |
+
+**TimelineEntryResponse:**
+
+```json
+{
+  "revisionNumber": 3,
+  "revisionType": "MOD",
+  "timestamp": "2026-03-21T04:00:00Z",
+  "actor": "user@example.com",
+  "changeCategory": "REQUIREMENT",
+  "entityId": "uuid",
+  "snapshot": { "title": "New Title", "status": "ACTIVE", "..." : "..." },
+  "changes": { "title": { "oldValue": "Old Title", "newValue": "New Title" } }
+}
+```
+
 ### Analysis
 
 | Method | Path | Body | Status | Purpose |
@@ -49,6 +83,13 @@ http://localhost:8000/api/v1/
 | GET | `/analysis/coverage-gaps?linkType=X` | — | 200 | Find coverage gaps by link type |
 | GET | `/analysis/impact/{id}` | — | 200 | Transitive impact analysis |
 | GET | `/analysis/cross-wave` | — | 200 | Cross-wave dependency violations |
+| GET | `/analysis/consistency-violations` | — | 200 | Detect consistency violations |
+| GET | `/analysis/completeness` | — | 200 | Analyze completeness |
+| GET | `/analysis/work-order` | — | 200 | Topological work order |
+| GET | `/analysis/dashboard-stats` | — | 200 | Aggregate project health stats |
+| GET | `/analysis/semantic-similarity` | — | 200 | Find semantically similar requirement pairs |
+| POST | `/analysis/sweep` | — | 200 | Run analysis sweep on one project |
+| POST | `/analysis/sweep/all` | — | 200 | Run analysis sweep on all projects |
 
 **CycleResponse** (`GET /analysis/cycles`):
 
@@ -68,6 +109,97 @@ http://localhost:8000/api/v1/
 Each cycle lists the member UIDs (closing back to the start) and the edges that
 form it, including the relation type between each consecutive pair.
 
+`GET /analysis/semantic-similarity` accepts query parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `project` | string | auto-resolved | Project identifier |
+| `threshold` | double | 0.85 | Minimum similarity score (0–1) |
+
+**SimilarityResultResponse:**
+
+```json
+{
+  "totalRequirements": 50,
+  "embeddedCount": 48,
+  "pairsAnalyzed": 1128,
+  "threshold": 0.85,
+  "pairs": [
+    {
+      "uid1": "REQ-012",
+      "title1": "User authentication via SSO",
+      "uid2": "REQ-037",
+      "title2": "Single sign-on login support",
+      "score": 0.93
+    }
+  ]
+}
+```
+
+### Embeddings
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/embeddings/{requirementId}` | — | 200 | Embed a single requirement |
+| GET | `/embeddings/{requirementId}/status` | — | 200 | Get embedding status |
+| POST | `/embeddings/batch?project=&force=false` | — | 200 | Batch embed all requirements in a project |
+| DELETE | `/embeddings/{requirementId}` | — | 204 | Delete embedding |
+
+Requires `GC_EMBEDDING_PROVIDER=openai` and `GC_EMBEDDING_API_KEY` to be set.
+When no provider is configured, endpoints return `provider_unavailable` status
+(graceful degradation).
+
+**EmbeddingStatusResponse** (`GET /embeddings/{id}/status`):
+
+```json
+{
+  "requirementId": "uuid",
+  "hasEmbedding": true,
+  "isStale": false,
+  "modelMismatch": false,
+  "currentModelId": "text-embedding-3-small",
+  "embeddingModelId": "text-embedding-3-small",
+  "embeddedAt": "2026-03-22T03:00:00Z"
+}
+```
+
+### Baselines
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/baselines?project=` | BaselineRequest | 201 | Create baseline |
+| GET | `/baselines?project=` | — | 200 | List baselines |
+| GET | `/baselines/{id}` | — | 200 | Get baseline |
+| GET | `/baselines/{id}/snapshot` | — | 200 | Requirement snapshot at baseline |
+| GET | `/baselines/{id}/compare/{otherId}` | — | 200 | Compare two baselines |
+| DELETE | `/baselines/{id}` | — | 204 | Delete baseline |
+
+**BaselineRequest:**
+
+```json
+{
+  "name": "v1.0",
+  "description": "First release baseline"
+}
+```
+
+**BaselineComparisonResponse** (`GET /baselines/{id}/compare/{otherId}`):
+
+```json
+{
+  "baselineId": "uuid",
+  "baselineName": "v1.0",
+  "otherBaselineId": "uuid",
+  "otherBaselineName": "v2.0",
+  "addedCount": 2,
+  "removedCount": 0,
+  "modifiedCount": 1,
+  "added": [...],
+  "removed": [...],
+  "modified": [{ "requirementId": "uuid", "uid": "REQ-001", "before": {...}, "after": {...} }]
+}
+```
+
 ### Graph
 
 | Method | Path | Body | Status | Purpose |
@@ -75,7 +207,21 @@ form it, including the relation type between each consecutive pair.
 | POST | `/admin/graph/materialize` | — | 200 | Materialize graph (AGE) |
 | GET | `/graph/ancestors/{uid}?depth=N` | — | 200 | Ancestor UIDs |
 | GET | `/graph/descendants/{uid}?depth=N` | — | 200 | Descendant UIDs |
-| GET | `/graph/paths?source=X&target=Y` | — | 200 | All paths between two UIDs |
+| GET | `/graph/paths?source=X&target=Y` | — | 200 | All paths between two UIDs (with edges) |
+
+**Path response shape:**
+
+```json
+[
+  {
+    "nodes": ["REQ-A", "REQ-B", "REQ-C"],
+    "edges": [
+      { "sourceUid": "REQ-A", "targetUid": "REQ-B", "relationType": "DEPENDS_ON" },
+      { "sourceUid": "REQ-B", "targetUid": "REQ-C", "relationType": "PARENT" }
+    ]
+  }
+]
+```
 
 ### GitHub Issues
 
@@ -110,6 +256,7 @@ form it, including the relation type between each consecutive pair.
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
 | POST | `/admin/import/strictdoc` | multipart/form-data | 200 | Import .sdoc file |
+| POST | `/admin/import/reqif` | multipart/form-data | 200 | Import .reqif file |
 | POST | `/admin/sync/github?owner=X&repo=Y` | — | 200 | Sync GitHub issues |
 
 ## Request / Response Format

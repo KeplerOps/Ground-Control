@@ -70,6 +70,24 @@ export interface RelationResponse {
   createdAt: string;
 }
 
+export interface GraphVisualizationNodeResponse {
+  id: string;
+  uid: string;
+  title: string;
+  statement: string;
+  priority: string;
+  status: string;
+  requirementType: string;
+  wave: number;
+}
+
+export interface GraphVisualizationResponse {
+  nodes: GraphVisualizationNodeResponse[];
+  edges: RelationResponse[];
+  totalNodes: number;
+  totalEdges: number;
+}
+
 export interface TraceabilityLinkResponse {
   id: string;
   requirementId: string;
@@ -113,6 +131,24 @@ export interface TraceabilityLinkHistoryResponse {
   timestamp: string;
   actor: string;
   snapshot: TraceabilityLinkResponse;
+}
+
+export type ChangeCategory = "REQUIREMENT" | "RELATION" | "TRACEABILITY_LINK";
+
+export interface FieldChangeResponse {
+  oldValue: unknown;
+  newValue: unknown;
+}
+
+export interface TimelineEntryResponse {
+  revisionNumber: number;
+  revisionType: RevisionType;
+  timestamp: string;
+  actor: string;
+  changeCategory: ChangeCategory;
+  entityId: string;
+  snapshot: Record<string, unknown>;
+  changes: Record<string, FieldChangeResponse>;
 }
 
 export interface RequirementSummaryResponse {

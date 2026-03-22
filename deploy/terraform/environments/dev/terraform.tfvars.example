@@ -11,3 +11,6 @@ tailscale_hostname = "gc-dev"
 
 # S3 backup bucket
 backup_bucket_name = "groundcontrol-backups-catalyst-dev"
+
+# Embedding provider (set to "openai" to enable, then put the API key in SSM)
+# gc_embedding_provider = "openai"

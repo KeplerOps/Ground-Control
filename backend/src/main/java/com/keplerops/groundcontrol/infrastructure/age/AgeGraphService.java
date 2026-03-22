@@ -5,6 +5,7 @@ import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.GraphClient;
+import com.keplerops.groundcontrol.domain.requirements.service.PathResult;
 import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
@@ -111,7 +112,7 @@ public class AgeGraphService implements GraphClient {
     }
 
     @Override
-    public List<List<String>> findPaths(String sourceUid, String targetUid) {
+    public List<PathResult> findPaths(String sourceUid, String targetUid) {
         if (!ageProperties.enabled()) {
             return List.of();
         }
@@ -120,14 +121,14 @@ public class AgeGraphService implements GraphClient {
         setupSearchPath();
 
         String sql = String.format(
-                "SELECT * FROM ag_catalog.cypher('%s', $$ MATCH path = (s:Requirement {uid: '%s'})-[*]->(t:Requirement {uid: '%s'}) RETURN [n IN nodes(path) | n.uid] $$) AS (v agtype)",
+                "SELECT * FROM ag_catalog.cypher('%s', $$ MATCH path = (s:Requirement {uid: '%s'})-[*]->(t:Requirement {uid: '%s'}) RETURN [n IN nodes(path) | n.uid], [r IN relationships(path) | label(r)] $$) AS (nodes agtype, rels agtype)",
                 graph, escapeCypher(sourceUid), escapeCypher(targetUid));
 
-        List<List<String>> paths = new ArrayList<>();
+        List<PathResult> paths = new ArrayList<>();
         jdbcTemplate.query(sql, rs -> {
-            String agtypeValue = rs.getString(1);
-            List<String> pathUids = parseAgtypeArray(agtypeValue);
-            paths.add(pathUids);
+            List<String> nodeUids = parseAgtypeArray(rs.getString(1));
+            List<String> edgeLabels = parseAgtypeArray(rs.getString(2));
+            paths.add(new PathResult(nodeUids, edgeLabels));
         });
         return paths;
     }

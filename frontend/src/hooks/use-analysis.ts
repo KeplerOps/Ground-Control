@@ -64,11 +64,7 @@ export function useImpact(id: string | undefined) {
 export function useConsistencyViolations() {
   const { activeProject } = useProjectContext();
   return useQuery({
-    queryKey: [
-      "analysis",
-      "consistency-violations",
-      activeProject?.identifier,
-    ],
+    queryKey: ["analysis", "consistency-violations", activeProject?.identifier],
     queryFn: () =>
       apiFetch<ConsistencyViolationResponse[]>(
         "/analysis/consistency-violations",

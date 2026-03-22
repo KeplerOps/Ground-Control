@@ -10,5 +10,5 @@ public interface GraphClient {
 
     List<String> getDescendants(String uid, int depth);
 
-    List<List<String>> findPaths(String sourceUid, String targetUid);
+    List<PathResult> findPaths(String sourceUid, String targetUid);
 }

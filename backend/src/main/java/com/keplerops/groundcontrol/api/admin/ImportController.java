@@ -38,4 +38,19 @@ public class ImportController {
         var filename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "unknown.sdoc";
         return ImportResultResponse.from(importService.importStrictdoc(projectId, filename, content));
     }
+
+    @PostMapping(value = "/reqif", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ImportResultResponse importReqif(
+            @RequestParam("file") MultipartFile file, @RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (IOException e) {
+            throw new GroundControlException("Failed to read uploaded file: " + e.getMessage(), "file_read_error", e);
+        }
+        var content = new String(bytes, StandardCharsets.UTF_8);
+        var filename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "unknown.reqif";
+        return ImportResultResponse.from(importService.importReqif(projectId, filename, content));
+    }
 }

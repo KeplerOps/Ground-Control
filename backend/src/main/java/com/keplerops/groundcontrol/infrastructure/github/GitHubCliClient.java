@@ -25,16 +25,31 @@ public class GitHubCliClient implements GitHubClient {
     private static final Pattern ISSUE_URL_RE = Pattern.compile("/issues/(\\d+)$");
 
     private final ObjectMapper objectMapper;
+    private final String ghPath;
 
-    public GitHubCliClient(ObjectMapper objectMapper) {
+    public GitHubCliClient(
+            ObjectMapper objectMapper,
+            @org.springframework.beans.factory.annotation.Value("${groundcontrol.github.gh-path:}") String ghPath) {
         this.objectMapper = objectMapper;
+        this.ghPath = ghPath.isBlank() ? resolveGhPath() : ghPath;
+        log.info("github_cli_path: {}", this.ghPath);
+    }
+
+    // Common Linux/macOS install locations; Windows is not supported.
+    private static String resolveGhPath() {
+        for (String candidate : List.of("/usr/bin/gh", "/usr/local/bin/gh", "/opt/homebrew/bin/gh")) {
+            if (java.nio.file.Files.isExecutable(java.nio.file.Path.of(candidate))) {
+                return candidate;
+            }
+        }
+        return "gh";
     }
 
     @Override
     public List<GitHubIssueData> fetchAllIssues(String owner, String repo) {
         try {
             ProcessBuilder pb = new ProcessBuilder(
-                    "gh",
+                    ghPath,
                     "issue",
                     "list",
                     "--repo",
@@ -100,8 +115,8 @@ public class GitHubCliClient implements GitHubClient {
     @Override
     public GitHubIssueData createIssue(String repo, String title, String body, List<String> labels) {
         try {
-            List<String> args =
-                    new ArrayList<>(List.of("gh", "issue", "create", "--repo", repo, "--title", title, "--body", body));
+            List<String> args = new ArrayList<>(
+                    List.of(ghPath, "issue", "create", "--repo", repo, "--title", title, "--body", body));
             if (labels != null && !labels.isEmpty()) {
                 args.add("--label");
                 args.add(String.join(",", labels));

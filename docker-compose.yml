@@ -44,19 +44,5 @@ services:
       redis:
         condition: service_healthy
 
-  roadmap:
-    image: nginx:alpine
-    ports:
-      - "3000:80"
-    volumes:
-      - ./tools/roadmap-viewer:/srv/roadmap:ro
-    command:
-      - sh
-      - -c
-      - |
-        rm -f /etc/nginx/conf.d/default.conf
-        ln -s /srv/roadmap/conf/default.conf /etc/nginx/conf.d/default.conf
-        exec nginx -g 'daemon off;'
-
 volumes:
   gc-postgres-data:

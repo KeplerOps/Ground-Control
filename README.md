@@ -29,7 +29,11 @@ MCP-driven AI workflows. The rest of the factory is coming.
 - **Pluggable verification** — Prover-agnostic architecture for design-level (TLA+, Alloy) and code-level (OpenJML, Frama-C, Verus) verification, with results stored as first-class graph nodes
 - **GitHub integration** — Sync issues into the traceability graph, or create issues from requirements with one command
 - **StrictDoc import** — Bulk-import from `.sdoc` files, idempotent
-- **MCP server** — 19 tools for Claude Code: manage requirements, run analysis, and build traceability without leaving your editor
+- **ReqIF import** — Bulk-import from ReqIF 1.2 `.reqif` files (IBM DOORS, Polarion, Jama), idempotent
+- **Text embeddings** — Pluggable vector embedding of requirement text with content-hash staleness detection, batch embedding, and graceful degradation when no provider is configured
+- **Semantic similarity** — Pairwise cosine similarity analysis across requirement embeddings to detect near-duplicate requirements with configurable threshold
+- **MCP server** — 30 tools for Claude Code: manage requirements, baselines, run analysis, embed text, and build traceability without leaving your editor
+- **Baseline management** — Named point-in-time snapshots of the requirement set for release management and specification evolution tracking
 - **Audit trail** — Every change to every entity is versioned via Hibernate Envers
 
 ## Near-Term Roadmap
@@ -106,7 +110,7 @@ compile time by ArchUnit.
 com.keplerops.groundcontrol/
 ├── api/               Controllers, DTOs, exception handling
 ├── domain/            Entities, services, enums, repository interfaces
-├── infrastructure/    AGE graph adapter, GitHub CLI adapter
+├── infrastructure/    AGE graph, GitHub CLI, embedding provider adapters
 └── shared/            Request logging, MDC
 ```
 

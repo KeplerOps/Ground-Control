@@ -26,18 +26,36 @@ import {
   detectConsistencyViolations,
   analyzeCompleteness,
   getDashboardStats,
+  getWorkOrder,
   importStrictdoc,
+  importReqif,
   syncGithub,
   getRequirementHistory,
   getRelationHistory,
   getTraceabilityLinkHistory,
+  getRequirementTimeline,
   deleteRelation,
   deleteTraceabilityLink,
   materializeGraph,
   getAncestors,
   getDescendants,
   findPaths,
+  getGraphVisualization,
+  extractSubgraph,
   createGitHubIssueViaApi,
+  runSweep,
+  runSweepAll,
+  embedRequirement,
+  getEmbeddingStatus,
+  embedProject,
+  deleteEmbedding,
+  analyzeSemanticSimilarity,
+  createBaseline,
+  listBaselines,
+  getBaseline,
+  getBaselineSnapshot,
+  compareBaselines,
+  deleteBaseline,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -472,6 +490,28 @@ server.tool(
   },
 );
 
+server.tool(
+  "gc_get_timeline",
+  "Get a unified audit timeline for a requirement, merging requirement, relation, and traceability link changes with field-level diffs. Paginated (default 100 entries).",
+  {
+    id: z.string().uuid().describe("Requirement UUID"),
+    change_category: z.enum(["REQUIREMENT", "RELATION", "TRACEABILITY_LINK"]).optional().describe("Filter by change category"),
+    from: z.string().optional().describe("Start of date range (ISO-8601 instant)"),
+    to: z.string().optional().describe("End of date range (ISO-8601 instant)"),
+    limit: z.number().int().min(1).max(500).optional().describe("Max entries to return (default 100)"),
+    offset: z.number().int().min(0).optional().describe("Number of entries to skip (default 0)"),
+  },
+  async ({ id, change_category, from, to, limit, offset }) => {
+    try {
+      const timeline = await getRequirementTimeline(id, change_category, from, to, limit, offset);
+      if (Array.isArray(timeline) && timeline.length === 0) return ok("No timeline entries found.");
+      return ok(JSON.stringify(timeline, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
 // ==========================================================================
 // Analysis tools
 // ==========================================================================
@@ -621,6 +661,26 @@ server.tool(
 );
 
 // ==========================================================================
+// Work order tool
+// ==========================================================================
+
+server.tool(
+  "gc_get_work_order",
+  "Get a topologically-sorted work order derived from the requirements DAG. Shows what is unblocked and ready to work on, grouped by wave, sorted by dependency order and MoSCoW priority.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await getWorkOrder(project);
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
 // Graph tools
 // ==========================================================================
 
@@ -678,7 +738,7 @@ server.tool(
 
 server.tool(
   "gc_find_paths",
-  "Find all paths between two requirements in the dependency graph.",
+  "Find all paths between two requirements in the dependency graph. Returns nodes (requirement UIDs) and edges (with source, target, and relation type) for each path.",
   {
     source: z.string().describe("Source requirement UID"),
     target: z.string().describe("Target requirement UID"),
@@ -689,6 +749,141 @@ server.tool(
       const paths = await findPaths(source, target, project);
       if (Array.isArray(paths) && paths.length === 0) return ok("No paths found.");
       return ok(JSON.stringify(paths, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_graph_visualization",
+  "Get the full graph visualization data (all requirement nodes and relation edges with metadata) for a project. Returns data suitable for rendering dependency diagrams.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const data = await getGraphVisualization(project);
+      return ok(JSON.stringify(data, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_extract_subgraph",
+  "Extract a subgraph starting from one or more root requirements. Returns all transitively reachable requirements and their relations as a self-contained graph.",
+  {
+    roots: z.array(z.string()).describe("Root requirement UIDs to start traversal from (e.g. ['GC-G001', 'GC-G002'])"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ roots, project }) => {
+    try {
+      const data = await extractSubgraph(roots, project);
+      return ok(JSON.stringify(data, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Baseline tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_baseline",
+  "Create a named baseline — a point-in-time snapshot of the current requirement set. Captures the current Envers revision number.",
+  {
+    name: z.string().max(100).describe("Baseline name (e.g. 'v1.0', 'Sprint-3 freeze')"),
+    description: z.string().optional().describe("Description of what this baseline represents"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ name, description, project }) => {
+    try {
+      const data = { name };
+      if (description !== undefined) data.description = description;
+      return ok(JSON.stringify(await createBaseline(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_baselines",
+  "List all baselines for a project, ordered by creation date (newest first).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const baselines = await listBaselines(project);
+      if (Array.isArray(baselines) && baselines.length === 0) return ok("No baselines found.");
+      return ok(JSON.stringify(baselines, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_baseline",
+  "Get a baseline by its UUID.",
+  {
+    id: z.string().uuid().describe("Baseline UUID"),
+  },
+  async ({ id }) => {
+    try {
+      return ok(JSON.stringify(await getBaseline(id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_baseline_snapshot",
+  "Get the requirement snapshot for a baseline — reconstructs the full requirement set as it existed at that point in time.",
+  {
+    id: z.string().uuid().describe("Baseline UUID"),
+  },
+  async ({ id }) => {
+    try {
+      return ok(JSON.stringify(await getBaselineSnapshot(id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_compare_baselines",
+  "Compare two baselines to see what requirements were added, removed, or modified between them.",
+  {
+    baseline_id: z.string().uuid().describe("First baseline UUID (the 'before')"),
+    other_baseline_id: z.string().uuid().describe("Second baseline UUID (the 'after')"),
+  },
+  async ({ baseline_id, other_baseline_id }) => {
+    try {
+      return ok(JSON.stringify(await compareBaselines(baseline_id, other_baseline_id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_baseline",
+  "Delete a baseline. This does not affect the underlying requirement history.",
+  {
+    id: z.string().uuid().describe("Baseline UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteBaseline(id);
+      return ok("Baseline deleted successfully.");
     } catch (e) {
       return err(e);
     }
@@ -716,6 +911,22 @@ server.tool(
 );
 
 server.tool(
+  "gc_import_reqif",
+  "Import requirements from a ReqIF 1.2 (.reqif) file. Idempotent: re-importing updates existing requirements by IDENTIFIER.",
+  {
+    file_path: z.string().describe("Absolute path to the .reqif file"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ file_path, project }) => {
+    try {
+      return ok(JSON.stringify(await importReqif(file_path, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
   "gc_sync_github",
   "Sync GitHub issues for a repository. Creates traceability links between issues and requirements.",
   {
@@ -725,6 +936,127 @@ server.tool(
   async ({ owner, repo }) => {
     try {
       return ok(JSON.stringify(await syncGithub(owner, repo), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Analysis sweep tools
+// ==========================================================================
+
+server.tool(
+  "gc_run_sweep",
+  "Run a full analysis sweep (orphans, coverage gaps, cross-wave, cycles, consistency) on a project. Returns a report of all detected problems. Optionally triggers configured notifications (GitHub issues, webhooks).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await runSweep(project);
+      if (!result.has_problems) return ok("Sweep complete. No problems detected.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_run_sweep_all",
+  "Run a full analysis sweep across ALL projects. Returns a list of reports, one per project.",
+  {},
+  async () => {
+    try {
+      const results = await runSweepAll();
+      if (Array.isArray(results) && results.length === 0) return ok("No projects to sweep.");
+      return ok(JSON.stringify(results, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Embedding tools
+// ==========================================================================
+
+server.tool(
+  "gc_embed_requirement",
+  "Generate a vector embedding for a requirement's text content (title, statement, rationale). Skips if embedding is already up-to-date. Returns status: 'embedded', 'up_to_date', or 'provider_unavailable'.",
+  {
+    requirement_id: z.string().uuid().describe("Requirement UUID"),
+  },
+  async ({ requirement_id }) => {
+    try {
+      const result = await embedRequirement(requirement_id);
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_embedding_status",
+  "Check the embedding status of a requirement: whether it has an embedding, if it's stale (text changed), or if the model has changed since embedding.",
+  {
+    requirement_id: z.string().uuid().describe("Requirement UUID"),
+  },
+  async ({ requirement_id }) => {
+    try {
+      const result = await getEmbeddingStatus(requirement_id);
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_embed_project",
+  "Batch-embed all requirements in a project. Only embeds requirements missing embeddings or with stale content. Use force=true to re-embed everything (e.g., after model migration).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    force: z.boolean().optional().describe("Force re-embedding all requirements (default false)"),
+  },
+  async ({ project, force }) => {
+    try {
+      const result = await embedProject(project, force);
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Semantic analysis tools
+// ==========================================================================
+
+server.tool(
+  "gc_analyze_similarity",
+  "Find semantically similar requirement pairs by computing cosine similarity across requirement embeddings. Returns pairs exceeding the threshold, sorted by similarity score descending. Requires embeddings to exist (run gc_embed_project first).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    threshold: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe("Minimum similarity score (0-1). Defaults to server-configured threshold (0.85)"),
+  },
+  async ({ project, threshold }) => {
+    try {
+      const result = await analyzeSemanticSimilarity(project, threshold);
+      if (result.pairs && result.pairs.length === 0) {
+        return ok(
+          `No similar requirement pairs found above threshold ${result.threshold}. ` +
+            `(${result.embedded_count}/${result.total_requirements} requirements embedded, ${result.pairs_analyzed} pairs analyzed)`,
+        );
+      }
+      return ok(JSON.stringify(result, null, 2));
     } catch (e) {
       return err(e);
     }

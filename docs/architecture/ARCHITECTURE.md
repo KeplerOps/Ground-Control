@@ -35,18 +35,24 @@ See [ADR-013](../../architecture/adrs/013-java-spring-boot-rewrite.md) for the J
 backend/src/main/java/com/keplerops/groundcontrol/
 ├── api/                          # REST controllers, DTOs, exception handler
 │   ├── requirements/             # RequirementController, request/response records
-│   ├── admin/                    # ImportController, SyncController, AnalysisController, GraphController
+│   ├── baselines/                # BaselineController, request/response records
+│   ├── admin/                    # ImportController, SweepController, AnalysisController, GraphController, EmbeddingController
 │   └── GlobalExceptionHandler.java
 ├── domain/                       # Business logic (Spring-web-free)
 │   ├── exception/                # Domain exception hierarchy
+│   ├── projects/                 # Project entity, repository, service
+│   ├── baselines/                # Baseline entity, repository, service
 │   └── requirements/
-│       ├── model/                # JPA entities (Requirement, RequirementRelation, TraceabilityLink, GitHubIssueSync, RequirementImport)
+│       ├── model/                # JPA entities (Requirement, RequirementRelation, TraceabilityLink, RequirementEmbedding, etc.)
 │       ├── repository/           # Spring Data JPA repository interfaces
-│       ├── service/              # RequirementService, TraceabilityService, ImportService, AnalysisService, etc.
+│       ├── service/              # RequirementService, AnalysisService, SimilarityService, EmbeddingService, etc.
 │       └── state/                # Enums (Status, RelationType, ArtifactType, LinkType, etc.)
 ├── infrastructure/               # External adapter implementations
 │   ├── age/                      # AgeGraphService (Apache AGE Cypher queries)
-│   └── github/                   # GitHubCliClient (gh CLI adapter)
+│   ├── embedding/                # NoOpEmbeddingProvider, OpenAiEmbeddingProvider, config
+│   ├── github/                   # GitHubCliClient (gh CLI adapter)
+│   ├── sweep/                    # ScheduledSweepRunner, notifiers
+│   └── web/                      # CORS config, SPA routing
 ├── shared/
 │   └── logging/                  # RequestLoggingFilter (MDC request_id)
 └── GroundControlApplication.java

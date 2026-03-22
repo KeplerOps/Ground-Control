@@ -17,3 +17,10 @@ variable "db_password" {
   sensitive   = true
   default     = "PLACEHOLDER"
 }
+
+variable "embedding_api_key" {
+  description = "API key for the embedding provider (e.g. OpenAI)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

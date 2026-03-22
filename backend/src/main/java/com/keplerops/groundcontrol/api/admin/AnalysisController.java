@@ -2,9 +2,11 @@ package com.keplerops.groundcontrol.api.admin;
 
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
+import com.keplerops.groundcontrol.domain.requirements.service.SimilarityService;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,11 +18,19 @@ import org.springframework.web.bind.annotation.RestController;
 public class AnalysisController {
 
     private final AnalysisService analysisService;
+    private final SimilarityService similarityService;
     private final ProjectService projectService;
+    private final double defaultSimilarityThreshold;
 
-    public AnalysisController(AnalysisService analysisService, ProjectService projectService) {
+    public AnalysisController(
+            AnalysisService analysisService,
+            SimilarityService similarityService,
+            ProjectService projectService,
+            @Value("${groundcontrol.embedding.similarity-threshold:0.85}") double defaultSimilarityThreshold) {
         this.analysisService = analysisService;
+        this.similarityService = similarityService;
         this.projectService = projectService;
+        this.defaultSimilarityThreshold = defaultSimilarityThreshold;
     }
 
     @GetMapping("/cycles")
@@ -78,9 +88,23 @@ public class AnalysisController {
                 .toList();
     }
 
+    @GetMapping("/work-order")
+    public WorkOrderResponse getWorkOrder(@RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return WorkOrderResponse.from(analysisService.getWorkOrder(projectId));
+    }
+
     @GetMapping("/dashboard-stats")
     public DashboardStatsResponse getDashboardStats(@RequestParam(required = false) String project) {
         var projectId = projectService.resolveProjectId(project);
         return DashboardStatsResponse.from(analysisService.getDashboardStats(projectId));
+    }
+
+    @GetMapping("/semantic-similarity")
+    public SimilarityResultResponse findSemanticSimilarity(
+            @RequestParam(required = false) String project, @RequestParam(required = false) Double threshold) {
+        var projectId = projectService.resolveProjectId(project);
+        var effectiveThreshold = threshold != null ? threshold : defaultSimilarityThreshold;
+        return SimilarityResultResponse.from(similarityService.findSimilarRequirements(projectId, effectiveThreshold));
     }
 }
