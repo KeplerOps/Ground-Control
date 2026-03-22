@@ -6,11 +6,9 @@ import com.keplerops.groundcontrol.domain.requirements.service.GraphClient;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-// TODO: split admin/read endpoints into separate controllers
 @RestController
 public class GraphController {
 
@@ -22,11 +20,6 @@ public class GraphController {
         this.graphClient = graphClient;
         this.analysisService = analysisService;
         this.projectService = projectService;
-    }
-
-    @PostMapping("/api/v1/admin/graph/materialize")
-    public void materializeGraph() {
-        graphClient.materializeGraph();
     }
 
     @GetMapping("/api/v1/graph/ancestors/{uid}")

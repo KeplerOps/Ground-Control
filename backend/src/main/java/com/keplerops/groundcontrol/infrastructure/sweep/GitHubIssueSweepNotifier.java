@@ -26,6 +26,7 @@ public class GitHubIssueSweepNotifier implements SweepNotifier {
     private static final Logger log = LoggerFactory.getLogger(GitHubIssueSweepNotifier.class);
     private static final DateTimeFormatter TIMESTAMP_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC);
+    private static final String SWEEP_TITLE_PREFIX = "[Sweep]";
 
     private final GitHubClient gitHubClient;
     private final SweepProperties properties;
@@ -45,16 +46,42 @@ public class GitHubIssueSweepNotifier implements SweepNotifier {
 
     @Override
     public void notify(SweepReport report) {
-        // Each sweep creates a new issue; deduplication is not yet implemented.
-        // TODO: search for open sweep issues before creating a new one to avoid duplicates.
-        var title =
-                String.format("[Sweep] %d problems detected in %s", report.totalProblems(), report.projectIdentifier());
-        var body = formatBody(report);
         var repo = properties.github().repo();
         var labels = properties.github().labels();
 
+        if (hasOpenSweepIssue(repo, report.projectIdentifier())) {
+            log.info(
+                    "sweep_github_issue_skipped: open sweep issue already exists for project={}",
+                    report.projectIdentifier());
+            return;
+        }
+
+        var title =
+                String.format("[Sweep] %d problems detected in %s", report.totalProblems(), report.projectIdentifier());
+        var body = formatBody(report);
+
         var issue = gitHubClient.createIssue(repo, title, body, labels);
         log.info("sweep_github_issue_created: project={} issue={}", report.projectIdentifier(), issue.number());
+    }
+
+    private boolean hasOpenSweepIssue(String repo, String projectIdentifier) {
+        String[] parts = repo.split("/", 2);
+        if (parts.length != 2) {
+            log.warn("sweep_dedup_skipped: cannot parse owner/repo from '{}'", repo);
+            return false;
+        }
+        String owner = parts[0];
+        String repoName = parts[1];
+
+        try {
+            return gitHubClient.fetchAllIssues(owner, repoName).stream()
+                    .anyMatch(issue -> "OPEN".equalsIgnoreCase(issue.state())
+                            && issue.title().startsWith(SWEEP_TITLE_PREFIX)
+                            && issue.title().contains(projectIdentifier));
+        } catch (Exception e) {
+            log.warn("sweep_dedup_check_failed: falling back to creating new issue. error={}", e.getMessage());
+            return false;
+        }
     }
 
     static String formatBody(SweepReport report) {
