@@ -45,6 +45,10 @@ import {
   createGitHubIssueViaApi,
   runSweep,
   runSweepAll,
+  embedRequirement,
+  getEmbeddingStatus,
+  embedProject,
+  deleteEmbedding,
   createBaseline,
   listBaselines,
   getBaseline,
@@ -967,6 +971,59 @@ server.tool(
       const results = await runSweepAll();
       if (Array.isArray(results) && results.length === 0) return ok("No projects to sweep.");
       return ok(JSON.stringify(results, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Embedding tools
+// ==========================================================================
+
+server.tool(
+  "gc_embed_requirement",
+  "Generate a vector embedding for a requirement's text content (title, statement, rationale). Skips if embedding is already up-to-date. Returns status: 'embedded', 'up_to_date', or 'provider_unavailable'.",
+  {
+    requirement_id: z.string().uuid().describe("Requirement UUID"),
+  },
+  async ({ requirement_id }) => {
+    try {
+      const result = await embedRequirement(requirement_id);
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_embedding_status",
+  "Check the embedding status of a requirement: whether it has an embedding, if it's stale (text changed), or if the model has changed since embedding.",
+  {
+    requirement_id: z.string().uuid().describe("Requirement UUID"),
+  },
+  async ({ requirement_id }) => {
+    try {
+      const result = await getEmbeddingStatus(requirement_id);
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_embed_project",
+  "Batch-embed all requirements in a project. Only embeds requirements missing embeddings or with stale content. Use force=true to re-embed everything (e.g., after model migration).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    force: z.boolean().optional().describe("Force re-embedding all requirements (default false)"),
+  },
+  async ({ project, force }) => {
+    try {
+      const result = await embedProject(project, force);
+      return ok(JSON.stringify(result, null, 2));
     } catch (e) {
       return err(e);
     }

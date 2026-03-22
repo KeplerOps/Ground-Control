@@ -56,6 +56,13 @@ groundcontrol:
     webhook:
       enabled: ${GC_SWEEP_WEBHOOK_ENABLED:false}
       url: ${GC_SWEEP_WEBHOOK_URL:}
+  embedding:
+    provider: ${GC_EMBEDDING_PROVIDER:none}
+    api-key: ${GC_EMBEDDING_API_KEY:}
+    api-url: ${GC_EMBEDDING_API_URL:https://api.openai.com/v1}
+    model: ${GC_EMBEDDING_MODEL:text-embedding-3-small}
+    dimensions: ${GC_EMBEDDING_DIMENSIONS:1536}
+    batch-size: ${GC_EMBEDDING_BATCH_SIZE:100}
 
 springdoc:
   api-docs:

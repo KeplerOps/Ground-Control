@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.73.0] - 2026-03-22
+
+### Added
+
+- Requirement text embedding infrastructure (GC-C015): pluggable vector embedding
+  of requirement text content (title, statement, rationale) with content-hash-based
+  staleness detection and batch embedding support
+- `EmbeddingProvider` domain interface with `NoOpEmbeddingProvider` (default, graceful
+  degradation) and `OpenAiEmbeddingProvider` (conditional on `GC_EMBEDDING_PROVIDER=openai`)
+- REST API endpoints: `POST /api/v1/embeddings/{id}`, `GET /api/v1/embeddings/{id}/status`,
+  `POST /api/v1/embeddings/batch`, `DELETE /api/v1/embeddings/{id}`
+- MCP tools: `gc_embed_requirement`, `gc_get_embedding_status`, `gc_embed_project`
+- Flyway migration V015 creates `requirement_embedding` table with BYTEA storage,
+  SHA-256 content hash, and model tracking
+- Configuration via `GC_EMBEDDING_PROVIDER`, `GC_EMBEDDING_API_KEY`,
+  `GC_EMBEDDING_MODEL`, `GC_EMBEDDING_DIMENSIONS`, `GC_EMBEDDING_BATCH_SIZE`
+
 ## [0.72.0] - 2026-03-22
 
 ### Fixed
