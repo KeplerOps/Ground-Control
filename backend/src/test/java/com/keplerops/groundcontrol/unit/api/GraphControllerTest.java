@@ -71,6 +71,18 @@ class GraphControllerTest {
                     .andExpect(jsonPath("$", hasSize(2)))
                     .andExpect(jsonPath("$[0]", is("REQ-PARENT")));
         }
+
+        @Test
+        void depthAbove20_returns400() throws Exception {
+            mockMvc.perform(get("/api/v1/graph/ancestors/REQ-CHILD").param("depth", "21"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void depthZero_returns400() throws Exception {
+            mockMvc.perform(get("/api/v1/graph/ancestors/REQ-CHILD").param("depth", "0"))
+                    .andExpect(status().isBadRequest());
+        }
     }
 
     @Nested
@@ -84,6 +96,12 @@ class GraphControllerTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$", hasSize(1)))
                     .andExpect(jsonPath("$[0]", is("REQ-CHILD")));
+        }
+
+        @Test
+        void depthAbove20_returns400() throws Exception {
+            mockMvc.perform(get("/api/v1/graph/descendants/REQ-PARENT").param("depth", "21"))
+                    .andExpect(status().isBadRequest());
         }
     }
 

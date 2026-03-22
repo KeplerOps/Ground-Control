@@ -1,6 +1,7 @@
 package com.keplerops.groundcontrol.unit.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
@@ -139,7 +140,7 @@ class AgeGraphServiceTest {
 
             // setupSearchPath: LOAD + SET
             verify(jdbcTemplate, times(2)).execute(anyString());
-            verify(jdbcTemplate).query(contains("PARENT"), any(RowCallbackHandler.class));
+            verify(jdbcTemplate).query(contains("PARENT"), any(RowCallbackHandler.class), anyString(), anyString());
         }
 
         @Test
@@ -147,7 +148,7 @@ class AgeGraphServiceTest {
             enabledService.getDescendants("REQ-001", 5);
 
             verify(jdbcTemplate, times(2)).execute(anyString());
-            verify(jdbcTemplate).query(contains("PARENT"), any(RowCallbackHandler.class));
+            verify(jdbcTemplate).query(contains("PARENT"), any(RowCallbackHandler.class), anyString(), anyString());
         }
 
         @Test
@@ -155,7 +156,78 @@ class AgeGraphServiceTest {
             enabledService.findPaths("REQ-001", "REQ-002");
 
             verify(jdbcTemplate, times(2)).execute(anyString());
-            verify(jdbcTemplate).query(contains("label(r)"), any(RowCallbackHandler.class));
+            verify(jdbcTemplate).query(contains("label(r)"), any(RowCallbackHandler.class), anyString(), anyString());
+        }
+    }
+
+    @Nested
+    class DepthValidation {
+
+        private AgeGraphService enabledService;
+
+        @BeforeEach
+        void setUp() {
+            var enabledProperties = new AgeProperties(true, "test_graph");
+            enabledService =
+                    new AgeGraphService(jdbcTemplate, enabledProperties, requirementRepository, relationRepository);
+        }
+
+        @Test
+        void getAncestors_depthAboveMax_throws() {
+            assertThatThrownBy(() -> enabledService.getAncestors("REQ-001", AgeGraphService.MAX_DEPTH + 1))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("depth");
+        }
+
+        @Test
+        void getAncestors_depthZero_throws() {
+            assertThatThrownBy(() -> enabledService.getAncestors("REQ-001", 0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("depth");
+        }
+
+        @Test
+        void getDescendants_depthAboveMax_throws() {
+            assertThatThrownBy(() -> enabledService.getDescendants("REQ-001", AgeGraphService.MAX_DEPTH + 1))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("depth");
+        }
+
+        @Test
+        void getAncestors_maxDepth_isAllowed() {
+            // MAX_DEPTH itself must be accepted
+            enabledService.getAncestors("REQ-001", AgeGraphService.MAX_DEPTH);
+
+            verify(jdbcTemplate).query(contains("PARENT"), any(RowCallbackHandler.class), anyString(), anyString());
+        }
+    }
+
+    @Nested
+    class EscapeCypher {
+
+        @Test
+        void escapesBackslash() {
+            assertThat(AgeGraphService.escapeCypher("a\\b")).isEqualTo("a\\\\b");
+        }
+
+        @Test
+        void escapesSingleQuote() {
+            assertThat(AgeGraphService.escapeCypher("it's")).isEqualTo("it\\'s");
+        }
+
+        @Test
+        void stripsNullBytes() {
+            assertThat(AgeGraphService.escapeCypher("a\0b")).isEqualTo("ab");
+        }
+
+        @Test
+        void escapesBacktick() {
+            assertThat(AgeGraphService.escapeCypher("a`b")).isEqualTo("a\\`b");
+        }
+
+        @Test
+        void handlesNull() {
+            assertThat(AgeGraphService.escapeCypher(null)).isEqualTo("");
         }
     }
 }
