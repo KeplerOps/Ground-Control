@@ -466,6 +466,39 @@ class RequirementServiceTest {
         }
 
         @Test
+        void combinesOutgoingAndIncomingRelations() {
+            var id = UUID.randomUUID();
+            var req = makeRequirement("REQ-001");
+            var target = makeRequirement("REQ-002");
+            var source = makeRequirement("REQ-003");
+            var outgoingRelation = new RequirementRelation(req, target, RelationType.DEPENDS_ON);
+            var incomingRelation = new RequirementRelation(source, req, RelationType.DEPENDS_ON);
+            when(requirementRepository.findById(id)).thenReturn(Optional.of(req));
+            when(relationRepository.findBySourceIdWithEntities(id)).thenReturn(List.of(outgoingRelation));
+            when(relationRepository.findByTargetIdWithEntities(id)).thenReturn(List.of(incomingRelation));
+
+            var result = service.getRelations(id);
+
+            assertThat(result).containsExactlyInAnyOrder(outgoingRelation, incomingRelation);
+        }
+
+        @Test
+        void doesNotMutateUnmodifiableJpaResultList() {
+            var id = UUID.randomUUID();
+            var req = makeRequirement("REQ-001");
+            var target = makeRequirement("REQ-002");
+            var outgoingRelation = new RequirementRelation(req, target, RelationType.DEPENDS_ON);
+            // Simulate a JPA implementation returning an unmodifiable list
+            when(requirementRepository.findById(id)).thenReturn(Optional.of(req));
+            when(relationRepository.findBySourceIdWithEntities(id)).thenReturn(List.of(outgoingRelation));
+            when(relationRepository.findByTargetIdWithEntities(id)).thenReturn(List.of());
+
+            // Must not throw UnsupportedOperationException
+            var result = service.getRelations(id);
+            assertThat(result).containsExactly(outgoingRelation);
+        }
+
+        @Test
         void throwsNotFoundForMissingRequirement() {
             var id = UUID.randomUUID();
             when(requirementRepository.findById(id)).thenReturn(Optional.empty());
