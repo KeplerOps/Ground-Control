@@ -83,6 +83,13 @@ http://localhost:8000/api/v1/
 | GET | `/analysis/coverage-gaps?linkType=X` | — | 200 | Find coverage gaps by link type |
 | GET | `/analysis/impact/{id}` | — | 200 | Transitive impact analysis |
 | GET | `/analysis/cross-wave` | — | 200 | Cross-wave dependency violations |
+| GET | `/analysis/consistency-violations` | — | 200 | Detect consistency violations |
+| GET | `/analysis/completeness` | — | 200 | Analyze completeness |
+| GET | `/analysis/work-order` | — | 200 | Topological work order |
+| GET | `/analysis/dashboard-stats` | — | 200 | Aggregate project health stats |
+| GET | `/analysis/semantic-similarity` | — | 200 | Find semantically similar requirement pairs |
+| POST | `/analysis/sweep` | — | 200 | Run analysis sweep on one project |
+| POST | `/analysis/sweep/all` | — | 200 | Run analysis sweep on all projects |
 
 **CycleResponse** (`GET /analysis/cycles`):
 
@@ -101,6 +108,60 @@ http://localhost:8000/api/v1/
 
 Each cycle lists the member UIDs (closing back to the start) and the edges that
 form it, including the relation type between each consecutive pair.
+
+`GET /analysis/semantic-similarity` accepts query parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `project` | string | auto-resolved | Project identifier |
+| `threshold` | double | 0.85 | Minimum similarity score (0–1) |
+
+**SimilarityResultResponse:**
+
+```json
+{
+  "totalRequirements": 50,
+  "embeddedCount": 48,
+  "pairsAnalyzed": 1128,
+  "threshold": 0.85,
+  "pairs": [
+    {
+      "uid1": "REQ-012",
+      "title1": "User authentication via SSO",
+      "uid2": "REQ-037",
+      "title2": "Single sign-on login support",
+      "score": 0.93
+    }
+  ]
+}
+```
+
+### Embeddings
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/embeddings/{requirementId}` | — | 200 | Embed a single requirement |
+| GET | `/embeddings/{requirementId}/status` | — | 200 | Get embedding status |
+| POST | `/embeddings/batch?project=&force=false` | — | 200 | Batch embed all requirements in a project |
+| DELETE | `/embeddings/{requirementId}` | — | 204 | Delete embedding |
+
+Requires `GC_EMBEDDING_PROVIDER=openai` and `GC_EMBEDDING_API_KEY` to be set.
+When no provider is configured, endpoints return `provider_unavailable` status
+(graceful degradation).
+
+**EmbeddingStatusResponse** (`GET /embeddings/{id}/status`):
+
+```json
+{
+  "requirementId": "uuid",
+  "hasEmbedding": true,
+  "isStale": false,
+  "modelMismatch": false,
+  "currentModelId": "text-embedding-3-small",
+  "embeddingModelId": "text-embedding-3-small",
+  "embeddedAt": "2026-03-22T03:00:00Z"
+}
+```
 
 ### Baselines
 
