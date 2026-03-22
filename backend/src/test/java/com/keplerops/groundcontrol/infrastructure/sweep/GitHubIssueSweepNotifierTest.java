@@ -1,18 +1,104 @@
 package com.keplerops.groundcontrol.infrastructure.sweep;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.requirements.service.CompletenessResult;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
+import com.keplerops.groundcontrol.domain.requirements.service.GitHubClient;
+import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class GitHubIssueSweepNotifierTest {
+
+    @Nested
+    class Notify {
+
+        private GitHubClient gitHubClient;
+        private GitHubIssueSweepNotifier notifier;
+        private SweepReport report;
+
+        @BeforeEach
+        void setUp() {
+            gitHubClient = mock(GitHubClient.class);
+            var props = new SweepProperties(
+                    true,
+                    "0 * * * *",
+                    new SweepProperties.GitHubNotification(true, "owner/repo", List.of("sweep")),
+                    new SweepProperties.WebhookNotification(false, null));
+            notifier = new GitHubIssueSweepNotifier(gitHubClient, props);
+            report = new SweepReport(
+                    "my-project",
+                    Instant.now(),
+                    List.of(),
+                    List.of(new SweepReport.RequirementSummary("GC-001", "Orphan")),
+                    Map.of(),
+                    List.of(),
+                    List.of(),
+                    new CompletenessResult(1, Map.of("DRAFT", 1), List.of()));
+        }
+
+        @Test
+        void createsIssueWhenNoOpenSweepIssueExists() {
+            when(gitHubClient.fetchAllIssues("owner", "repo")).thenReturn(List.of());
+            when(gitHubClient.createIssue(anyString(), anyString(), anyString(), anyList()))
+                    .thenReturn(new GitHubIssueData(42, "title", "OPEN", "url", "body", List.of()));
+
+            notifier.notify(report);
+
+            verify(gitHubClient).createIssue(anyString(), anyString(), anyString(), anyList());
+        }
+
+        @Test
+        void skipsCreationWhenOpenSweepIssueAlreadyExists() {
+            var existingIssue = new GitHubIssueData(
+                    10, "[Sweep] 1 problems detected in my-project", "OPEN", "url", "body", List.of());
+            when(gitHubClient.fetchAllIssues("owner", "repo")).thenReturn(List.of(existingIssue));
+
+            notifier.notify(report);
+
+            verify(gitHubClient, never()).createIssue(any(), any(), any(), any());
+        }
+
+        @Test
+        void createsIssueWhenExistingSweepIssueIsClosed() {
+            var closedIssue = new GitHubIssueData(
+                    10, "[Sweep] 1 problems detected in my-project", "CLOSED", "url", "body", List.of());
+            when(gitHubClient.fetchAllIssues("owner", "repo")).thenReturn(List.of(closedIssue));
+            when(gitHubClient.createIssue(anyString(), anyString(), anyString(), anyList()))
+                    .thenReturn(new GitHubIssueData(11, "title", "OPEN", "url", "body", List.of()));
+
+            notifier.notify(report);
+
+            verify(gitHubClient).createIssue(anyString(), anyString(), anyString(), anyList());
+        }
+
+        @Test
+        void createsIssueWhenFetchThrowsException() {
+            when(gitHubClient.fetchAllIssues("owner", "repo"))
+                    .thenThrow(new RuntimeException("network error"));
+            when(gitHubClient.createIssue(anyString(), anyString(), anyString(), anyList()))
+                    .thenReturn(new GitHubIssueData(42, "title", "OPEN", "url", "body", List.of()));
+
+            notifier.notify(report);
+
+            verify(gitHubClient).createIssue(anyString(), anyString(), anyString(), anyList());
+        }
+    }
 
     @Test
     void formatsBodyWithAllSections() {
