@@ -3,7 +3,10 @@ package com.keplerops.groundcontrol.api.admin;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
 import com.keplerops.groundcontrol.domain.requirements.service.GraphClient;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import java.util.List;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -12,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 // TODO: split admin/read endpoints into separate controllers
 @RestController
+@Validated
 public class GraphController {
 
     private final GraphClient graphClient;
@@ -32,7 +36,7 @@ public class GraphController {
     @GetMapping("/api/v1/graph/ancestors/{uid}")
     public List<String> getAncestors(
             @PathVariable String uid,
-            @RequestParam(defaultValue = "10") int depth,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(20) int depth,
             @RequestParam(required = false) String project) {
         if (project != null) {
             projectService.resolveProjectId(project);
@@ -43,7 +47,7 @@ public class GraphController {
     @GetMapping("/api/v1/graph/descendants/{uid}")
     public List<String> getDescendants(
             @PathVariable String uid,
-            @RequestParam(defaultValue = "10") int depth,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(20) int depth,
             @RequestParam(required = false) String project) {
         if (project != null) {
             projectService.resolveProjectId(project);
