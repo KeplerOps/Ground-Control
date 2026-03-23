@@ -29,6 +29,8 @@ public class GraphController {
         graphClient.materializeGraph();
     }
 
+    private static final int MAX_GRAPH_DEPTH = 50;
+
     @GetMapping("/api/v1/graph/ancestors/{uid}")
     public List<String> getAncestors(
             @PathVariable String uid,
@@ -37,7 +39,7 @@ public class GraphController {
         if (project != null) {
             projectService.resolveProjectId(project);
         }
-        return graphClient.getAncestors(uid, depth);
+        return graphClient.getAncestors(uid, Math.max(1, Math.min(depth, MAX_GRAPH_DEPTH)));
     }
 
     @GetMapping("/api/v1/graph/descendants/{uid}")
@@ -48,7 +50,7 @@ public class GraphController {
         if (project != null) {
             projectService.resolveProjectId(project);
         }
-        return graphClient.getDescendants(uid, depth);
+        return graphClient.getDescendants(uid, Math.max(1, Math.min(depth, MAX_GRAPH_DEPTH)));
     }
 
     @GetMapping("/api/v1/graph/visualization")

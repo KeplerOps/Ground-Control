@@ -30,7 +30,10 @@ public class WebhookSweepNotifier implements SweepNotifier {
     public WebhookSweepNotifier(SweepProperties properties, ObjectMapper objectMapper) {
         this.properties = properties;
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder().connectTimeout(TIMEOUT).build();
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(TIMEOUT)
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .build();
     }
 
     @PostConstruct

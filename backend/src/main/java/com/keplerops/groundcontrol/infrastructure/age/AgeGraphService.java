@@ -175,9 +175,12 @@ public class AgeGraphService implements GraphClient {
     }
 
     /**
-     * Escapes a value for safe inclusion in a Cypher single-quoted string literal.
-     * Handles backslash, single quote, and strips control characters that could
-     * break out of string context.
+     * Escapes a value for safe inclusion in a Cypher single-quoted string literal
+     * inside a dollar-quoted SQL block ({@code $$ ... $$}).
+     *
+     * <p>Handles: backslash, single quote, control characters, and critically the
+     * {@code $$} delimiter sequence which could break out of the Cypher block
+     * and allow arbitrary SQL injection.
      */
     private static String escapeCypher(String value) {
         if (value == null) {
@@ -186,6 +189,11 @@ public class AgeGraphService implements GraphClient {
         var sb = new StringBuilder(value.length());
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
+            // Prevent $$ delimiter injection: replace $ with escaped unicode
+            if (c == '$') {
+                sb.append("\\u0024");
+                continue;
+            }
             switch (c) {
                 case '\\' -> sb.append("\\\\");
                 case '\'' -> sb.append("\\'");

@@ -35,10 +35,17 @@ public final class RequirementSpecifications {
 
     public static Specification<Requirement> searchTitleOrStatement(String search) {
         return (root, query, cb) -> {
-            var pattern = "%" + search.toLowerCase(Locale.ROOT) + "%";
+            var escaped = escapeLikePattern(search.toLowerCase(Locale.ROOT));
+            var pattern = "%" + escaped + "%";
             return cb.or(
-                    cb.like(cb.lower(root.get("title")), pattern), cb.like(cb.lower(root.get("statement")), pattern));
+                    cb.like(cb.lower(root.get("title")), pattern, '\\'),
+                    cb.like(cb.lower(root.get("statement")), pattern, '\\'));
         };
+    }
+
+    /** Escape SQL LIKE wildcards to prevent pattern injection. */
+    private static String escapeLikePattern(String input) {
+        return input.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     public static Specification<Requirement> notArchived() {
