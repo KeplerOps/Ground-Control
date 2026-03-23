@@ -6,6 +6,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
 import com.keplerops.groundcontrol.infrastructure.github.GitHubCliClient;
+import com.keplerops.groundcontrol.infrastructure.github.GitHubCliClient.IssuePage;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -121,6 +123,77 @@ class GitHubCliClientTest {
             List<GitHubIssueData> result = parseJson(json);
 
             assertThat(result.get(0).labels()).containsExactly("bug", "P0", "phase-1");
+        }
+    }
+
+    @Nested
+    class Pagination {
+
+        @Test
+        void singlePageReturnsAllIssues() {
+            var client = stubbedClient(List.of(new IssuePage(List.of(issue(1), issue(2)), 2)));
+
+            List<GitHubIssueData> result = client.fetchAllIssues("o", "r");
+
+            assertThat(result).hasSize(2);
+            assertThat(result.get(0).number()).isEqualTo(1);
+            assertThat(result.get(1).number()).isEqualTo(2);
+        }
+
+        @Test
+        void paginatesUntilPartialPage() {
+            var client = stubbedClient(
+                    List.of(new IssuePage(makeIssues(1, 100), 100), new IssuePage(makeIssues(101, 130), 30)));
+
+            List<GitHubIssueData> result = client.fetchAllIssues("o", "r");
+
+            assertThat(result).hasSize(130);
+            assertThat(result.get(0).number()).isEqualTo(1);
+            assertThat(result.get(129).number()).isEqualTo(130);
+        }
+
+        @Test
+        void paginatesCorrectlyWhenPRsFilteredFromFullPage() {
+            // 100 raw items but only 90 issues (10 PRs filtered) — should still fetch next page
+            var client =
+                    stubbedClient(List.of(new IssuePage(makeIssues(1, 90), 100), new IssuePage(makeIssues(91, 95), 5)));
+
+            List<GitHubIssueData> result = client.fetchAllIssues("o", "r");
+
+            assertThat(result).hasSize(95);
+        }
+
+        @Test
+        void emptyPageReturnsEmpty() {
+            var client = stubbedClient(List.of(new IssuePage(List.of(), 0)));
+
+            List<GitHubIssueData> result = client.fetchAllIssues("o", "r");
+
+            assertThat(result).isEmpty();
+        }
+
+        private GitHubCliClient stubbedClient(List<IssuePage> pages) {
+            return new GitHubCliClient(new ObjectMapper(), "gh") {
+                private int callCount = 0;
+
+                @Override
+                protected IssuePage fetchIssuePage(String owner, String repo, int page) {
+                    return pages.get(callCount++);
+                }
+            };
+        }
+
+        private List<GitHubIssueData> makeIssues(int from, int to) {
+            List<GitHubIssueData> issues = new ArrayList<>();
+            for (int i = from; i <= to; i++) {
+                issues.add(issue(i));
+            }
+            return issues;
+        }
+
+        private GitHubIssueData issue(int number) {
+            return new GitHubIssueData(
+                    number, "Issue " + number, "OPEN", "https://github.com/o/r/issues/" + number, "", List.of());
         }
     }
 

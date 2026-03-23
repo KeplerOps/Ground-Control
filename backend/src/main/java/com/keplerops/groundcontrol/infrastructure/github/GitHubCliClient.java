@@ -46,7 +46,11 @@ public class GitHubCliClient implements GitHubClient {
         return "gh";
     }
 
-    record IssuePage(List<GitHubIssueData> issues, int rawCount) {}
+    public record IssuePage(List<GitHubIssueData> issues, int rawCount) {
+        public IssuePage {
+            issues = List.copyOf(issues);
+        }
+    }
 
     @Override
     public List<GitHubIssueData> fetchAllIssues(String owner, String repo) {
@@ -75,7 +79,7 @@ public class GitHubCliClient implements GitHubClient {
         return allIssues;
     }
 
-    IssuePage fetchIssuePage(String owner, String repo, int page) {
+    protected IssuePage fetchIssuePage(String owner, String repo, int page) {
         try {
             ProcessBuilder pb = new ProcessBuilder(
                     ghPath,
