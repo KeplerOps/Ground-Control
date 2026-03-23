@@ -35,12 +35,12 @@ import org.hibernate.envers.Audited;
 public class TraceabilityLink {
 
     /*@ public invariant requirement != null;
-      @ public invariant artifactType != null;
-      @ public invariant artifactIdentifier != null && !artifactIdentifier.isEmpty();
-      @ public invariant linkType != null;
-      @ public invariant syncStatus != null;
-      @ public invariant artifactUrl != null;
-      @ public invariant artifactTitle != null; @*/
+    @ public invariant artifactType != null;
+    @ public invariant artifactIdentifier != null && !artifactIdentifier.isEmpty();
+    @ public invariant linkType != null;
+    @ public invariant syncStatus != null;
+    @ public invariant artifactUrl != null;
+    @ public invariant artifactTitle != null; @*/
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -86,14 +86,14 @@ public class TraceabilityLink {
     }
 
     /*@ requires requirement != null;
-      @ requires artifactType != null;
-      @ requires artifactIdentifier != null && !artifactIdentifier.isEmpty();
-      @ requires linkType != null;
-      @ ensures this.requirement == requirement;
-      @ ensures this.artifactType == artifactType;
-      @ ensures this.artifactIdentifier.equals(artifactIdentifier);
-      @ ensures this.linkType == linkType;
-      @ ensures this.syncStatus == SyncStatus.SYNCED; @*/
+    @ requires artifactType != null;
+    @ requires artifactIdentifier != null && !artifactIdentifier.isEmpty();
+    @ requires linkType != null;
+    @ ensures this.requirement == requirement;
+    @ ensures this.artifactType == artifactType;
+    @ ensures this.artifactIdentifier.equals(artifactIdentifier);
+    @ ensures this.linkType == linkType;
+    @ ensures this.syncStatus == SyncStatus.SYNCED; @*/
     public TraceabilityLink(
             Requirement requirement, ArtifactType artifactType, String artifactIdentifier, LinkType linkType) {
         this.requirement = requirement;
@@ -141,7 +141,7 @@ public class TraceabilityLink {
     }
 
     /*@ requires syncStatus != null;
-      @ ensures this.syncStatus == syncStatus; @*/
+    @ ensures this.syncStatus == syncStatus; @*/
     public void setSyncStatus(/*@ non_null @*/ SyncStatus syncStatus) {
         this.syncStatus = syncStatus;
     }
@@ -150,7 +150,9 @@ public class TraceabilityLink {
         return artifactUrl;
     }
 
-    public void setArtifactUrl(String artifactUrl) {
+    /*@ requires artifactUrl != null;
+    @ ensures this.artifactUrl == artifactUrl; @*/
+    public void setArtifactUrl(/*@ non_null @*/ String artifactUrl) {
         this.artifactUrl = artifactUrl;
     }
 
@@ -158,7 +160,9 @@ public class TraceabilityLink {
         return artifactTitle;
     }
 
-    public void setArtifactTitle(String artifactTitle) {
+    /*@ requires artifactTitle != null;
+    @ ensures this.artifactTitle == artifactTitle; @*/
+    public void setArtifactTitle(/*@ non_null @*/ String artifactTitle) {
         this.artifactTitle = artifactTitle;
     }
 
