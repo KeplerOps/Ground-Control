@@ -11,5 +11,4 @@ package com.keplerops.groundcontrol.domain.requirements.service;
  * @param target UID of the target requirement involved (for explicit relation errors), or null
  * @param issueRef GitHub issue reference involved (for traceability errors), or null
  */
-public record ImportError(
-        String phase, String uid, String error, String parent, String target, String issueRef) {}
+public record ImportError(String phase, String uid, String error, String parent, String target, String issueRef) {}

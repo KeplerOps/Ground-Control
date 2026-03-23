@@ -945,8 +945,7 @@ class ImportServiceTest {
 
             assertThat(result.relationsCreated()).isZero();
             assertThat(result.errors())
-                    .anyMatch(e -> e.phase().equals("relations")
-                            && e.error().contains("Simulated relation failure"));
+                    .anyMatch(e -> e.phase().equals("relations") && e.error().contains("Simulated relation failure"));
         }
 
         @Test
@@ -1061,8 +1060,8 @@ class ImportServiceTest {
 
             assertThat(result.relationsCreated()).isZero();
             assertThat(result.errors())
-                    .anyMatch(e -> e.phase().equals("relations")
-                            && e.error().contains("Simulated SpecRelation failure"));
+                    .anyMatch(
+                            e -> e.phase().equals("relations") && e.error().contains("Simulated SpecRelation failure"));
         }
 
         @Test

@@ -85,10 +85,7 @@ public class ImportService {
     }
 
     private Map<String, UUID> upsertRequirements(
-            UUID projectId,
-            List<ParsedRequirement> requirements,
-            ImportCounters counters,
-            List<ImportError> errors) {
+            UUID projectId, List<ParsedRequirement> requirements, ImportCounters counters, List<ImportError> errors) {
         Map<String, UUID> uidToId = new HashMap<>();
         for (ParsedRequirement req : requirements) {
             try {
