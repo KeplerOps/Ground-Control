@@ -149,6 +149,12 @@ resource "aws_instance" "this" {
   iam_instance_profile   = aws_iam_instance_profile.instance.name
   subnet_id              = var.subnet_id
 
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+  }
+
   root_block_device {
     volume_size = 8
     volume_type = "gp3"
@@ -156,18 +162,16 @@ resource "aws_instance" "this" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user-data.sh.tftpl", {
-    aws_region            = var.aws_region
-    data_device           = var.data_device
-    ssm_tailscale_key     = var.ssm_tailscale_key
-    ssm_db_password       = var.ssm_db_password
-    tailscale_hostname    = var.tailscale_hostname
-    ecr_registry_url      = var.ecr_registry_url
-    backup_bucket         = var.backup_bucket_name
-    gc_image              = var.gc_image
-    gc_database_user      = var.gc_database_user
-    gc_database_name      = var.gc_database_name
-    ssm_embedding_api_key = var.ssm_embedding_api_key
-    gc_embedding_provider = var.gc_embedding_provider
+    aws_region         = var.aws_region
+    data_device        = var.data_device
+    ssm_tailscale_key  = var.ssm_tailscale_key
+    ssm_db_password    = var.ssm_db_password
+    tailscale_hostname = var.tailscale_hostname
+    ecr_registry_url   = var.ecr_registry_url
+    backup_bucket      = var.backup_bucket_name
+    gc_image           = var.gc_image
+    gc_database_user   = var.gc_database_user
+    gc_database_name   = var.gc_database_name
   }))
 
   tags = {

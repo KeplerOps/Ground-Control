@@ -1,0 +1,7 @@
+spring:
+  config:
+    import: aws-parameterstore:${GC_SSM_PREFIX:/gc/dev/}
+  cloud:
+    aws:
+      parameterstore:
+        region: ${AWS_REGION:us-east-2}

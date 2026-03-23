@@ -6,14 +6,20 @@ set -euo pipefail
 
 TAG="${1:-latest}"
 GC_DIR=/opt/gc
+AWS_REGION="${AWS_REGION:-us-east-2}"
+SSM_DB_PASSWORD="${SSM_DB_PASSWORD:-/gc/dev/spring.datasource.password}"
 
 cd "${GC_DIR}"
 
-# Refresh secrets from SSM (regenerates .env with latest values)
-if [ -x "${GC_DIR}/refresh-env.sh" ]; then
-  echo "Refreshing secrets from SSM..."
-  "${GC_DIR}/refresh-env.sh"
-fi
+# Read DB password from SSM for Postgres container
+DB_PASS=$(aws ssm get-parameter \
+  --region "${AWS_REGION}" \
+  --name "${SSM_DB_PASSWORD}" \
+  --with-decryption \
+  --query 'Parameter.Value' \
+  --output text)
+sed -i "s|^GC_DATABASE_PASSWORD=.*|GC_DATABASE_PASSWORD=${DB_PASS}|" .env
+sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${DB_PASS}|" .env
 
 # Update image tag if specified
 if [ "${TAG}" != "latest" ]; then

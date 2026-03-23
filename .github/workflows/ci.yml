@@ -230,6 +230,20 @@ jobs:
           role-to-assume: arn:aws:iam::516608939870:role/github-actions-terraform
           aws-region: us-east-2
 
+      - name: Sync secrets to SSM
+        run: |
+          [ -n "$GC_DB_PASSWORD" ] && aws ssm put-parameter --name /gc/dev/spring.datasource.password \
+            --type SecureString --value "$GC_DB_PASSWORD" --overwrite
+          [ -n "$GC_GITHUB_TOKEN" ] && aws ssm put-parameter --name /gc/dev/groundcontrol.github.token \
+            --type SecureString --value "$GC_GITHUB_TOKEN" --overwrite
+          [ -n "$GC_EMBEDDING_API_KEY" ] && aws ssm put-parameter --name /gc/dev/groundcontrol.embedding.api-key \
+            --type SecureString --value "$GC_EMBEDDING_API_KEY" --overwrite
+          true  # ensure step succeeds even if all secrets are empty
+        env:
+          GC_DB_PASSWORD: ${{ secrets.GC_DB_PASSWORD }}
+          GC_GITHUB_TOKEN: ${{ secrets.GC_GITHUB_TOKEN }}
+          GC_EMBEDDING_API_KEY: ${{ secrets.GC_EMBEDDING_API_KEY }}
+
       - name: Find EC2 instance
         id: ec2
         run: |

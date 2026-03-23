@@ -80,8 +80,6 @@ module "compute" {
   backup_bucket_arn  = module.backup.bucket_arn
   ecr_registry_url   = split("/", aws_ecr_repository.app.repository_url)[0]
 
-  ssm_tailscale_key     = module.secrets.tailscale_auth_key_name
-  ssm_db_password       = module.secrets.db_password_name
-  ssm_embedding_api_key = module.secrets.embedding_api_key_name
-  gc_embedding_provider = var.gc_embedding_provider
+  ssm_tailscale_key = module.secrets.tailscale_auth_key_name
+  ssm_db_password   = module.secrets.db_password_name
 }

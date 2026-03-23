@@ -47,7 +47,10 @@ mount /data
 mkdir -p /data/postgres /data/backups
 chown 999:999 /data/postgres  # postgres container UID
 
-# --- Read secrets from SSM ---
+# --- Deploy Ground Control ---
+mkdir -p /opt/gc
+
+# --- Read DB password from SSM for Postgres container ---
 DB_PASSWORD=$(aws ssm get-parameter \
   --region "${aws_region}" \
   --name "${ssm_db_password}" \
@@ -55,31 +58,13 @@ DB_PASSWORD=$(aws ssm get-parameter \
   --query 'Parameter.Value' \
   --output text)
 
-EMBEDDING_API_KEY=$(aws ssm get-parameter \
-  --region "${aws_region}" \
-  --name "${ssm_embedding_api_key}" \
-  --with-decryption \
-  --query 'Parameter.Value' \
-  --output text 2>/dev/null || echo "")
-
-# --- Deploy Ground Control ---
-mkdir -p /opt/gc
-
-# --- Write refresh-env script (reusable by deploy.sh) ---
-cat > /opt/gc/refresh-env.sh <<'REFRESHEOF'
-#!/bin/bash
-set -euo pipefail
-REGION="${aws_region}"
-DB_PASSWORD=$(aws ssm get-parameter --region "$${REGION}" --name "${ssm_db_password}" --with-decryption --query 'Parameter.Value' --output text)
-EMBEDDING_API_KEY=$(aws ssm get-parameter --region "$${REGION}" --name "${ssm_embedding_api_key}" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+# --- Write .env (non-secret config + DB password for Postgres container) ---
 cat > /opt/gc/.env <<ENVEOF
 GC_DATABASE_URL=jdbc:postgresql://db:5432/${gc_database_name}
 GC_DATABASE_USER=${gc_database_user}
 GC_DATABASE_PASSWORD=$${DB_PASSWORD}
 GC_SERVER_PORT=8000
 GC_CACHE_TYPE=none
-GC_EMBEDDING_PROVIDER=${gc_embedding_provider}
-GC_EMBEDDING_API_KEY=$${EMBEDDING_API_KEY}
 JAVA_TOOL_OPTIONS=-Xmx512m -Xms256m
 POSTGRES_DB=${gc_database_name}
 POSTGRES_USER=${gc_database_user}
@@ -87,11 +72,6 @@ POSTGRES_PASSWORD=$${DB_PASSWORD}
 GC_IMAGE=${gc_image}
 ENVEOF
 chmod 600 /opt/gc/.env
-REFRESHEOF
-chmod +x /opt/gc/refresh-env.sh
-
-# Generate initial .env
-/opt/gc/refresh-env.sh
 
 cat > /opt/gc/docker-compose.yml <<'COMPOSEEOF'
 services:
@@ -118,10 +98,9 @@ services:
       GC_DATABASE_PASSWORD: $${GC_DATABASE_PASSWORD}
       GC_SERVER_PORT: "8000"
       GC_CACHE_TYPE: "none"
-      GC_EMBEDDING_PROVIDER: $${GC_EMBEDDING_PROVIDER:-none}
-      GC_EMBEDDING_API_KEY: $${GC_EMBEDDING_API_KEY:-}
       JAVA_TOOL_OPTIONS: $${JAVA_TOOL_OPTIONS}
       SPRING_PROFILES_ACTIVE: prod
+      AWS_REGION: "${aws_region}"
     ports:
       - "8000:8000"
     depends_on:
@@ -147,16 +126,18 @@ cat > /opt/gc/backup.sh <<'BACKUPEOF'
 #!/bin/bash
 set -euo pipefail
 
-# Source env for DB credentials
-set -a; source /opt/gc/.env; set +a
-
+REGION="${aws_region}"
 BACKUP_DIR=/data/backups
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 DUMP_FILE="$${BACKUP_DIR}/gc-$${TIMESTAMP}.dump"
 
+# Read DB credentials from SSM
+DB_USER=$(grep POSTGRES_USER /opt/gc/.env | cut -d= -f2)
+DB_NAME=$(grep POSTGRES_DB /opt/gc/.env | cut -d= -f2)
+
 # pg_dump via the running container
 docker compose -f /opt/gc/docker-compose.yml exec -T db \
-  pg_dump -Fc -U "$${POSTGRES_USER}" "$${POSTGRES_DB}" > "$${DUMP_FILE}"
+  pg_dump -Fc -U "$${DB_USER}" "$${DB_NAME}" > "$${DUMP_FILE}"
 
 # Upload to S3
 aws s3 cp "$${DUMP_FILE}" "s3://${backup_bucket}/pg-dumps/gc-$${TIMESTAMP}.dump"
@@ -182,16 +163,21 @@ WATCHEOF
 chmod +x /opt/gc/watchdog.sh
 
 # --- Deploy helper ---
-cat > /opt/gc/deploy.sh <<'DEPLOYEOF'
+cat > /opt/gc/deploy.sh <<DEPLOYEOF
 #!/bin/bash
 set -euo pipefail
 cd /opt/gc
-/opt/gc/refresh-env.sh
+
+# Read DB password from SSM for Postgres container
+DB_PASS=\$(aws ssm get-parameter --region "${aws_region}" --name "${ssm_db_password}" --with-decryption --query 'Parameter.Value' --output text)
+sed -i "s|^GC_DATABASE_PASSWORD=.*|GC_DATABASE_PASSWORD=\$${DB_PASS}|" /opt/gc/.env
+sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=\$${DB_PASS}|" /opt/gc/.env
+
 source /opt/gc/ecr-login.sh
 docker compose pull
 docker compose up -d
 echo "Waiting for health check..."
-for i in $(seq 1 30); do
+for i in \$(seq 1 30); do
   if curl -sf http://localhost:8000/actuator/health | grep -q '"status":"UP"'; then
     echo "Deploy complete — application is UP"
     exit 0

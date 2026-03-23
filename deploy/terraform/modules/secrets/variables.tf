@@ -24,3 +24,10 @@ variable "embedding_api_key" {
   sensitive   = true
   default     = ""
 }
+
+variable "github_token" {
+  description = "GitHub personal access token for issue sync and creation"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
