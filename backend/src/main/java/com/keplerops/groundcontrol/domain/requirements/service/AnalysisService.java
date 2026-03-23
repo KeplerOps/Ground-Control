@@ -89,34 +89,11 @@ public class AnalysisService {
     }
 
     public List<Requirement> findOrphans(UUID projectId) {
-        List<Requirement> allRequirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
-        List<Requirement> orphans = new ArrayList<>();
-
-        for (Requirement req : allRequirements) {
-            UUID id = req.getId();
-            boolean hasRelations = !relationRepository.findBySourceId(id).isEmpty()
-                    || !relationRepository.findByTargetId(id).isEmpty();
-            boolean hasLinks = traceabilityLinkRepository.existsByRequirementId(id);
-
-            if (!hasRelations && !hasLinks) {
-                orphans.add(req);
-            }
-        }
-
-        return orphans;
+        return requirementRepository.findOrphansByProjectId(projectId);
     }
 
     public List<Requirement> findCoverageGaps(UUID projectId, LinkType linkType) {
-        List<Requirement> allRequirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
-        List<Requirement> gaps = new ArrayList<>();
-
-        for (Requirement req : allRequirements) {
-            if (!traceabilityLinkRepository.existsByRequirementIdAndLinkType(req.getId(), linkType)) {
-                gaps.add(req);
-            }
-        }
-
-        return gaps;
+        return requirementRepository.findCoverageGapsByProjectIdAndLinkType(projectId, linkType);
     }
 
     public Set<Requirement> impactAnalysis(UUID requirementId) {
