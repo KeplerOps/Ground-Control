@@ -9,7 +9,7 @@ DO NOT commit or push any changes to the PR.
 
 # PR Review Requirement: $ARGUMENTS
 
-## 1. Read the PR and ensure you are on the correct branch
+## 1. Read the PR and ensure you are on the correct branch. Merge dev into the PR branch.
 
 ## 2. Ensure there is still a need for the PR and its proposed changes based on the state of the `dev` branch.
 
