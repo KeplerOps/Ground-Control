@@ -111,39 +111,42 @@ public class GitHubCliClient implements GitHubClient {
             List<Map<String, Object>> rawIssues =
                     objectMapper.readValue(stdout, new TypeReference<List<Map<String, Object>>>() {});
 
-            List<GitHubIssueData> result = new ArrayList<>();
-            for (Map<String, Object> raw : rawIssues) {
-                // GitHub REST API returns PRs in the issues endpoint; skip them
-                if (raw.containsKey("pull_request")) {
-                    continue;
-                }
-
-                int number = ((Number) raw.get("number")).intValue();
-                String title = (String) raw.get("title");
-                String apiState = (String) raw.get("state");
-                String state = apiState.equalsIgnoreCase("open") ? "OPEN" : "CLOSED";
-                String url = (String) raw.get("html_url");
-                String body = raw.get("body") != null ? (String) raw.get("body") : "";
-
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> labelObjects =
-                        raw.get("labels") != null ? (List<Map<String, Object>>) raw.get("labels") : List.of();
-
-                List<String> labels = new ArrayList<>();
-                for (Map<String, Object> labelObj : labelObjects) {
-                    labels.add((String) labelObj.get("name"));
-                }
-
-                result.add(new GitHubIssueData(number, title, state, url, body, labels));
-            }
-
-            return new IssuePage(result, rawIssues.size());
+            return new IssuePage(parseIssues(rawIssues), rawIssues.size());
         } catch (IOException e) {
             throw new GroundControlException("Failed to execute gh CLI: " + e.getMessage(), "github_cli_error", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new GroundControlException("gh CLI execution interrupted", "github_interrupted", e);
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    public static List<GitHubIssueData> parseIssues(List<Map<String, Object>> rawIssues) {
+        List<GitHubIssueData> result = new ArrayList<>();
+        for (Map<String, Object> raw : rawIssues) {
+            // GitHub REST API returns PRs in the issues endpoint; skip them
+            if (raw.containsKey("pull_request")) {
+                continue;
+            }
+
+            int number = ((Number) raw.get("number")).intValue();
+            String title = (String) raw.get("title");
+            String apiState = (String) raw.get("state");
+            String state = apiState.equalsIgnoreCase("open") ? "OPEN" : "CLOSED";
+            String url = (String) raw.get("html_url");
+            String body = raw.get("body") != null ? (String) raw.get("body") : "";
+
+            List<Map<String, Object>> labelObjects =
+                    raw.get("labels") != null ? (List<Map<String, Object>>) raw.get("labels") : List.of();
+
+            List<String> labels = new ArrayList<>();
+            for (Map<String, Object> labelObj : labelObjects) {
+                labels.add((String) labelObj.get("name"));
+            }
+
+            result.add(new GitHubIssueData(number, title, state, url, body, labels));
+        }
+        return result;
     }
 
     @Override

@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
-import java.util.ArrayList;
+import com.keplerops.groundcontrol.infrastructure.github.GitHubCliClient;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -36,7 +36,7 @@ class GitHubCliClientTest {
                     ]
                     """;
 
-            List<GitHubIssueData> result = parseRestApiJson(json);
+            List<GitHubIssueData> result = parseJson(json);
 
             assertThat(result).hasSize(1);
             GitHubIssueData issue = result.get(0);
@@ -64,7 +64,7 @@ class GitHubCliClientTest {
                     ]
                     """;
 
-            List<GitHubIssueData> result = parseRestApiJson(json);
+            List<GitHubIssueData> result = parseJson(json);
 
             assertThat(result).hasSize(1);
             assertThat(result.get(0).state()).isEqualTo("CLOSED");
@@ -96,7 +96,7 @@ class GitHubCliClientTest {
                     ]
                     """;
 
-            List<GitHubIssueData> result = parseRestApiJson(json);
+            List<GitHubIssueData> result = parseJson(json);
 
             assertThat(result).hasSize(1);
             assertThat(result.get(0).number()).isEqualTo(1);
@@ -118,7 +118,7 @@ class GitHubCliClientTest {
                     ]
                     """;
 
-            List<GitHubIssueData> result = parseRestApiJson(json);
+            List<GitHubIssueData> result = parseJson(json);
 
             assertThat(result.get(0).labels()).containsExactly("bug", "P0", "phase-1");
         }
@@ -137,35 +137,9 @@ class GitHubCliClientTest {
         }
     }
 
-    /**
-     * Mirrors the parsing logic in GitHubCliClient.fetchIssuePage() for REST API responses.
-     */
     @SuppressWarnings("unchecked")
-    private static List<GitHubIssueData> parseRestApiJson(String json) throws Exception {
+    private static List<GitHubIssueData> parseJson(String json) throws Exception {
         List<Map<String, Object>> rawIssues = objectMapper.readValue(json, new TypeReference<>() {});
-        List<GitHubIssueData> result = new ArrayList<>();
-        for (Map<String, Object> raw : rawIssues) {
-            if (raw.containsKey("pull_request")) {
-                continue;
-            }
-
-            int number = ((Number) raw.get("number")).intValue();
-            String title = (String) raw.get("title");
-            String apiState = (String) raw.get("state");
-            String state = apiState.equalsIgnoreCase("open") ? "OPEN" : "CLOSED";
-            String url = (String) raw.get("html_url");
-            String body = raw.get("body") != null ? (String) raw.get("body") : "";
-
-            List<Map<String, Object>> labelObjects =
-                    raw.get("labels") != null ? (List<Map<String, Object>>) raw.get("labels") : List.of();
-
-            List<String> labels = new ArrayList<>();
-            for (Map<String, Object> labelObj : labelObjects) {
-                labels.add((String) labelObj.get("name"));
-            }
-
-            result.add(new GitHubIssueData(number, title, state, url, body, labels));
-        }
-        return result;
+        return GitHubCliClient.parseIssues(rawIssues);
     }
 }
