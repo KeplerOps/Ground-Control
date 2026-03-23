@@ -458,7 +458,7 @@ class RequirementServiceTest {
             var id = UUID.randomUUID();
             var req = makeRequirement("REQ-001");
             when(requirementRepository.findById(id)).thenReturn(Optional.of(req));
-            when(relationRepository.findBySourceIdWithEntities(id)).thenReturn(new java.util.ArrayList<>());
+            when(relationRepository.findBySourceIdWithEntities(id)).thenReturn(List.of());
             when(relationRepository.findByTargetIdWithEntities(id)).thenReturn(List.of());
 
             var result = service.getRelations(id);
