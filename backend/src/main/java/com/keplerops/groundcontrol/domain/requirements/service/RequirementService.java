@@ -185,8 +185,9 @@ public class RequirementService {
         getById(requirementId);
         var outgoing = relationRepository.findBySourceIdWithEntities(requirementId);
         var incoming = relationRepository.findByTargetIdWithEntities(requirementId);
-        outgoing.addAll(incoming);
-        return outgoing;
+        var combined = new ArrayList<RequirementRelation>(outgoing);
+        combined.addAll(incoming);
+        return combined;
     }
 
     @Transactional(readOnly = true)
