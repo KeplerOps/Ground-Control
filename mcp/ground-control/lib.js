@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -293,19 +293,42 @@ export async function getWorkOrder(project) {
   return request("GET", "/api/v1/analysis/work-order", { params: { project } });
 }
 
+/**
+ * Validate that a file path is safe to read: must be an absolute path, must not
+ * traverse outside its own directory via '..', and must resolve to a regular file
+ * with an expected extension. Prevents path traversal attacks via MCP tool input.
+ */
+function validateFilePath(filePath, allowedExtensions) {
+  const resolved = resolve(filePath);
+  if (resolved !== filePath && !filePath.startsWith("/")) {
+    throw new Error(`File path must be absolute: ${filePath}`);
+  }
+  // Reject paths with '..' components after resolution
+  if (filePath.includes("..")) {
+    throw new Error(`Path traversal not allowed: ${filePath}`);
+  }
+  const ext = resolved.split(".").pop()?.toLowerCase();
+  if (allowedExtensions && !allowedExtensions.includes(ext)) {
+    throw new Error(`File extension '.${ext}' not allowed. Expected: ${allowedExtensions.join(", ")}`);
+  }
+  return resolved;
+}
+
 export async function importStrictdoc(filePath, project) {
-  const content = readFileSync(filePath);
+  const safePath = validateFilePath(filePath, ["sdoc", "xml"]);
+  const content = readFileSync(safePath);
   const form = new FormData();
-  form.append("file", new Blob([content]), basename(filePath));
+  form.append("file", new Blob([content]), basename(safePath));
   const params = {};
   if (project) params.project = project;
   return request("POST", "/api/v1/admin/import/strictdoc", { formData: form, params });
 }
 
 export async function importReqif(filePath, project) {
-  const content = readFileSync(filePath);
+  const safePath = validateFilePath(filePath, ["reqif", "xml"]);
+  const content = readFileSync(safePath);
   const form = new FormData();
-  form.append("file", new Blob([content]), basename(filePath));
+  form.append("file", new Blob([content]), basename(safePath));
   const params = {};
   if (project) params.project = project;
   return request("POST", "/api/v1/admin/import/reqif", { formData: form, params });

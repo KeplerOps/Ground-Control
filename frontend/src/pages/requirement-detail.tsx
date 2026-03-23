@@ -574,7 +574,9 @@ function TraceabilityRow({
         {link.artifactType.replace(/_/g, " ")}
       </td>
       <td className="px-3 py-2">
-        {link.artifactUrl ? (
+        {link.artifactUrl &&
+        (link.artifactUrl.startsWith("https://") ||
+          link.artifactUrl.startsWith("http://")) ? (
           <a
             href={link.artifactUrl}
             target="_blank"
