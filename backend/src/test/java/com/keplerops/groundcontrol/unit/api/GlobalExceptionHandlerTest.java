@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 class GlobalExceptionHandlerTest {
 
@@ -51,6 +52,18 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void handleMissingServletRequestPart_returnsBadRequest() {
+        var ex = new MissingServletRequestPartException("file");
+
+        var response = handler.handleMissingServletRequestPart(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error().code()).isEqualTo("bad_request");
+        assertThat(response.getBody().error().message()).isEqualTo("Missing required part 'file'");
+    }
+
+    @Test
     void handleGeneric_returnsInternalServerError() {
         var ex = new RuntimeException("something broke");
 
@@ -64,7 +77,8 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void allHandlers_returnConsistentErrorEnvelope() {
-        ErrorResponse r1 = handler.handleHttpMessageNotReadable(new HttpMessageNotReadableException("x")).getBody();
+        ErrorResponse r1 = handler.handleHttpMessageNotReadable(new HttpMessageNotReadableException("x"))
+                .getBody();
         ErrorResponse r2 = handler.handleGeneric(new RuntimeException("x")).getBody();
 
         assertThat(r1).isNotNull();
