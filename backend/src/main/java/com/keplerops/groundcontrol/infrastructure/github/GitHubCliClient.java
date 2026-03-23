@@ -46,23 +46,26 @@ public class GitHubCliClient implements GitHubClient {
         return "gh";
     }
 
+    record IssuePage(List<GitHubIssueData> issues, int rawCount) {}
+
     @Override
     public List<GitHubIssueData> fetchAllIssues(String owner, String repo) {
         List<GitHubIssueData> allIssues = new ArrayList<>();
         int page = 1;
 
         while (true) {
-            List<GitHubIssueData> batch = fetchIssuePage(owner, repo, page);
-            allIssues.addAll(batch);
+            IssuePage batch = fetchIssuePage(owner, repo, page);
+            allIssues.addAll(batch.issues());
 
-            if (batch.size() < PAGE_SIZE) {
+            if (batch.rawCount() < PAGE_SIZE) {
                 break;
             }
 
             log.info(
-                    "github_issues_page_full: page={} size={} repo={}/{}, fetching next page",
+                    "github_issues_page_full: page={} raw={} issues={} repo={}/{}, fetching next page",
                     page,
-                    batch.size(),
+                    batch.rawCount(),
+                    batch.issues().size(),
                     owner,
                     repo);
             page++;
@@ -72,7 +75,7 @@ public class GitHubCliClient implements GitHubClient {
         return allIssues;
     }
 
-    List<GitHubIssueData> fetchIssuePage(String owner, String repo, int page) {
+    IssuePage fetchIssuePage(String owner, String repo, int page) {
         try {
             ProcessBuilder pb = new ProcessBuilder(
                     ghPath,
@@ -134,7 +137,7 @@ public class GitHubCliClient implements GitHubClient {
                 result.add(new GitHubIssueData(number, title, state, url, body, labels));
             }
 
-            return result;
+            return new IssuePage(result, rawIssues.size());
         } catch (IOException e) {
             throw new GroundControlException("Failed to execute gh CLI: " + e.getMessage(), "github_cli_error", e);
         } catch (InterruptedException e) {
