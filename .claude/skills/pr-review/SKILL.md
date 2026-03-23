@@ -21,4 +21,6 @@ DO NOT commit or push any changes to the PR.
 
 ## 5. Use the /security-review tool. Fix ALL issues. DO NOT defer issues until later. If any issues require more than minor changes, tell the user and stop.
 
-## 6. Summarize the changes and report the status. Provide a succinct one line commit message recommendation.
+## 6. Ensure there is a changelog entry for the PR.
+
+## 7. Summarize the changes and report the status. Provide a succinct one line commit message recommendation.
