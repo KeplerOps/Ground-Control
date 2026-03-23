@@ -31,7 +31,16 @@ import org.hibernate.envers.Audited;
         uniqueConstraints =
                 @UniqueConstraint(
                         columnNames = {"requirement_id", "artifact_type", "artifact_identifier", "link_type"}))
+@SuppressWarnings("java:S125") // JML contract annotations are intentional, not dead code
 public class TraceabilityLink {
+
+    /*@ public invariant requirement != null;
+    @ public invariant artifactType != null;
+    @ public invariant artifactIdentifier != null && !artifactIdentifier.isEmpty();
+    @ public invariant linkType != null;
+    @ public invariant syncStatus != null;
+    @ public invariant artifactUrl != null;
+    @ public invariant artifactTitle != null; @*/
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -76,6 +85,15 @@ public class TraceabilityLink {
         // JPA
     }
 
+    /*@ requires requirement != null;
+    @ requires artifactType != null;
+    @ requires artifactIdentifier != null && !artifactIdentifier.isEmpty();
+    @ requires linkType != null;
+    @ ensures this.requirement == requirement;
+    @ ensures this.artifactType == artifactType;
+    @ ensures this.artifactIdentifier.equals(artifactIdentifier);
+    @ ensures this.linkType == linkType;
+    @ ensures this.syncStatus == SyncStatus.SYNCED; @*/
     public TraceabilityLink(
             Requirement requirement, ArtifactType artifactType, String artifactIdentifier, LinkType linkType) {
         this.requirement = requirement;
@@ -122,7 +140,9 @@ public class TraceabilityLink {
         return syncStatus;
     }
 
-    public void setSyncStatus(SyncStatus syncStatus) {
+    /*@ requires syncStatus != null;
+    @ ensures this.syncStatus == syncStatus; @*/
+    public void setSyncStatus(/*@ non_null @*/ SyncStatus syncStatus) {
         this.syncStatus = syncStatus;
     }
 
@@ -130,7 +150,9 @@ public class TraceabilityLink {
         return artifactUrl;
     }
 
-    public void setArtifactUrl(String artifactUrl) {
+    /*@ requires artifactUrl != null;
+    @ ensures this.artifactUrl == artifactUrl; @*/
+    public void setArtifactUrl(/*@ non_null @*/ String artifactUrl) {
         this.artifactUrl = artifactUrl;
     }
 
@@ -138,7 +160,9 @@ public class TraceabilityLink {
         return artifactTitle;
     }
 
-    public void setArtifactTitle(String artifactTitle) {
+    /*@ requires artifactTitle != null;
+    @ ensures this.artifactTitle == artifactTitle; @*/
+    public void setArtifactTitle(/*@ non_null @*/ String artifactTitle) {
         this.artifactTitle = artifactTitle;
     }
 
