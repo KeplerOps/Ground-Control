@@ -8,6 +8,7 @@ import com.keplerops.groundcontrol.domain.requirements.service.GraphClient;
 import com.keplerops.groundcontrol.domain.requirements.service.PathResult;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -17,6 +18,9 @@ import org.springframework.stereotype.Component;
 public class AgeGraphService implements GraphClient {
 
     private static final Logger log = LoggerFactory.getLogger(AgeGraphService.class);
+
+    /** Graph names must be alphanumeric/underscore only to prevent injection. */
+    private static final Pattern SAFE_GRAPH_NAME = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_]{0,62}$");
 
     private final JdbcTemplate jdbcTemplate;
     private final AgeProperties ageProperties;
@@ -32,6 +36,7 @@ public class AgeGraphService implements GraphClient {
         this.ageProperties = ageProperties;
         this.requirementRepository = requirementRepository;
         this.relationRepository = relationRepository;
+        validateGraphName(ageProperties.graphName());
     }
 
     @Override
@@ -162,10 +167,39 @@ public class AgeGraphService implements GraphClient {
         return uids;
     }
 
+    private static void validateGraphName(String name) {
+        if (name == null || !SAFE_GRAPH_NAME.matcher(name).matches()) {
+            throw new IllegalStateException(
+                    "Invalid AGE graph name '" + name + "': must match [a-zA-Z_][a-zA-Z0-9_]{0,62}");
+        }
+    }
+
+    /**
+     * Escapes a value for safe inclusion in a Cypher single-quoted string literal.
+     * Handles backslash, single quote, and strips control characters that could
+     * break out of string context.
+     */
     private static String escapeCypher(String value) {
         if (value == null) {
             return "";
         }
-        return value.replace("\\", "\\\\").replace("'", "\\'");
+        var sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '\\' -> sb.append("\\\\");
+                case '\'' -> sb.append("\\'");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    // Strip other control characters to prevent injection
+                    if (c >= 0x20 && c != 0x7F) {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        return sb.toString();
     }
 }

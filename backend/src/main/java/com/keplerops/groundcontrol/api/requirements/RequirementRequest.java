@@ -8,8 +8,8 @@ import jakarta.validation.constraints.Size;
 public record RequirementRequest(
         @NotBlank @Size(max = 50) String uid,
         @NotBlank @Size(max = 255) String title,
-        @NotBlank String statement,
-        String rationale,
+        @NotBlank @Size(max = 50000) String statement,
+        @Size(max = 50000) String rationale,
         RequirementType requirementType,
         Priority priority,
         Integer wave) {}

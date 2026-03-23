@@ -6,6 +6,7 @@ import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.GroundControlException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import jakarta.validation.ConstraintViolationException;
 import java.util.HashMap;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -87,11 +88,20 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of("bad_request", message));
     }
 
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<ErrorResponse> handleConstraintViolation(ConstraintViolationException ex) {
+        Map<String, Object> violations = new HashMap<>();
+        ex.getConstraintViolations()
+                .forEach(v -> violations.put(v.getPropertyPath().toString(), v.getMessage()));
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(ErrorResponse.of("validation_error", "Validation failed", violations));
+    }
+
     @ExceptionHandler(GroundControlException.class)
     public ResponseEntity<ErrorResponse> handleGroundControl(GroundControlException ex) {
-        log.error("Unhandled domain exception", ex);
+        log.error("Unhandled domain exception: {}", ex.getMessage(), ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ErrorResponse.of(ex.getErrorCode(), ex.getMessage()));
+                .body(ErrorResponse.of(ex.getErrorCode(), "An internal error occurred"));
     }
 
     @ExceptionHandler(Exception.class)

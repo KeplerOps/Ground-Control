@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ground Control — Roadmap</title>
-<script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
-<script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
-<script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+<script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js" integrity="sha384-gLbE3MXfaoePqVBNqRl5A3TtBPHKH6/OQpH4xGJrDiTR6THgBfnHKeYbEIEQLqE" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js" integrity="sha384-2FkL0DOXxKZSfAYEfQzVVjCpOaSmquRiNpPPqgCb39biJT9M0oCfVRUHgBbMmGMl" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js" integrity="sha384-37GyKFKCEBBqYihpQejUkvFMDgpGXPyZLn27jJiiDTmfF8cUqNLXEfhQqiEh2MIY" crossorigin="anonymous"></script>
 <style>
   :root {
     --bg: #0f1117;
@@ -221,7 +221,7 @@
 <div id="tooltip"></div>
 
 <script>
-const API = 'http://' + window.location.hostname + ':8000/api/v1';
+const API = window.location.origin + '/api/v1';
 
 const SERIES_COLORS = {
   A: '#6c7ee1', B: '#4ecdc4', C: '#f7b731', D: '#e056a0',

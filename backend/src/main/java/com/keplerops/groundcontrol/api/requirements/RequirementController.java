@@ -139,7 +139,9 @@ public class RequirementController {
             @RequestParam(required = false) Instant to,
             @RequestParam(defaultValue = "100") int limit,
             @RequestParam(defaultValue = "0") int offset) {
-        return auditService.getRequirementTimeline(id, changeCategory, from, to, limit, offset).stream()
+        int boundedLimit = Math.max(1, Math.min(limit, 1000));
+        int boundedOffset = Math.max(0, offset);
+        return auditService.getRequirementTimeline(id, changeCategory, from, to, boundedLimit, boundedOffset).stream()
                 .map(TimelineEntryResponse::from)
                 .toList();
     }

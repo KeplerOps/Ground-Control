@@ -14,7 +14,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
  * Populates ActorHolder and MDC with the actor identity from X-Actor header.
- * Defaults to "anonymous" if the header is missing or blank.
+ * Defaults to "anonymous" if the header is missing, blank, or contains unsafe characters.
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 1)
@@ -23,14 +23,12 @@ public class ActorFilter extends OncePerRequestFilter {
     private static final String ACTOR_HEADER = "X-Actor";
     private static final String MDC_ACTOR = "actor";
     private static final String DEFAULT_ACTOR = "anonymous";
+    private static final int MAX_ACTOR_LENGTH = 100;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        String actor = request.getHeader(ACTOR_HEADER);
-        if (actor == null || actor.isBlank()) {
-            actor = DEFAULT_ACTOR;
-        }
+        String actor = sanitizeActor(request.getHeader(ACTOR_HEADER));
         ActorHolder.set(actor);
         MDC.put(MDC_ACTOR, actor);
         try {
@@ -39,5 +37,22 @@ public class ActorFilter extends OncePerRequestFilter {
             ActorHolder.clear();
             MDC.remove(MDC_ACTOR);
         }
+    }
+
+    /** Sanitize the actor header to prevent log injection and enforce reasonable length. */
+    private static String sanitizeActor(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return DEFAULT_ACTOR;
+        }
+        if (raw.length() > MAX_ACTOR_LENGTH) {
+            return DEFAULT_ACTOR;
+        }
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c < 0x20 || c == 0x7F) {
+                return DEFAULT_ACTOR;
+            }
+        }
+        return raw;
     }
 }

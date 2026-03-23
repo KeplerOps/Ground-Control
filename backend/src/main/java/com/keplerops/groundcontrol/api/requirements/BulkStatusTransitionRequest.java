@@ -6,4 +6,5 @@ import jakarta.validation.constraints.NotNull;
 import java.util.List;
 import java.util.UUID;
 
-public record BulkStatusTransitionRequest(@NotEmpty List<UUID> ids, @NotNull Status status) {}
+public record BulkStatusTransitionRequest(
+        @NotEmpty @jakarta.validation.constraints.Size(max = 500) List<UUID> ids, @NotNull Status status) {}

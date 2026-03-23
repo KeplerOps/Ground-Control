@@ -6,8 +6,8 @@ import jakarta.validation.constraints.Size;
 
 public record UpdateRequirementRequest(
         @Size(min = 1, max = 255) String title,
-        @Size(min = 1) String statement,
-        String rationale,
+        @Size(min = 1, max = 50000) String statement,
+        @Size(max = 50000) String rationale,
         RequirementType requirementType,
         Priority priority,
         Integer wave) {}
