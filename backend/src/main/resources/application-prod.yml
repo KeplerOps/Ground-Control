@@ -1,6 +1,6 @@
 spring:
   config:
-    import: aws-parameterstore:/gc/dev/
+    import: aws-parameterstore:${GC_SSM_PREFIX:/gc/dev/}
   cloud:
     aws:
       parameterstore:

@@ -6,13 +6,15 @@ set -euo pipefail
 
 TAG="${1:-latest}"
 GC_DIR=/opt/gc
+AWS_REGION="${AWS_REGION:-us-east-2}"
+SSM_DB_PASSWORD="${SSM_DB_PASSWORD:-/gc/dev/spring.datasource.password}"
 
 cd "${GC_DIR}"
 
 # Read DB password from SSM for Postgres container
 DB_PASS=$(aws ssm get-parameter \
-  --region us-east-2 \
-  --name /gc/dev/spring.datasource.password \
+  --region "${AWS_REGION}" \
+  --name "${SSM_DB_PASSWORD}" \
   --with-decryption \
   --query 'Parameter.Value' \
   --output text)

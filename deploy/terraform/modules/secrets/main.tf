@@ -1,17 +1,14 @@
 # -----------------------------------------------------------------------------
 # Secrets Module — SSM parameters for EC2 deployment
 # -----------------------------------------------------------------------------
-# These parameters are created with placeholder values and must be populated
-# manually via AWS CLI before the EC2 instance is launched:
+# Terraform creates these parameters with placeholder values. The CI/CD
+# pipeline (GitHub Actions deploy job) populates them from GitHub secrets
+# on every deploy. Parameter names match Spring property names so Spring
+# Cloud AWS Parameter Store resolves them directly at app startup.
 #
-#   aws ssm put-parameter --name "/gc/dev/spring.datasource.password" \
-#     --type SecureString --value "YOUR_PASSWORD" --overwrite
-#
-#   aws ssm put-parameter --name "/gc/dev/groundcontrol.github.token" \
-#     --type SecureString --value "ghp_..." --overwrite
-#
-# Parameter names match Spring property names so Spring Cloud AWS Parameter
-# Store can resolve them directly (no refresh-env.sh needed).
+# Migration note: renaming an SSM parameter causes Terraform to destroy
+# the old one and create a new one with the placeholder value. Run a
+# deploy (or manually sync secrets) immediately after terraform apply.
 
 resource "aws_ssm_parameter" "tailscale_auth_key" {
   name  = "${var.parameter_prefix}/tailscale_auth_key"
