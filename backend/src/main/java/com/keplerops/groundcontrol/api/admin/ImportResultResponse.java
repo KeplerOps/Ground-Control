@@ -1,9 +1,9 @@
 package com.keplerops.groundcontrol.api.admin;
 
+import com.keplerops.groundcontrol.domain.requirements.service.ImportError;
 import com.keplerops.groundcontrol.domain.requirements.service.ImportResult;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 public record ImportResultResponse(
@@ -16,7 +16,7 @@ public record ImportResultResponse(
         int relationsSkipped,
         int traceabilityLinksCreated,
         int traceabilityLinksSkipped,
-        List<Map<String, Object>> errors) {
+        List<ImportError> errors) {
 
     public static ImportResultResponse from(ImportResult result) {
         return new ImportResultResponse(

@@ -289,9 +289,9 @@ class GitHubIssueSyncServiceTest {
 
             assertThat(result.linksUpdated()).isZero();
             assertThat(result.errors()).hasSize(1);
-            assertThat(result.errors().get(0).get("phase")).isEqualTo("traceability");
-            assertThat(result.errors().get(0).get("artifactIdentifier")).isEqualTo("10");
-            assertThat(result.errors().get(0).get("error")).isEqualTo("DB save failed");
+            assertThat(result.errors().get(0).phase()).isEqualTo("traceability");
+            assertThat(result.errors().get(0).artifactIdentifier()).isEqualTo("10");
+            assertThat(result.errors().get(0).error()).isEqualTo("DB save failed");
         }
     }
 
@@ -315,7 +315,7 @@ class GitHubIssueSyncServiceTest {
 
             assertThat(result.issuesCreated()).isEqualTo(1);
             assertThat(result.errors()).hasSize(1);
-            assertThat(result.errors().get(0).get("issue")).isEqualTo(1);
+            assertThat(result.errors().get(0).issue()).isEqualTo(1);
         }
     }
 

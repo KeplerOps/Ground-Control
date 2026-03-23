@@ -16,6 +16,7 @@ import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.SyncStatus;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -61,7 +62,7 @@ public class GitHubIssueSyncService {
     public SyncResult syncGitHubIssues(String owner, String repo) {
         List<GitHubIssueData> fetched = gitHubClient.fetchAllIssues(owner, repo);
         Instant fetchedAt = Instant.now();
-        List<Map<String, Object>> errors = new ArrayList<>();
+        List<SyncError> errors = new ArrayList<>();
 
         int issuesCreated = 0;
         int issuesUpdated = 0;
@@ -96,7 +97,7 @@ public class GitHubIssueSyncService {
                 }
             } catch (RuntimeException e) {
                 log.warn("github_issue_sync_failed: issue={} error={}", issue.number(), e.getMessage());
-                errors.add(Map.of("phase", "upsert", "issue", issue.number(), "error", e.getMessage()));
+                errors.add(new SyncError("upsert", issue.number(), null, e.getMessage()));
             }
         }
 
@@ -121,13 +122,7 @@ public class GitHubIssueSyncService {
                         "traceability_link_update_failed: artifact={} error={}",
                         link.getArtifactIdentifier(),
                         e.getMessage());
-                errors.add(Map.of(
-                        "phase",
-                        "traceability",
-                        "artifactIdentifier",
-                        link.getArtifactIdentifier(),
-                        "error",
-                        e.getMessage()));
+                errors.add(new SyncError("traceability", null, link.getArtifactIdentifier(), e.getMessage()));
             }
         }
 
@@ -139,7 +134,7 @@ public class GitHubIssueSyncService {
                 "issuesCreated", issuesCreated,
                 "issuesUpdated", issuesUpdated,
                 "linksUpdated", linksUpdated));
-        audit.setErrors(errors);
+        audit.setErrors(toAuditErrors(errors));
         var savedAudit = importRepository.save(audit);
 
         return new SyncResult(
@@ -150,6 +145,19 @@ public class GitHubIssueSyncService {
                 issuesUpdated,
                 linksUpdated,
                 errors);
+    }
+
+    private static List<Map<String, Object>> toAuditErrors(List<SyncError> errors) {
+        return errors.stream()
+                .map(e -> {
+                    var m = new LinkedHashMap<String, Object>();
+                    m.put("phase", e.phase());
+                    if (e.issue() != null) m.put("issue", e.issue());
+                    if (e.artifactIdentifier() != null) m.put("artifactIdentifier", e.artifactIdentifier());
+                    m.put("error", e.error());
+                    return (Map<String, Object>) m;
+                })
+                .toList();
     }
 
     public CreateGitHubIssueResult createIssueFromRequirement(CreateGitHubIssueCommand command) {
