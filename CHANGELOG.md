@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   diagnostics (previously only stderr was shown, hiding docker logs)
 - Increase deploy health check timeout from 60s to 10min, SSM command timeout
   from 120s to 660s, and CI wait loop to match
+- Fix V014 Flyway migration failing on prod data with case-duplicate UIDs
+  (`OBS-001` / `obs-001`): drop unique constraint before normalizing to
+  uppercase, and deduplicate colliding rows by renaming with `-DUP-N` suffix
 
 ## [0.75.1] - 2026-03-22
 
