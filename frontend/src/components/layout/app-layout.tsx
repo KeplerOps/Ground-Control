@@ -11,7 +11,13 @@ import {
   Rocket,
   Workflow,
 } from "lucide-react";
-import { Link, NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  NavLink,
+  Outlet,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 
 function NavItem({
   to,
@@ -128,9 +134,7 @@ export function AppLayout() {
             </NavItem>
           </nav>
 
-          <div className="ml-auto">
-            {workspaceId && <WorkspaceSwitcher />}
-          </div>
+          <div className="ml-auto">{workspaceId && <WorkspaceSwitcher />}</div>
         </div>
       </header>
 

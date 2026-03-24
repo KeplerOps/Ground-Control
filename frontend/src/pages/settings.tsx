@@ -110,7 +110,11 @@ function CredentialsTab({ workspaceId }: { workspaceId?: string }) {
     e.preventDefault();
     if (!name.trim() || !credType.trim()) return;
     await api.createCredential(
-      { name: name.trim(), credentialType: credType.trim(), data: credData.trim() || undefined },
+      {
+        name: name.trim(),
+        credentialType: credType.trim(),
+        data: credData.trim() || undefined,
+      },
       workspaceId,
     );
     qc.invalidateQueries({ queryKey: ["credentials", workspaceId] });
@@ -144,8 +148,11 @@ function CredentialsTab({ workspaceId }: { workspaceId?: string }) {
 
       {isLoading ? (
         <div className="space-y-2">
-          {Array.from({ length: 3 }, (_, i) => (
-            <div key={i} className="h-14 animate-pulse rounded-lg border border-border bg-card" />
+          {["s1", "s2", "s3"].map((k) => (
+            <div
+              key={k}
+              className="h-14 animate-pulse rounded-lg border border-border bg-card"
+            />
           ))}
         </div>
       ) : credentials.length === 0 ? (
@@ -303,8 +310,11 @@ function VariablesTab({ workspaceId }: { workspaceId?: string }) {
 
       {isLoading ? (
         <div className="space-y-2">
-          {Array.from({ length: 3 }, (_, i) => (
-            <div key={i} className="h-14 animate-pulse rounded-lg border border-border bg-card" />
+          {["s1", "s2", "s3"].map((k) => (
+            <div
+              key={k}
+              className="h-14 animate-pulse rounded-lg border border-border bg-card"
+            />
           ))}
         </div>
       ) : variables.length === 0 ? (

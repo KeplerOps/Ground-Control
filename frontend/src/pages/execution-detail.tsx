@@ -5,8 +5,8 @@ import {
   useExecution,
   useRetryExecution,
 } from "@/hooks/use-executions";
-import type { TaskExecution } from "@/types/api";
 import { cn } from "@/lib/utils";
+import type { TaskExecution } from "@/types/api";
 import {
   ArrowLeft,
   ChevronDown,
@@ -47,7 +47,8 @@ export function ExecutionDetail() {
     execution.status === "RUNNING" ||
     execution.status === "PENDING" ||
     execution.status === "QUEUED";
-  const isFailed = execution.status === "FAILED" || execution.status === "TIMED_OUT";
+  const isFailed =
+    execution.status === "FAILED" || execution.status === "TIMED_OUT";
 
   return (
     <div className="space-y-6">
@@ -77,7 +78,9 @@ export function ExecutionDetail() {
           {isRunning && (
             <button
               type="button"
-              onClick={() => cancelExecution.mutate(id!)}
+              onClick={() => {
+                if (id) cancelExecution.mutate(id);
+              }}
               disabled={cancelExecution.isPending}
               className="inline-flex items-center gap-1.5 rounded-md border border-destructive px-3 py-1.5 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
             >
@@ -88,7 +91,9 @@ export function ExecutionDetail() {
           {isFailed && (
             <button
               type="button"
-              onClick={() => retryExecution.mutate(id!)}
+              onClick={() => {
+                if (id) retryExecution.mutate(id);
+              }}
               disabled={retryExecution.isPending}
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >

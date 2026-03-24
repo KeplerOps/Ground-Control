@@ -1,6 +1,6 @@
 import { useWorkspaces } from "@/hooks/use-workspaces";
 import type { Workspace } from "@/types/api";
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { type ReactNode, createContext, useContext, useMemo } from "react";
 import { useParams } from "react-router-dom";
 
 interface WorkspaceContextValue {

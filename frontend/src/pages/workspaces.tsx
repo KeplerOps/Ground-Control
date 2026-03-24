@@ -51,8 +51,11 @@ export function Workspaces() {
 
       {isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 3 }, (_, i) => (
-            <div key={i} className="h-28 animate-pulse rounded-lg border border-border bg-card" />
+          {["s1", "s2", "s3"].map((k) => (
+            <div
+              key={k}
+              className="h-28 animate-pulse rounded-lg border border-border bg-card"
+            />
           ))}
         </div>
       ) : workspaces.length === 0 ? (
@@ -100,7 +103,11 @@ export function Workspaces() {
             <input
               type="text"
               value={identifier}
-              onChange={(e) => setIdentifier(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))}
+              onChange={(e) =>
+                setIdentifier(
+                  e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"),
+                )
+              }
               placeholder="e.g. my-team"
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
               required
@@ -142,7 +149,9 @@ export function Workspaces() {
             </button>
             <button
               type="submit"
-              disabled={createWorkspace.isPending || !identifier.trim() || !name.trim()}
+              disabled={
+                createWorkspace.isPending || !identifier.trim() || !name.trim()
+              }
               className={cn(
                 "rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90",
                 createWorkspace.isPending && "opacity-50",

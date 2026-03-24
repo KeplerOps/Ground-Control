@@ -11,6 +11,7 @@ import {
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import type { NodeType, WorkflowEdge, WorkflowNode } from "@/types/api";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Circle,
@@ -24,7 +25,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
 
 const NODE_TYPE_OPTIONS: NodeType[] = [
   "SHELL",
@@ -221,11 +221,15 @@ export function WorkflowDetail() {
       <div className="grid gap-4 sm:grid-cols-4">
         <div className="rounded-lg border border-border bg-card p-3">
           <p className="text-xs text-muted-foreground">Version</p>
-          <p className="mt-0.5 text-sm font-medium">v{workflow.currentVersion}</p>
+          <p className="mt-0.5 text-sm font-medium">
+            v{workflow.currentVersion}
+          </p>
         </div>
         <div className="rounded-lg border border-border bg-card p-3">
           <p className="text-xs text-muted-foreground">Timeout</p>
-          <p className="mt-0.5 text-sm font-medium">{workflow.timeoutSeconds}s</p>
+          <p className="mt-0.5 text-sm font-medium">
+            {workflow.timeoutSeconds}s
+          </p>
         </div>
         <div className="rounded-lg border border-border bg-card p-3">
           <p className="text-xs text-muted-foreground">Max Retries</p>
@@ -284,9 +288,7 @@ export function WorkflowDetail() {
       {/* Node List */}
       {nodes.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-lg font-medium">
-            Nodes ({nodes.length})
-          </h2>
+          <h2 className="text-lg font-medium">Nodes ({nodes.length})</h2>
           <div className="space-y-1">
             {nodes.map((node) => (
               <div
@@ -301,7 +303,9 @@ export function WorkflowDetail() {
                   style={{ backgroundColor: NODE_TYPE_COLORS[node.nodeType] }}
                 />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">{node.label || node.name}</p>
+                  <p className="text-sm font-medium">
+                    {node.label || node.name}
+                  </p>
                   <p className="text-xs text-muted-foreground">
                     {node.nodeType} &middot; {node.name}
                   </p>
@@ -327,9 +331,7 @@ export function WorkflowDetail() {
       {/* Edge List */}
       {edges.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-lg font-medium">
-            Edges ({edges.length})
-          </h2>
+          <h2 className="text-lg font-medium">Edges ({edges.length})</h2>
           <div className="space-y-1">
             {edges.map((edge) => (
               <div

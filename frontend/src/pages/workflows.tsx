@@ -35,7 +35,11 @@ export function Workflows() {
     e.preventDefault();
     if (!name.trim()) return;
     createWorkflow.mutate(
-      { name: name.trim(), description: description.trim(), workspace: workspace?.identifier },
+      {
+        name: name.trim(),
+        description: description.trim(),
+        workspace: workspace?.identifier,
+      },
       {
         onSuccess: (wf) => {
           setShowCreate(false);
@@ -81,15 +85,20 @@ export function Workflows() {
 
       {isLoading ? (
         <div className="space-y-2">
-          {Array.from({ length: 5 }, (_, i) => (
-            <div key={i} className="h-16 animate-pulse rounded-lg border border-border bg-card" />
+          {["s1", "s2", "s3", "s4", "s5"].map((k) => (
+            <div
+              key={k}
+              className="h-16 animate-pulse rounded-lg border border-border bg-card"
+            />
           ))}
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-lg border border-border bg-card p-12 text-center">
           <Workflow className="mx-auto h-10 w-10 text-muted-foreground" />
           <p className="mt-3 text-muted-foreground">
-            {search ? "No workflows match your search." : "No workflows yet. Create one to get started."}
+            {search
+              ? "No workflows match your search."
+              : "No workflows yet. Create one to get started."}
           </p>
         </div>
       ) : (
@@ -99,7 +108,9 @@ export function Workflows() {
               key={wf.id}
               type="button"
               className="flex w-full items-center gap-4 rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-accent/30"
-              onClick={() => navigate(`/w/${workspace?.identifier}/workflows/${wf.id}`)}
+              onClick={() =>
+                navigate(`/w/${workspace?.identifier}/workflows/${wf.id}`)
+              }
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{wf.name}</p>

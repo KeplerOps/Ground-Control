@@ -38,8 +38,11 @@ export function Executions() {
 
       {isLoading ? (
         <div className="space-y-2">
-          {Array.from({ length: 5 }, (_, i) => (
-            <div key={i} className="h-14 animate-pulse rounded-lg border border-border bg-card" />
+          {["s1", "s2", "s3", "s4", "s5"].map((k) => (
+            <div
+              key={k}
+              className="h-14 animate-pulse rounded-lg border border-border bg-card"
+            />
           ))}
         </div>
       ) : filtered.length === 0 ? (
@@ -86,9 +89,7 @@ export function Executions() {
                   {ex.triggerType}
                 </span>
                 <span className="w-20 text-right text-xs text-muted-foreground">
-                  {ex.durationMs > 0
-                    ? formatDuration(ex.durationMs)
-                    : "--"}
+                  {ex.durationMs > 0 ? formatDuration(ex.durationMs) : "--"}
                 </span>
                 <span className="w-28 text-right text-xs text-muted-foreground">
                   {ex.startedAt

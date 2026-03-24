@@ -1,7 +1,7 @@
+import { StatusBadge } from "@/components/status-badge";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useExecutions } from "@/hooks/use-executions";
 import { useWorkflows } from "@/hooks/use-workflows";
-import { StatusBadge } from "@/components/status-badge";
 import { cn } from "@/lib/utils";
 import {
   Activity,
@@ -61,7 +61,10 @@ export function Dashboard() {
         </div>
       </div>
 
-      <DashboardContent workspaceId={workspace.identifier} navigate={navigate} />
+      <DashboardContent
+        workspaceId={workspace.identifier}
+        navigate={navigate}
+      />
     </div>
   );
 }
@@ -74,7 +77,8 @@ function DashboardContent({
   navigate: (path: string) => void;
 }) {
   const { data: workflowPage, isLoading: wLoading } = useWorkflows(workspaceId);
-  const { data: executionPage, isLoading: eLoading } = useExecutions(workspaceId);
+  const { data: executionPage, isLoading: eLoading } =
+    useExecutions(workspaceId);
 
   if (wLoading || eLoading) return <LoadingSkeleton />;
 
@@ -90,17 +94,36 @@ function DashboardContent({
 
   const executionCounts = {
     total: executionPage?.totalElements ?? 0,
-    running: executions.filter((e) => e.status === "RUNNING" || e.status === "PENDING" || e.status === "QUEUED").length,
+    running: executions.filter(
+      (e) =>
+        e.status === "RUNNING" ||
+        e.status === "PENDING" ||
+        e.status === "QUEUED",
+    ).length,
     success: executions.filter((e) => e.status === "SUCCESS").length,
-    failed: executions.filter((e) => e.status === "FAILED" || e.status === "TIMED_OUT").length,
+    failed: executions.filter(
+      (e) => e.status === "FAILED" || e.status === "TIMED_OUT",
+    ).length,
   };
 
   const statCards = [
-    { label: "Total Workflows", value: workflows.length, color: "text-foreground" },
+    {
+      label: "Total Workflows",
+      value: workflows.length,
+      color: "text-foreground",
+    },
     { label: "Active", value: statusCounts.ACTIVE, color: "text-green-400" },
     { label: "Draft", value: statusCounts.DRAFT, color: "text-gray-400" },
-    { label: "Running Executions", value: executionCounts.running, color: "text-blue-400" },
-    { label: "Failed Executions", value: executionCounts.failed, color: "text-red-400" },
+    {
+      label: "Running Executions",
+      value: executionCounts.running,
+      color: "text-blue-400",
+    },
+    {
+      label: "Failed Executions",
+      value: executionCounts.failed,
+      color: "text-red-400",
+    },
   ];
 
   return (
@@ -154,7 +177,9 @@ function DashboardContent({
                   key={wf.id}
                   type="button"
                   className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent/30"
-                  onClick={() => navigate(`/w/${workspaceId}/workflows/${wf.id}`)}
+                  onClick={() =>
+                    navigate(`/w/${workspaceId}/workflows/${wf.id}`)
+                  }
                 >
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">
                     {wf.name}
@@ -195,14 +220,18 @@ function DashboardContent({
                   key={ex.id}
                   type="button"
                   className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent/30"
-                  onClick={() => navigate(`/w/${workspaceId}/executions/${ex.id}`)}
+                  onClick={() =>
+                    navigate(`/w/${workspaceId}/executions/${ex.id}`)
+                  }
                 >
                   <span className="min-w-0 flex-1 truncate text-sm">
                     {ex.workflowName}
                   </span>
                   <StatusBadge status={ex.status} />
                   <span className="shrink-0 text-xs text-muted-foreground">
-                    {ex.durationMs > 0 ? `${(ex.durationMs / 1000).toFixed(1)}s` : "--"}
+                    {ex.durationMs > 0
+                      ? `${(ex.durationMs / 1000).toFixed(1)}s`
+                      : "--"}
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">
                     {formatRelativeTime(ex.createdAt)}
@@ -236,9 +265,9 @@ function LoadingSkeleton() {
     <div className="space-y-6">
       <div className="h-8 w-48 animate-pulse rounded bg-muted" />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        {Array.from({ length: 5 }, (_, i) => (
+        {["s1", "s2", "s3", "s4", "s5"].map((k) => (
           <div
-            key={i}
+            key={k}
             className="h-20 animate-pulse rounded-lg border border-border bg-card"
           />
         ))}

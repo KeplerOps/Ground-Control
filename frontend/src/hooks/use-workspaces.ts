@@ -1,5 +1,5 @@
 import { api } from "@/lib/api-client";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 export function useWorkspaces() {
   return useQuery({
