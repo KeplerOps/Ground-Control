@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-03-24
+
+### Changed
+
+- **Platform pivot to workflow management.** Ground Control is now a lightweight
+  workflow management platform (like Airflow/n8n but simpler) for building,
+  scheduling, and monitoring automated workflows as DAGs.
+
+### Added
+
+- Visual workflow builder with drag-and-drop DAG editor in the browser
+- DAG execution engine with topological task scheduling, retry, timeout, and
+  parallelism controls
+- Shell, HTTP, and Docker task types for workflow nodes
+- Cron schedule, webhook, and manual trigger types
+- Triple interface: REST API + MCP server for AI assistants + web GUI
+- Graph-native workflow analysis (cycle detection, critical path, dependency
+  impact) powered by Apache AGE
+- Workspace-scoped credentials (encrypted, write-only) and variables with
+  template syntax (`{{credentials.name}}`, `{{variables.name}}`)
+- Workflow lifecycle management with status transitions
+  (DRAFT -> ACTIVE -> PAUSED -> ARCHIVED)
+- Execution tracking with per-node status, output capture, and statistics
+- Webhook endpoint with HMAC-SHA256 signature verification
+- React 19 / Vite 6 / TypeScript 5 / Tailwind 4 frontend
+
 ## [0.76.0] - 2026-03-24
 
 ### Added

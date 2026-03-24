@@ -1,84 +1,44 @@
 import { cn } from "@/lib/utils";
-import type { Status } from "@/types/api";
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { ChevronDown } from "lucide-react";
+import type { ExecutionStatus, WorkflowStatus } from "@/types/api";
 
-const statusColors: Record<Status, string> = {
+const workflowStatusColors: Record<WorkflowStatus, string> = {
   DRAFT: "bg-gray-500/15 text-gray-400",
   ACTIVE: "bg-green-500/15 text-green-400",
-  DEPRECATED: "bg-orange-500/15 text-orange-400",
+  PAUSED: "bg-yellow-500/15 text-yellow-400",
   ARCHIVED: "bg-gray-500/15 text-gray-500",
 };
 
-const validTransitions: Record<Status, Status[]> = {
-  DRAFT: ["ACTIVE"],
-  ACTIVE: ["DEPRECATED"],
-  DEPRECATED: ["ACTIVE", "ARCHIVED"],
-  ARCHIVED: [],
+const executionStatusColors: Record<ExecutionStatus, string> = {
+  PENDING: "bg-gray-500/15 text-gray-400",
+  QUEUED: "bg-blue-500/15 text-blue-400",
+  RUNNING: "bg-blue-500/15 text-blue-300 animate-pulse",
+  SUCCESS: "bg-green-500/15 text-green-400",
+  FAILED: "bg-red-500/15 text-red-400",
+  CANCELLED: "bg-gray-500/15 text-gray-500",
+  SKIPPED: "bg-gray-500/15 text-gray-400",
+  TIMED_OUT: "bg-orange-500/15 text-orange-400",
 };
 
-interface StatusBadgeDropdownProps {
-  status: Status;
-  onTransition: (newStatus: Status) => void;
-  disabled?: boolean;
+interface StatusBadgeProps {
+  status: WorkflowStatus | ExecutionStatus;
+  className?: string;
 }
 
-export function StatusBadgeDropdown({
-  status,
-  onTransition,
-  disabled,
-}: StatusBadgeDropdownProps) {
-  const transitions = validTransitions[status];
-
-  if (transitions.length === 0 || disabled) {
-    return (
-      <span
-        className={cn(
-          "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-          statusColors[status],
-        )}
-      >
-        {status}
-      </span>
-    );
-  }
+export function StatusBadge({ status, className }: StatusBadgeProps) {
+  const color =
+    workflowStatusColors[status as WorkflowStatus] ??
+    executionStatusColors[status as ExecutionStatus] ??
+    "bg-gray-500/15 text-gray-400";
 
   return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger
-        className={cn(
-          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium cursor-pointer",
-          "hover:ring-1 hover:ring-primary/50",
-          statusColors[status],
-        )}
-      >
-        {status}
-        <ChevronDown className="h-3 w-3" />
-      </DropdownMenu.Trigger>
-
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          className="min-w-[120px] rounded-md border border-border bg-card p-1 shadow-lg"
-          sideOffset={4}
-        >
-          {transitions.map((s) => (
-            <DropdownMenu.Item
-              key={s}
-              className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent"
-              onSelect={() => onTransition(s)}
-            >
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                  statusColors[s],
-                )}
-              >
-                {s}
-              </span>
-            </DropdownMenu.Item>
-          ))}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+        color,
+        className,
+      )}
+    >
+      {status}
+    </span>
   );
 }

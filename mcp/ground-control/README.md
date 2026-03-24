@@ -1,8 +1,8 @@
 # Ground Control MCP Server
 
-MCP server wrapping the Ground Control REST API. Provides 30 tools for
-requirements management, traceability, graph analysis, embeddings, and
-semantic analysis.
+MCP server wrapping the Ground Control REST API. Provides tools for workflow
+management including workspaces, workflows, nodes, edges, executions, triggers,
+credentials, and variables.
 
 ## Setup
 
@@ -29,103 +29,122 @@ Requires a running Ground Control instance:
 make up && make dev
 ```
 
-`GC_BASE_URL` defaults to `http://localhost:8000` if not set.
+`GC_BASE_URL` defaults to `http://localhost:8000` if not set. The API base
+path is `/api/v1`.
 
 ## Workflow
 
-Operations have a natural ordering. Requirements must exist before they can
-be related, linked, or analyzed.
+Operations have a natural ordering. Workspaces contain workflows, workflows
+contain nodes and edges, and executions are created from published workflows.
 
-1. **Create requirements** — `gc_create_requirement` with uid, title, statement
-2. **Create relations** — `gc_create_relation` between two existing requirements
-3. **Add traceability links** — `gc_create_traceability_link` to connect code, tests, issues, ADRs
-4. **Run analysis** — `gc_analyze_cycles`, `gc_analyze_orphans`, `gc_analyze_coverage_gaps`, `gc_analyze_impact`, `gc_analyze_cross_wave`, `gc_analyze_consistency`, `gc_analyze_completeness`
-5. **Embed requirements** — `gc_embed_project` to generate vector embeddings, `gc_analyze_similarity` to find near-duplicates
-6. **Transition status** — `gc_transition_status` moves requirements forward: DRAFT → ACTIVE → DEPRECATED → ARCHIVED
-7. **Bulk operations** — `gc_import_strictdoc` for .sdoc files, `gc_import_reqif` for .reqif files, `gc_sync_github` for issue sync
-8. **Manage baselines** — `gc_create_baseline`, `gc_compare_baselines` for release management
+1. **Create a workspace** -- `gc_create_workspace` to organize workflows
+2. **Create a workflow** -- `gc_create_workflow` with a name (defaults to DRAFT)
+3. **Add nodes** -- `gc_add_node` to define steps (actions, conditions, transforms, etc.)
+4. **Add edges** -- `gc_add_edge` to connect nodes with optional conditions
+5. **Validate** -- `gc_validate_workflow` to check structure before publishing
+6. **Publish** -- `gc_publish_workflow` to make the workflow executable
+7. **Execute** -- `gc_execute_workflow` to run with optional inputs
+8. **Monitor** -- `gc_list_executions`, `gc_get_execution` to track progress
+9. **Manage lifecycle** -- `gc_transition_workflow` to ACTIVE, PAUSED, or ARCHIVED
+10. **Set up triggers** -- `gc_create_trigger` for webhooks, schedules, or events
+11. **Configure credentials** -- `gc_create_credential` for external service auth
+12. **Define variables** -- `gc_create_variable` for reusable workspace-level values
 
 ## Tool Reference
 
+### Workspaces
+
 | Tool | Parameters | Purpose |
 |------|-----------|---------|
-| `gc_create_requirement` | `uid` (required), `title` (required), `statement` (required), `rationale`, `requirement_type`, `priority`, `wave` | Create a requirement. Status defaults to DRAFT |
-| `gc_get_requirement` | `uid` (required) | Get requirement by UID |
-| `gc_list_requirements` | `status`, `type`, `wave`, `search`, `page`, `size`, `sort` | List requirements with optional filters. Paginated, sortable |
-| `gc_update_requirement` | `id` (required), `uid`, `title`, `statement`, `rationale`, `requirement_type`, `priority`, `wave` | Update fields on an existing requirement. Pass only changed fields |
-| `gc_transition_status` | `id` (required), `status` (required) | Transition requirement status. Forward-only |
-| `gc_archive_requirement` | `id` (required) | Shortcut to transition to ARCHIVED |
-| `gc_create_relation` | `source_id` (required), `target_id` (required), `relation_type` (required) | Create a directed relation between two requirements |
-| `gc_get_relations` | `id` (required) | Get all relations (incoming and outgoing) for a requirement |
-| `gc_get_traceability` | `id` (required) | Get all traceability links for a requirement |
-| `gc_create_traceability_link` | `requirement_id` (required), `artifact_type` (required), `artifact_identifier` (required), `link_type` (required), `artifact_url`, `artifact_title` | Link an artifact to a requirement |
-| `gc_analyze_cycles` | _(none)_ | Detect dependency cycles in the requirements graph |
-| `gc_analyze_orphans` | _(none)_ | Find requirements with no relations |
-| `gc_analyze_coverage_gaps` | `link_type` (required) | Find requirements missing a specific link type |
-| `gc_analyze_impact` | `id` (required) | Transitive impact analysis from a given requirement |
-| `gc_analyze_cross_wave` | _(none)_ | Find cross-wave dependency violations |
-| `gc_analyze_consistency` | `project` (optional) | Detect consistency violations (active conflicts, active supersedes) |
-| `gc_analyze_completeness` | `project` (optional) | Analyze completeness: status distribution and missing fields |
-| `gc_dashboard_stats` | `project` (optional) | Aggregate project health: counts by status/wave, coverage percentages, recent changes |
-| `gc_get_work_order` | `project` (optional) | Topological work order with MoSCoW priority |
-| `gc_dashboard_stats` | `project` (optional) | Aggregate project health: counts, coverage, recent changes |
-| `gc_run_sweep` | `project` (optional) | Run full analysis sweep on one project |
-| `gc_run_sweep_all` | _(none)_ | Run analysis sweep across all projects |
-| `gc_import_strictdoc` | `file_path` (required), `project` (optional) | Import requirements from a .sdoc file. Idempotent |
-| `gc_import_reqif` | `file_path` (required), `project` (optional) | Import requirements from a .reqif file. Idempotent |
-| `gc_sync_github` | `owner` (required), `repo` (required) | Sync GitHub issues as traceability links |
-| `gc_create_github_issue` | `uid` (required), `repo`, `labels`, `extra_body` | Create GitHub issue from requirement and auto-link |
-| `gc_embed_requirement` | `requirement_id` (required) | Generate embedding for a requirement's text |
-| `gc_get_embedding_status` | `requirement_id` (required) | Check embedding status (stale, model mismatch) |
-| `gc_embed_project` | `project` (optional), `force` (optional) | Batch-embed all requirements in a project |
-| `gc_analyze_similarity` | `project` (optional), `threshold` (optional) | Find semantically similar requirement pairs |
-| `gc_get_graph_visualization` | `project` (optional) | Get all requirements and relations for visualization |
-| `gc_materialize_graph` | _(none)_ | Materialize Apache AGE graph |
-| `gc_get_ancestors` | `uid` (required), `depth` (optional) | Get ancestor UIDs via graph traversal |
-| `gc_get_descendants` | `uid` (required), `depth` (optional) | Get descendant UIDs via graph traversal |
-| `gc_find_paths` | `source` (required), `target` (required) | Find all paths between two requirements |
-| `gc_extract_subgraph` | `roots` (required) | Extract subgraph from root UIDs |
-| `gc_create_baseline` | `name` (required), `description`, `project` (optional) | Create point-in-time baseline |
-| `gc_list_baselines` | `project` (optional) | List all baselines |
-| `gc_get_baseline` | `id` (required) | Get baseline details |
-| `gc_get_baseline_snapshot` | `id` (required) | Get requirement snapshot at baseline |
-| `gc_compare_baselines` | `id` (required), `other_id` (required) | Compare two baselines |
-| `gc_delete_baseline` | `id` (required) | Delete a baseline |
-| `gc_clone_requirement` | `id` (required), `new_uid` (required), `copy_relations` (optional) | Clone a requirement |
-| `gc_bulk_transition_status` | `ids` (required), `status` (required) | Bulk transition multiple requirements |
-| `gc_delete_relation` | `requirement_id` (required), `relation_id` (required) | Delete a relation |
-| `gc_delete_traceability_link` | `requirement_id` (required), `link_id` (required) | Delete a traceability link |
-| `gc_get_requirement_history` | `id` (required) | Get requirement revision history |
-| `gc_get_relation_history` | `requirement_id` (required), `relation_id` (required) | Get relation revision history |
-| `gc_get_traceability_link_history` | `requirement_id` (required), `link_id` (required) | Get link revision history |
-| `gc_get_timeline` | `id` (required), `change_category`, `actor`, `from`, `to`, `limit`, `offset` | Unified audit timeline for a requirement |
-| `gc_get_project_timeline` | `project`, `change_category`, `actor`, `from`, `to`, `limit`, `offset` | Unified audit timeline across all requirements in a project |
-| `gc_export_audit_timeline` | `project`, `change_category`, `actor`, `from`, `to`, `limit` | Export project audit timeline as CSV |
+| `gc_create_workspace` | `name` (required), `description` | Create a workspace for organizing workflows |
+| `gc_list_workspaces` | _(none)_ | List all workspaces |
+
+### Workflows
+
+| Tool | Parameters | Purpose |
+|------|-----------|---------|
+| `gc_create_workflow` | `name` (required), `description`, `workspace` | Create a workflow. Status defaults to DRAFT |
+| `gc_list_workflows` | `workspace` | List workflows, optionally filtered by workspace |
+| `gc_get_workflow` | `id` (required) | Get a workflow by UUID |
+| `gc_update_workflow` | `id` (required), `name`, `description` | Update workflow fields. Pass only changed fields |
+| `gc_delete_workflow` | `id` (required) | Delete a workflow |
+| `gc_publish_workflow` | `id` (required) | Publish a workflow for execution |
+| `gc_validate_workflow` | `id` (required) | Validate workflow structure (nodes, edges, config) |
+| `gc_transition_workflow` | `id` (required), `status` (required) | Transition workflow status |
+
+### Nodes
+
+| Tool | Parameters | Purpose |
+|------|-----------|---------|
+| `gc_add_node` | `workflow_id` (required), `name` (required), `node_type` (required), `config`, `position_x`, `position_y` | Add a node to a workflow |
+| `gc_get_nodes` | `workflow_id` (required) | Get all nodes in a workflow |
+| `gc_update_node` | `workflow_id` (required), `node_id` (required), `name`, `config`, `position_x`, `position_y` | Update a node. Pass only changed fields |
+| `gc_delete_node` | `workflow_id` (required), `node_id` (required) | Delete a node from a workflow |
+
+### Edges
+
+| Tool | Parameters | Purpose |
+|------|-----------|---------|
+| `gc_add_edge` | `workflow_id` (required), `source_node_id` (required), `target_node_id` (required), `condition` | Add an edge between two nodes |
+| `gc_get_edges` | `workflow_id` (required) | Get all edges in a workflow |
+| `gc_delete_edge` | `workflow_id` (required), `edge_id` (required) | Delete an edge from a workflow |
+
+### Executions
+
+| Tool | Parameters | Purpose |
+|------|-----------|---------|
+| `gc_execute_workflow` | `workflow_id` (required), `inputs` | Execute a published workflow with optional JSON inputs |
+| `gc_list_executions` | `workflow_id` | List executions. Filters by workflow if ID provided, otherwise lists all |
+| `gc_get_execution` | `id` (required) | Get execution details |
+| `gc_cancel_execution` | `id` (required) | Cancel a running execution |
+| `gc_retry_execution` | `id` (required) | Retry a failed execution |
+
+### Triggers
+
+| Tool | Parameters | Purpose |
+|------|-----------|---------|
+| `gc_create_trigger` | `workflow_id` (required), `name` (required), `trigger_type` (required), `config` | Create a trigger for a workflow |
+| `gc_list_triggers` | `workflow_id` (required) | List triggers for a workflow |
+| `gc_toggle_trigger` | `id` (required), `is_active` (required) | Enable or disable a trigger |
+| `gc_delete_trigger` | `id` (required) | Delete a trigger |
+
+### Credentials
+
+| Tool | Parameters | Purpose |
+|------|-----------|---------|
+| `gc_list_credentials` | `workspace` | List credentials in a workspace. Values are never returned |
+| `gc_create_credential` | `name` (required), `credential_type` (required), `encrypted_data` (required), `workspace` | Create a credential for workflow nodes |
+| `gc_delete_credential` | `id` (required) | Delete a credential |
+
+### Variables
+
+| Tool | Parameters | Purpose |
+|------|-----------|---------|
+| `gc_list_variables` | `workspace` | List variables in a workspace |
+| `gc_create_variable` | `name` (required), `value` (required), `variable_type`, `is_secret`, `workspace` | Create a workspace variable |
+| `gc_update_variable` | `id` (required), `name`, `value`, `variable_type`, `is_secret` | Update a variable. Pass only changed fields |
+| `gc_delete_variable` | `id` (required) | Delete a variable |
 
 ## Enums
 
-**Status:** `DRAFT`, `ACTIVE`, `DEPRECATED`, `ARCHIVED`
+**Workflow status:** `DRAFT`, `ACTIVE`, `PAUSED`, `ARCHIVED`
 
-**Requirement type:** `FUNCTIONAL`, `NON_FUNCTIONAL`, `CONSTRAINT`, `INTERFACE`
+**Node type:** `TRIGGER`, `ACTION`, `CONDITION`, `DELAY`, `LOOP`, `TRANSFORM`, `HTTP_REQUEST`, `CODE`, `SUB_WORKFLOW`
 
-**Priority (MoSCoW):** `MUST`, `SHOULD`, `COULD`, `WONT`
-
-**Relation type:** `PARENT`, `DEPENDS_ON`, `CONFLICTS_WITH`, `REFINES`, `SUPERSEDES`, `RELATED`
-
-**Artifact type:** `GITHUB_ISSUE`, `CODE_FILE`, `ADR`, `CONFIG`, `POLICY`, `TEST`, `SPEC`, `PROOF`, `DOCUMENTATION`
-
-**Link type:** `IMPLEMENTS`, `TESTS`, `DOCUMENTS`, `CONSTRAINS`, `VERIFIES`
+**Trigger type:** `WEBHOOK`, `SCHEDULE`, `EVENT`, `MANUAL`
 
 ## Status Transitions
 
-Forward-only. No backward transitions.
+Workflows start in DRAFT. After publishing, they can be transitioned:
 
 ```
-DRAFT → ACTIVE → DEPRECATED → ARCHIVED
+DRAFT -> (publish) -> PUBLISHED
+PUBLISHED -> ACTIVE -> PAUSED -> ARCHIVED
+                  \-> ARCHIVED
 ```
 
-`gc_transition_status` enforces this. `gc_archive_requirement` is a shortcut
-that transitions directly to ARCHIVED (must already be DEPRECATED).
+`gc_transition_workflow` accepts `ACTIVE`, `PAUSED`, or `ARCHIVED` as the
+target status.
 
 ## Error Handling
 
@@ -135,7 +154,7 @@ Errors return:
 {
   "error": {
     "code": "NOT_FOUND",
-    "message": "Requirement not found",
+    "message": "Workflow not found",
     "detail": {}
   }
 }
@@ -145,6 +164,13 @@ Common codes: `NOT_FOUND` (404), `CONFLICT` (409), `VALIDATION_ERROR` (422).
 
 ## IDs
 
-`gc_create_requirement` and `gc_get_requirement` use `uid` (human-readable,
-e.g. `REQ-001`). All other tools use `id` (UUID, returned in create/list
-responses).
+All entities use UUID identifiers, returned in create/list responses. The MCP
+tools use `snake_case` parameter names which are automatically converted to
+`camelCase` for the REST API.
+
+## Field Name Convention
+
+The MCP server uses `snake_case` field names (e.g., `node_type`, `workflow_id`).
+These are automatically mapped to the `camelCase` names expected by the REST API
+(e.g., `nodeType`, `workflowId`). Response bodies are similarly converted back
+to `snake_case`.

@@ -1,84 +1,50 @@
-import { readFileSync } from "node:fs";
-import { basename } from "node:path";
-import { execFile as execFileCb } from "node:child_process";
-import { promisify } from "node:util";
-
-const execFile = promisify(execFileCb);
-
 // ---------------------------------------------------------------------------
 // Constants (matching Java enums)
 // ---------------------------------------------------------------------------
 
-export const STATUSES = ["DRAFT", "ACTIVE", "DEPRECATED", "ARCHIVED"];
-export const REQUIREMENT_TYPES = ["FUNCTIONAL", "NON_FUNCTIONAL", "CONSTRAINT", "INTERFACE"];
-export const PRIORITIES = ["MUST", "SHOULD", "COULD", "WONT"];
-export const RELATION_TYPES = ["PARENT", "DEPENDS_ON", "CONFLICTS_WITH", "REFINES", "SUPERSEDES", "RELATED"];
-export const ARTIFACT_TYPES = [
-  "GITHUB_ISSUE",
-  "CODE_FILE",
-  "ADR",
-  "CONFIG",
-  "POLICY",
-  "TEST",
-  "SPEC",
-  "PROOF",
-  "DOCUMENTATION",
+export const WORKFLOW_STATUSES = ["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"];
+export const NODE_TYPES = [
+  "TRIGGER",
+  "ACTION",
+  "CONDITION",
+  "DELAY",
+  "LOOP",
+  "TRANSFORM",
+  "HTTP_REQUEST",
+  "CODE",
+  "SUB_WORKFLOW",
 ];
-export const LINK_TYPES = ["IMPLEMENTS", "TESTS", "DOCUMENTS", "CONSTRAINS", "VERIFIES"];
+export const TRIGGER_TYPES = ["WEBHOOK", "SCHEDULE", "EVENT", "MANUAL"];
 
 // ---------------------------------------------------------------------------
 // Field name mapping (snake_case MCP <-> camelCase API)
 // ---------------------------------------------------------------------------
 
 const TO_CAMEL = {
-  requirement_type: "requirementType",
-  artifact_type: "artifactType",
-  artifact_identifier: "artifactIdentifier",
-  artifact_url: "artifactUrl",
-  artifact_title: "artifactTitle",
-  link_type: "linkType",
-  relation_type: "relationType",
-  target_id: "targetId",
-  new_uid: "newUid",
-  copy_relations: "copyRelations",
-  revision_number: "revisionNumber",
-  revision_type: "revisionType",
-  sync_status: "syncStatus",
-  last_synced_at: "lastSyncedAt",
-  source_uid: "sourceUid",
-  target_uid: "targetUid",
-  source_wave: "sourceWave",
-  target_wave: "targetWave",
-  requirement_uid: "requirementUid",
-  extra_body: "extraBody",
-  project_identifier: "projectIdentifier",
-  blocking_status: "blockingStatus",
-  blocked_by: "blockedBy",
-  content_hash: "contentHash",
-  model_id: "modelId",
-  has_embedding: "hasEmbedding",
-  is_stale: "isStale",
-  model_mismatch: "modelMismatch",
-  current_model_id: "currentModelId",
-  embedding_model_id: "embeddingModelId",
-  embedded_at: "embeddedAt",
-  pairs_analyzed: "pairsAnalyzed",
-  embedded_count: "embeddedCount",
-  similarity_threshold: "similarityThreshold",
-  total_unblocked: "totalUnblocked",
-  total_blocked: "totalBlocked",
-  total_unconstrained: "totalUnconstrained",
-  total_requirements: "totalRequirements",
-  created_by: "createdBy",
-  baseline_id: "baselineId",
-  baseline_name: "baselineName",
-  other_baseline_id: "otherBaselineId",
-  other_baseline_name: "otherBaselineName",
-  added_count: "addedCount",
-  removed_count: "removedCount",
-  modified_count: "modifiedCount",
-  requirement_count: "requirementCount",
-  requirement_id: "requirementId",
+  node_type: "nodeType",
+  source_node_id: "sourceNodeId",
+  target_node_id: "targetNodeId",
+  workflow_id: "workflowId",
+  workspace_id: "workspaceId",
+  trigger_type: "triggerType",
+  credential_type: "credentialType",
+  encrypted_data: "encryptedData",
+  created_at: "createdAt",
+  updated_at: "updatedAt",
+  started_at: "startedAt",
+  completed_at: "completedAt",
+  position_x: "positionX",
+  position_y: "positionY",
+  retry_count: "retryCount",
+  max_retries: "maxRetries",
+  timeout_seconds: "timeoutSeconds",
+  is_active: "isActive",
+  cron_expression: "cronExpression",
+  next_fire_time: "nextFireTime",
+  last_fired_at: "lastFiredAt",
+  execution_count: "executionCount",
+  variable_type: "variableType",
+  is_secret: "isSecret",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -133,19 +99,13 @@ export function parseErrorBody(text) {
   }
 }
 
-async function request(method, path, { body, params, formData } = {}) {
+async function request(method, path, { body, params } = {}) {
   const url = buildUrl(path, params);
-  const options = { method };
+  const options = { method, headers: { "X-Actor": "mcp-server" } };
 
-  if (formData) {
-    options.headers = { "X-Actor": "mcp-server" };
-    options.body = formData;
-    // Let fetch set Content-Type with boundary for multipart
-  } else if (body !== undefined) {
-    options.headers = { "Content-Type": "application/json", "X-Actor": "mcp-server" };
+  if (body !== undefined) {
+    options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(toCamelCase(body));
-  } else {
-    options.headers = { "X-Actor": "mcp-server" };
   }
 
   const res = await fetch(url, options);
@@ -164,377 +124,191 @@ async function request(method, path, { body, params, formData } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Project API functions
+// Workspace API
 // ---------------------------------------------------------------------------
 
-export async function listProjects() {
-  return request("GET", "/api/v1/projects");
+export async function createWorkspace(data) {
+  return request("POST", "/api/v1/workspaces", { body: data });
 }
 
-export async function getProject(identifier) {
-  return request("GET", `/api/v1/projects/${encodeURIComponent(identifier)}`);
-}
-
-export async function createProject(data) {
-  return request("POST", "/api/v1/projects", { body: data });
-}
-
-export async function updateProject(identifier, data) {
-  return request("PUT", `/api/v1/projects/${encodeURIComponent(identifier)}`, { body: data });
+export async function listWorkspaces() {
+  return request("GET", "/api/v1/workspaces");
 }
 
 // ---------------------------------------------------------------------------
-// Requirement API functions
+// Workflow API
 // ---------------------------------------------------------------------------
 
-export async function getRequirementByUid(uid, project) {
-  return request("GET", `/api/v1/requirements/uid/${encodeURIComponent(uid)}`, {
-    params: { project },
+export async function createWorkflow(data, workspace) {
+  return request("POST", "/api/v1/workflows", { body: data, params: { workspace } });
+}
+
+export async function listWorkflows(workspace) {
+  return request("GET", "/api/v1/workflows", { params: { workspace } });
+}
+
+export async function getWorkflow(id) {
+  return request("GET", `/api/v1/workflows/${encodeURIComponent(id)}`);
+}
+
+export async function updateWorkflow(id, data) {
+  return request("PUT", `/api/v1/workflows/${encodeURIComponent(id)}`, { body: data });
+}
+
+export async function deleteWorkflow(id) {
+  await request("DELETE", `/api/v1/workflows/${encodeURIComponent(id)}`);
+}
+
+export async function publishWorkflow(id) {
+  return request("POST", `/api/v1/workflows/${encodeURIComponent(id)}/publish`);
+}
+
+export async function validateWorkflow(id) {
+  return request("POST", `/api/v1/workflows/${encodeURIComponent(id)}/validate`);
+}
+
+export async function transitionWorkflow(id, status) {
+  return request("POST", `/api/v1/workflows/${encodeURIComponent(id)}/transition`, {
+    body: { status },
   });
 }
 
-export async function getRequirement(id) {
-  return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}`);
-}
+// ---------------------------------------------------------------------------
+// Node API
+// ---------------------------------------------------------------------------
 
-export async function listRequirements({ status, type, priority, wave, search, page, size, sort, project } = {}) {
-  return request("GET", "/api/v1/requirements", {
-    params: { status, type, priority, wave, search, page, size, sort, project },
+export async function addNode(workflowId, data) {
+  return request("POST", `/api/v1/workflows/${encodeURIComponent(workflowId)}/nodes`, {
+    body: data,
   });
 }
 
-export async function createRequirement(data, project) {
-  return request("POST", "/api/v1/requirements", { body: data, params: { project } });
+export async function getNodes(workflowId) {
+  return request("GET", `/api/v1/workflows/${encodeURIComponent(workflowId)}/nodes`);
 }
 
-export async function updateRequirement(id, data) {
-  return request("PUT", `/api/v1/requirements/${encodeURIComponent(id)}`, { body: data });
-}
-
-export async function transitionStatus(id, status, reason) {
-  const body = { status };
-  if (reason) body.reason = reason;
-  return request("POST", `/api/v1/requirements/${encodeURIComponent(id)}/transition`, { body });
-}
-
-export async function archiveRequirement(id) {
-  return request("POST", `/api/v1/requirements/${encodeURIComponent(id)}/archive`);
-}
-
-export async function bulkTransitionStatus(ids, status, reason) {
-  const body = { ids, status };
-  if (reason) body.reason = reason;
-  return request("POST", "/api/v1/requirements/bulk/transition", { body });
-}
-
-export async function cloneRequirement(id, newUid, copyRelations) {
-  return request("POST", `/api/v1/requirements/${encodeURIComponent(id)}/clone`, {
-    body: { new_uid: newUid, copy_relations: copyRelations },
-  });
-}
-
-export async function getRelations(id) {
-  return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}/relations`);
-}
-
-export async function createRelation(sourceId, targetId, relationType) {
-  return request("POST", `/api/v1/requirements/${encodeURIComponent(sourceId)}/relations`, {
-    body: { target_id: targetId, relation_type: relationType },
-  });
-}
-
-export async function getTraceabilityLinks(id) {
-  return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}/traceability`);
-}
-
-export async function createTraceabilityLink(requirementId, data) {
+export async function updateNode(workflowId, nodeId, data) {
   return request(
-    "POST",
-    `/api/v1/requirements/${encodeURIComponent(requirementId)}/traceability`,
+    "PUT",
+    `/api/v1/workflows/${encodeURIComponent(workflowId)}/nodes/${encodeURIComponent(nodeId)}`,
     { body: data },
   );
 }
 
-export async function detectCycles(project) {
-  return request("GET", "/api/v1/analysis/cycles", { params: { project } });
+export async function deleteNode(workflowId, nodeId) {
+  await request(
+    "DELETE",
+    `/api/v1/workflows/${encodeURIComponent(workflowId)}/nodes/${encodeURIComponent(nodeId)}`,
+  );
 }
 
-export async function findOrphans(project) {
-  return request("GET", "/api/v1/analysis/orphans", { params: { project } });
-}
+// ---------------------------------------------------------------------------
+// Edge API
+// ---------------------------------------------------------------------------
 
-export async function findCoverageGaps(linkType, project) {
-  return request("GET", "/api/v1/analysis/coverage-gaps", {
-    params: { linkType, project },
+export async function addEdge(workflowId, data) {
+  return request("POST", `/api/v1/workflows/${encodeURIComponent(workflowId)}/edges`, {
+    body: data,
   });
 }
 
-export async function impactAnalysis(id) {
-  return request("GET", `/api/v1/analysis/impact/${encodeURIComponent(id)}`);
+export async function getEdges(workflowId) {
+  return request("GET", `/api/v1/workflows/${encodeURIComponent(workflowId)}/edges`);
 }
 
-export async function crossWaveValidation(project) {
-  return request("GET", "/api/v1/analysis/cross-wave", { params: { project } });
+export async function deleteEdge(workflowId, edgeId) {
+  await request(
+    "DELETE",
+    `/api/v1/workflows/${encodeURIComponent(workflowId)}/edges/${encodeURIComponent(edgeId)}`,
+  );
 }
 
-export async function detectConsistencyViolations(project) {
-  return request("GET", "/api/v1/analysis/consistency-violations", { params: { project } });
-}
+// ---------------------------------------------------------------------------
+// Execution API
+// ---------------------------------------------------------------------------
 
-export async function analyzeCompleteness(project) {
-  return request("GET", "/api/v1/analysis/completeness", { params: { project } });
-}
-
-export async function getDashboardStats(project) {
-  return request("GET", "/api/v1/analysis/dashboard-stats", { params: { project } });
-}
-
-export async function getWorkOrder(project) {
-  return request("GET", "/api/v1/analysis/work-order", { params: { project } });
-}
-
-export async function importStrictdoc(filePath, project) {
-  const content = readFileSync(filePath);
-  const form = new FormData();
-  form.append("file", new Blob([content]), basename(filePath));
-  const params = {};
-  if (project) params.project = project;
-  return request("POST", "/api/v1/admin/import/strictdoc", { formData: form, params });
-}
-
-export async function importReqif(filePath, project) {
-  const content = readFileSync(filePath);
-  const form = new FormData();
-  form.append("file", new Blob([content]), basename(filePath));
-  const params = {};
-  if (project) params.project = project;
-  return request("POST", "/api/v1/admin/import/reqif", { formData: form, params });
-}
-
-export async function syncGithub(owner, repo) {
-  return request("POST", "/api/v1/admin/sync/github", {
-    params: { owner, repo },
+export async function executeWorkflow(workflowId, inputs) {
+  return request("POST", `/api/v1/workflows/${encodeURIComponent(workflowId)}/execute`, {
+    body: { inputs },
   });
 }
 
-// ---------------------------------------------------------------------------
-// History functions
-// ---------------------------------------------------------------------------
-
-export async function getRequirementHistory(id) {
-  return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}/history`);
+export async function listWorkflowExecutions(workflowId) {
+  return request("GET", `/api/v1/workflows/${encodeURIComponent(workflowId)}/executions`);
 }
 
-export async function getRelationHistory(reqId, relId) {
-  return request("GET", `/api/v1/requirements/${encodeURIComponent(reqId)}/relations/${encodeURIComponent(relId)}/history`);
+export async function listExecutions() {
+  return request("GET", "/api/v1/executions");
 }
 
-export async function getTraceabilityLinkHistory(reqId, linkId) {
-  return request("GET", `/api/v1/requirements/${encodeURIComponent(reqId)}/traceability/${encodeURIComponent(linkId)}/history`);
+export async function getExecution(id) {
+  return request("GET", `/api/v1/executions/${encodeURIComponent(id)}`);
 }
 
-export async function getRequirementTimeline(id, changeCategory, actor, from, to, limit, offset) {
-  const params = new URLSearchParams();
-  if (changeCategory) params.set("changeCategory", changeCategory);
-  if (actor) params.set("actor", actor);
-  if (from) params.set("from", from);
-  if (to) params.set("to", to);
-  if (limit != null) params.set("limit", String(limit));
-  if (offset != null) params.set("offset", String(offset));
-  const qs = params.toString();
-  return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}/timeline${qs ? `?${qs}` : ""}`);
+export async function cancelExecution(id) {
+  return request("POST", `/api/v1/executions/${encodeURIComponent(id)}/cancel`);
 }
 
-export async function getProjectTimeline(project, changeCategory, actor, from, to, limit, offset) {
-  const params = new URLSearchParams();
-  if (project) params.set("project", project);
-  if (changeCategory) params.set("changeCategory", changeCategory);
-  if (actor) params.set("actor", actor);
-  if (from) params.set("from", from);
-  if (to) params.set("to", to);
-  if (limit != null) params.set("limit", String(limit));
-  if (offset != null) params.set("offset", String(offset));
-  const qs = params.toString();
-  return request("GET", `/api/v1/audit/timeline${qs ? `?${qs}` : ""}`);
-}
-
-export async function exportAuditTimeline(project, changeCategory, actor, from, to, limit) {
-  const url = buildUrl("/api/v1/audit/timeline/export", {
-    project, changeCategory, actor, from, to, limit,
-  });
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
-  return resp.text();
+export async function retryExecution(id) {
+  return request("POST", `/api/v1/executions/${encodeURIComponent(id)}/retry`);
 }
 
 // ---------------------------------------------------------------------------
-// Delete functions
+// Trigger API
 // ---------------------------------------------------------------------------
 
-export async function deleteRelation(reqId, relId) {
-  await request("DELETE", `/api/v1/requirements/${encodeURIComponent(reqId)}/relations/${encodeURIComponent(relId)}`);
+export async function createTrigger(data) {
+  return request("POST", "/api/v1/triggers", { body: data });
 }
 
-export async function deleteTraceabilityLink(reqId, linkId) {
-  await request("DELETE", `/api/v1/requirements/${encodeURIComponent(reqId)}/traceability/${encodeURIComponent(linkId)}`);
+export async function listTriggers(workflowId) {
+  return request("GET", "/api/v1/triggers", { params: { workflowId } });
 }
 
-// ---------------------------------------------------------------------------
-// Graph functions
-// ---------------------------------------------------------------------------
-
-export async function materializeGraph() {
-  return request("POST", "/api/v1/admin/graph/materialize");
+export async function updateTrigger(id, data) {
+  return request("PUT", `/api/v1/triggers/${encodeURIComponent(id)}`, { body: data });
 }
 
-export async function getAncestors(uid, depth, project) {
-  return request("GET", `/api/v1/graph/ancestors/${encodeURIComponent(uid)}`, {
-    params: { depth, project },
-  });
-}
-
-export async function getDescendants(uid, depth, project) {
-  return request("GET", `/api/v1/graph/descendants/${encodeURIComponent(uid)}`, {
-    params: { depth, project },
-  });
-}
-
-export async function findPaths(source, target, project) {
-  return request("GET", "/api/v1/graph/paths", {
-    params: { source, target, project },
-  });
-}
-
-export async function getGraphVisualization(project) {
-  return request("GET", "/api/v1/graph/visualization", {
-    params: { project },
-  });
-}
-
-export async function extractSubgraph(roots, project) {
-  return request("GET", "/api/v1/graph/subgraph", {
-    params: { roots: roots.join(","), project },
-  });
+export async function deleteTrigger(id) {
+  await request("DELETE", `/api/v1/triggers/${encodeURIComponent(id)}`);
 }
 
 // ---------------------------------------------------------------------------
-// Baseline functions
+// Credential API
 // ---------------------------------------------------------------------------
 
-export async function createBaseline(data, project) {
-  return request("POST", "/api/v1/baselines", { body: data, params: { project } });
+export async function createCredential(data, workspace) {
+  return request("POST", "/api/v1/credentials", { body: data, params: { workspace } });
 }
 
-export async function listBaselines(project) {
-  return request("GET", "/api/v1/baselines", { params: { project } });
+export async function listCredentials(workspace) {
+  return request("GET", "/api/v1/credentials", { params: { workspace } });
 }
 
-export async function getBaseline(id) {
-  return request("GET", `/api/v1/baselines/${encodeURIComponent(id)}`);
+export async function updateCredential(id, data) {
+  return request("PUT", `/api/v1/credentials/${encodeURIComponent(id)}`, { body: data });
 }
 
-export async function getBaselineSnapshot(id) {
-  return request("GET", `/api/v1/baselines/${encodeURIComponent(id)}/snapshot`);
-}
-
-export async function compareBaselines(id, otherId) {
-  return request("GET", `/api/v1/baselines/${encodeURIComponent(id)}/compare/${encodeURIComponent(otherId)}`);
-}
-
-export async function deleteBaseline(id) {
-  await request("DELETE", `/api/v1/baselines/${encodeURIComponent(id)}`);
+export async function deleteCredential(id) {
+  await request("DELETE", `/api/v1/credentials/${encodeURIComponent(id)}`);
 }
 
 // ---------------------------------------------------------------------------
-// GitHub issue creation
+// Variable API
 // ---------------------------------------------------------------------------
 
-export function formatIssueBody(req, extraBody) {
-  const headerParts = [
-    `**${req.uid}**`,
-    req.requirement_type || "FUNCTIONAL",
-    req.priority || "SHOULD",
-  ];
-  if (req.wave != null) {
-    headerParts.push(`Wave ${req.wave}`);
-  }
-  headerParts.push(req.status || "DRAFT");
-
-  let body = `> ${headerParts.join(" | ")}\n\n## Statement\n\n${req.statement}`;
-
-  if (req.rationale) {
-    body += `\n\n## Rationale\n\n${req.rationale}`;
-  }
-
-  body += `\n\n---\n*Created from Ground Control requirement ${req.uid}*`;
-
-  if (extraBody) {
-    body += `\n\n${extraBody}`;
-  }
-
-  return body;
+export async function createVariable(data, workspace) {
+  return request("POST", "/api/v1/variables", { body: data, params: { workspace } });
 }
 
-export async function createGitHubIssue({ title, body, labels, repo }) {
-  const targetRepo = repo || process.env.GH_REPO;
-  const args = ["issue", "create", "--title", title, "--body", body];
-  if (targetRepo) {
-    args.push("--repo", targetRepo);
-  }
-  if (labels && labels.length > 0) {
-    args.push("--label", labels.join(","));
-  }
-
-  const { stdout } = await execFile("gh", args);
-  const url = stdout.trim();
-  const match = url.match(/\/issues\/(\d+)$/);
-  if (!match) {
-    throw new Error(`Could not parse issue number from gh output: ${url}`);
-  }
-  const number = parseInt(match[1], 10);
-  return { url, number };
+export async function listVariables(workspace) {
+  return request("GET", "/api/v1/variables", { params: { workspace } });
 }
 
-export async function createGitHubIssueViaApi(data, project) {
-  return request("POST", "/api/v1/admin/github/issues", { body: data, params: { project } });
+export async function updateVariable(id, data) {
+  return request("PUT", `/api/v1/variables/${encodeURIComponent(id)}`, { body: data });
 }
 
-// ---------------------------------------------------------------------------
-// Analysis sweep API functions
-// ---------------------------------------------------------------------------
-
-export async function runSweep(project) {
-  return request("POST", "/api/v1/analysis/sweep", { params: { project } });
-}
-
-export async function runSweepAll() {
-  return request("POST", "/api/v1/analysis/sweep/all");
-}
-
-// ---------------------------------------------------------------------------
-// Embedding API functions
-// ---------------------------------------------------------------------------
-
-export async function embedRequirement(requirementId) {
-  return request("POST", `/api/v1/embeddings/${encodeURIComponent(requirementId)}`);
-}
-
-export async function getEmbeddingStatus(requirementId) {
-  return request("GET", `/api/v1/embeddings/${encodeURIComponent(requirementId)}/status`);
-}
-
-export async function embedProject(project, force) {
-  return request("POST", "/api/v1/embeddings/batch", {
-    params: { project, force: force ? "true" : undefined },
-  });
-}
-
-export async function deleteEmbedding(requirementId) {
-  await request("DELETE", `/api/v1/embeddings/${encodeURIComponent(requirementId)}`);
-}
-
-export async function analyzeSemanticSimilarity(project, threshold) {
-  return request("GET", "/api/v1/analysis/semantic-similarity", {
-    params: { project, threshold },
-  });
+export async function deleteVariable(id) {
+  await request("DELETE", `/api/v1/variables/${encodeURIComponent(id)}`);
 }

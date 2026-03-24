@@ -1,28 +1,31 @@
 import { AppLayout } from "@/components/layout/app-layout";
-import { ProjectProvider } from "@/contexts/project-context";
-import { useProjects } from "@/hooks/use-projects";
-import { Admin } from "@/pages/admin";
-import { Analysis } from "@/pages/analysis";
+import { WorkspaceProvider } from "@/contexts/workspace-context";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 import { Dashboard } from "@/pages/dashboard";
-import { Graph } from "@/pages/graph";
-import { Projects } from "@/pages/projects";
-import { RequirementDetail } from "@/pages/requirement-detail";
-import { Requirements } from "@/pages/requirements";
+import { ExecutionDetail } from "@/pages/execution-detail";
+import { Executions } from "@/pages/executions";
+import { Settings } from "@/pages/settings";
+import { WorkflowDetail } from "@/pages/workflow-detail";
+import { Workflows } from "@/pages/workflows";
+import { Workspaces } from "@/pages/workspaces";
 import { Link, Navigate, Route, Routes } from "react-router-dom";
 
 function NotFound() {
   return (
     <div className="py-20 text-center text-muted-foreground">
       <p>Page not found.</p>
-      <Link to="/projects" className="mt-4 inline-block text-primary underline">
-        Back to projects
+      <Link
+        to="/workspaces"
+        className="mt-4 inline-block text-primary underline"
+      >
+        Back to workspaces
       </Link>
     </div>
   );
 }
 
 function RootRedirect() {
-  const { data: projects = [], isLoading } = useProjects();
+  const { data: workspaces = [], isLoading } = useWorkspaces();
 
   if (isLoading) {
     return (
@@ -32,12 +35,12 @@ function RootRedirect() {
     );
   }
 
-  const first = projects[0];
+  const first = workspaces[0];
   if (first) {
-    return <Navigate to={`/p/${first.identifier}/`} replace />;
+    return <Navigate to={`/w/${first.identifier}/`} replace />;
   }
 
-  return <Navigate to="/projects" replace />;
+  return <Navigate to="/workspaces" replace />;
 }
 
 export function AppRoutes() {
@@ -45,22 +48,22 @@ export function AppRoutes() {
     <Routes>
       <Route path="/" element={<RootRedirect />} />
       <Route element={<AppLayout />}>
-        <Route path="projects" element={<Projects />} />
+        <Route path="workspaces" element={<Workspaces />} />
       </Route>
       <Route
-        path="p/:projectId"
+        path="w/:workspaceId"
         element={
-          <ProjectProvider>
+          <WorkspaceProvider>
             <AppLayout />
-          </ProjectProvider>
+          </WorkspaceProvider>
         }
       >
         <Route index element={<Dashboard />} />
-        <Route path="requirements" element={<Requirements />} />
-        <Route path="requirements/:id" element={<RequirementDetail />} />
-        <Route path="graph" element={<Graph />} />
-        <Route path="analysis" element={<Analysis />} />
-        <Route path="admin" element={<Admin />} />
+        <Route path="workflows" element={<Workflows />} />
+        <Route path="workflows/:id" element={<WorkflowDetail />} />
+        <Route path="executions" element={<Executions />} />
+        <Route path="executions/:id" element={<ExecutionDetail />} />
+        <Route path="settings" element={<Settings />} />
         <Route path="*" element={<NotFound />} />
       </Route>
       <Route element={<AppLayout />}>

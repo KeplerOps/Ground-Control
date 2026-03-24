@@ -33,11 +33,12 @@ Or use `make frontend-install`, `make frontend-dev`, `make frontend-build`, etc.
 
 `com.keplerops.groundcontrol`
 
+Workflow management platform: define workflows as DAGs of nodes and edges,
+execute them via cron/webhook/manual triggers, monitor through API/MCP/GUI.
+
 Architecture: `api/ -> domain/ <- infrastructure/` (enforced by ArchUnit).
 Domain layer has no Spring web imports.
 
 ## Development Philosophy (Pre-Alpha)
 
 Ship features, not ceremony. L0 is the default assurance level. Add JML contracts only where invalid input causes silent data corruption (state transitions, security boundaries). One test per significant behavior. See docs/CODING_STANDARDS.md and ADR-012 for the full framework.
-
-When implementing a feature, query Ground Control for related requirements. After completing work, create IMPLEMENTS and TESTS traceability links for any requirements you satisfied.

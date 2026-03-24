@@ -2,9 +2,11 @@
 
 ## Mission
 
-Ground Control is a requirements management system with traceability and graph analysis. It manages requirements, tracks relations, links to external artifacts, and runs graph-based analysis (cycles, orphans, coverage gaps, impact, cross-wave validation).
-
-See [ADR-014](../../architecture/adrs/014-pluggable-verification-architecture.md) for the verification architecture and [ADR-011](../../architecture/adrs/011-requirements-data-model.md) for the requirements data model.
+Ground Control is a lightweight workflow management platform for building,
+scheduling, and monitoring automated workflows. It lets users define workflows
+as directed acyclic graphs (DAGs) of executable nodes, trigger them via cron
+schedules, webhooks, or manual invocation, and monitor execution through a
+triple interface: REST API, MCP server (for AI assistants), and web GUI.
 
 ## Stack
 
@@ -24,39 +26,104 @@ See [ADR-014](../../architecture/adrs/014-pluggable-verification-architecture.md
 | Coverage | JaCoCo |
 | Logging | SLF4J + Logback (JSON in prod, console in dev) |
 | API docs | Springdoc-OpenAPI |
+| Frontend | React 19 / Vite 6 / TypeScript 5 / Tailwind 4 |
 | Container | Docker (multi-stage, non-root, JDK 21) |
 | Registry | GHCR (`ghcr.io/keplerops/ground-control`) |
-
-See [ADR-013](../../architecture/adrs/013-java-spring-boot-rewrite.md) for the Java migration rationale.
 
 ## Package Structure
 
 ```
 backend/src/main/java/com/keplerops/groundcontrol/
 ├── api/                          # REST controllers, DTOs, exception handler
-│   ├── requirements/             # RequirementController, request/response records
-│   ├── baselines/                # BaselineController, request/response records
-│   ├── admin/                    # ImportController, SweepController, AnalysisController, GraphController, EmbeddingController
+│   ├── workspaces/               # WorkspaceController, request/response records
+│   ├── workflows/                # WorkflowController, NodeController, EdgeController
+│   ├── executions/               # ExecutionController
+│   ├── triggers/                 # TriggerController
+│   ├── credentials/              # CredentialController
+│   ├── variables/                # VariableController
+│   ├── webhooks/                 # WebhookController
+│   ├── analysis/                 # AnalysisController (critical path, impact, validation)
 │   └── GlobalExceptionHandler.java
 ├── domain/                       # Business logic (Spring-web-free)
 │   ├── exception/                # Domain exception hierarchy
-│   ├── projects/                 # Project entity, repository, service
-│   ├── baselines/                # Baseline entity, repository, service
-│   └── requirements/
-│       ├── model/                # JPA entities (Requirement, RequirementRelation, TraceabilityLink, RequirementEmbedding, etc.)
-│       ├── repository/           # Spring Data JPA repository interfaces
-│       ├── service/              # RequirementService, AnalysisService, SimilarityService, EmbeddingService, etc.
-│       └── state/                # Enums (Status, RelationType, ArtifactType, LinkType, etc.)
+│   ├── workspaces/               # Workspace entity, repository, service
+│   ├── workflows/                # Workflow, Node, Edge entities, services
+│   ├── executions/               # Execution entity, ExecutionEngine, task runners
+│   ├── triggers/                 # Trigger entity, cron scheduler, webhook dispatch
+│   ├── credentials/              # Credential entity, encryption service
+│   ├── variables/                # Variable entity, template resolution
+│   └── analysis/                 # AnalysisService (cycles, critical path, impact)
 ├── infrastructure/               # External adapter implementations
 │   ├── age/                      # AgeGraphService (Apache AGE Cypher queries)
-│   ├── embedding/                # NoOpEmbeddingProvider, OpenAiEmbeddingProvider, config
-│   ├── github/                   # GitHubCliClient (gh CLI adapter)
-│   ├── sweep/                    # ScheduledSweepRunner, notifiers
+│   ├── execution/                # ShellTaskExecutor, HttpTaskExecutor, DockerTaskExecutor
+│   ├── webhook/                  # Webhook listener, HMAC validation
 │   └── web/                      # CORS config, SPA routing
 ├── shared/
 │   └── logging/                  # RequestLoggingFilter (MDC request_id)
 └── GroundControlApplication.java
 ```
+
+## Domain Model
+
+The workflow domain model has three core concepts:
+
+**Workflows** are DAGs composed of Nodes and Edges. A Workflow belongs to a
+Workspace and progresses through statuses: DRAFT -> ACTIVE -> PAUSED -> ARCHIVED.
+Publishing a workflow validates the DAG (cycle detection, connectivity, config
+completeness) and transitions it to ACTIVE.
+
+**Nodes** represent individual tasks within a workflow. Each node has a type
+(SHELL, HTTP, or DOCKER), a configuration block, an optional retry policy, and
+a position for the visual editor. Nodes connect via Edges, which carry a
+condition (success, failure, or always) that controls execution flow.
+
+**Executions** are runtime instances of a workflow. When triggered, the execution
+engine performs a topological sort of the DAG, schedules nodes respecting
+dependency order and edge conditions, and tracks per-node status
+(PENDING -> RUNNING -> COMPLETED | FAILED | CANCELLED). The engine supports
+retry with configurable backoff, timeouts, and cancellation.
+
+Supporting entities:
+
+- **Triggers** — Cron, webhook, or manual. Cron triggers use a scheduler;
+  webhook triggers generate a unique token and accept POST requests.
+- **Credentials** — Encrypted secrets scoped to a workspace, referenced in node
+  configs via `{{credentials.name}}` template syntax. Values are write-only.
+- **Variables** — Key-value pairs scoped to a workspace, referenced via
+  `{{variables.name}}`. Unlike credentials, values are readable.
+
+## Execution Engine
+
+The execution engine is the core runtime component:
+
+1. **Trigger** — A cron tick, webhook POST, or manual API call initiates an
+   execution for a published workflow.
+2. **Plan** — The engine topologically sorts the workflow DAG to determine
+   execution order.
+3. **Schedule** — Nodes with all dependencies satisfied are dispatched to the
+   appropriate task executor (Shell, HTTP, or Docker).
+4. **Execute** — Each task executor runs the node's configuration, captures
+   output and errors, and reports status back to the engine.
+5. **Evaluate** — After a node completes, the engine evaluates outgoing edge
+   conditions to determine which downstream nodes to schedule next.
+6. **Complete** — The execution completes when all reachable nodes have finished
+   (or the execution is cancelled).
+
+Retry logic is per-node: on failure, the engine respects the node's retry policy
+(max retries, backoff interval) before marking it as failed.
+
+## Triple Interface
+
+Ground Control exposes three interfaces to the same domain layer:
+
+- **REST API** — Full CRUD for all entities, execution management, and graph
+  analysis endpoints. Documented via Springdoc-OpenAPI.
+- **MCP Server** — Tool-based interface for AI assistants (Claude Code). Tools
+  like `gc_create_workflow`, `gc_trigger_workflow`, and `gc_list_executions`
+  call the same domain services as the REST API.
+- **Web GUI** — React frontend with a visual DAG editor, execution monitoring
+  dashboard, and workspace management. Communicates with the backend via the
+  REST API.
 
 ## Dependency Rule
 
@@ -70,6 +137,23 @@ api/ -> domain/ <- infrastructure/
 
 Enforced at compile time by ArchUnit tests in `ArchitectureTest.java`.
 
+## Data Layer
+
+PostgreSQL 16 stores all relational data (workflows, nodes, edges, executions,
+triggers, credentials, variables) via Hibernate/JPA. Apache AGE extends
+PostgreSQL with a graph query layer — workflow DAGs are materialized as graph
+vertices and edges, enabling efficient Cypher queries for:
+
+- **Cycle detection** — Validates DAG integrity before publishing
+- **Critical path** — Identifies the longest execution path through the workflow
+- **Impact analysis** — Determines downstream nodes affected by a given node's
+  failure
+- **Dependency queries** — Answers "what are all ancestors/descendants of this
+  node?" in a single query
+
+Apache AGE is optional — the application gracefully degrades to JPA-only
+analysis when AGE is unavailable.
+
 ## Configuration
 
 Spring profiles drive environment-specific behavior:
@@ -78,26 +162,3 @@ Spring profiles drive environment-specific behavior:
 - `application-test.yml` — test overrides (Testcontainers)
 
 Environment variables use the `GC_` prefix (e.g., `GC_DATABASE_URL`, `GC_SERVER_PORT`). See `.env.example`.
-
-## What Exists vs. What Doesn't
-
-### Exists (Phase 1 complete as of v0.28.0)
-
-**Domain entities:** Requirement, RequirementRelation, TraceabilityLink, GitHubIssueSync, RequirementImport — all JPA with Envers auditing.
-
-**Services:** RequirementService (9 methods), TraceabilityService, ImportService (StrictDoc parser + idempotent import), GitHubIssueSyncService (CLI-based GitHub sync), AnalysisService (cycle/orphan/coverage/impact/cross-wave), AgeGraphService (Apache AGE graph materialization + Cypher queries).
-
-**API:** RequirementController (9 REST endpoints), AnalysisController (5 endpoints), ImportController, SyncController, GraphController. GlobalExceptionHandler maps domain exceptions to HTTP error envelopes.
-
-**Tooling:** Status state machine with JML contracts (verified by OpenJML ESC + Z3), Flyway migrations (V001–V010), Spotless/Error Prone/SpotBugs/Checkstyle/JaCoCo, ArchUnit architecture tests, CI pipeline (build + test + integration + verify), production Dockerfile, GHCR publishing, E2E integration tests (6-step main + 4-step AGE).
-
-### Does not exist yet
-
-- Frontend
-- Auth flows
-- Redis integration (Redis is in docker-compose.yml but nothing in the app uses it)
-- Production deployment infrastructure (local Docker Compose only)
-- Multi-tenancy
-- Search
-- Verification result tracking (VerificationResult entity from ADR-014 not yet implemented)
-- Apache AGE is optional — the app gracefully degrades to JPA-only analysis when AGE is unavailable

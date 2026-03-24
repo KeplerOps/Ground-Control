@@ -3,103 +3,73 @@
 [![CI](https://github.com/KeplerOps/Ground-Control/actions/workflows/ci.yml/badge.svg)](https://github.com/KeplerOps/Ground-Control/actions/workflows/ci.yml)
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=KeplerOps_Ground-Control&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=KeplerOps_Ground-Control)
 
-An automated software factory that connects requirements, code, controls, and
-observability over a single data layer — with traceability throughout.
+A lightweight workflow management platform for building, scheduling, and
+monitoring automated workflows. Think Airflow or n8n, but simpler.
 
-Ground Control unifies the software lifecycle into one graph-native platform.
-Every artifact — requirement, code file, test, ADR, verification result,
-security control — is a node. Every relationship is an edge. One query can
-answer "which security requirements have no formal verification in the last
-30 days?" or "what breaks if this interface changes?" No tool-hopping, no
-stale spreadsheets, no traceability theater.
+Ground Control lets you define workflows as directed acyclic graphs (DAGs),
+execute them on a schedule or via triggers, and monitor everything through
+your choice of API, GUI, or AI assistant (MCP). Every workflow, node, edge,
+and execution is stored in a graph-native data layer — so questions like
+"what downstream tasks break if this step fails?" are a single query away.
 
-**Starting with requirements.** The requirements engine is live today: lifecycle
-management, DAG-based dependency tracking, graph analysis, GitHub sync, and
-MCP-driven AI workflows. The rest of the factory is coming.
+## Key Features
 
-<p align="center">
-  <img src="assets/interactive_graph_example.png" alt="Interactive requirements graph showing DAG layout with dependency edges, status coloring, and requirement details" width="720">
-</p>
-
-## What's Live
-
-- **Requirements lifecycle** — DRAFT → ACTIVE → DEPRECATED → ARCHIVED, with MoSCoW priority and wave-based planning
-- **Traceability links** — Connect requirements to GitHub issues, code files, tests, ADRs, verification results, and other artifacts
-- **Graph analysis** — Cycle detection, orphan detection, coverage gaps, transitive impact analysis, cross-wave validation
-- **Pluggable verification** — Prover-agnostic architecture for design-level (TLA+, Alloy) and code-level (OpenJML, Frama-C, Verus) verification, with results stored as first-class graph nodes
-- **GitHub integration** — Sync issues into the traceability graph, or create issues from requirements with one command
-- **StrictDoc import** — Bulk-import from `.sdoc` files, idempotent
-- **ReqIF import** — Bulk-import from ReqIF 1.2 `.reqif` files (IBM DOORS, Polarion, Jama), idempotent
-- **Text embeddings** — Pluggable vector embedding of requirement text with content-hash staleness detection, batch embedding, and graceful degradation when no provider is configured
-- **Semantic similarity** — Pairwise cosine similarity analysis across requirement embeddings to detect near-duplicate requirements with configurable threshold
-- **MCP server** — 30 tools for Claude Code: manage requirements, baselines, run analysis, embed text, and build traceability without leaving your editor
-- **Baseline management** — Named point-in-time snapshots of the requirement set for release management and specification evolution tracking
+- **Visual workflow builder** — Drag-and-drop DAG editor in the browser
+- **DAG execution engine** — Topological task scheduling with retry, timeout, and parallelism controls
+- **Task types** — Shell commands, HTTP requests, and Docker containers out of the box
+- **Triggers** — Cron schedules, incoming webhooks, and manual execution
+- **Triple interface** — REST API + MCP server for AI assistants + web GUI
+- **Graph-native analysis** — Cycle detection, critical path, dependency impact analysis powered by Apache AGE
+- **Workspaces** — Organize workflows by team or project
+- **Credentials and variables** — Securely store secrets and share configuration across workflows
 - **Audit trail** — Every change to every entity is versioned via Hibernate Envers
 
-## Near-Term Roadmap
+## Quick Start
 
-| Domain | What it adds |
-|--------|-------------|
-| **Risk management** | Risk register as graph nodes linked to requirements and controls; impact/likelihood scoring; risk-to-requirement traceability so you can see which risks are unmitigated |
-| **Security** | Threat modeling artifacts connected to the requirement and verification graphs; security control tracking; compliance evidence generation for frameworks like ISO 27001 and SOC 2 |
-| **Asset management** | Software asset inventory (services, libraries, infrastructure) as graph nodes; dependency mapping; change impact analysis that traces from a library upgrade through assets to affected requirements |
-
-## Getting Started
-
-**Prerequisites:** Java 21, Docker, `gh` CLI (for GitHub features)
+**Prerequisites:** Docker and Docker Compose
 
 ```bash
 git clone https://github.com/KeplerOps/Ground-Control.git
 cd Ground-Control
 cp .env.example .env
 
-make up       # Start PostgreSQL 16 (Apache AGE)
-make dev      # Spring Boot on http://localhost:8000
+docker compose up -d    # PostgreSQL 16 (Apache AGE) + Ground Control
 ```
 
 Then visit:
 
-- **API** — `http://localhost:8000/api/v1/requirements`
+- **GUI** — `http://localhost:3000`
+- **API** — `http://localhost:8000/api/v1/workflows`
 - **Swagger UI** — `http://localhost:8000/api/docs`
 - **OpenAPI spec** — `http://localhost:8000/api/openapi.json`
+
+### Development Setup
+
+For local development without Docker for the app layer:
+
+```bash
+make up       # Start PostgreSQL 16 (Apache AGE)
+make dev      # Spring Boot on http://localhost:8000
+```
+
+In a separate terminal:
+
+```bash
+make frontend-install   # Install frontend dependencies
+make frontend-dev       # Vite dev server on http://localhost:3000
+```
 
 ### MCP Server (Claude Code)
 
 Configured in `.mcp.json`, works automatically with Claude Code. Start the
-backend, then use tools like `gc_create_requirement`, `gc_analyze_cycles`, and
-`gc_create_github_issue` from your conversation. See the
+backend, then use tools like `gc_create_workflow`, `gc_list_executions`, and
+`gc_trigger_workflow` from your conversation. See the
 [MCP server docs](mcp/ground-control/README.md) for the full tool reference.
-
-## Development
-
-```bash
-make rapid        # Format + compile (~1s warm) — inner dev loop
-make test         # Unit tests
-make check        # CI-equivalent: build + tests + static analysis + coverage
-make integration  # Integration tests (Testcontainers, no external DB needed)
-make verify       # Everything: check + integration + OpenJML ESC
-```
-
-Run `make help` to see all targets.
-
-## Tech Stack
-
-| | |
-|---|---|
-| **Runtime** | Java 21 / Spring Boot 3.4 / Gradle |
-| **Database** | PostgreSQL 16 + Apache AGE (optional graph queries) |
-| **Migrations** | Flyway |
-| **Auditing** | Hibernate Envers |
-| **Testing** | JUnit 5, jqwik (property-based), ArchUnit, Testcontainers |
-| **Static analysis** | Spotless, Error Prone, SpotBugs, Checkstyle, JaCoCo |
-| **Formal methods** | JML + OpenJML ESC + Z3 |
-| **CI/CD** | GitHub Actions → GHCR |
-| **Quality** | SonarCloud |
 
 ## Architecture
 
 ```
-api/ → domain/ ← infrastructure/
+api/ -> domain/ <- infrastructure/
 ```
 
 The domain layer has zero Spring web imports. Controllers depend on domain
@@ -110,16 +80,70 @@ compile time by ArchUnit.
 com.keplerops.groundcontrol/
 ├── api/               Controllers, DTOs, exception handling
 ├── domain/            Entities, services, enums, repository interfaces
-├── infrastructure/    AGE graph, GitHub CLI, embedding provider adapters
+│   ├── workspaces/    Workspace entity, service
+│   ├── workflows/     Workflow, Node, Edge entities, execution engine
+│   ├── triggers/      Trigger entity, cron scheduler
+│   ├── credentials/   Credential entity, encryption
+│   └── variables/     Variable entity, scoping
+├── infrastructure/    AGE graph, task executors, webhook listener
 └── shared/            Request logging, MDC
 ```
+
+The workflow domain model centers on **Workflows** (DAGs of Nodes and Edges),
+**Executions** (runtime instances of a workflow), and **Triggers** (cron,
+webhook, or manual). PostgreSQL stores relational data; Apache AGE provides
+graph queries for dependency analysis, critical path computation, and
+impact analysis.
+
+## API Endpoints
+
+| Resource | Operations |
+|----------|-----------|
+| **Workspaces** | CRUD |
+| **Workflows** | CRUD, publish, validate, status transitions |
+| **Nodes** | CRUD within a workflow |
+| **Edges** | CRUD within a workflow |
+| **Executions** | Create, list, get, cancel, retry, stats |
+| **Triggers** | CRUD, enable/disable |
+| **Credentials** | CRUD (values write-only) |
+| **Variables** | CRUD |
+| **Webhooks** | `POST /api/v1/webhooks/{token}` |
+
+See the [API Reference](docs/API.md) for full details.
+
+## Development
+
+```bash
+make rapid        # Format + compile (~3-5s) — inner dev loop
+make test         # Unit tests
+make check        # CI-equivalent: build + tests + static analysis + coverage
+make integration  # Integration tests (Testcontainers, no external DB needed)
+make verify       # Everything: check + integration + OpenJML ESC
+```
+
+Run `make help` to see all targets.
+
+## Technology Stack
+
+| | |
+|---|---|
+| **Runtime** | Java 21 / Spring Boot 3.4 / Gradle |
+| **Frontend** | React 19 / Vite 6 / TypeScript 5 / Tailwind 4 |
+| **Database** | PostgreSQL 16 + Apache AGE (graph queries) |
+| **Migrations** | Flyway |
+| **Auditing** | Hibernate Envers |
+| **Testing** | JUnit 5, jqwik (property-based), ArchUnit, Testcontainers |
+| **Static analysis** | Spotless, Error Prone, SpotBugs, Checkstyle, JaCoCo |
+| **Formal methods** | JML + OpenJML ESC + Z3 |
+| **CI/CD** | GitHub Actions -> GHCR |
+| **Quality** | SonarCloud |
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [API Reference](docs/API.md) | REST endpoints, filtering, pagination, error format |
-| [Architecture](docs/architecture/ARCHITECTURE.md) | Package structure, dependency rules |
+| [Architecture](docs/architecture/ARCHITECTURE.md) | Domain model, execution engine, package structure |
 | [Coding Standards](docs/CODING_STANDARDS.md) | Style, testing policy, assurance levels |
 | [Deployment](docs/deployment/DEPLOYMENT.md) | Setup, Docker, CI/CD pipeline |
 | [MCP Server](mcp/ground-control/README.md) | Tool reference, workflows |

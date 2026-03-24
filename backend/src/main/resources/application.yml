@@ -15,8 +15,6 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
-      org.hibernate.envers:
-        audit_table_suffix: _audit
 
   flyway:
     enabled: true
@@ -41,32 +39,15 @@ management:
         include: health,info,metrics
 
 groundcontrol:
-  github:
-    gh-path: ${GC_GH_PATH:}
   age:
     enabled: ${GC_AGE_ENABLED:false}
-    graph-name: ${GC_AGE_GRAPH_NAME:requirements}
-  sweep:
-    enabled: ${GC_SWEEP_ENABLED:false}
-    cron: ${GC_SWEEP_CRON:0 0 6 * * *}
-    github:
-      enabled: ${GC_SWEEP_GITHUB_ENABLED:false}
-      repo: ${GC_SWEEP_GITHUB_REPO:}
-      labels: ${GC_SWEEP_GITHUB_LABELS:analysis-sweep}
-    webhook:
-      enabled: ${GC_SWEEP_WEBHOOK_ENABLED:false}
-      url: ${GC_SWEEP_WEBHOOK_URL:}
-  compliance:
-    audit-retention-days: ${GC_AUDIT_RETENTION_DAYS:-1}
-    audit-retention-cron: ${GC_AUDIT_RETENTION_CRON:0 0 3 * * *}
-  embedding:
-    provider: ${GC_EMBEDDING_PROVIDER:none}
-    api-key: ${GC_EMBEDDING_API_KEY:}
-    api-url: ${GC_EMBEDDING_API_URL:https://api.openai.com/v1}
-    model: ${GC_EMBEDDING_MODEL:text-embedding-3-small}
-    dimensions: ${GC_EMBEDDING_DIMENSIONS:1536}
-    batch-size: ${GC_EMBEDDING_BATCH_SIZE:100}
-    similarity-threshold: ${GC_EMBEDDING_SIMILARITY_THRESHOLD:0.85}
+    graph-name: ${GC_AGE_GRAPH_NAME:workflows}
+  scheduler:
+    enabled: ${GC_SCHEDULER_ENABLED:false}
+    poll-interval-ms: ${GC_SCHEDULER_POLL_MS:60000}
+  execution:
+    thread-pool-size: ${GC_EXECUTION_THREADS:4}
+    default-timeout-seconds: ${GC_EXECUTION_TIMEOUT:3600}
 
 springdoc:
   api-docs:

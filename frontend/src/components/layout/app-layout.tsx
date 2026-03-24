@@ -1,13 +1,17 @@
-import { ProjectSwitcher } from "@/components/project-switcher";
+import { useWorkspace } from "@/contexts/workspace-context";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 import { cn } from "@/lib/utils";
-import { Rocket } from "lucide-react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
-  Link,
-  NavLink,
-  Outlet,
-  useLocation,
-  useParams,
-} from "react-router-dom";
+  ChevronDown,
+  Cog,
+  LayoutDashboard,
+  ListChecks,
+  Play,
+  Rocket,
+  Workflow,
+} from "lucide-react";
+import { Link, NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
 
 function NavItem({
   to,
@@ -24,7 +28,7 @@ function NavItem({
       end={end}
       className={({ isActive }) =>
         cn(
-          "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+          "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
           isActive
             ? "bg-accent text-accent-foreground"
             : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
@@ -36,19 +40,61 @@ function NavItem({
   );
 }
 
-export function AppLayout() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const location = useLocation();
-  const isFullBleed = location.pathname.endsWith("/graph");
+function WorkspaceSwitcher() {
+  const { data: workspaces = [] } = useWorkspaces();
+  const { workspace } = useWorkspace();
+  const navigate = useNavigate();
 
-  const base = projectId ? `/p/${projectId}` : "";
+  if (!workspace) return null;
+
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-accent/50">
+        {workspace.name}
+        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          className="min-w-[180px] rounded-md border border-border bg-card p-1 shadow-lg"
+          sideOffset={4}
+          align="end"
+        >
+          {workspaces.map((w) => (
+            <DropdownMenu.Item
+              key={w.id}
+              className={cn(
+                "flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent",
+                w.id === workspace.id && "font-semibold",
+              )}
+              onSelect={() => navigate(`/w/${w.identifier}/`)}
+            >
+              {w.name}
+            </DropdownMenu.Item>
+          ))}
+          <DropdownMenu.Separator className="my-1 h-px bg-border" />
+          <DropdownMenu.Item
+            className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent"
+            onSelect={() => navigate("/workspaces")}
+          >
+            Manage workspaces
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
+export function AppLayout() {
+  const { workspaceId } = useParams<{ workspaceId: string }>();
+
+  const base = workspaceId ? `/w/${workspaceId}` : "";
 
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4">
           <Link
-            to={projectId ? `${base}/` : "/"}
+            to={workspaceId ? `${base}/` : "/"}
             className="flex items-center gap-2 font-semibold"
           >
             <Rocket className="h-5 w-5 text-primary" />
@@ -56,25 +102,39 @@ export function AppLayout() {
           </Link>
 
           <nav className="flex items-center gap-1">
-            {projectId && (
+            {workspaceId && (
               <>
                 <NavItem to={`${base}/`} end>
+                  <LayoutDashboard className="h-4 w-4" />
                   Dashboard
                 </NavItem>
-                <NavItem to={`${base}/requirements`}>Requirements</NavItem>
-                <NavItem to={`${base}/graph`}>Graph</NavItem>
-                <NavItem to={`${base}/analysis`}>Analysis</NavItem>
+                <NavItem to={`${base}/workflows`}>
+                  <Workflow className="h-4 w-4" />
+                  Workflows
+                </NavItem>
+                <NavItem to={`${base}/executions`}>
+                  <Play className="h-4 w-4" />
+                  Executions
+                </NavItem>
+                <NavItem to={`${base}/settings`}>
+                  <Cog className="h-4 w-4" />
+                  Settings
+                </NavItem>
               </>
             )}
-            <NavItem to="/projects">Projects</NavItem>
-            {projectId && <NavItem to={`${base}/admin`}>Admin</NavItem>}
+            <NavItem to="/workspaces">
+              <ListChecks className="h-4 w-4" />
+              Workspaces
+            </NavItem>
           </nav>
 
-          <div className="ml-auto">{projectId && <ProjectSwitcher />}</div>
+          <div className="ml-auto">
+            {workspaceId && <WorkspaceSwitcher />}
+          </div>
         </div>
       </header>
 
-      <main className={cn(isFullBleed ? "" : "mx-auto max-w-7xl px-4 py-6")}>
+      <main className="mx-auto max-w-7xl px-4 py-6">
         <Outlet />
       </main>
     </div>

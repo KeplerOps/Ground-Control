@@ -12,7 +12,7 @@ plugins {
 }
 
 group = "com.keplerops"
-version = "0.19.0"
+version = "1.0.0"
 
 // -Pquick: disable slow static analysis for fast dev loops
 val quick = providers.gradleProperty("quick").isPresent

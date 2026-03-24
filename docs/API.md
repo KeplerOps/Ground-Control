@@ -1,6 +1,6 @@
 # Ground Control REST API
 
-HTTP API for direct REST usage. Pre-alpha, localhost only, no authentication.
+HTTP API for the workflow management platform.
 
 ## Base URL
 
@@ -10,67 +10,299 @@ http://localhost:8000/api/v1/
 
 ## Endpoints
 
-### Requirements
+### Workspaces
 
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
-| POST | `/requirements` | RequirementRequest | 201 | Create requirement |
-| GET | `/requirements` | — | 200 | List requirements (paginated, filterable) |
-| GET | `/requirements/{id}` | — | 200 | Get requirement by UUID |
-| GET | `/requirements/uid/{uid}` | — | 200 | Get requirement by UID |
-| PUT | `/requirements/{id}` | UpdateRequirementRequest | 200 | Update requirement (partial) |
-| POST | `/requirements/{id}/transition` | `{ "status": "ACTIVE" }` | 200 | Transition status |
-| POST | `/requirements/bulk/transition` | BulkStatusTransitionRequest | 200 | Bulk transition status |
-| POST | `/requirements/{id}/clone` | CloneRequirementRequest | 201 | Clone requirement |
-| POST | `/requirements/{id}/archive` | — | 200 | Archive requirement |
+| POST | `/workspaces` | WorkspaceRequest | 201 | Create workspace |
+| GET | `/workspaces` | — | 200 | List workspaces (paginated) |
+| GET | `/workspaces/{id}` | — | 200 | Get workspace by ID |
+| PUT | `/workspaces/{id}` | UpdateWorkspaceRequest | 200 | Update workspace |
+| DELETE | `/workspaces/{id}` | — | 204 | Delete workspace |
 
-### Relations
-
-| Method | Path | Body | Status | Purpose |
-|--------|------|------|--------|---------|
-| POST | `/requirements/{id}/relations` | RelationRequest | 201 | Create relation |
-| GET | `/requirements/{id}/relations` | — | 200 | List relations |
-| DELETE | `/requirements/{id}/relations/{relationId}` | — | 204 | Delete relation |
-
-### Traceability
-
-| Method | Path | Body | Status | Purpose |
-|--------|------|------|--------|---------|
-| POST | `/requirements/{id}/traceability` | TraceabilityLinkRequest | 201 | Create traceability link |
-| GET | `/requirements/{id}/traceability` | — | 200 | List traceability links |
-| DELETE | `/requirements/{id}/traceability/{linkId}` | — | 204 | Delete traceability link |
-
-### Audit History
-
-| Method | Path | Body | Status | Purpose |
-|--------|------|------|--------|---------|
-| GET | `/requirements/{id}/history` | — | 200 | Requirement revision history |
-| GET | `/requirements/{id}/relations/{relationId}/history` | — | 200 | Relation revision history |
-| GET | `/requirements/{id}/traceability/{linkId}/history` | — | 200 | Traceability link revision history |
-| GET | `/requirements/{id}/timeline` | — | 200 | Unified audit timeline |
-
-`GET /requirements/{id}/timeline` accepts query parameters:
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `changeCategory` | enum | REQUIREMENT, RELATION, TRACEABILITY_LINK |
-| `from` | ISO-8601 instant | Start of date range |
-| `to` | ISO-8601 instant | End of date range |
-| `limit` | integer | Max entries to return (default 100) |
-| `offset` | integer | Number of entries to skip (default 0) |
-
-**TimelineEntryResponse:**
+**WorkspaceRequest:**
 
 ```json
 {
-  "revisionNumber": 3,
-  "revisionType": "MOD",
-  "timestamp": "2026-03-21T04:00:00Z",
-  "actor": "user@example.com",
-  "changeCategory": "REQUIREMENT",
-  "entityId": "uuid",
-  "snapshot": { "title": "New Title", "status": "ACTIVE", "..." : "..." },
-  "changes": { "title": { "oldValue": "Old Title", "newValue": "New Title" } }
+  "name": "Data Engineering",
+  "description": "ETL and data pipeline workflows"
+}
+```
+
+### Workflows
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/workspaces/{workspaceId}/workflows` | WorkflowRequest | 201 | Create workflow |
+| GET | `/workspaces/{workspaceId}/workflows` | — | 200 | List workflows (paginated, filterable) |
+| GET | `/workflows/{id}` | — | 200 | Get workflow by ID |
+| PUT | `/workflows/{id}` | UpdateWorkflowRequest | 200 | Update workflow |
+| DELETE | `/workflows/{id}` | — | 204 | Delete workflow |
+| POST | `/workflows/{id}/publish` | — | 200 | Publish workflow (validates DAG first) |
+| POST | `/workflows/{id}/validate` | — | 200 | Validate workflow DAG without publishing |
+| POST | `/workflows/{id}/transition` | `{ "status": "ACTIVE" }` | 200 | Transition workflow status |
+
+**WorkflowRequest:**
+
+```json
+{
+  "name": "Daily ETL Pipeline",
+  "description": "Extract, transform, and load data from source systems",
+  "tags": ["etl", "daily"]
+}
+```
+
+**Workflow statuses:** DRAFT -> ACTIVE -> PAUSED -> ARCHIVED
+
+Publishing a workflow validates the DAG (checks for cycles, disconnected nodes,
+and missing configurations) and transitions it from DRAFT to ACTIVE.
+
+### Nodes
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/workflows/{workflowId}/nodes` | NodeRequest | 201 | Create node |
+| GET | `/workflows/{workflowId}/nodes` | — | 200 | List nodes in workflow |
+| GET | `/workflows/{workflowId}/nodes/{id}` | — | 200 | Get node by ID |
+| PUT | `/workflows/{workflowId}/nodes/{id}` | UpdateNodeRequest | 200 | Update node |
+| DELETE | `/workflows/{workflowId}/nodes/{id}` | — | 204 | Delete node |
+
+**NodeRequest:**
+
+```json
+{
+  "name": "Extract Orders",
+  "type": "HTTP",
+  "config": {
+    "method": "GET",
+    "url": "https://api.example.com/orders",
+    "headers": { "Authorization": "Bearer {{credentials.api_key}}" },
+    "timeout": 30
+  },
+  "retryPolicy": {
+    "maxRetries": 3,
+    "backoffSeconds": 10
+  },
+  "position": { "x": 100, "y": 200 }
+}
+```
+
+**Node types:**
+
+| Type | Description | Config fields |
+|------|-------------|---------------|
+| `SHELL` | Execute a shell command | `command`, `workingDir`, `env`, `timeout` |
+| `HTTP` | Make an HTTP request | `method`, `url`, `headers`, `body`, `timeout` |
+| `DOCKER` | Run a Docker container | `image`, `command`, `env`, `volumes`, `timeout` |
+
+### Edges
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/workflows/{workflowId}/edges` | EdgeRequest | 201 | Create edge |
+| GET | `/workflows/{workflowId}/edges` | — | 200 | List edges in workflow |
+| GET | `/workflows/{workflowId}/edges/{id}` | — | 200 | Get edge by ID |
+| DELETE | `/workflows/{workflowId}/edges/{id}` | — | 204 | Delete edge |
+
+**EdgeRequest:**
+
+```json
+{
+  "sourceNodeId": "uuid-of-extract-node",
+  "targetNodeId": "uuid-of-transform-node",
+  "condition": "success"
+}
+```
+
+**Edge conditions:**
+
+| Condition | Description |
+|-----------|-------------|
+| `success` | Target runs only if source succeeds (default) |
+| `failure` | Target runs only if source fails |
+| `always` | Target runs regardless of source outcome |
+
+Creating an edge that would introduce a cycle returns `409 Conflict`.
+
+### Executions
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/workflows/{workflowId}/executions` | ExecutionRequest | 201 | Start execution |
+| GET | `/workflows/{workflowId}/executions` | — | 200 | List executions (paginated, filterable) |
+| GET | `/executions/{id}` | — | 200 | Get execution with node statuses |
+| POST | `/executions/{id}/cancel` | — | 200 | Cancel running execution |
+| POST | `/executions/{id}/retry` | — | 201 | Retry failed execution |
+| GET | `/workflows/{workflowId}/executions/stats` | — | 200 | Execution statistics |
+
+**ExecutionRequest:**
+
+```json
+{
+  "inputs": {
+    "date": "2026-03-24",
+    "mode": "full"
+  }
+}
+```
+
+**Execution statuses:** PENDING -> RUNNING -> COMPLETED | FAILED | CANCELLED
+
+**ExecutionResponse:**
+
+```json
+{
+  "id": "uuid",
+  "workflowId": "uuid",
+  "status": "RUNNING",
+  "triggeredBy": "manual",
+  "startedAt": "2026-03-24T10:00:00Z",
+  "completedAt": null,
+  "inputs": { "date": "2026-03-24" },
+  "nodeStatuses": [
+    {
+      "nodeId": "uuid",
+      "nodeName": "Extract Orders",
+      "status": "COMPLETED",
+      "startedAt": "2026-03-24T10:00:01Z",
+      "completedAt": "2026-03-24T10:00:05Z",
+      "output": { "recordCount": 1523 },
+      "error": null
+    },
+    {
+      "nodeId": "uuid",
+      "nodeName": "Transform Data",
+      "status": "RUNNING",
+      "startedAt": "2026-03-24T10:00:06Z",
+      "completedAt": null,
+      "output": null,
+      "error": null
+    }
+  ]
+}
+```
+
+**ExecutionStatsResponse:**
+
+```json
+{
+  "totalExecutions": 142,
+  "completed": 130,
+  "failed": 8,
+  "cancelled": 4,
+  "averageDurationSeconds": 47.2,
+  "successRate": 0.916
+}
+```
+
+### Triggers
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/workflows/{workflowId}/triggers` | TriggerRequest | 201 | Create trigger |
+| GET | `/workflows/{workflowId}/triggers` | — | 200 | List triggers for workflow |
+| GET | `/triggers/{id}` | — | 200 | Get trigger by ID |
+| PUT | `/triggers/{id}` | UpdateTriggerRequest | 200 | Update trigger |
+| DELETE | `/triggers/{id}` | — | 204 | Delete trigger |
+| POST | `/triggers/{id}/toggle` | — | 200 | Enable or disable trigger |
+
+**TriggerRequest (cron):**
+
+```json
+{
+  "type": "CRON",
+  "config": {
+    "expression": "0 0 2 * * ?",
+    "timezone": "UTC"
+  },
+  "enabled": true
+}
+```
+
+**TriggerRequest (webhook):**
+
+```json
+{
+  "type": "WEBHOOK",
+  "config": {
+    "secret": "optional-hmac-secret"
+  },
+  "enabled": true
+}
+```
+
+**Trigger types:**
+
+| Type | Description |
+|------|-------------|
+| `CRON` | Runs on a cron schedule |
+| `WEBHOOK` | Runs when the webhook URL receives a POST |
+| `MANUAL` | Run only via API or GUI |
+
+### Credentials
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/workspaces/{workspaceId}/credentials` | CredentialRequest | 201 | Create credential |
+| GET | `/workspaces/{workspaceId}/credentials` | — | 200 | List credentials (values redacted) |
+| GET | `/credentials/{id}` | — | 200 | Get credential (value redacted) |
+| PUT | `/credentials/{id}` | UpdateCredentialRequest | 200 | Update credential |
+| DELETE | `/credentials/{id}` | — | 204 | Delete credential |
+
+**CredentialRequest:**
+
+```json
+{
+  "name": "api_key",
+  "type": "SECRET",
+  "value": "sk-abc123..."
+}
+```
+
+Credential values are write-only. GET responses return the name and type but
+never the plaintext value. Reference credentials in node configs using the
+`{{credentials.name}}` template syntax.
+
+### Variables
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/workspaces/{workspaceId}/variables` | VariableRequest | 201 | Create variable |
+| GET | `/workspaces/{workspaceId}/variables` | — | 200 | List variables |
+| GET | `/variables/{id}` | — | 200 | Get variable |
+| PUT | `/variables/{id}` | UpdateVariableRequest | 200 | Update variable |
+| DELETE | `/variables/{id}` | — | 204 | Delete variable |
+
+**VariableRequest:**
+
+```json
+{
+  "name": "base_url",
+  "value": "https://api.example.com",
+  "description": "Base URL for the external API"
+}
+```
+
+Reference variables in node configs using the `{{variables.name}}` template
+syntax.
+
+### Webhooks
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/webhooks/{token}` | any JSON | 200 | Trigger workflow via webhook |
+
+The webhook token is generated when a WEBHOOK trigger is created. The request
+body is passed to the execution as input. If an HMAC secret is configured on the
+trigger, the request must include an `X-Webhook-Signature` header with a valid
+HMAC-SHA256 signature of the body.
+
+**Response:**
+
+```json
+{
+  "executionId": "uuid",
+  "status": "PENDING"
 }
 ```
 
@@ -78,186 +310,9 @@ http://localhost:8000/api/v1/
 
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
-| GET | `/analysis/cycles` | — | 200 | Detect dependency cycles |
-| GET | `/analysis/orphans` | — | 200 | Find orphan requirements |
-| GET | `/analysis/coverage-gaps?linkType=X` | — | 200 | Find coverage gaps by link type |
-| GET | `/analysis/impact/{id}` | — | 200 | Transitive impact analysis |
-| GET | `/analysis/cross-wave` | — | 200 | Cross-wave dependency violations |
-| GET | `/analysis/consistency-violations` | — | 200 | Detect consistency violations |
-| GET | `/analysis/completeness` | — | 200 | Analyze completeness |
-| GET | `/analysis/work-order` | — | 200 | Topological work order |
-| GET | `/analysis/dashboard-stats` | — | 200 | Aggregate project health stats |
-| GET | `/analysis/semantic-similarity` | — | 200 | Find semantically similar requirement pairs |
-| POST | `/analysis/sweep` | — | 200 | Run analysis sweep on one project |
-| POST | `/analysis/sweep/all` | — | 200 | Run analysis sweep on all projects |
-
-**CycleResponse** (`GET /analysis/cycles`):
-
-```json
-[
-  {
-    "members": ["REQ-A", "REQ-B", "REQ-C", "REQ-A"],
-    "edges": [
-      { "sourceUid": "REQ-A", "targetUid": "REQ-B", "relationType": "DEPENDS_ON" },
-      { "sourceUid": "REQ-B", "targetUid": "REQ-C", "relationType": "DEPENDS_ON" },
-      { "sourceUid": "REQ-C", "targetUid": "REQ-A", "relationType": "PARENT" }
-    ]
-  }
-]
-```
-
-Each cycle lists the member UIDs (closing back to the start) and the edges that
-form it, including the relation type between each consecutive pair.
-
-`GET /analysis/semantic-similarity` accepts query parameters:
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `project` | string | auto-resolved | Project identifier |
-| `threshold` | double | 0.85 | Minimum similarity score (0–1) |
-
-**SimilarityResultResponse:**
-
-```json
-{
-  "totalRequirements": 50,
-  "embeddedCount": 48,
-  "pairsAnalyzed": 1128,
-  "threshold": 0.85,
-  "pairs": [
-    {
-      "uid1": "REQ-012",
-      "title1": "User authentication via SSO",
-      "uid2": "REQ-037",
-      "title2": "Single sign-on login support",
-      "score": 0.93
-    }
-  ]
-}
-```
-
-### Embeddings
-
-| Method | Path | Body | Status | Purpose |
-|--------|------|------|--------|---------|
-| POST | `/embeddings/{requirementId}` | — | 200 | Embed a single requirement |
-| GET | `/embeddings/{requirementId}/status` | — | 200 | Get embedding status |
-| POST | `/embeddings/batch?project=&force=false` | — | 200 | Batch embed all requirements in a project |
-| DELETE | `/embeddings/{requirementId}` | — | 204 | Delete embedding |
-
-Requires `GC_EMBEDDING_PROVIDER=openai` and `GC_EMBEDDING_API_KEY` to be set.
-When no provider is configured, endpoints return `provider_unavailable` status
-(graceful degradation).
-
-**EmbeddingStatusResponse** (`GET /embeddings/{id}/status`):
-
-```json
-{
-  "requirementId": "uuid",
-  "hasEmbedding": true,
-  "isStale": false,
-  "modelMismatch": false,
-  "currentModelId": "text-embedding-3-small",
-  "embeddingModelId": "text-embedding-3-small",
-  "embeddedAt": "2026-03-22T03:00:00Z"
-}
-```
-
-### Baselines
-
-| Method | Path | Body | Status | Purpose |
-|--------|------|------|--------|---------|
-| POST | `/baselines?project=` | BaselineRequest | 201 | Create baseline |
-| GET | `/baselines?project=` | — | 200 | List baselines |
-| GET | `/baselines/{id}` | — | 200 | Get baseline |
-| GET | `/baselines/{id}/snapshot` | — | 200 | Requirement snapshot at baseline |
-| GET | `/baselines/{id}/compare/{otherId}` | — | 200 | Compare two baselines |
-| DELETE | `/baselines/{id}` | — | 204 | Delete baseline |
-
-**BaselineRequest:**
-
-```json
-{
-  "name": "v1.0",
-  "description": "First release baseline"
-}
-```
-
-**BaselineComparisonResponse** (`GET /baselines/{id}/compare/{otherId}`):
-
-```json
-{
-  "baselineId": "uuid",
-  "baselineName": "v1.0",
-  "otherBaselineId": "uuid",
-  "otherBaselineName": "v2.0",
-  "addedCount": 2,
-  "removedCount": 0,
-  "modifiedCount": 1,
-  "added": [...],
-  "removed": [...],
-  "modified": [{ "requirementId": "uuid", "uid": "REQ-001", "before": {...}, "after": {...} }]
-}
-```
-
-### Graph
-
-| Method | Path | Body | Status | Purpose |
-|--------|------|------|--------|---------|
-| POST | `/admin/graph/materialize` | — | 200 | Materialize graph (AGE) |
-| GET | `/graph/ancestors/{uid}?depth=N` | — | 200 | Ancestor UIDs |
-| GET | `/graph/descendants/{uid}?depth=N` | — | 200 | Descendant UIDs |
-| GET | `/graph/paths?source=X&target=Y` | — | 200 | All paths between two UIDs (with edges) |
-
-**Path response shape:**
-
-```json
-[
-  {
-    "nodes": ["REQ-A", "REQ-B", "REQ-C"],
-    "edges": [
-      { "sourceUid": "REQ-A", "targetUid": "REQ-B", "relationType": "DEPENDS_ON" },
-      { "sourceUid": "REQ-B", "targetUid": "REQ-C", "relationType": "PARENT" }
-    ]
-  }
-]
-```
-
-### GitHub Issues
-
-| Method | Path | Body | Status | Purpose |
-|--------|------|------|--------|---------|
-| POST | `/admin/github/issues` | GitHubIssueRequest | 201 | Create issue from requirement |
-
-**GitHubIssueRequest:**
-
-```json
-{
-  "requirementUid": "GC-A001",
-  "repo": "owner/repo",
-  "extraBody": "Additional markdown (optional)",
-  "labels": ["enhancement"]
-}
-```
-
-**GitHubIssueResponse:**
-
-```json
-{
-  "issueUrl": "https://github.com/owner/repo/issues/42",
-  "issueNumber": 42,
-  "traceabilityLinkId": "uuid",
-  "warning": null
-}
-```
-
-### Import / Sync
-
-| Method | Path | Body | Status | Purpose |
-|--------|------|------|--------|---------|
-| POST | `/admin/import/strictdoc` | multipart/form-data | 200 | Import .sdoc file |
-| POST | `/admin/import/reqif` | multipart/form-data | 200 | Import .reqif file |
-| POST | `/admin/sync/github?owner=X&repo=Y` | — | 200 | Sync GitHub issues |
+| GET | `/workflows/{id}/analysis/critical-path` | — | 200 | Critical path through the DAG |
+| GET | `/workflows/{id}/analysis/impact/{nodeId}` | — | 200 | Downstream impact of a node |
+| POST | `/workflows/{id}/analysis/validate` | — | 200 | Full DAG validation |
 
 ## Request / Response Format
 
@@ -267,28 +322,32 @@ JSON. Error responses use a nested envelope:
 {
   "error": {
     "code": "NOT_FOUND",
-    "message": "Requirement not found",
+    "message": "Workflow not found",
     "detail": {}
   }
 }
 ```
 
-HTTP status codes: 201 (created), 200 (ok), 204 (deleted), 404 (not found),
-409 (conflict), 422 (validation error).
+HTTP status codes: 201 (created), 200 (ok), 204 (deleted), 400 (bad request),
+404 (not found), 409 (conflict), 422 (validation error).
 
 ## Filtering
 
-`GET /api/v1/requirements` accepts query parameters:
+`GET /workspaces/{workspaceId}/workflows` accepts query parameters:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `status` | enum | DRAFT, ACTIVE, DEPRECATED, ARCHIVED |
-| `type` | enum | FUNCTIONAL, NON_FUNCTIONAL, CONSTRAINT, INTERFACE |
-| `wave` | integer | Wave number |
-| `search` | string | Free-text search in title and statement |
+| `status` | enum | DRAFT, ACTIVE, PAUSED, ARCHIVED |
+| `search` | string | Free-text search in name and description |
+| `tag` | string | Filter by tag (repeatable) |
 
-Archived requirements are excluded by default. Filter by `status=ARCHIVED`
-to include them.
+`GET /workflows/{workflowId}/executions` accepts query parameters:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `status` | enum | PENDING, RUNNING, COMPLETED, FAILED, CANCELLED |
+| `from` | ISO-8601 instant | Start of date range |
+| `to` | ISO-8601 instant | End of date range |
 
 ## Pagination
 
@@ -298,7 +357,7 @@ Standard Spring Page parameters:
 |-----------|---------|-------------|
 | `page` | 0 | Page number (0-based) |
 | `size` | 20 | Page size |
-| `sort` | — | Sort field and direction (e.g. `sort=uid,asc`) |
+| `sort` | — | Sort field and direction (e.g. `sort=createdAt,desc`) |
 
 Response wraps results in a Spring Page object with `content`, `totalElements`,
 `totalPages`, `number`, `size`.
