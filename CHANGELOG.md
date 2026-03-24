@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add `latest` Docker tag for default branch pushes in CI workflow so EC2 deploy
   can pull `ground-control:latest` from ECR
+- Capture both stdout and stderr from SSM deploy command on failure for proper
+  diagnostics (previously only stderr was shown, hiding docker logs)
+- Increase deploy health check timeout from 60s to 10min, SSM command timeout
+  from 120s to 660s, and CI wait loop to match
 
 ## [0.75.1] - 2026-03-22
 

@@ -27,7 +27,7 @@ echo "Starting services..."
 docker compose up -d
 
 echo "Waiting for health check..."
-for i in $(seq 1 30); do
+for i in $(seq 1 300); do
   if curl -sf http://localhost:8000/actuator/health | grep -q '"status":"UP"'; then
     echo "Deploy complete — application is UP"
     exit 0
@@ -35,6 +35,6 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-echo "WARNING: Health check did not pass within 60s"
+echo "WARNING: Health check did not pass within 600s"
 docker compose logs --tail=50 backend
 exit 1
