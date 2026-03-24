@@ -14,7 +14,6 @@ import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
@@ -126,21 +125,21 @@ public class RequirementService {
 
     public BulkTransitionResult bulkTransitionStatus(List<UUID> ids, Status newStatus) {
         var succeeded = new ArrayList<Requirement>();
-        var failed = new ArrayList<Map<String, Object>>();
+        var failed = new ArrayList<BulkFailureDetail>();
         for (UUID id : ids) {
             try {
                 var requirement = getById(id);
                 if (!requirement.getStatus().canTransitionTo(newStatus)) {
-                    failed.add(Map.of(
-                            "id", id.toString(),
-                            "uid", requirement.getUid(),
-                            "error", "Cannot transition from " + requirement.getStatus() + " to " + newStatus));
+                    failed.add(new BulkFailureDetail(
+                            id.toString(),
+                            requirement.getUid(),
+                            "Cannot transition from " + requirement.getStatus() + " to " + newStatus));
                     continue;
                 }
                 requirement.transitionStatus(newStatus);
                 succeeded.add(requirementRepository.save(requirement));
             } catch (NotFoundException e) {
-                failed.add(Map.of("id", id.toString(), "error", e.getMessage()));
+                failed.add(new BulkFailureDetail(id.toString(), null, e.getMessage()));
             }
         }
         return new BulkTransitionResult(succeeded, failed);
@@ -186,8 +185,9 @@ public class RequirementService {
         getById(requirementId);
         var outgoing = relationRepository.findBySourceIdWithEntities(requirementId);
         var incoming = relationRepository.findByTargetIdWithEntities(requirementId);
-        outgoing.addAll(incoming);
-        return outgoing;
+        var combined = new ArrayList<RequirementRelation>(outgoing);
+        combined.addAll(incoming);
+        return combined;
     }
 
     @Transactional(readOnly = true)

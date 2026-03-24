@@ -2,7 +2,6 @@ package com.keplerops.groundcontrol.domain.requirements.service;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 public record SyncResult(
@@ -12,7 +11,7 @@ public record SyncResult(
         int issuesCreated,
         int issuesUpdated,
         int linksUpdated,
-        List<Map<String, Object>> errors) {
+        List<SyncError> errors) {
 
     public SyncResult {
         errors = List.copyOf(errors);

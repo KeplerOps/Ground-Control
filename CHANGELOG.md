@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.75.1] - 2026-03-22
+
+### Fixed
+
+- Fix `RequirementService.getRelations()` mutating unmodifiable JPA result list
+  by creating a mutable copy before combining outgoing and incoming relations
+  (closes #321)
+
+## [0.75.0] - 2026-03-22
+
+### Changed
+
+- Replace `List<Map<String, Object>>` error fields in API responses with typed records
+  (GC-A012 tech debt, closes #324):
+  - `BulkStatusTransitionResponse.failed` now uses `BulkFailureDetail(id, uid, error)`
+  - `ImportResultResponse.errors` now uses `ImportError(phase, uid, error, parent, target, issueRef)`
+  - `SyncResultResponse.errors` now uses `SyncError(phase, issue, artifactIdentifier, error)`
+- Domain result records `BulkTransitionResult`, `ImportResult`, `SyncResult` updated accordingly
+- Audit JSONB persistence unchanged — `RequirementImport.errors` column remains untyped JSON
+
+## [0.74.4] - 2026-03-23
+
+### Fixed
+
+- Paginate `GitHubCliClient.fetchAllIssues()` using GitHub REST API to fetch all
+  issues instead of silently truncating at 500; filters out pull requests and
+  normalizes state values (closes #317)
+
+## [0.74.3] - 2026-03-23
+
+### Changed
+
+- Replaced N+1 in-memory filtering in `AnalysisService.findOrphans()` and
+  `findCoverageGaps()` with single JPQL `NOT EXISTS` queries in
+  `RequirementRepository` (closes #318)
+
+## [0.74.2] - 2026-03-23
+
+### Fixed
+
+- Added exception handlers for `HttpMessageNotReadableException`,
+  `MethodArgumentTypeMismatchException`, `MissingServletRequestParameterException`,
+  `MissingServletRequestPartException`, and generic `Exception` catch-all to ensure
+  all API errors return the consistent `ErrorResponse` envelope (closes #315)
+
+## [0.74.1] - 2026-03-23
+
+### Added
+
+- JML contract annotations on `TraceabilityLink` domain model: class invariants,
+  constructor pre/postconditions, and setter contracts for `setSyncStatus`,
+  `setArtifactUrl`, and `setArtifactTitle` (closes #327)
+
 ## [0.74.0] - 2026-03-22
 
 ### Added
