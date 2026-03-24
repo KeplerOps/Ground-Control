@@ -3,9 +3,12 @@ package com.keplerops.groundcontrol.domain.requirements.service;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 /** Converts audited entities to flat snapshot maps for timeline diff computation. */
 public final class SnapshotMapper {
@@ -60,5 +63,49 @@ public final class SnapshotMapper {
             }
         }
         return diff;
+    }
+
+    /** Computes added/removed/modified relation changes between two point-in-time snapshot maps. */
+    public static List<RelationChange> computeRelationChanges(
+            Map<UUID, Map<String, Object>> fromMap, Map<UUID, Map<String, Object>> toMap) {
+        return computeEntityChanges(fromMap, toMap, RelationChange::new);
+    }
+
+    /** Computes added/removed/modified traceability link changes between two point-in-time snapshot maps. */
+    public static List<TraceabilityLinkChange> computeTraceabilityLinkChanges(
+            Map<UUID, Map<String, Object>> fromMap, Map<UUID, Map<String, Object>> toMap) {
+        return computeEntityChanges(fromMap, toMap, TraceabilityLinkChange::new);
+    }
+
+    @FunctionalInterface
+    interface EntityChangeFactory<T> {
+        T create(UUID id, String changeType, Map<String, Object> snapshot, Map<String, FieldChange> fieldChanges);
+    }
+
+    static <T> List<T> computeEntityChanges(
+            Map<UUID, Map<String, Object>> fromMap,
+            Map<UUID, Map<String, Object>> toMap,
+            EntityChangeFactory<T> factory) {
+        var changes = new ArrayList<T>();
+
+        for (var entry : toMap.entrySet()) {
+            var fromSnapshot = fromMap.get(entry.getKey());
+            if (fromSnapshot == null) {
+                changes.add(factory.create(entry.getKey(), "ADDED", entry.getValue(), Map.of()));
+            } else {
+                var fieldChanges = computeDiff(fromSnapshot, entry.getValue());
+                if (!fieldChanges.isEmpty()) {
+                    changes.add(factory.create(entry.getKey(), "MODIFIED", entry.getValue(), fieldChanges));
+                }
+            }
+        }
+
+        for (var entry : fromMap.entrySet()) {
+            if (!toMap.containsKey(entry.getKey())) {
+                changes.add(factory.create(entry.getKey(), "REMOVED", entry.getValue(), Map.of()));
+            }
+        }
+
+        return changes;
     }
 }

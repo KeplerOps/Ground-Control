@@ -141,6 +141,111 @@ class AuditServiceTest {
     }
 
     @Nested
+    class ComputeRelationChanges {
+
+        @Test
+        void detectsAddedRelation() {
+            var id = UUID.randomUUID();
+            Map<UUID, Map<String, Object>> fromMap = Map.of();
+            Map<UUID, Map<String, Object>> toMap = Map.of(id, Map.of("relationType", "DEPENDS_ON"));
+
+            var changes = SnapshotMapper.computeRelationChanges(fromMap, toMap);
+
+            assertThat(changes).hasSize(1);
+            assertThat(changes.get(0).changeType()).isEqualTo("ADDED");
+            assertThat(changes.get(0).relationId()).isEqualTo(id);
+            assertThat(changes.get(0).snapshot()).containsEntry("relationType", "DEPENDS_ON");
+            assertThat(changes.get(0).fieldChanges()).isEmpty();
+        }
+
+        @Test
+        void detectsRemovedRelation() {
+            var id = UUID.randomUUID();
+            Map<UUID, Map<String, Object>> fromMap = Map.of(id, Map.of("relationType", "DEPENDS_ON"));
+            Map<UUID, Map<String, Object>> toMap = Map.of();
+
+            var changes = SnapshotMapper.computeRelationChanges(fromMap, toMap);
+
+            assertThat(changes).hasSize(1);
+            assertThat(changes.get(0).changeType()).isEqualTo("REMOVED");
+            assertThat(changes.get(0).relationId()).isEqualTo(id);
+        }
+
+        @Test
+        void detectsModifiedRelation() {
+            var id = UUID.randomUUID();
+            Map<UUID, Map<String, Object>> fromMap = Map.of(id, Map.of("description", "old desc"));
+            Map<UUID, Map<String, Object>> toMap = Map.of(id, Map.of("description", "new desc"));
+
+            var changes = SnapshotMapper.computeRelationChanges(fromMap, toMap);
+
+            assertThat(changes).hasSize(1);
+            assertThat(changes.get(0).changeType()).isEqualTo("MODIFIED");
+            assertThat(changes.get(0).fieldChanges()).containsKey("description");
+        }
+
+        @Test
+        void excludesUnchangedRelations() {
+            var id = UUID.randomUUID();
+            var snapshot = Map.<String, Object>of("relationType", "DEPENDS_ON");
+            Map<UUID, Map<String, Object>> fromMap = Map.of(id, snapshot);
+            Map<UUID, Map<String, Object>> toMap = Map.of(id, snapshot);
+
+            var changes = SnapshotMapper.computeRelationChanges(fromMap, toMap);
+
+            assertThat(changes).isEmpty();
+        }
+
+        @Test
+        void emptyMapsProduceNoChanges() {
+            var changes = SnapshotMapper.computeRelationChanges(Map.of(), Map.of());
+            assertThat(changes).isEmpty();
+        }
+    }
+
+    @Nested
+    class ComputeTraceabilityLinkChanges {
+
+        @Test
+        void detectsAddedLink() {
+            var id = UUID.randomUUID();
+            Map<UUID, Map<String, Object>> fromMap = Map.of();
+            Map<UUID, Map<String, Object>> toMap = Map.of(id, Map.of("artifactType", "CODE_FILE"));
+
+            var changes = SnapshotMapper.computeTraceabilityLinkChanges(fromMap, toMap);
+
+            assertThat(changes).hasSize(1);
+            assertThat(changes.get(0).changeType()).isEqualTo("ADDED");
+            assertThat(changes.get(0).linkId()).isEqualTo(id);
+        }
+
+        @Test
+        void detectsRemovedLink() {
+            var id = UUID.randomUUID();
+            Map<UUID, Map<String, Object>> fromMap = Map.of(id, Map.of("artifactType", "CODE_FILE"));
+            Map<UUID, Map<String, Object>> toMap = Map.of();
+
+            var changes = SnapshotMapper.computeTraceabilityLinkChanges(fromMap, toMap);
+
+            assertThat(changes).hasSize(1);
+            assertThat(changes.get(0).changeType()).isEqualTo("REMOVED");
+        }
+
+        @Test
+        void detectsModifiedLink() {
+            var id = UUID.randomUUID();
+            Map<UUID, Map<String, Object>> fromMap = Map.of(id, Map.of("syncStatus", "SYNCED"));
+            Map<UUID, Map<String, Object>> toMap = Map.of(id, Map.of("syncStatus", "STALE"));
+
+            var changes = SnapshotMapper.computeTraceabilityLinkChanges(fromMap, toMap);
+
+            assertThat(changes).hasSize(1);
+            assertThat(changes.get(0).changeType()).isEqualTo("MODIFIED");
+            assertThat(changes.get(0).fieldChanges()).containsKey("syncStatus");
+        }
+    }
+
+    @Nested
     class TraceabilityLinkSnapshot {
 
         @Test

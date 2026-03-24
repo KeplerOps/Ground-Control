@@ -34,6 +34,7 @@ import {
   getRelationHistory,
   getTraceabilityLinkHistory,
   getRequirementTimeline,
+  getRequirementDiff,
   getProjectTimeline,
   exportAuditTimeline,
   deleteRelation,
@@ -511,6 +512,24 @@ server.tool(
       const timeline = await getRequirementTimeline(id, change_category, actor, from, to, limit, offset);
       if (Array.isArray(timeline) && timeline.length === 0) return ok("No timeline entries found.");
       return ok(JSON.stringify(timeline, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_requirement_diff",
+  "Get a structured diff between two revisions of a requirement, showing per-field changes, added/removed relations, and added/removed traceability links.",
+  {
+    id: z.string().uuid().describe("Requirement UUID"),
+    from_revision: z.number().int().min(1).describe("Starting revision number (the 'before')"),
+    to_revision: z.number().int().min(1).describe("Ending revision number (the 'after')"),
+  },
+  async ({ id, from_revision, to_revision }) => {
+    try {
+      const diff = await getRequirementDiff(id, from_revision, to_revision);
+      return ok(JSON.stringify(diff, null, 2));
     } catch (e) {
       return err(e);
     }

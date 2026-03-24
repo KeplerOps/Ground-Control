@@ -307,4 +307,85 @@ class AuditHistoryIntegrationTest extends BaseIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
     }
+
+    // --- Version diff endpoint tests (builds on data from steps 1-5) ---
+
+    @Test
+    @Order(20)
+    void diff_showsFieldChangesAndAddedEntities() throws Exception {
+        // Get history to discover revision numbers
+        var historyResult = mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/history"))
+                .andExpect(status().isOk())
+                .andReturn();
+        var historyJson = objectMapper.readTree(historyResult.getResponse().getContentAsString());
+        int firstRevision = historyJson.get(0).get("revisionNumber").asInt();
+        int lastRevision =
+                historyJson.get(historyJson.size() - 1).get("revisionNumber").asInt();
+
+        // Diff between first and last revision — should show field changes,
+        // relation added, and traceability link added
+        mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/diff")
+                        .param("fromRevision", String.valueOf(firstRevision))
+                        .param("toRevision", String.valueOf(lastRevision + 100)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.requirementId", is(requirementId.toString())))
+                .andExpect(jsonPath("$.fieldChanges.title.oldValue", is("Audit test requirement")))
+                .andExpect(jsonPath("$.fieldChanges.title.newValue", is("Updated audit title")))
+                .andExpect(jsonPath("$.relationChanges[0].changeType", is("ADDED")))
+                .andExpect(jsonPath("$.relationChanges[0].snapshot.relationType", is("DEPENDS_ON")))
+                .andExpect(jsonPath("$.traceabilityLinkChanges[0].changeType", is("ADDED")))
+                .andExpect(jsonPath("$.traceabilityLinkChanges[0].snapshot.artifactType", is("CODE_FILE")));
+    }
+
+    @Test
+    @Order(21)
+    void diff_emptyWhenSameRevision() throws Exception {
+        var historyResult = mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/history"))
+                .andExpect(status().isOk())
+                .andReturn();
+        var historyJson = objectMapper.readTree(historyResult.getResponse().getContentAsString());
+        int lastRevision =
+                historyJson.get(historyJson.size() - 1).get("revisionNumber").asInt();
+
+        // Diff between lastRevision and lastRevision+1 (no changes in between)
+        mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/diff")
+                        .param("fromRevision", String.valueOf(lastRevision))
+                        .param("toRevision", String.valueOf(lastRevision + 100)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fieldChanges").isEmpty());
+    }
+
+    @Test
+    @Order(22)
+    void diff_nonexistentRequirement_returns404() throws Exception {
+        mockMvc.perform(get("/api/v1/requirements/" + UUID.randomUUID() + "/diff")
+                        .param("fromRevision", "1")
+                        .param("toRevision", "2"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code", is("not_found")));
+    }
+
+    @Test
+    @Order(23)
+    void diff_invalidRevisionOrder_returns422() throws Exception {
+        mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/diff")
+                        .param("fromRevision", "10")
+                        .param("toRevision", "1"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.code", is("validation_error")));
+    }
+
+    @Test
+    @Order(24)
+    void diff_requirementNotAtRevision_returns422() throws Exception {
+        // Revision 1 is before this requirement existed (Envers revisions start at 1)
+        // but the requirement may or may not exist at rev 1. Use rev 0 which is always invalid.
+        // Actually, auditReader.find returns the entity at the *closest prior* revision,
+        // so if the requirement didn't exist yet, it returns null.
+        // We'll use a very low revision where the requirement definitely didn't exist.
+        mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/diff")
+                        .param("fromRevision", "1")
+                        .param("toRevision", "2"))
+                .andExpect(status().isUnprocessableEntity());
+    }
 }
