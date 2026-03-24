@@ -31,6 +31,9 @@ public class GroundControlRevisionEntity implements Serializable {
     @Column(name = "actor")
     private String actor;
 
+    @Column(name = "reason")
+    private String reason;
+
     public int getId() {
         return id;
     }
@@ -45,5 +48,13 @@ public class GroundControlRevisionEntity implements Serializable {
 
     public void setActor(String actor) {
         this.actor = actor;
+    }
+
+    public String getReason() {
+        return reason;
+    }
+
+    public void setReason(String reason) {
+        this.reason = reason;
     }
 }

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.76.0] - 2026-03-24
+
+### Added
+
+- Project-wide audit timeline endpoint (`GET /api/v1/audit/timeline`) aggregating
+  changes across all requirements in a project
+- Actor filtering on requirement and project audit timelines
+- CSV export of audit timeline for compliance reporting
+  (`GET /api/v1/audit/timeline/export`)
+- Optional `reason` field on status transitions, recorded in the audit trail
+  for governance traceability
+- Configurable audit data retention with scheduled cleanup
+  (`GC_AUDIT_RETENTION_DAYS`, disabled by default)
+- MCP tools: `gc_get_project_timeline`, `gc_export_audit_timeline`
+- MCP tools `gc_transition_status` and `gc_bulk_transition_status` now accept
+  optional `reason` parameter
+
 ## [0.75.2] - 2026-03-23
 
 ### Fixed

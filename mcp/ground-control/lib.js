@@ -211,20 +211,20 @@ export async function updateRequirement(id, data) {
   return request("PUT", `/api/v1/requirements/${encodeURIComponent(id)}`, { body: data });
 }
 
-export async function transitionStatus(id, status) {
-  return request("POST", `/api/v1/requirements/${encodeURIComponent(id)}/transition`, {
-    body: { status },
-  });
+export async function transitionStatus(id, status, reason) {
+  const body = { status };
+  if (reason) body.reason = reason;
+  return request("POST", `/api/v1/requirements/${encodeURIComponent(id)}/transition`, { body });
 }
 
 export async function archiveRequirement(id) {
   return request("POST", `/api/v1/requirements/${encodeURIComponent(id)}/archive`);
 }
 
-export async function bulkTransitionStatus(ids, status) {
-  return request("POST", "/api/v1/requirements/bulk/transition", {
-    body: { ids, status },
-  });
+export async function bulkTransitionStatus(ids, status, reason) {
+  const body = { ids, status };
+  if (reason) body.reason = reason;
+  return request("POST", "/api/v1/requirements/bulk/transition", { body });
 }
 
 export async function cloneRequirement(id, newUid, copyRelations) {
@@ -333,15 +333,38 @@ export async function getTraceabilityLinkHistory(reqId, linkId) {
   return request("GET", `/api/v1/requirements/${encodeURIComponent(reqId)}/traceability/${encodeURIComponent(linkId)}/history`);
 }
 
-export async function getRequirementTimeline(id, changeCategory, from, to, limit, offset) {
+export async function getRequirementTimeline(id, changeCategory, actor, from, to, limit, offset) {
   const params = new URLSearchParams();
   if (changeCategory) params.set("changeCategory", changeCategory);
+  if (actor) params.set("actor", actor);
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   if (limit != null) params.set("limit", String(limit));
   if (offset != null) params.set("offset", String(offset));
   const qs = params.toString();
   return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}/timeline${qs ? `?${qs}` : ""}`);
+}
+
+export async function getProjectTimeline(project, changeCategory, actor, from, to, limit, offset) {
+  const params = new URLSearchParams();
+  if (project) params.set("project", project);
+  if (changeCategory) params.set("changeCategory", changeCategory);
+  if (actor) params.set("actor", actor);
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  if (limit != null) params.set("limit", String(limit));
+  if (offset != null) params.set("offset", String(offset));
+  const qs = params.toString();
+  return request("GET", `/api/v1/audit/timeline${qs ? `?${qs}` : ""}`);
+}
+
+export async function exportAuditTimeline(project, changeCategory, actor, from, to, limit) {
+  const url = buildUrl("/api/v1/audit/timeline/export", {
+    project, changeCategory, actor, from, to, limit,
+  });
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
+  return resp.text();
 }
 
 // ---------------------------------------------------------------------------

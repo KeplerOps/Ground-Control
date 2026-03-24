@@ -206,7 +206,7 @@ class AnalysisControllerTest {
             coverage.put("TESTS", new CoverageStats(3, 0, 0.0));
 
             var recentChanges = List.of(
-                    new RecentChange("REQ-A", "Title A", "MOD", Instant.parse("2026-03-18T10:00:00Z"), "user1"));
+                    new RecentChange("REQ-A", "Title A", "MOD", Instant.parse("2026-03-18T10:00:00Z"), "user1", null));
 
             var stats = new DashboardStats(3, byStatus, waveStats, coverage, recentChanges);
 

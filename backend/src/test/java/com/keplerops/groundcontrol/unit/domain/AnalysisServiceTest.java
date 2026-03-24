@@ -580,7 +580,8 @@ class AnalysisServiceTest {
             when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.VERIFIES))
                     .thenReturn(false);
             when(auditService.getRecentRequirementChanges(Set.of(reqId), 10))
-                    .thenReturn(List.of(new RecentChange("REQ-COV", "Title", "ADD", Instant.now(), "test-actor")));
+                    .thenReturn(
+                            List.of(new RecentChange("REQ-COV", "Title", "ADD", Instant.now(), "test-actor", null)));
 
             DashboardStats result = service.getDashboardStats(PROJECT_ID);
 

@@ -69,6 +69,7 @@ public class AuditService {
                             java.time.Instant.ofEpochMilli(revInfo.getTimestamp()),
                             revType.name(),
                             revInfo.getActor(),
+                            revInfo.getReason(),
                             entity);
                 })
                 .toList();
@@ -99,6 +100,7 @@ public class AuditService {
                             java.time.Instant.ofEpochMilli(revInfo.getTimestamp()),
                             revType.name(),
                             revInfo.getActor(),
+                            revInfo.getReason(),
                             entity);
                 })
                 .toList();
@@ -130,7 +132,8 @@ public class AuditService {
                             entity.getTitle(),
                             revType.name(),
                             java.time.Instant.ofEpochMilli(revInfo.getTimestamp()),
-                            revInfo.getActor());
+                            revInfo.getActor(),
+                            revInfo.getReason());
                 })
                 .toList();
     }
@@ -160,6 +163,7 @@ public class AuditService {
                             java.time.Instant.ofEpochMilli(revInfo.getTimestamp()),
                             revType.name(),
                             revInfo.getActor(),
+                            revInfo.getReason(),
                             entity);
                 })
                 .toList();
@@ -170,7 +174,7 @@ public class AuditService {
      * including requirement field changes, relation changes, and traceability link changes.
      */
     public List<TimelineEntry> getRequirementTimeline(
-            UUID id, ChangeCategory changeCategory, Instant from, Instant to, int limit, int offset) {
+            UUID id, ChangeCategory changeCategory, String actor, Instant from, Instant to, int limit, int offset) {
         if (!requirementRepository.existsById(id)) {
             throw new NotFoundException("Requirement not found: " + id);
         }
@@ -187,7 +191,49 @@ public class AuditService {
             entries.addAll(buildTraceabilityLinkEntries(id));
         }
 
+        return filterAndPaginate(entries, actor, from, to, limit, offset);
+    }
+
+    /**
+     * Returns a unified, chronologically-sorted audit timeline across all requirements in a project.
+     *
+     * <p>TODO: This loads all revisions into memory then filters/paginates. Move to DB-level
+     * pagination (e.g. a native query joining revinfo with audit tables) before beta to avoid
+     * O(requirements * revisions) memory usage on large projects.
+     */
+    public List<TimelineEntry> getProjectTimeline(
+            UUID projectId,
+            ChangeCategory changeCategory,
+            String actor,
+            Instant from,
+            Instant to,
+            int limit,
+            int offset) {
+        var requirements = requirementRepository.findByProjectId(projectId);
+        var entries = new ArrayList<TimelineEntry>();
+
+        for (var requirement : requirements) {
+            var reqId = requirement.getId();
+            if (changeCategory == null || changeCategory == ChangeCategory.REQUIREMENT) {
+                entries.addAll(buildRequirementEntries(reqId));
+            }
+            if (changeCategory == null || changeCategory == ChangeCategory.RELATION) {
+                entries.addAll(buildRelationEntries(reqId));
+            }
+            if (changeCategory == null || changeCategory == ChangeCategory.TRACEABILITY_LINK) {
+                entries.addAll(buildTraceabilityLinkEntries(reqId));
+            }
+        }
+
+        return filterAndPaginate(entries, actor, from, to, limit, offset);
+    }
+
+    private List<TimelineEntry> filterAndPaginate(
+            List<TimelineEntry> entries, String actor, Instant from, Instant to, int limit, int offset) {
         var stream = entries.stream();
+        if (actor != null && !actor.isBlank()) {
+            stream = stream.filter(e -> actor.equals(e.actor()));
+        }
         if (from != null) {
             stream = stream.filter(e -> !e.timestamp().isBefore(from));
         }
@@ -231,6 +277,7 @@ public class AuditService {
                     revType.name(),
                     Instant.ofEpochMilli(revInfo.getTimestamp()),
                     revInfo.getActor(),
+                    revInfo.getReason(),
                     ChangeCategory.REQUIREMENT,
                     entity.getId(),
                     snapshot,
@@ -278,6 +325,7 @@ public class AuditService {
                     revType.name(),
                     Instant.ofEpochMilli(revInfo.getTimestamp()),
                     revInfo.getActor(),
+                    revInfo.getReason(),
                     ChangeCategory.RELATION,
                     entity.getId(),
                     snapshot,
@@ -323,6 +371,7 @@ public class AuditService {
                     revType.name(),
                     Instant.ofEpochMilli(revInfo.getTimestamp()),
                     revInfo.getActor(),
+                    revInfo.getReason(),
                     ChangeCategory.TRACEABILITY_LINK,
                     entity.getId(),
                     snapshot,

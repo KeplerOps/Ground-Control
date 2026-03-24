@@ -34,6 +34,8 @@ import {
   getRelationHistory,
   getTraceabilityLinkHistory,
   getRequirementTimeline,
+  getProjectTimeline,
+  exportAuditTimeline,
   deleteRelation,
   deleteTraceabilityLink,
   materializeGraph,
@@ -214,10 +216,11 @@ server.tool(
   {
     id: z.string().uuid().describe("Requirement UUID"),
     status: z.enum(STATUSES).describe("Target status"),
+    reason: z.string().optional().describe("Optional reason for the transition (recorded in audit trail)"),
   },
-  async ({ id, status }) => {
+  async ({ id, status, reason }) => {
     try {
-      return ok(JSON.stringify(await transitionStatus(id, status), null, 2));
+      return ok(JSON.stringify(await transitionStatus(id, status, reason), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -246,8 +249,9 @@ server.tool(
     uids: z.array(z.string()).min(1).describe("Requirement UIDs (e.g. ['GC-A001', 'GC-A002'])"),
     status: z.enum(STATUSES).describe("Target status for all requirements"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    reason: z.string().optional().describe("Optional reason for the transition (recorded in audit trail)"),
   },
-  async ({ uids, status, project }) => {
+  async ({ uids, status, project, reason }) => {
     try {
       const ids = [];
       const resolutionFailures = [];
@@ -262,7 +266,7 @@ server.tool(
       if (ids.length === 0) {
         return ok(JSON.stringify({ succeeded: [], failed: resolutionFailures, total_requested: uids.length, total_succeeded: 0, total_failed: resolutionFailures.length }, null, 2));
       }
-      const result = await bulkTransitionStatus(ids, status);
+      const result = await bulkTransitionStatus(ids, status, reason);
       if (resolutionFailures.length > 0) {
         result.failed = [...(result.failed || []), ...resolutionFailures];
         result.total_failed = (result.total_failed || 0) + resolutionFailures.length;
@@ -496,16 +500,61 @@ server.tool(
   {
     id: z.string().uuid().describe("Requirement UUID"),
     change_category: z.enum(["REQUIREMENT", "RELATION", "TRACEABILITY_LINK"]).optional().describe("Filter by change category"),
+    actor: z.string().optional().describe("Filter by actor (exact match)"),
     from: z.string().optional().describe("Start of date range (ISO-8601 instant)"),
     to: z.string().optional().describe("End of date range (ISO-8601 instant)"),
     limit: z.number().int().min(1).max(500).optional().describe("Max entries to return (default 100)"),
     offset: z.number().int().min(0).optional().describe("Number of entries to skip (default 0)"),
   },
-  async ({ id, change_category, from, to, limit, offset }) => {
+  async ({ id, change_category, actor, from, to, limit, offset }) => {
     try {
-      const timeline = await getRequirementTimeline(id, change_category, from, to, limit, offset);
+      const timeline = await getRequirementTimeline(id, change_category, actor, from, to, limit, offset);
       if (Array.isArray(timeline) && timeline.length === 0) return ok("No timeline entries found.");
       return ok(JSON.stringify(timeline, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_project_timeline",
+  "Get a unified audit timeline across all requirements in a project. Merges requirement, relation, and traceability link changes with field-level diffs. Paginated (default 100 entries).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    change_category: z.enum(["REQUIREMENT", "RELATION", "TRACEABILITY_LINK"]).optional().describe("Filter by change category"),
+    actor: z.string().optional().describe("Filter by actor (exact match)"),
+    from: z.string().optional().describe("Start of date range (ISO-8601 instant)"),
+    to: z.string().optional().describe("End of date range (ISO-8601 instant)"),
+    limit: z.number().int().min(1).max(500).optional().describe("Max entries to return (default 100)"),
+    offset: z.number().int().min(0).optional().describe("Number of entries to skip (default 0)"),
+  },
+  async ({ project, change_category, actor, from, to, limit, offset }) => {
+    try {
+      const timeline = await getProjectTimeline(project, change_category, actor, from, to, limit, offset);
+      if (Array.isArray(timeline) && timeline.length === 0) return ok("No timeline entries found.");
+      return ok(JSON.stringify(timeline, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_export_audit_timeline",
+  "Export the project audit timeline as CSV for compliance reporting. Returns CSV text with columns: timestamp, actor, reason, change_category, revision_type, entity_id, changes.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    change_category: z.enum(["REQUIREMENT", "RELATION", "TRACEABILITY_LINK"]).optional().describe("Filter by change category"),
+    actor: z.string().optional().describe("Filter by actor (exact match)"),
+    from: z.string().optional().describe("Start of date range (ISO-8601 instant)"),
+    to: z.string().optional().describe("End of date range (ISO-8601 instant)"),
+    limit: z.number().int().min(1).max(10000).optional().describe("Max entries to export (default 10000)"),
+  },
+  async ({ project, change_category, actor, from, to, limit }) => {
+    try {
+      const csv = await exportAuditTimeline(project, change_category, actor, from, to, limit);
+      return ok(csv);
     } catch (e) {
       return err(e);
     }
