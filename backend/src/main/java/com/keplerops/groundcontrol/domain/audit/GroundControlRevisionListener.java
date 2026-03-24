@@ -8,5 +8,6 @@ public class GroundControlRevisionListener implements RevisionListener {
     public void newRevision(Object revisionEntity) {
         var rev = (GroundControlRevisionEntity) revisionEntity;
         rev.setActor(ActorHolder.get());
+        rev.setReason(ActorHolder.getReason());
     }
 }

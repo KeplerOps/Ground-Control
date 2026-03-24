@@ -6,7 +6,12 @@ import java.time.Instant;
 import java.util.UUID;
 
 public record RelationHistoryResponse(
-        int revisionNumber, String revisionType, Instant timestamp, String actor, RelationSnapshot snapshot) {
+        int revisionNumber,
+        String revisionType,
+        Instant timestamp,
+        String actor,
+        String reason,
+        RelationSnapshot snapshot) {
 
     public record RelationSnapshot(
             UUID id, UUID sourceId, UUID targetId, RelationType relationType, String description, Instant createdAt) {}
@@ -21,6 +26,11 @@ public record RelationHistoryResponse(
                 entity.getDescription(),
                 entity.getCreatedAt());
         return new RelationHistoryResponse(
-                revision.revisionNumber(), revision.revisionType(), revision.timestamp(), revision.actor(), snapshot);
+                revision.revisionNumber(),
+                revision.revisionType(),
+                revision.timestamp(),
+                revision.actor(),
+                revision.reason(),
+                snapshot);
     }
 }

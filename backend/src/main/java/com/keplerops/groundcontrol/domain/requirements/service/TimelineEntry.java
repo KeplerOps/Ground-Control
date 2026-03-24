@@ -11,6 +11,7 @@ public record TimelineEntry(
         String revisionType,
         Instant timestamp,
         String actor,
+        String reason,
         ChangeCategory changeCategory,
         UUID entityId,
         Map<String, Object> snapshot,
