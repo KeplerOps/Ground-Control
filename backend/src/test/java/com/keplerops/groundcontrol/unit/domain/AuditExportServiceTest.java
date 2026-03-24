@@ -84,4 +84,16 @@ class AuditExportServiceTest {
         var csv = service.toCsv(List.of(entry));
         assertThat(csv).contains("\"reason, with comma\"");
     }
+
+    @Test
+    void toCsv_formulaInjection_isPrefixed() {
+        var id = UUID.randomUUID();
+        var entry = new TimelineEntry(
+                1, "ADD", Instant.now(), "eve", "=CMD('calc')", ChangeCategory.REQUIREMENT, id, Map.of(), Map.of());
+
+        var csv = service.toCsv(List.of(entry));
+        // Leading = should be prefixed with ' and then quoted (contains comma from parentheses)
+        assertThat(csv).contains("'=CMD('calc')");
+        assertThat(csv).doesNotContain(",=CMD");
+    }
 }

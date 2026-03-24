@@ -19,6 +19,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/audit")
 public class AuditController {
 
+    private static final int MAX_EXPORT_LIMIT = 50_000;
+
     private final AuditService auditService;
     private final AuditExportService auditExportService;
     private final ProjectService projectService;
@@ -54,7 +56,8 @@ public class AuditController {
             @RequestParam(required = false) Instant to,
             @RequestParam(defaultValue = "10000") int limit) {
         var projectId = projectService.resolveProjectId(project);
-        var entries = auditService.getProjectTimeline(projectId, changeCategory, actor, from, to, limit, 0);
+        var cappedLimit = Math.min(limit, MAX_EXPORT_LIMIT);
+        var entries = auditService.getProjectTimeline(projectId, changeCategory, actor, from, to, cappedLimit, 0);
         var csv = auditExportService.toCsv(entries);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"audit-timeline.csv\"")

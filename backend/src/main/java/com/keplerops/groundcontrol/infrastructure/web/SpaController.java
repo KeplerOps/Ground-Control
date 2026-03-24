@@ -8,8 +8,8 @@ import org.springframework.web.bind.annotation.GetMapping;
  * client-side routing.
  *
  * <p>Spring's {@code @GetMapping} path variables match a single segment only, so we need explicit
- * patterns for each depth level used by the React Router routes (up to 4 segments:
- * {@code /p/:projectId/requirements/:id}).
+ * patterns for each depth level. We support up to 6 segments to provide headroom beyond the
+ * current deepest route ({@code /p/:projectId/requirements/:id} = 4 segments).
  *
  * <p>The regex on each segment excludes paths starting with "api" or "actuator" and paths
  * containing a dot (static file requests like .js, .css, .html).
@@ -18,13 +18,14 @@ import org.springframework.web.bind.annotation.GetMapping;
 public class SpaController {
 
     private static final String NO_DOT = "^(?!api|actuator)[^\\.]*$";
+    private static final String S1 = "/{a:" + NO_DOT + "}";
+    private static final String S2 = S1 + "/{b:" + NO_DOT + "}";
+    private static final String S3 = S2 + "/{c:" + NO_DOT + "}";
+    private static final String S4 = S3 + "/{d:" + NO_DOT + "}";
+    private static final String S5 = S4 + "/{e:" + NO_DOT + "}";
+    private static final String S6 = S5 + "/{f:" + NO_DOT + "}";
 
-    @GetMapping({
-        "/{p1:" + NO_DOT + "}",
-        "/{p1:" + NO_DOT + "}/{p2:" + NO_DOT + "}",
-        "/{p1:" + NO_DOT + "}/{p2:" + NO_DOT + "}/{p3:" + NO_DOT + "}",
-        "/{p1:" + NO_DOT + "}/{p2:" + NO_DOT + "}/{p3:" + NO_DOT + "}/{p4:" + NO_DOT + "}"
-    })
+    @GetMapping({S1, S2, S3, S4, S5, S6})
     public String forward() {
         return "forward:/index.html";
     }
