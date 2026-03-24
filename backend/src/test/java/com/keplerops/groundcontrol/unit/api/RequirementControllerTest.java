@@ -29,6 +29,7 @@ import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
 import com.keplerops.groundcontrol.domain.requirements.service.AuditService;
 import com.keplerops.groundcontrol.domain.requirements.service.BulkTransitionResult;
+import com.keplerops.groundcontrol.domain.requirements.service.ChangeType;
 import com.keplerops.groundcontrol.domain.requirements.service.CloneRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateTraceabilityLinkCommand;
@@ -711,10 +712,10 @@ class RequirementControllerTest {
             var linkId = UUID.randomUUID();
 
             var fieldChanges = Map.of("title", new FieldChange("Old Title", "New Title"));
-            var relationChanges =
-                    List.of(new RelationChange(relId, "ADDED", Map.of("relationType", "DEPENDS_ON"), Map.of()));
-            var linkChanges = List.of(
-                    new TraceabilityLinkChange(linkId, "REMOVED", Map.of("artifactType", "CODE_FILE"), Map.of()));
+            var relationChanges = List.of(
+                    new RelationChange(relId, ChangeType.ADDED, Map.of("relationType", "DEPENDS_ON"), Map.of()));
+            var linkChanges = List.of(new TraceabilityLinkChange(
+                    linkId, ChangeType.REMOVED, Map.of("artifactType", "CODE_FILE"), Map.of()));
 
             var diff = new RequirementVersionDiff(reqId, 1, 5, fieldChanges, relationChanges, linkChanges);
             when(auditService.getRequirementDiff(reqId, 1, 5)).thenReturn(diff);

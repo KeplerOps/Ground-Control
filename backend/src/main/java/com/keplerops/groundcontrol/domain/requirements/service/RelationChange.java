@@ -5,4 +5,4 @@ import java.util.UUID;
 
 /** A single relation added, removed, or modified between two revisions. */
 public record RelationChange(
-        UUID relationId, String changeType, Map<String, Object> snapshot, Map<String, FieldChange> fieldChanges) {}
+        UUID relationId, ChangeType changeType, Map<String, Object> snapshot, Map<String, FieldChange> fieldChanges) {}

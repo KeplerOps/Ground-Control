@@ -197,10 +197,10 @@ class AuditServiceDiffTest {
 
                 assertThat(diff.fieldChanges()).isEmpty();
                 assertThat(diff.relationChanges()).hasSize(1);
-                assertThat(diff.relationChanges().get(0).changeType()).isEqualTo("ADDED");
+                assertThat(diff.relationChanges().get(0).changeType()).isEqualTo(ChangeType.ADDED);
                 assertThat(diff.relationChanges().get(0).relationId()).isEqualTo(relId);
                 assertThat(diff.traceabilityLinkChanges()).hasSize(1);
-                assertThat(diff.traceabilityLinkChanges().get(0).changeType()).isEqualTo("REMOVED");
+                assertThat(diff.traceabilityLinkChanges().get(0).changeType()).isEqualTo(ChangeType.REMOVED);
                 assertThat(diff.traceabilityLinkChanges().get(0).linkId()).isEqualTo(linkId);
             }
         }

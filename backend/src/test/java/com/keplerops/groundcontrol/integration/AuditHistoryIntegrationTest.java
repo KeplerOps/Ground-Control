@@ -378,14 +378,18 @@ class AuditHistoryIntegrationTest extends BaseIntegrationTest {
     @Test
     @Order(24)
     void diff_requirementNotAtRevision_returns422() throws Exception {
-        // Revision 1 is before this requirement existed (Envers revisions start at 1)
-        // but the requirement may or may not exist at rev 1. Use rev 0 which is always invalid.
-        // Actually, auditReader.find returns the entity at the *closest prior* revision,
-        // so if the requirement didn't exist yet, it returns null.
-        // We'll use a very low revision where the requirement definitely didn't exist.
+        // Find the actual first revision for this requirement, then use one before it
+        var historyResult = mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/history"))
+                .andExpect(status().isOk())
+                .andReturn();
+        var historyJson = objectMapper.readTree(historyResult.getResponse().getContentAsString());
+        int firstRevision = historyJson.get(0).get("revisionNumber").asInt();
+        int beforeFirstRevision = firstRevision - 1;
+
+        // Requirement did not exist at beforeFirstRevision, so auditReader.find returns null
         mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/diff")
-                        .param("fromRevision", "1")
-                        .param("toRevision", "2"))
+                        .param("fromRevision", String.valueOf(beforeFirstRevision))
+                        .param("toRevision", String.valueOf(firstRevision)))
                 .andExpect(status().isUnprocessableEntity());
     }
 }

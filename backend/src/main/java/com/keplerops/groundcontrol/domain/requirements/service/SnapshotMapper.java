@@ -79,7 +79,7 @@ public final class SnapshotMapper {
 
     @FunctionalInterface
     interface EntityChangeFactory<T> {
-        T create(UUID id, String changeType, Map<String, Object> snapshot, Map<String, FieldChange> fieldChanges);
+        T create(UUID id, ChangeType changeType, Map<String, Object> snapshot, Map<String, FieldChange> fieldChanges);
     }
 
     static <T> List<T> computeEntityChanges(
@@ -91,18 +91,18 @@ public final class SnapshotMapper {
         for (var entry : toMap.entrySet()) {
             var fromSnapshot = fromMap.get(entry.getKey());
             if (fromSnapshot == null) {
-                changes.add(factory.create(entry.getKey(), "ADDED", entry.getValue(), Map.of()));
+                changes.add(factory.create(entry.getKey(), ChangeType.ADDED, entry.getValue(), Map.of()));
             } else {
                 var fieldChanges = computeDiff(fromSnapshot, entry.getValue());
                 if (!fieldChanges.isEmpty()) {
-                    changes.add(factory.create(entry.getKey(), "MODIFIED", entry.getValue(), fieldChanges));
+                    changes.add(factory.create(entry.getKey(), ChangeType.MODIFIED, entry.getValue(), fieldChanges));
                 }
             }
         }
 
         for (var entry : fromMap.entrySet()) {
             if (!toMap.containsKey(entry.getKey())) {
-                changes.add(factory.create(entry.getKey(), "REMOVED", entry.getValue(), Map.of()));
+                changes.add(factory.create(entry.getKey(), ChangeType.REMOVED, entry.getValue(), Map.of()));
             }
         }
 

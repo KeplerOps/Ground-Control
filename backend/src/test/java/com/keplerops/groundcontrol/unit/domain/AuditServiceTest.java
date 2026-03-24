@@ -6,6 +6,7 @@ import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
+import com.keplerops.groundcontrol.domain.requirements.service.ChangeType;
 import com.keplerops.groundcontrol.domain.requirements.service.FieldChange;
 import com.keplerops.groundcontrol.domain.requirements.service.SnapshotMapper;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
@@ -152,7 +153,7 @@ class AuditServiceTest {
             var changes = SnapshotMapper.computeRelationChanges(fromMap, toMap);
 
             assertThat(changes).hasSize(1);
-            assertThat(changes.get(0).changeType()).isEqualTo("ADDED");
+            assertThat(changes.get(0).changeType()).isEqualTo(ChangeType.ADDED);
             assertThat(changes.get(0).relationId()).isEqualTo(id);
             assertThat(changes.get(0).snapshot()).containsEntry("relationType", "DEPENDS_ON");
             assertThat(changes.get(0).fieldChanges()).isEmpty();
@@ -167,7 +168,7 @@ class AuditServiceTest {
             var changes = SnapshotMapper.computeRelationChanges(fromMap, toMap);
 
             assertThat(changes).hasSize(1);
-            assertThat(changes.get(0).changeType()).isEqualTo("REMOVED");
+            assertThat(changes.get(0).changeType()).isEqualTo(ChangeType.REMOVED);
             assertThat(changes.get(0).relationId()).isEqualTo(id);
         }
 
@@ -180,7 +181,7 @@ class AuditServiceTest {
             var changes = SnapshotMapper.computeRelationChanges(fromMap, toMap);
 
             assertThat(changes).hasSize(1);
-            assertThat(changes.get(0).changeType()).isEqualTo("MODIFIED");
+            assertThat(changes.get(0).changeType()).isEqualTo(ChangeType.MODIFIED);
             assertThat(changes.get(0).fieldChanges()).containsKey("description");
         }
 
@@ -215,7 +216,7 @@ class AuditServiceTest {
             var changes = SnapshotMapper.computeTraceabilityLinkChanges(fromMap, toMap);
 
             assertThat(changes).hasSize(1);
-            assertThat(changes.get(0).changeType()).isEqualTo("ADDED");
+            assertThat(changes.get(0).changeType()).isEqualTo(ChangeType.ADDED);
             assertThat(changes.get(0).linkId()).isEqualTo(id);
         }
 
@@ -228,7 +229,7 @@ class AuditServiceTest {
             var changes = SnapshotMapper.computeTraceabilityLinkChanges(fromMap, toMap);
 
             assertThat(changes).hasSize(1);
-            assertThat(changes.get(0).changeType()).isEqualTo("REMOVED");
+            assertThat(changes.get(0).changeType()).isEqualTo(ChangeType.REMOVED);
         }
 
         @Test
@@ -240,7 +241,7 @@ class AuditServiceTest {
             var changes = SnapshotMapper.computeTraceabilityLinkChanges(fromMap, toMap);
 
             assertThat(changes).hasSize(1);
-            assertThat(changes.get(0).changeType()).isEqualTo("MODIFIED");
+            assertThat(changes.get(0).changeType()).isEqualTo(ChangeType.MODIFIED);
             assertThat(changes.get(0).fieldChanges()).containsKey("syncStatus");
         }
     }
