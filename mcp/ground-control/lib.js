@@ -79,6 +79,16 @@ const TO_CAMEL = {
   modified_count: "modifiedCount",
   requirement_count: "requirementCount",
   requirement_id: "requirementId",
+  from_revision: "fromRevision",
+  to_revision: "toRevision",
+  field_changes: "fieldChanges",
+  relation_changes: "relationChanges",
+  traceability_link_changes: "traceabilityLinkChanges",
+  change_type: "changeType",
+  old_value: "oldValue",
+  new_value: "newValue",
+  relation_id: "relationId",
+  link_id: "linkId",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -343,6 +353,13 @@ export async function getRequirementTimeline(id, changeCategory, actor, from, to
   if (offset != null) params.set("offset", String(offset));
   const qs = params.toString();
   return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}/timeline${qs ? `?${qs}` : ""}`);
+}
+
+export async function getRequirementDiff(id, fromRevision, toRevision) {
+  const params = new URLSearchParams();
+  params.set("fromRevision", String(fromRevision));
+  params.set("toRevision", String(toRevision));
+  return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}/diff?${params.toString()}`);
 }
 
 export async function getProjectTimeline(project, changeCategory, actor, from, to, limit, offset) {

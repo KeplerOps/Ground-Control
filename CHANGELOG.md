@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.77.0] - 2026-03-24
+
+### Added
+
+- Structured requirement version diff API (`GET /api/v1/requirements/{id}/diff`)
+  returning per-field changes, added/removed/modified relations, and
+  added/removed/modified traceability links between two revision numbers
+- MCP tool `gc_get_requirement_diff` for agent-driven change review workflows
+
 ## [0.76.0] - 2026-03-24
 
 ### Added
