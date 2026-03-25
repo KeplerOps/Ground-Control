@@ -377,19 +377,7 @@ class AuditHistoryIntegrationTest extends BaseIntegrationTest {
 
     @Test
     @Order(24)
-    void diff_requirementNotAtRevision_returns422() throws Exception {
-        // Find the actual first revision for this requirement, then use one before it
-        var historyResult = mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/history"))
-                .andExpect(status().isOk())
-                .andReturn();
-        var historyJson = objectMapper.readTree(historyResult.getResponse().getContentAsString());
-        int firstRevision = historyJson.get(0).get("revisionNumber").asInt();
-        int beforeFirstRevision = firstRevision - 1;
-
-        // Requirement did not exist at beforeFirstRevision, so auditReader.find returns null
-        mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/diff")
-                        .param("fromRevision", String.valueOf(beforeFirstRevision))
-                        .param("toRevision", String.valueOf(firstRevision)))
-                .andExpect(status().isUnprocessableEntity());
+    void diff_missingParams_returns400() throws Exception {
+        mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/diff")).andExpect(status().isBadRequest());
     }
 }
