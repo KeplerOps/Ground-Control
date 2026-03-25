@@ -1,3 +1,5 @@
 package com.keplerops.groundcontrol.domain.documents.service;
 
-public record UpdateDocumentCommand(String title, String version, String description) {}
+import java.util.Optional;
+
+public record UpdateDocumentCommand(String title, String version, Optional<String> description) {}

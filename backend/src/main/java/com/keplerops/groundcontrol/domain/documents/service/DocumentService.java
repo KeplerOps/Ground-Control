@@ -62,7 +62,7 @@ public class DocumentService {
             doc.setVersion(command.version());
         }
         if (command.description() != null) {
-            doc.setDescription(command.description());
+            doc.setDescription(command.description().orElse(null));
         }
 
         var saved = documentRepository.save(doc);

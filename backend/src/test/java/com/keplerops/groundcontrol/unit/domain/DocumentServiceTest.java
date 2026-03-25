@@ -92,7 +92,7 @@ class DocumentServiceTest {
                     .thenReturn(false);
             when(documentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-            var command = new UpdateDocumentCommand("New Title", "2.0.0", "Updated");
+            var command = new UpdateDocumentCommand("New Title", "2.0.0", Optional.of("Updated"));
             var result = service.update(doc.getId(), command);
 
             assertThat(result.getTitle()).isEqualTo("New Title");
@@ -101,6 +101,7 @@ class DocumentServiceTest {
         }
 
         @Test
+        @SuppressWarnings("NullOptional")
         void throwsConflictOnDuplicateTitle() {
             var doc = makeDocument("Old Title", "1.0.0");
             when(documentRepository.findById(doc.getId())).thenReturn(Optional.of(doc));
