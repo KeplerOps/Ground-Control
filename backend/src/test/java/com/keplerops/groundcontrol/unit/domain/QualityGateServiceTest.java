@@ -8,7 +8,6 @@ import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
-import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.qualitygates.model.QualityGate;
 import com.keplerops.groundcontrol.domain.qualitygates.repository.QualityGateRepository;
@@ -18,7 +17,6 @@ import com.keplerops.groundcontrol.domain.qualitygates.state.ComparisonOperator;
 import com.keplerops.groundcontrol.domain.qualitygates.state.MetricType;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
-import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
 import com.keplerops.groundcontrol.domain.requirements.service.CompletenessIssue;
 import com.keplerops.groundcontrol.domain.requirements.service.CompletenessResult;
@@ -43,16 +41,10 @@ class QualityGateServiceTest {
     private QualityGateRepository qualityGateRepository;
 
     @Mock
-    private ProjectRepository projectRepository;
-
-    @Mock
     private ProjectService projectService;
 
     @Mock
     private RequirementRepository requirementRepository;
-
-    @Mock
-    private TraceabilityLinkRepository traceabilityLinkRepository;
 
     @Mock
     private AnalysisService analysisService;
@@ -70,13 +62,7 @@ class QualityGateServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new QualityGateService(
-                qualityGateRepository,
-                projectRepository,
-                projectService,
-                requirementRepository,
-                traceabilityLinkRepository,
-                analysisService);
+        service = new QualityGateService(qualityGateRepository, projectService, requirementRepository, analysisService);
     }
 
     @Nested
@@ -84,7 +70,7 @@ class QualityGateServiceTest {
 
         @Test
         void createsGateSuccessfully() {
-            when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
+            when(projectService.getById(PROJECT_ID)).thenReturn(TEST_PROJECT);
             when(qualityGateRepository.existsByProjectIdAndName(PROJECT_ID, "Coverage Gate"))
                     .thenReturn(false);
             when(qualityGateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -108,7 +94,7 @@ class QualityGateServiceTest {
 
         @Test
         void throwsConflictOnDuplicateName() {
-            when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
+            when(projectService.getById(PROJECT_ID)).thenReturn(TEST_PROJECT);
             when(qualityGateRepository.existsByProjectIdAndName(PROJECT_ID, "Coverage Gate"))
                     .thenReturn(true);
 
@@ -139,6 +125,7 @@ class QualityGateServiceTest {
 
             var command = new com.keplerops.groundcontrol.domain.qualitygates.service.UpdateQualityGateCommand(
                     "New Name", null, null, null, null, null, 90.0, false);
+            // null Optional fields = not provided (unchanged)
 
             var result = service.update(gate.getId(), command);
 
@@ -173,14 +160,9 @@ class QualityGateServiceTest {
 
         @Test
         void coverageGatePassesWhenAboveThreshold() {
-            var req1 = makeRequirement("GC-001", UUID.randomUUID(), Status.ACTIVE);
-            var req2 = makeRequirement("GC-002", UUID.randomUUID(), Status.ACTIVE);
-            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
-                    .thenReturn(List.of(req1, req2));
-            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(req1.getId(), LinkType.TESTS))
-                    .thenReturn(true);
-            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(req2.getId(), LinkType.TESTS))
-                    .thenReturn(true);
+            when(requirementRepository.countByScope(PROJECT_ID, Status.ACTIVE)).thenReturn(2L);
+            when(requirementRepository.countCoveredByLinkType(PROJECT_ID, LinkType.TESTS, Status.ACTIVE))
+                    .thenReturn(2L);
 
             var gate = makeGate(
                     "Test Coverage", MetricType.COVERAGE, "TESTS", Status.ACTIVE, ComparisonOperator.GTE, 80.0);
@@ -196,14 +178,9 @@ class QualityGateServiceTest {
 
         @Test
         void coverageGateFailsWhenBelowThreshold() {
-            var req1 = makeRequirement("GC-001", UUID.randomUUID(), Status.ACTIVE);
-            var req2 = makeRequirement("GC-002", UUID.randomUUID(), Status.ACTIVE);
-            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
-                    .thenReturn(List.of(req1, req2));
-            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(req1.getId(), LinkType.TESTS))
-                    .thenReturn(true);
-            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(req2.getId(), LinkType.TESTS))
-                    .thenReturn(false);
+            when(requirementRepository.countByScope(PROJECT_ID, Status.ACTIVE)).thenReturn(2L);
+            when(requirementRepository.countCoveredByLinkType(PROJECT_ID, LinkType.TESTS, Status.ACTIVE))
+                    .thenReturn(1L);
 
             var gate = makeGate(
                     "Test Coverage", MetricType.COVERAGE, "TESTS", Status.ACTIVE, ComparisonOperator.GTE, 80.0);
@@ -219,12 +196,9 @@ class QualityGateServiceTest {
 
         @Test
         void scopeStatusFiltersRequirements() {
-            var activeReq = makeRequirement("GC-001", UUID.randomUUID(), Status.ACTIVE);
-            var draftReq = makeRequirement("GC-002", UUID.randomUUID(), Status.DRAFT);
-            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
-                    .thenReturn(List.of(activeReq, draftReq));
-            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(activeReq.getId(), LinkType.TESTS))
-                    .thenReturn(true);
+            when(requirementRepository.countByScope(PROJECT_ID, Status.ACTIVE)).thenReturn(1L);
+            when(requirementRepository.countCoveredByLinkType(PROJECT_ID, LinkType.TESTS, Status.ACTIVE))
+                    .thenReturn(1L);
 
             var gate = makeGate(
                     "Active Coverage", MetricType.COVERAGE, "TESTS", Status.ACTIVE, ComparisonOperator.GTE, 100.0);

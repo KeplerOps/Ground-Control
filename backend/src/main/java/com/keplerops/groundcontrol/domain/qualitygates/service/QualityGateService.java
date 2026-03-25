@@ -3,14 +3,11 @@ package com.keplerops.groundcontrol.domain.qualitygates.service;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
-import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.qualitygates.model.QualityGate;
 import com.keplerops.groundcontrol.domain.qualitygates.repository.QualityGateRepository;
 import com.keplerops.groundcontrol.domain.qualitygates.state.MetricType;
-import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
-import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
@@ -31,31 +28,23 @@ public class QualityGateService {
     private static final Logger log = LoggerFactory.getLogger(QualityGateService.class);
 
     private final QualityGateRepository qualityGateRepository;
-    private final ProjectRepository projectRepository;
     private final ProjectService projectService;
     private final RequirementRepository requirementRepository;
-    private final TraceabilityLinkRepository traceabilityLinkRepository;
     private final AnalysisService analysisService;
 
     public QualityGateService(
             QualityGateRepository qualityGateRepository,
-            ProjectRepository projectRepository,
             ProjectService projectService,
             RequirementRepository requirementRepository,
-            TraceabilityLinkRepository traceabilityLinkRepository,
             AnalysisService analysisService) {
         this.qualityGateRepository = qualityGateRepository;
-        this.projectRepository = projectRepository;
         this.projectService = projectService;
         this.requirementRepository = requirementRepository;
-        this.traceabilityLinkRepository = traceabilityLinkRepository;
         this.analysisService = analysisService;
     }
 
     public QualityGate create(CreateQualityGateCommand command) {
-        var project = projectRepository
-                .findById(command.projectId())
-                .orElseThrow(() -> new NotFoundException("Project not found: " + command.projectId()));
+        var project = projectService.getById(command.projectId());
 
         if (qualityGateRepository.existsByProjectIdAndName(project.getId(), command.name())) {
             throw new ConflictException("Quality gate with name '" + command.name() + "' already exists in project "
@@ -99,16 +88,16 @@ public class QualityGateService {
             gate.setName(command.name());
         }
         if (command.description() != null) {
-            gate.setDescription(command.description());
+            gate.setDescription(command.description().orElse(null));
         }
         if (command.metricType() != null) {
             gate.setMetricType(command.metricType());
         }
         if (command.metricParam() != null) {
-            gate.setMetricParam(command.metricParam());
+            gate.setMetricParam(command.metricParam().orElse(null));
         }
         if (command.scopeStatus() != null) {
-            gate.setScopeStatus(command.scopeStatus());
+            gate.setScopeStatus(command.scopeStatus().orElse(null));
         }
         if (command.operator() != null) {
             gate.setOperator(command.operator());
@@ -196,26 +185,16 @@ public class QualityGateService {
 
     private double computeCoveragePercentage(UUID projectId, String metricParam, Status scopeStatus) {
         LinkType linkType = LinkType.valueOf(metricParam);
-        List<Requirement> requirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
-        if (scopeStatus != null) {
-            requirements = requirements.stream()
-                    .filter(r -> r.getStatus() == scopeStatus)
-                    .toList();
-        }
-        if (requirements.isEmpty()) {
+        long total = requirementRepository.countByScope(projectId, scopeStatus);
+        if (total == 0) {
             return 100.0;
         }
-        int covered = 0;
-        for (Requirement req : requirements) {
-            if (traceabilityLinkRepository.existsByRequirementIdAndLinkType(req.getId(), linkType)) {
-                covered++;
-            }
-        }
-        return Math.round(covered * 1000.0 / requirements.size()) / 10.0;
+        long covered = requirementRepository.countCoveredByLinkType(projectId, linkType, scopeStatus);
+        return Math.round(covered * 1000.0 / total) / 10.0;
     }
 
     private double computeOrphanCount(UUID projectId, Status scopeStatus) {
-        List<Requirement> orphans = analysisService.findOrphans(projectId);
+        var orphans = analysisService.findOrphans(projectId);
         if (scopeStatus != null) {
             orphans = orphans.stream().filter(r -> r.getStatus() == scopeStatus).toList();
         }

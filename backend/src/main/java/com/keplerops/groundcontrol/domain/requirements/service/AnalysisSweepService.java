@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.domain.requirements.service;
 
+import com.keplerops.groundcontrol.domain.exception.GroundControlException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.qualitygates.service.QualityGateEvaluationResult;
@@ -75,8 +76,10 @@ public class AnalysisSweepService {
         QualityGateEvaluationResult qualityGateResults = null;
         try {
             qualityGateResults = qualityGateService.evaluate(identifier);
-        } catch (RuntimeException e) {
+        } catch (GroundControlException e) {
             log.warn("sweep_quality_gates_failed: project={} error={}", identifier, e.getMessage());
+        } catch (RuntimeException e) {
+            log.error("sweep_quality_gates_unexpected_error: project={} error={}", identifier, e.getMessage(), e);
         }
 
         var report = new SweepReport(
