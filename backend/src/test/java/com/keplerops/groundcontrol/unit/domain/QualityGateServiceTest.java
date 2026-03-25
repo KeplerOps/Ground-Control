@@ -7,6 +7,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.qualitygates.model.QualityGate;
@@ -134,6 +136,45 @@ class QualityGateServiceTest {
             assertThat(result.getThreshold()).isEqualTo(90.0);
             assertThat(result.isEnabled()).isFalse();
         }
+
+        @Test
+        void updatesAllOptionalFields() {
+            var gate = makeGate("Gate", MetricType.ORPHAN_COUNT, null, null, ComparisonOperator.LTE, 5.0);
+            when(qualityGateRepository.findById(gate.getId())).thenReturn(Optional.of(gate));
+            when(qualityGateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new com.keplerops.groundcontrol.domain.qualitygates.service.UpdateQualityGateCommand(
+                    null,
+                    Optional.of("New desc"),
+                    MetricType.COVERAGE,
+                    Optional.of("TESTS"),
+                    Optional.of(Status.ACTIVE),
+                    ComparisonOperator.GT,
+                    null,
+                    null);
+
+            var result = service.update(gate.getId(), command);
+
+            assertThat(result.getDescription()).isEqualTo("New desc");
+            assertThat(result.getMetricType()).isEqualTo(MetricType.COVERAGE);
+            assertThat(result.getMetricParam()).isEqualTo("TESTS");
+            assertThat(result.getScopeStatus()).isEqualTo(Status.ACTIVE);
+            assertThat(result.getOperator()).isEqualTo(ComparisonOperator.GT);
+        }
+
+        @Test
+        void clearsScopeStatusWithEmptyOptional() {
+            var gate = makeGate("Gate", MetricType.COVERAGE, "TESTS", Status.ACTIVE, ComparisonOperator.GTE, 80.0);
+            when(qualityGateRepository.findById(gate.getId())).thenReturn(Optional.of(gate));
+            when(qualityGateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new com.keplerops.groundcontrol.domain.qualitygates.service.UpdateQualityGateCommand(
+                    null, null, null, null, Optional.empty(), null, null, null);
+
+            var result = service.update(gate.getId(), command);
+
+            assertThat(result.getScopeStatus()).isNull();
+        }
     }
 
     @Nested
@@ -147,6 +188,66 @@ class QualityGateServiceTest {
             service.delete(gate.getId());
 
             verify(qualityGateRepository).delete(gate);
+        }
+    }
+
+    @Nested
+    class GetAndList {
+
+        @Test
+        void getByIdReturnsGate() {
+            var gate = makeGate("Gate", MetricType.COVERAGE, "TESTS", null, ComparisonOperator.GTE, 80.0);
+            when(qualityGateRepository.findById(gate.getId())).thenReturn(Optional.of(gate));
+
+            var result = service.getById(gate.getId());
+
+            assertThat(result.getName()).isEqualTo("Gate");
+        }
+
+        @Test
+        void getByIdThrowsWhenNotFound() {
+            var id = UUID.randomUUID();
+            when(qualityGateRepository.findById(id)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.getById(id)).isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void listByProjectDelegatesToRepository() {
+            when(qualityGateRepository.findByProjectIdOrderByNameAsc(PROJECT_ID))
+                    .thenReturn(List.of());
+
+            var result = service.listByProject(PROJECT_ID);
+
+            assertThat(result).isEmpty();
+        }
+    }
+
+    @Nested
+    class Validation {
+
+        @Test
+        void rejectsCoverageMissingMetricParam() {
+            when(projectService.getById(PROJECT_ID)).thenReturn(TEST_PROJECT);
+            when(qualityGateRepository.existsByProjectIdAndName(PROJECT_ID, "Bad Gate"))
+                    .thenReturn(false);
+
+            var command = new CreateQualityGateCommand(
+                    PROJECT_ID, "Bad Gate", null, MetricType.COVERAGE, null, null, ComparisonOperator.GTE, 80.0);
+
+            assertThatThrownBy(() -> service.create(command)).isInstanceOf(DomainValidationException.class);
+        }
+
+        @Test
+        void rejectsCoverageInvalidLinkType() {
+            when(projectService.getById(PROJECT_ID)).thenReturn(TEST_PROJECT);
+            when(qualityGateRepository.existsByProjectIdAndName(PROJECT_ID, "Bad Gate"))
+                    .thenReturn(false);
+
+            var command = new CreateQualityGateCommand(
+                    PROJECT_ID, "Bad Gate", null, MetricType.COVERAGE, "INVALID", null, ComparisonOperator.GTE, 80.0);
+
+            assertThatThrownBy(() -> service.create(command)).isInstanceOf(DomainValidationException.class);
         }
     }
 
@@ -229,6 +330,66 @@ class QualityGateServiceTest {
             when(analysisService.findOrphans(PROJECT_ID)).thenReturn(List.of(orphan));
 
             var gate = makeGate("No Orphans", MetricType.ORPHAN_COUNT, null, null, ComparisonOperator.LTE, 0.0);
+            when(qualityGateRepository.findByProjectIdAndEnabledTrueOrderByNameAsc(PROJECT_ID))
+                    .thenReturn(List.of(gate));
+
+            var result = service.evaluate("test-project");
+
+            assertThat(result.passed()).isFalse();
+            assertThat(result.gates().getFirst().actualValue()).isEqualTo(1.0);
+        }
+
+        @Test
+        void coverageReturns100WhenNoRequirements() {
+            when(requirementRepository.countByScope(PROJECT_ID, Status.ACTIVE)).thenReturn(0L);
+
+            var gate = makeGate("Empty", MetricType.COVERAGE, "TESTS", Status.ACTIVE, ComparisonOperator.GTE, 80.0);
+            when(qualityGateRepository.findByProjectIdAndEnabledTrueOrderByNameAsc(PROJECT_ID))
+                    .thenReturn(List.of(gate));
+
+            var result = service.evaluate("test-project");
+
+            assertThat(result.passed()).isTrue();
+            assertThat(result.gates().getFirst().actualValue()).isEqualTo(100.0);
+        }
+
+        @Test
+        void gtOperatorWorks() {
+            when(requirementRepository.countByScope(PROJECT_ID, null)).thenReturn(10L);
+            when(requirementRepository.countCoveredByLinkType(PROJECT_ID, LinkType.TESTS, null))
+                    .thenReturn(9L);
+
+            var gate = makeGate("GT Gate", MetricType.COVERAGE, "TESTS", null, ComparisonOperator.GT, 80.0);
+            when(qualityGateRepository.findByProjectIdAndEnabledTrueOrderByNameAsc(PROJECT_ID))
+                    .thenReturn(List.of(gate));
+
+            var result = service.evaluate("test-project");
+
+            assertThat(result.passed()).isTrue();
+        }
+
+        @Test
+        void ltOperatorWorks() {
+            var orphan = makeRequirement("GC-ORPH", UUID.randomUUID(), Status.DRAFT);
+            when(analysisService.findOrphans(PROJECT_ID)).thenReturn(List.of(orphan));
+
+            var gate = makeGate("LT Gate", MetricType.ORPHAN_COUNT, null, null, ComparisonOperator.LT, 5.0);
+            when(qualityGateRepository.findByProjectIdAndEnabledTrueOrderByNameAsc(PROJECT_ID))
+                    .thenReturn(List.of(gate));
+
+            var result = service.evaluate("test-project");
+
+            assertThat(result.passed()).isTrue();
+        }
+
+        @Test
+        void orphanCountWithScopeFilter() {
+            var activeOrphan = makeRequirement("GC-A", UUID.randomUUID(), Status.ACTIVE);
+            var draftOrphan = makeRequirement("GC-D", UUID.randomUUID(), Status.DRAFT);
+            when(analysisService.findOrphans(PROJECT_ID)).thenReturn(List.of(activeOrphan, draftOrphan));
+
+            var gate = makeGate(
+                    "Active Orphans", MetricType.ORPHAN_COUNT, null, Status.ACTIVE, ComparisonOperator.EQ, 0.0);
             when(qualityGateRepository.findByProjectIdAndEnabledTrueOrderByNameAsc(PROJECT_ID))
                     .thenReturn(List.of(gate));
 
