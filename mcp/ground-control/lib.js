@@ -25,6 +25,8 @@ export const ARTIFACT_TYPES = [
   "DOCUMENTATION",
 ];
 export const LINK_TYPES = ["IMPLEMENTS", "TESTS", "DOCUMENTS", "CONSTRAINS", "VERIFIES"];
+export const METRIC_TYPES = ["COVERAGE", "ORPHAN_COUNT", "COMPLETENESS"];
+export const COMPARISON_OPERATORS = ["GTE", "LTE", "EQ", "GT", "LT"];
 
 // ---------------------------------------------------------------------------
 // Field name mapping (snake_case MCP <-> camelCase API)
@@ -89,6 +91,15 @@ const TO_CAMEL = {
   new_value: "newValue",
   relation_id: "relationId",
   link_id: "linkId",
+  metric_type: "metricType",
+  metric_param: "metricParam",
+  scope_status: "scopeStatus",
+  total_gates: "totalGates",
+  passed_count: "passedCount",
+  failed_count: "failedCount",
+  gate_id: "gateId",
+  gate_name: "gateName",
+  actual_value: "actualValue",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -554,4 +565,32 @@ export async function analyzeSemanticSimilarity(project, threshold) {
   return request("GET", "/api/v1/analysis/semantic-similarity", {
     params: { project, threshold },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Quality Gate API functions
+// ---------------------------------------------------------------------------
+
+export async function createQualityGate(data, project) {
+  return request("POST", "/api/v1/quality-gates", { body: data, params: { project } });
+}
+
+export async function listQualityGates(project) {
+  return request("GET", "/api/v1/quality-gates", { params: { project } });
+}
+
+export async function getQualityGate(id) {
+  return request("GET", `/api/v1/quality-gates/${encodeURIComponent(id)}`);
+}
+
+export async function updateQualityGate(id, data) {
+  return request("PUT", `/api/v1/quality-gates/${encodeURIComponent(id)}`, { body: data });
+}
+
+export async function deleteQualityGate(id) {
+  await request("DELETE", `/api/v1/quality-gates/${encodeURIComponent(id)}`);
+}
+
+export async function evaluateQualityGates(project) {
+  return request("POST", "/api/v1/quality-gates/evaluate", { params: { project } });
 }
