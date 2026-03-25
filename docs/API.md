@@ -200,6 +200,62 @@ When no provider is configured, endpoints return `provider_unavailable` status
 }
 ```
 
+### Quality Gates
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/quality-gates?project=` | QualityGateRequest | 201 | Create quality gate |
+| GET | `/quality-gates?project=` | — | 200 | List quality gates |
+| GET | `/quality-gates/{id}` | — | 200 | Get quality gate |
+| PUT | `/quality-gates/{id}` | UpdateQualityGateRequest | 200 | Update quality gate |
+| DELETE | `/quality-gates/{id}` | — | 204 | Delete quality gate |
+| POST | `/quality-gates/evaluate?project=` | — | 200 | Evaluate all enabled gates (CI/CD) |
+
+**QualityGateRequest:**
+
+```json
+{
+  "name": "Test Coverage Gate",
+  "description": "Minimum 80% of ACTIVE requirements must have TESTS link",
+  "metricType": "COVERAGE",
+  "metricParam": "TESTS",
+  "scopeStatus": "ACTIVE",
+  "operator": "GTE",
+  "threshold": 80.0
+}
+```
+
+- `metricType`: `COVERAGE` (% with link type), `ORPHAN_COUNT`, `COMPLETENESS` (issue count)
+- `metricParam`: Required for `COVERAGE` — a LinkType (`IMPLEMENTS`, `TESTS`, `DOCUMENTS`, `CONSTRAINS`, `VERIFIES`)
+- `scopeStatus`: Filter requirements by status. Omit to check all non-archived
+- `operator`: `GTE` (>=), `LTE` (<=), `EQ` (==), `GT` (>), `LT` (<)
+
+**QualityGateEvaluationResponse** (`POST /quality-gates/evaluate`):
+
+```json
+{
+  "projectIdentifier": "ground-control",
+  "timestamp": "2026-03-24T06:00:00Z",
+  "passed": false,
+  "totalGates": 2,
+  "passedCount": 1,
+  "failedCount": 1,
+  "gates": [
+    {
+      "gateId": "uuid",
+      "gateName": "Test Coverage Gate",
+      "metricType": "COVERAGE",
+      "metricParam": "TESTS",
+      "scopeStatus": "ACTIVE",
+      "operator": "GTE",
+      "threshold": 80.0,
+      "actualValue": 65.0,
+      "passed": false
+    }
+  ]
+}
+```
+
 ### Graph
 
 | Method | Path | Body | Status | Purpose |

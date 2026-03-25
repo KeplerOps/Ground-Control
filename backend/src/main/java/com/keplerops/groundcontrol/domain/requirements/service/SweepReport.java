@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.domain.requirements.service;
 
+import com.keplerops.groundcontrol.domain.qualitygates.service.QualityGateEvaluationResult;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -12,14 +13,16 @@ public record SweepReport(
         Map<String, List<RequirementSummary>> coverageGaps,
         List<CrossWaveViolationSummary> crossWaveViolations,
         List<ConsistencyViolationSummary> consistencyViolations,
-        CompletenessResult completeness) {
+        CompletenessResult completeness,
+        QualityGateEvaluationResult qualityGateResults) {
 
     public boolean hasProblems() {
         return !cycles.isEmpty()
                 || !orphans.isEmpty()
                 || coverageGaps.values().stream().anyMatch(l -> !l.isEmpty())
                 || !crossWaveViolations.isEmpty()
-                || !consistencyViolations.isEmpty();
+                || !consistencyViolations.isEmpty()
+                || (qualityGateResults != null && !qualityGateResults.passed());
     }
 
     /** Counts each distinct finding; a requirement may appear in multiple categories. */
@@ -27,6 +30,9 @@ public record SweepReport(
         int count = cycles.size() + orphans.size() + crossWaveViolations.size() + consistencyViolations.size();
         for (List<RequirementSummary> gaps : coverageGaps.values()) {
             count += gaps.size();
+        }
+        if (qualityGateResults != null) {
+            count += qualityGateResults.failedCount();
         }
         return count;
     }

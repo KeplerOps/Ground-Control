@@ -59,12 +59,20 @@ import {
   getBaselineSnapshot,
   compareBaselines,
   deleteBaseline,
+  createQualityGate,
+  listQualityGates,
+  getQualityGate,
+  updateQualityGate,
+  deleteQualityGate,
+  evaluateQualityGates,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
   RELATION_TYPES,
   ARTIFACT_TYPES,
   LINK_TYPES,
+  METRIC_TYPES,
+  COMPARISON_OPERATORS,
 } from "./lib.js";
 
 function ok(text) {
@@ -1124,6 +1132,127 @@ server.tool(
             `(${result.embedded_count}/${result.total_requirements} requirements embedded, ${result.pairs_analyzed} pairs analyzed)`,
         );
       }
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Quality Gate tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_quality_gate",
+  "Create a quality gate rule for a project. Quality gates define pass/fail thresholds for CI/CD integration (e.g. 'minimum 80% of ACTIVE requirements must have a TESTS link').",
+  {
+    name: z.string().max(100).describe("Quality gate name (e.g. 'Test Coverage Gate')"),
+    description: z.string().optional().describe("Description of what this gate checks"),
+    metric_type: z.enum(METRIC_TYPES).describe("Metric to evaluate: COVERAGE (% with link type), ORPHAN_COUNT, COMPLETENESS (issue count)"),
+    metric_param: z.string().optional().describe("Parameter for the metric. Required for COVERAGE: a LinkType (IMPLEMENTS, TESTS, DOCUMENTS, CONSTRAINS, VERIFIES)"),
+    scope_status: z.enum(STATUSES).optional().describe("Filter requirements by status (e.g. ACTIVE). Omit to check all non-archived requirements"),
+    operator: z.enum(COMPARISON_OPERATORS).describe("Comparison operator: GTE (>=), LTE (<=), EQ (==), GT (>), LT (<)"),
+    threshold: z.number().describe("Threshold value to compare against (e.g. 80 for 80% coverage)"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ name, description, metric_type, metric_param, scope_status, operator, threshold, project }) => {
+    try {
+      const data = { name, metric_type, operator, threshold };
+      if (description !== undefined) data.description = description;
+      if (metric_param !== undefined) data.metric_param = metric_param;
+      if (scope_status !== undefined) data.scope_status = scope_status;
+      return ok(JSON.stringify(await createQualityGate(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_quality_gates",
+  "List all quality gates for a project.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const gates = await listQualityGates(project);
+      if (Array.isArray(gates) && gates.length === 0) return ok("No quality gates found.");
+      return ok(JSON.stringify(gates, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_quality_gate",
+  "Get a quality gate by its UUID.",
+  {
+    id: z.string().uuid().describe("Quality gate UUID"),
+  },
+  async ({ id }) => {
+    try {
+      return ok(JSON.stringify(await getQualityGate(id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_quality_gate",
+  "Update a quality gate. Only specified fields are changed.",
+  {
+    id: z.string().uuid().describe("Quality gate UUID"),
+    name: z.string().max(100).optional().describe("New name"),
+    description: z.string().optional().describe("New description"),
+    metric_type: z.enum(METRIC_TYPES).optional().describe("New metric type"),
+    metric_param: z.string().optional().describe("New metric parameter"),
+    scope_status: z.enum(STATUSES).optional().describe("New scope status filter"),
+    operator: z.enum(COMPARISON_OPERATORS).optional().describe("New comparison operator"),
+    threshold: z.number().optional().describe("New threshold value"),
+    enabled: z.boolean().optional().describe("Enable or disable the gate"),
+  },
+  async ({ id, ...fields }) => {
+    try {
+      const data = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined) data[k] = v;
+      }
+      return ok(JSON.stringify(await updateQualityGate(id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_quality_gate",
+  "Delete a quality gate.",
+  {
+    id: z.string().uuid().describe("Quality gate UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteQualityGate(id);
+      return ok("Quality gate deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_evaluate_quality_gates",
+  "Evaluate all enabled quality gates for a project. Returns overall pass/fail plus per-gate results. Designed for CI/CD integration.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await evaluateQualityGates(project);
       return ok(JSON.stringify(result, null, 2));
     } catch (e) {
       return err(e);

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.78.0] - 2026-03-24
+
+### Added
+
+- Configurable quality gates for CI/CD integration (`POST /api/v1/quality-gates`,
+  `POST /api/v1/quality-gates/evaluate`) with per-project pass/fail thresholds
+  for coverage, orphan count, and completeness metrics
+- Quality gate evaluation integrated into analysis sweep reports
+- MCP tools: `gc_create_quality_gate`, `gc_list_quality_gates`,
+  `gc_get_quality_gate`, `gc_update_quality_gate`, `gc_delete_quality_gate`,
+  `gc_evaluate_quality_gates`
+
 ## [0.77.0] - 2026-03-24
 
 ### Added
