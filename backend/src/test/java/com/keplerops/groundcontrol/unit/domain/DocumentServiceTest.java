@@ -92,7 +92,7 @@ class DocumentServiceTest {
                     .thenReturn(false);
             when(documentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-            var command = new UpdateDocumentCommand("New Title", "2.0.0", Optional.of("Updated"));
+            var command = UpdateDocumentCommand.of("New Title", "2.0.0", Optional.of("Updated"));
             var result = service.update(doc.getId(), command);
 
             assertThat(result.getTitle()).isEqualTo("New Title");
@@ -101,14 +101,13 @@ class DocumentServiceTest {
         }
 
         @Test
-        @SuppressWarnings("NullOptional")
         void throwsConflictOnDuplicateTitle() {
             var doc = makeDocument("Old Title", "1.0.0");
             when(documentRepository.findById(doc.getId())).thenReturn(Optional.of(doc));
             when(documentRepository.existsByProjectIdAndTitle(PROJECT_ID, "Taken Title"))
                     .thenReturn(true);
 
-            var command = new UpdateDocumentCommand("Taken Title", null, null);
+            var command = UpdateDocumentCommand.of("Taken Title", null, null);
             assertThatThrownBy(() -> service.update(doc.getId(), command)).isInstanceOf(ConflictException.class);
         }
     }

@@ -55,7 +55,7 @@ public class DocumentController {
 
     @PutMapping("/{id}")
     public DocumentResponse update(@PathVariable UUID id, @Valid @RequestBody UpdateDocumentRequest request) {
-        var command = new UpdateDocumentCommand(request.title(), request.version(), request.description());
+        var command = UpdateDocumentCommand.of(request.title(), request.version(), request.description());
         return DocumentResponse.from(documentService.update(id, command));
     }
 

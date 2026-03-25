@@ -61,7 +61,7 @@ public class DocumentService {
         if (command.version() != null) {
             doc.setVersion(command.version());
         }
-        if (command.description() != null) {
+        if (command.descriptionProvided()) {
             doc.setDescription(command.description().orElse(null));
         }
 
