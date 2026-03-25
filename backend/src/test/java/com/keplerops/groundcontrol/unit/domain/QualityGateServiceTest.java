@@ -116,6 +116,7 @@ class QualityGateServiceTest {
     class Update {
 
         @Test
+        @SuppressWarnings("NullOptional") // null Optional = "not provided" (intentional API semantics)
         void updatesFieldsSelectively() {
             var gate = makeGate("Old Name", MetricType.COVERAGE, "TESTS", Status.ACTIVE, ComparisonOperator.GTE, 80.0);
             when(qualityGateRepository.findById(gate.getId())).thenReturn(Optional.of(gate));
