@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.80.0] - 2026-03-25
+
+### Added
+
+- `/ship` skill: consolidated post-implementation workflow (CI monitor, SonarCloud
+  check, code review, security review) in a single command
+- `/implement` clause-by-clause verification step (Step 4.5) requiring explicit
+  requirement-to-code mapping before completion
+- Stop hook with completion verifier agent that blocks session end if CHANGELOG,
+  traceability links, or status transitions are missing
+- PostToolUse hook for automatic Java formatting (spotlessApply) after file edits
+- `.claude/rules/` with implementation quality and review standards rules
+- Required status checks on main and dev branches (build, test, integration,
+  verify, sonarcloud)
+
+### Changed
+
+- SonarCloud CI job is now blocking (removed continue-on-error) and gates
+  Docker image builds
+- Simplified `.claude/settings.local.json` permissions from 90+ one-off entries
+  to ~20 wildcard patterns
+
 ## [0.79.0] - 2026-03-25
 
 ### Added
