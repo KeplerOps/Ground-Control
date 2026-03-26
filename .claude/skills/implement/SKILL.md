@@ -40,6 +40,20 @@ Explore the codebase to determine whether the requirement described in the issue
 - Plans must include updating the changelog, readme, and docs as appropriate.
 - **If the requirement IS already met**: Report that the requirement is satisfied and identify which code satisfies it.
 
+## Step 4.5: Clause-by-Clause Verification
+
+Before declaring implementation complete:
+1. Re-read the requirement statement from Step 1.
+2. Break it into individual clauses and acceptance criteria.
+3. For EACH clause, identify the specific code (file:line) that satisfies it.
+4. If any clause is not satisfied, go back and implement it before proceeding.
+
+Present the mapping as a checklist:
+- [ ] Clause: "..." → Satisfied by: file.java:line
+- [ ] Clause: "..." → Satisfied by: file.java:line
+
+Do not proceed to Step 5 until every clause is checked off.
+
 ## Step 5: Ensure Traceability Links
 
 After implementation is complete (or if already implemented):

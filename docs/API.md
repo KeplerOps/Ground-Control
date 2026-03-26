@@ -200,6 +200,26 @@ When no provider is configured, endpoints return `provider_unavailable` status
 }
 ```
 
+### Documents
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/documents?project=` | DocumentRequest | 201 | Create document |
+| GET | `/documents?project=` | — | 200 | List documents |
+| GET | `/documents/{id}` | — | 200 | Get document |
+| PUT | `/documents/{id}` | UpdateDocumentRequest | 200 | Update document |
+| DELETE | `/documents/{id}` | — | 204 | Delete document |
+
+**DocumentRequest:**
+
+```json
+{
+  "title": "System Requirements Specification",
+  "version": "1.0.0",
+  "description": "Top-level SRS document"
+}
+```
+
 ### Quality Gates
 
 | Method | Path | Body | Status | Purpose |

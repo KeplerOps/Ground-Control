@@ -100,6 +100,7 @@ const TO_CAMEL = {
   gate_id: "gateId",
   gate_name: "gateName",
   actual_value: "actualValue",
+  created_by: "createdBy",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -593,4 +594,28 @@ export async function deleteQualityGate(id) {
 
 export async function evaluateQualityGates(project) {
   return request("POST", "/api/v1/quality-gates/evaluate", { params: { project } });
+}
+
+// ---------------------------------------------------------------------------
+// Document API functions
+// ---------------------------------------------------------------------------
+
+export async function createDocument(data, project) {
+  return request("POST", "/api/v1/documents", { body: data, params: { project } });
+}
+
+export async function listDocuments(project) {
+  return request("GET", "/api/v1/documents", { params: { project } });
+}
+
+export async function getDocument(id) {
+  return request("GET", `/api/v1/documents/${encodeURIComponent(id)}`);
+}
+
+export async function updateDocument(id, data) {
+  return request("PUT", `/api/v1/documents/${encodeURIComponent(id)}`, { body: data });
+}
+
+export async function deleteDocument(id) {
+  await request("DELETE", `/api/v1/documents/${encodeURIComponent(id)}`);
 }

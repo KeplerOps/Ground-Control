@@ -7,12 +7,20 @@ plugins {
     id("com.diffplug.spotless") version "7.0.2"
     id("com.github.spotbugs") version "6.0.27"
     id("net.ltgt.errorprone") version "4.1.0"
+    id("org.sonarqube") version "6.0.1.5171"
     checkstyle
     jacoco
 }
 
 group = "com.keplerops"
 version = "0.19.0"
+
+sonar {
+    properties {
+        property("sonar.projectKey", "KeplerOps_Ground-Control")
+        property("sonar.organization", "keplerops")
+    }
+}
 
 // -Pquick: disable slow static analysis for fast dev loops
 val quick = providers.gradleProperty("quick").isPresent

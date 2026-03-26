@@ -65,6 +65,11 @@ import {
   updateQualityGate,
   deleteQualityGate,
   evaluateQualityGates,
+  createDocument,
+  listDocuments,
+  getDocument,
+  updateDocument,
+  deleteDocument,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -1254,6 +1259,100 @@ server.tool(
     try {
       const result = await evaluateQualityGates(project);
       return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Document tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_document",
+  "Create a document — a top-level container for organizing requirements into coherent specifications.",
+  {
+    title: z.string().max(200).describe("Document title"),
+    version: z.string().max(50).describe("Document version (e.g. '1.0.0')"),
+    description: z.string().optional().describe("Document description"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ title, version, description, project }) => {
+    try {
+      const data = { title, version };
+      if (description !== undefined) data.description = description;
+      return ok(JSON.stringify(await createDocument(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_documents",
+  "List all documents for a project, ordered by creation date (newest first).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const documents = await listDocuments(project);
+      if (Array.isArray(documents) && documents.length === 0) return ok("No documents found.");
+      return ok(JSON.stringify(documents, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_document",
+  "Get a document by its UUID.",
+  {
+    id: z.string().uuid().describe("Document UUID"),
+  },
+  async ({ id }) => {
+    try {
+      return ok(JSON.stringify(await getDocument(id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_document",
+  "Update a document. Only specified fields are changed.",
+  {
+    id: z.string().uuid().describe("Document UUID"),
+    title: z.string().max(200).optional().describe("New title"),
+    version: z.string().max(50).optional().describe("New version"),
+    description: z.string().optional().describe("New description"),
+  },
+  async ({ id, ...fields }) => {
+    try {
+      const data = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined) data[k] = v;
+      }
+      return ok(JSON.stringify(await updateDocument(id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_document",
+  "Delete a document.",
+  {
+    id: z.string().uuid().describe("Document UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteDocument(id);
+      return ok("Document deleted.");
     } catch (e) {
       return err(e);
     }

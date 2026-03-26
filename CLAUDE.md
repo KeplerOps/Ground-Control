@@ -41,3 +41,11 @@ Domain layer has no Spring web imports.
 Ship features, not ceremony. L0 is the default assurance level. Add JML contracts only where invalid input causes silent data corruption (state transitions, security boundaries). One test per significant behavior. See docs/CODING_STANDARDS.md and ADR-012 for the full framework.
 
 When implementing a feature, query Ground Control for related requirements. After completing work, create IMPLEMENTS and TESTS traceability links for any requirements you satisfied.
+
+## Code Review
+
+Don't surface nitpicks about PR titles or descriptions unless they are grossly misleading.
+
+## Implementation
+
+Always check your work against the requirement you are implementing to be sure you have implemented all the functionality described in the requirement.
