@@ -144,14 +144,7 @@ class QualityGateServiceTest {
             when(qualityGateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
             var command = new com.keplerops.groundcontrol.domain.qualitygates.service.UpdateQualityGateCommand(
-                    null,
-                    Optional.of("New desc"),
-                    MetricType.COVERAGE,
-                    Optional.of("TESTS"),
-                    Optional.of(Status.ACTIVE),
-                    ComparisonOperator.GT,
-                    null,
-                    null);
+                    null, "New desc", MetricType.COVERAGE, "TESTS", Status.ACTIVE, ComparisonOperator.GT, null, null);
 
             var result = service.update(gate.getId(), command);
 
@@ -160,20 +153,6 @@ class QualityGateServiceTest {
             assertThat(result.getMetricParam()).isEqualTo("TESTS");
             assertThat(result.getScopeStatus()).isEqualTo(Status.ACTIVE);
             assertThat(result.getOperator()).isEqualTo(ComparisonOperator.GT);
-        }
-
-        @Test
-        void clearsScopeStatusWithEmptyOptional() {
-            var gate = makeGate("Gate", MetricType.COVERAGE, "TESTS", Status.ACTIVE, ComparisonOperator.GTE, 80.0);
-            when(qualityGateRepository.findById(gate.getId())).thenReturn(Optional.of(gate));
-            when(qualityGateRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-            var command = new com.keplerops.groundcontrol.domain.qualitygates.service.UpdateQualityGateCommand(
-                    null, null, null, null, Optional.empty(), null, null, null);
-
-            var result = service.update(gate.getId(), command);
-
-            assertThat(result.getScopeStatus()).isNull();
         }
     }
 
