@@ -369,7 +369,11 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
 | POST | `/admin/graph/materialize` | — | 200 | Materialize graph (AGE) |
 | GET | `/graph/ancestors/{uid}?depth=N` | — | 200 | Ancestor UIDs |
 | GET | `/graph/descendants/{uid}?depth=N` | — | 200 | Descendant UIDs |
+| GET | `/graph/visualization?entityTypes=X,Y` | — | 200 | Full graph (filterable by entity type) |
+| GET | `/graph/subgraph?roots=X&entityTypes=Y` | — | 200 | Subgraph (filterable by entity type) |
 | GET | `/graph/paths?source=X&target=Y` | — | 200 | All paths between two UIDs (with edges) |
+
+`entityTypes` is an optional comma-separated list (e.g. `REQUIREMENT`). When omitted, all entity types are returned. Each node includes an `entityType` field.
 
 **Path response shape:**
 

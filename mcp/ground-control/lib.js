@@ -107,6 +107,8 @@ const TO_CAMEL = {
   section_id: "sectionId",
   content_type: "contentType",
   text_content: "textContent",
+  entity_type: "entityType",
+  entity_types: "entityTypes",
   requirement_uid: "requirementUid",
 };
 
@@ -441,15 +443,15 @@ export async function findPaths(source, target, project) {
   });
 }
 
-export async function getGraphVisualization(project) {
+export async function getGraphVisualization(project, entityTypes) {
   return request("GET", "/api/v1/graph/visualization", {
-    params: { project },
+    params: { project, entityTypes: entityTypes ? entityTypes.join(",") : undefined },
   });
 }
 
-export async function extractSubgraph(roots, project) {
+export async function extractSubgraph(roots, project, entityTypes) {
   return request("GET", "/api/v1/graph/subgraph", {
-    params: { roots: roots.join(","), project },
+    params: { roots: roots.join(","), project, entityTypes: entityTypes ? entityTypes.join(",") : undefined },
   });
 }
 
