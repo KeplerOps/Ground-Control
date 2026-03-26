@@ -88,16 +88,16 @@ public class QualityGateService {
             gate.setName(command.name());
         }
         if (command.description() != null) {
-            gate.setDescription(command.description().orElse(null));
+            gate.setDescription(command.description());
         }
         if (command.metricType() != null) {
             gate.setMetricType(command.metricType());
         }
         if (command.metricParam() != null) {
-            gate.setMetricParam(command.metricParam().orElse(null));
+            gate.setMetricParam(command.metricParam());
         }
         if (command.scopeStatus() != null) {
-            gate.setScopeStatus(command.scopeStatus().orElse(null));
+            gate.setScopeStatus(command.scopeStatus());
         }
         if (command.operator() != null) {
             gate.setOperator(command.operator());
