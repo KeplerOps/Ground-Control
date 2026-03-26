@@ -4,6 +4,7 @@ import com.keplerops.groundcontrol.domain.documents.model.ContentType;
 import com.keplerops.groundcontrol.domain.documents.model.SectionContent;
 import com.keplerops.groundcontrol.domain.documents.repository.SectionContentRepository;
 import com.keplerops.groundcontrol.domain.documents.repository.SectionRepository;
+import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
@@ -40,6 +41,12 @@ public class SectionContentService {
                 .orElseThrow(() -> new NotFoundException("Section not found: " + command.sectionId()));
 
         validateContentType(command.contentType(), command.requirementId(), command.textContent());
+
+        if (command.contentType() == ContentType.REQUIREMENT
+                && command.requirementId() != null
+                && contentRepository.existsByRequirementId(command.requirementId())) {
+            throw new ConflictException("Requirement " + command.requirementId() + " already belongs to a section");
+        }
 
         var requirement = command.requirementId() != null
                 ? requirementRepository

@@ -45,7 +45,8 @@ import {
   findPaths,
   getGraphVisualization,
   extractSubgraph,
-  createGitHubIssueViaApi,
+  createGitHubIssue,
+  formatIssueBody,
   runSweep,
   runSweepAll,
   embedRequirement,
@@ -454,11 +455,28 @@ server.tool(
   },
   async ({ uid, extra_body, labels, repo, project }) => {
     try {
-      const data = { requirement_uid: uid };
-      if (extra_body !== undefined) data.extra_body = extra_body;
-      if (labels !== undefined) data.labels = labels;
-      if (repo !== undefined) data.repo = repo;
-      return ok(JSON.stringify(await createGitHubIssueViaApi(data, project), null, 2));
+      // Fetch requirement to build issue body
+      const req = await getRequirementByUid(uid, project);
+      const title = `${req.uid}: ${req.title}`;
+      const body = formatIssueBody(req, extra_body);
+
+      // Create issue using local gh CLI
+      const { url, number } = await createGitHubIssue({ title, body, labels, repo });
+
+      // Auto-link via traceability
+      try {
+        await createTraceabilityLink(req.id, {
+          artifact_type: "GITHUB_ISSUE",
+          artifact_identifier: String(number),
+          artifact_url: url,
+          artifact_title: title,
+          link_type: "IMPLEMENTS",
+        });
+      } catch (linkErr) {
+        return ok(JSON.stringify({ url, number, warning: `Issue created but traceability link failed: ${linkErr.message}` }, null, 2));
+      }
+
+      return ok(JSON.stringify({ url, number, traceability_linked: true }, null, 2));
     } catch (e) {
       return err(e);
     }

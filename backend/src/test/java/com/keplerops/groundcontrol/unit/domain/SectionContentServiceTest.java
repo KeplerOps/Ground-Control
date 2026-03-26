@@ -16,6 +16,7 @@ import com.keplerops.groundcontrol.domain.documents.repository.SectionRepository
 import com.keplerops.groundcontrol.domain.documents.service.CreateSectionContentCommand;
 import com.keplerops.groundcontrol.domain.documents.service.SectionContentService;
 import com.keplerops.groundcontrol.domain.documents.service.UpdateSectionContentCommand;
+import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
@@ -117,6 +118,15 @@ class SectionContentServiceTest {
 
             var command = new CreateSectionContentCommand(SECTION_ID, ContentType.TEXT_BLOCK, null, null, 0);
             assertThatThrownBy(() -> service.create(command)).isInstanceOf(DomainValidationException.class);
+        }
+
+        @Test
+        void rejectsRequirementAlreadyInSection() {
+            when(sectionRepository.findById(SECTION_ID)).thenReturn(Optional.of(TEST_SECTION));
+            when(contentRepository.existsByRequirementId(REQ_ID)).thenReturn(true);
+
+            var command = new CreateSectionContentCommand(SECTION_ID, ContentType.REQUIREMENT, REQ_ID, null, 0);
+            assertThatThrownBy(() -> service.create(command)).isInstanceOf(ConflictException.class);
         }
 
         @Test
