@@ -156,6 +156,16 @@ class DocumentServiceTest {
     class Grammar {
 
         @Test
+        void grammarRecordsCanBeInstantiated() {
+            var field = new com.keplerops.groundcontrol.domain.documents.service.GrammarField(
+                    "risk", "ENUM", true, List.of("LOW", "HIGH"));
+            var grammar = new com.keplerops.groundcontrol.domain.documents.service.DocumentGrammar(
+                    List.of(field), List.of("FUNCTIONAL"), List.of("PARENT"));
+            assertThat(grammar.fields()).hasSize(1);
+            assertThat(grammar.allowedRequirementTypes()).containsExactly("FUNCTIONAL");
+        }
+
+        @Test
         void setsGrammar() {
             var doc = makeDocument("SRS", "1.0.0");
             when(documentRepository.findById(doc.getId())).thenReturn(Optional.of(doc));
