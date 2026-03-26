@@ -8,4 +8,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface SectionContentRepository extends JpaRepository<SectionContent, UUID> {
 
     List<SectionContent> findBySectionIdOrderBySortOrder(UUID sectionId);
+
+    List<SectionContent> findBySectionIdInOrderBySortOrder(List<UUID> sectionIds);
 }

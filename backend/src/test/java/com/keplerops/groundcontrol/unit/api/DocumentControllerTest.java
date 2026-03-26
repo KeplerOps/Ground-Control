@@ -15,7 +15,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.keplerops.groundcontrol.api.documents.DocumentController;
 import com.keplerops.groundcontrol.domain.documents.model.Document;
+import com.keplerops.groundcontrol.domain.documents.service.DocumentReadingOrder;
+import com.keplerops.groundcontrol.domain.documents.service.DocumentReadingOrderService;
 import com.keplerops.groundcontrol.domain.documents.service.DocumentService;
+import com.keplerops.groundcontrol.domain.documents.service.ReadingOrderContentItem;
+import com.keplerops.groundcontrol.domain.documents.service.ReadingOrderNode;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import java.time.Instant;
@@ -36,6 +40,9 @@ class DocumentControllerTest {
 
     @MockitoBean
     private DocumentService documentService;
+
+    @MockitoBean
+    private DocumentReadingOrderService readingOrderService;
 
     @MockitoBean
     private ProjectService projectService;
@@ -98,6 +105,23 @@ class DocumentControllerTest {
     void deleteReturns204() throws Exception {
         mockMvc.perform(delete("/api/v1/documents/{id}", DOC_ID)).andExpect(status().isNoContent());
         verify(documentService).delete(DOC_ID);
+    }
+
+    @Test
+    void readingOrderReturnsNestedStructure() throws Exception {
+        var contentItem = new ReadingOrderContentItem("TEXT_BLOCK", null, null, "Some text", 0);
+        var sectionNode =
+                new ReadingOrderNode(UUID.randomUUID(), "Chapter 1", null, 0, List.of(contentItem), List.of());
+        var order = new DocumentReadingOrder(DOC_ID, "SRS", "1.0.0", "Desc", List.of(sectionNode));
+        when(readingOrderService.getReadingOrder(DOC_ID)).thenReturn(order);
+
+        mockMvc.perform(get("/api/v1/documents/{id}/reading-order", DOC_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title", is("SRS")))
+                .andExpect(jsonPath("$.sections", hasSize(1)))
+                .andExpect(jsonPath("$.sections[0].title", is("Chapter 1")))
+                .andExpect(jsonPath("$.sections[0].content", hasSize(1)))
+                .andExpect(jsonPath("$.sections[0].content[0].contentType", is("TEXT_BLOCK")));
     }
 
     private static Document makeDocument() {

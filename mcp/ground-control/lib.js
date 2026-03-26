@@ -674,3 +674,11 @@ export async function updateSectionContent(id, data) {
 export async function deleteSectionContent(id) {
   await request("DELETE", `/api/v1/sections/content/${encodeURIComponent(id)}`);
 }
+
+// ---------------------------------------------------------------------------
+// Document Reading Order API functions
+// ---------------------------------------------------------------------------
+
+export async function getDocumentReadingOrder(documentId) {
+  return request("GET", `/api/v1/documents/${encodeURIComponent(documentId)}/reading-order`);
+}

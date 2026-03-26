@@ -1,6 +1,7 @@
 package com.keplerops.groundcontrol.api.documents;
 
 import com.keplerops.groundcontrol.domain.documents.service.CreateDocumentCommand;
+import com.keplerops.groundcontrol.domain.documents.service.DocumentReadingOrderService;
 import com.keplerops.groundcontrol.domain.documents.service.DocumentService;
 import com.keplerops.groundcontrol.domain.documents.service.UpdateDocumentCommand;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
@@ -24,10 +25,15 @@ import org.springframework.web.bind.annotation.RestController;
 public class DocumentController {
 
     private final DocumentService documentService;
+    private final DocumentReadingOrderService readingOrderService;
     private final ProjectService projectService;
 
-    public DocumentController(DocumentService documentService, ProjectService projectService) {
+    public DocumentController(
+            DocumentService documentService,
+            DocumentReadingOrderService readingOrderService,
+            ProjectService projectService) {
         this.documentService = documentService;
+        this.readingOrderService = readingOrderService;
         this.projectService = projectService;
     }
 
@@ -63,5 +69,10 @@ public class DocumentController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable UUID id) {
         documentService.delete(id);
+    }
+
+    @GetMapping("/{id}/reading-order")
+    public DocumentReadingOrderResponse readingOrder(@PathVariable UUID id) {
+        return DocumentReadingOrderResponse.from(readingOrderService.getReadingOrder(id));
     }
 }
