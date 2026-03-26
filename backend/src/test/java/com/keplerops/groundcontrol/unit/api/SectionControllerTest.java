@@ -17,6 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.keplerops.groundcontrol.api.sections.SectionController;
 import com.keplerops.groundcontrol.domain.documents.model.Document;
 import com.keplerops.groundcontrol.domain.documents.model.Section;
+import com.keplerops.groundcontrol.domain.documents.service.SectionContentService;
 import com.keplerops.groundcontrol.domain.documents.service.SectionService;
 import com.keplerops.groundcontrol.domain.documents.service.SectionTreeNode;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
@@ -39,6 +40,9 @@ class SectionControllerTest {
 
     @MockitoBean
     private SectionService sectionService;
+
+    @MockitoBean
+    private SectionContentService contentService;
 
     private static final UUID DOC_ID = UUID.fromString("00000000-0000-0000-0000-000000000002");
     private static final UUID SECTION_ID = UUID.fromString("00000000-0000-0000-0000-000000000077");

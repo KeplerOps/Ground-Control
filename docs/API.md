@@ -200,6 +200,35 @@ When no provider is configured, endpoints return `provider_unavailable` status
 }
 ```
 
+### Section Content
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/sections/{sectionId}/content` | SectionContentRequest | 201 | Add content item |
+| GET | `/sections/{sectionId}/content` | — | 200 | List content in order |
+| PUT | `/sections/content/{id}` | UpdateSectionContentRequest | 200 | Update content item |
+| DELETE | `/sections/content/{id}` | — | 204 | Delete content item |
+
+**SectionContentRequest:**
+
+```json
+{
+  "contentType": "REQUIREMENT",
+  "requirementId": "uuid",
+  "sortOrder": 0
+}
+```
+
+or for text blocks:
+
+```json
+{
+  "contentType": "TEXT_BLOCK",
+  "textContent": "This section describes...",
+  "sortOrder": 1
+}
+```
+
 ### Sections
 
 | Method | Path | Body | Status | Purpose |
