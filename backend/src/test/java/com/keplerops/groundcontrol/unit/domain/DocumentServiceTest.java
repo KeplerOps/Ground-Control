@@ -163,6 +163,21 @@ class DocumentServiceTest {
                     List.of(field), List.of("FUNCTIONAL"), List.of("PARENT"));
             assertThat(grammar.fields()).hasSize(1);
             assertThat(grammar.allowedRequirementTypes()).containsExactly("FUNCTIONAL");
+            assertThat(field.name()).isEqualTo("risk");
+            assertThat(field.enumValues()).containsExactly("LOW", "HIGH");
+
+            // Requirement.customFields getter/setter
+            var req = new com.keplerops.groundcontrol.domain.requirements.model.Requirement(
+                    TEST_PROJECT, "GC-T1", "Test", "Statement");
+            req.setCustomFields("{\"risk\":\"HIGH\"}");
+            assertThat(req.getCustomFields()).isEqualTo("{\"risk\":\"HIGH\"}");
+
+            var request = new com.keplerops.groundcontrol.api.documents.DocumentGrammarRequest(
+                    List.of(new com.keplerops.groundcontrol.api.documents.DocumentGrammarRequest.FieldDef(
+                            "risk", "ENUM", true, List.of("LOW"))),
+                    List.of("FUNCTIONAL"),
+                    List.of("PARENT"));
+            assertThat(request.fields()).hasSize(1);
         }
 
         @Test
