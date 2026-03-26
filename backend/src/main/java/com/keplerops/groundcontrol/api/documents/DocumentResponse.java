@@ -10,6 +10,7 @@ public record DocumentResponse(
         String title,
         String version,
         String description,
+        boolean hasGrammar,
         Instant createdAt,
         Instant updatedAt,
         String createdBy) {
@@ -21,6 +22,7 @@ public record DocumentResponse(
                 doc.getTitle(),
                 doc.getVersion(),
                 doc.getDescription(),
+                doc.getGrammar() != null,
                 doc.getCreatedAt(),
                 doc.getUpdatedAt(),
                 doc.getCreatedBy());

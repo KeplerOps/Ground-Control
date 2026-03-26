@@ -152,6 +152,67 @@ class DocumentServiceTest {
         }
     }
 
+    @Nested
+    class Grammar {
+
+        @Test
+        void grammarRecordsCanBeInstantiated() {
+            var field = new com.keplerops.groundcontrol.domain.documents.service.GrammarField(
+                    "risk", "ENUM", true, List.of("LOW", "HIGH"));
+            var grammar = new com.keplerops.groundcontrol.domain.documents.service.DocumentGrammar(
+                    List.of(field), List.of("FUNCTIONAL"), List.of("PARENT"));
+            assertThat(grammar.fields()).hasSize(1);
+            assertThat(grammar.allowedRequirementTypes()).containsExactly("FUNCTIONAL");
+            assertThat(field.name()).isEqualTo("risk");
+            assertThat(field.enumValues()).containsExactly("LOW", "HIGH");
+
+            // Requirement.customFields getter/setter
+            var req = new com.keplerops.groundcontrol.domain.requirements.model.Requirement(
+                    TEST_PROJECT, "GC-T1", "Test", "Statement");
+            req.setCustomFields("{\"risk\":\"HIGH\"}");
+            assertThat(req.getCustomFields()).isEqualTo("{\"risk\":\"HIGH\"}");
+
+            var request = new com.keplerops.groundcontrol.api.documents.DocumentGrammarRequest(
+                    List.of(new com.keplerops.groundcontrol.api.documents.DocumentGrammarRequest.FieldDef(
+                            "risk", "ENUM", true, List.of("LOW"))),
+                    List.of("FUNCTIONAL"),
+                    List.of("PARENT"));
+            assertThat(request.fields()).hasSize(1);
+        }
+
+        @Test
+        void setsGrammar() {
+            var doc = makeDocument("SRS", "1.0.0");
+            when(documentRepository.findById(doc.getId())).thenReturn(Optional.of(doc));
+            when(documentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            service.setGrammar(doc.getId(), "{\"fields\":[]}");
+
+            verify(documentRepository).save(any(Document.class));
+        }
+
+        @Test
+        void getsGrammar() {
+            var doc = makeDocument("SRS", "1.0.0");
+            setField(doc, "grammar", "{\"fields\":[]}");
+            when(documentRepository.findById(doc.getId())).thenReturn(Optional.of(doc));
+
+            assertThat(service.getGrammar(doc.getId())).isEqualTo("{\"fields\":[]}");
+        }
+
+        @Test
+        void deletesGrammar() {
+            var doc = makeDocument("SRS", "1.0.0");
+            setField(doc, "grammar", "{\"fields\":[]}");
+            when(documentRepository.findById(doc.getId())).thenReturn(Optional.of(doc));
+            when(documentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            service.deleteGrammar(doc.getId());
+
+            verify(documentRepository).save(any(Document.class));
+        }
+    }
+
     private static Document makeDocument(String title, String version) {
         var doc = new Document(TEST_PROJECT, title, version, null, null);
         setField(doc, "id", UUID.randomUUID());

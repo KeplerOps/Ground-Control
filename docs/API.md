@@ -200,6 +200,29 @@ When no provider is configured, endpoints return `provider_unavailable` status
 }
 ```
 
+### Document Grammar
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| PUT | `/documents/{id}/grammar` | Grammar JSON | 200 | Set/replace grammar |
+| GET | `/documents/{id}/grammar` | — | 200 | Get grammar |
+| DELETE | `/documents/{id}/grammar` | — | 204 | Remove grammar |
+
+**Grammar JSON:**
+
+```json
+{
+  "fields": [
+    {"name": "acceptance_criteria", "type": "STRING", "required": false},
+    {"name": "risk_level", "type": "ENUM", "required": true, "enumValues": ["LOW", "MEDIUM", "HIGH"]}
+  ],
+  "allowedRequirementTypes": ["FUNCTIONAL", "NON_FUNCTIONAL"],
+  "allowedRelationTypes": ["PARENT", "DEPENDS_ON", "REFINES"]
+}
+```
+
+Field types: `STRING`, `INTEGER`, `BOOLEAN`, `ENUM`. Declarative metadata — no runtime enforcement.
+
 ### Document Reading Order
 
 | Method | Path | Body | Status | Purpose |
