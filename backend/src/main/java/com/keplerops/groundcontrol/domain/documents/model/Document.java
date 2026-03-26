@@ -26,7 +26,7 @@ public class Document extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String description;
 
-    @Column(columnDefinition = "JSONB")
+    @Column(columnDefinition = "TEXT")
     private String grammar;
 
     @Column(length = 100)

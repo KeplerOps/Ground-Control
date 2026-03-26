@@ -4,6 +4,7 @@ import static com.keplerops.groundcontrol.TestUtil.setField;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -122,6 +123,33 @@ class DocumentControllerTest {
                 .andExpect(jsonPath("$.sections[0].title", is("Chapter 1")))
                 .andExpect(jsonPath("$.sections[0].content", hasSize(1)))
                 .andExpect(jsonPath("$.sections[0].content[0].contentType", is("TEXT_BLOCK")));
+    }
+
+    @Test
+    void setGrammarReturnsJson() throws Exception {
+        var grammarJson = "{\"fields\":[],\"allowedRequirementTypes\":[\"FUNCTIONAL\"]}";
+        when(documentService.getGrammar(DOC_ID)).thenReturn(grammarJson);
+
+        mockMvc.perform(put("/api/v1/documents/{id}/grammar", DOC_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(grammarJson))
+                .andExpect(status().isOk());
+
+        verify(documentService).setGrammar(eq(DOC_ID), any());
+    }
+
+    @Test
+    void getGrammarReturnsJson() throws Exception {
+        when(documentService.getGrammar(DOC_ID)).thenReturn("{\"fields\":[]}");
+
+        mockMvc.perform(get("/api/v1/documents/{id}/grammar", DOC_ID)).andExpect(status().isOk());
+    }
+
+    @Test
+    void deleteGrammarReturns204() throws Exception {
+        mockMvc.perform(delete("/api/v1/documents/{id}/grammar", DOC_ID)).andExpect(status().isNoContent());
+
+        verify(documentService).deleteGrammar(DOC_ID);
     }
 
     private static Document makeDocument() {

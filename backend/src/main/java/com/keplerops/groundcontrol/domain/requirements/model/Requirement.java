@@ -74,7 +74,7 @@ public class Requirement {
 
     private Integer wave;
 
-    @Column(name = "custom_fields", columnDefinition = "JSONB")
+    @Column(name = "custom_fields", columnDefinition = "TEXT")
     private String customFields;
 
     @Column(nullable = false, updatable = false)
