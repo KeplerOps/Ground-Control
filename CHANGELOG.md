@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BaseEntity` `@MappedSuperclass` for shared JPA entity boilerplate
   (id, createdAt, updatedAt, lifecycle callbacks)
 
+### Fixed
+
+- Remove nullable `Optional` fields from `UpdateQualityGateCommand` to resolve
+  SonarCloud S2789 reliability bugs on dev branch
+
 ## [0.82.0] - 2026-03-26
 
 ### Added
