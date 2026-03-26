@@ -15,8 +15,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.keplerops.groundcontrol.api.sections.SectionController;
+import com.keplerops.groundcontrol.domain.documents.model.ContentType;
 import com.keplerops.groundcontrol.domain.documents.model.Document;
 import com.keplerops.groundcontrol.domain.documents.model.Section;
+import com.keplerops.groundcontrol.domain.documents.model.SectionContent;
 import com.keplerops.groundcontrol.domain.documents.service.SectionContentService;
 import com.keplerops.groundcontrol.domain.documents.service.SectionService;
 import com.keplerops.groundcontrol.domain.documents.service.SectionTreeNode;
@@ -117,6 +119,64 @@ class SectionControllerTest {
     void deleteReturns204() throws Exception {
         mockMvc.perform(delete("/api/v1/sections/{id}", SECTION_ID)).andExpect(status().isNoContent());
         verify(sectionService).delete(SECTION_ID);
+    }
+
+    // --- Content endpoint tests ---
+
+    @Test
+    void addContentReturns201() throws Exception {
+        when(contentService.create(any())).thenReturn(makeContent());
+
+        mockMvc.perform(
+                        post("/api/v1/sections/{sectionId}/content", SECTION_ID)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                {"contentType":"TEXT_BLOCK","textContent":"Some text","sortOrder":0}
+                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.contentType", is("TEXT_BLOCK")))
+                .andExpect(jsonPath("$.textContent", is("Some text")));
+    }
+
+    @Test
+    void listContentReturnsItems() throws Exception {
+        when(contentService.listBySection(SECTION_ID)).thenReturn(List.of(makeContent()));
+
+        mockMvc.perform(get("/api/v1/sections/{sectionId}/content", SECTION_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].contentType", is("TEXT_BLOCK")));
+    }
+
+    @Test
+    void updateContentReturnsUpdated() throws Exception {
+        when(contentService.update(eq(CONTENT_ID), any())).thenReturn(makeContent());
+
+        mockMvc.perform(put("/api/v1/sections/content/{id}", CONTENT_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                {"textContent":"Updated text","sortOrder":5}
+                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contentType", is("TEXT_BLOCK")));
+    }
+
+    @Test
+    void deleteContentReturns204() throws Exception {
+        mockMvc.perform(delete("/api/v1/sections/content/{id}", CONTENT_ID)).andExpect(status().isNoContent());
+        verify(contentService).delete(CONTENT_ID);
+    }
+
+    private static final UUID CONTENT_ID = UUID.fromString("00000000-0000-0000-0000-000000000066");
+
+    private static SectionContent makeContent() {
+        var section = makeSection();
+        var content = new SectionContent(section, ContentType.TEXT_BLOCK, null, "Some text", 0);
+        setField(content, "id", CONTENT_ID);
+        setField(content, "createdAt", Instant.parse("2026-03-26T06:00:00Z"));
+        setField(content, "updatedAt", Instant.parse("2026-03-26T06:00:00Z"));
+        return content;
     }
 
     private static Section makeSection() {

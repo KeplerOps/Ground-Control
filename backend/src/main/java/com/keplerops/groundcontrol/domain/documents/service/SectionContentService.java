@@ -88,30 +88,33 @@ public class SectionContentService {
         log.info("section_content_deleted: id={}", content.getId());
     }
 
+    private static final String FIELD_KEY = "field";
+    private static final String TYPE_KEY = "contentType";
+
     private void validateContentType(ContentType contentType, UUID requirementId, String textContent) {
         if (contentType == ContentType.REQUIREMENT && requirementId == null) {
             throw new DomainValidationException(
                     "requirement_id is required for REQUIREMENT content type",
                     "validation_error",
-                    Map.of("field", "requirementId", "contentType", contentType.name()));
+                    Map.of(FIELD_KEY, "requirementId", TYPE_KEY, contentType.name()));
         }
         if (contentType == ContentType.TEXT_BLOCK && (textContent == null || textContent.isBlank())) {
             throw new DomainValidationException(
                     "text_content is required for TEXT_BLOCK content type",
                     "validation_error",
-                    Map.of("field", "textContent", "contentType", contentType.name()));
+                    Map.of(FIELD_KEY, "textContent", TYPE_KEY, contentType.name()));
         }
         if (contentType == ContentType.REQUIREMENT && textContent != null) {
             throw new DomainValidationException(
                     "text_content must be null for REQUIREMENT content type",
                     "validation_error",
-                    Map.of("field", "textContent", "contentType", contentType.name()));
+                    Map.of(FIELD_KEY, "textContent", TYPE_KEY, contentType.name()));
         }
         if (contentType == ContentType.TEXT_BLOCK && requirementId != null) {
             throw new DomainValidationException(
                     "requirement_id must be null for TEXT_BLOCK content type",
                     "validation_error",
-                    Map.of("field", "requirementId", "contentType", contentType.name()));
+                    Map.of(FIELD_KEY, "requirementId", TYPE_KEY, contentType.name()));
         }
     }
 }
