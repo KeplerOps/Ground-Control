@@ -101,6 +101,9 @@ const TO_CAMEL = {
   gate_name: "gateName",
   actual_value: "actualValue",
   created_by: "createdBy",
+  document_id: "documentId",
+  parent_id: "parentId",
+  sort_order: "sortOrder",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -618,4 +621,32 @@ export async function updateDocument(id, data) {
 
 export async function deleteDocument(id) {
   await request("DELETE", `/api/v1/documents/${encodeURIComponent(id)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Section API functions
+// ---------------------------------------------------------------------------
+
+export async function createSection(documentId, data) {
+  return request("POST", `/api/v1/documents/${encodeURIComponent(documentId)}/sections`, { body: data });
+}
+
+export async function listSections(documentId) {
+  return request("GET", `/api/v1/documents/${encodeURIComponent(documentId)}/sections`);
+}
+
+export async function getSectionTree(documentId) {
+  return request("GET", `/api/v1/documents/${encodeURIComponent(documentId)}/sections/tree`);
+}
+
+export async function getSection(id) {
+  return request("GET", `/api/v1/sections/${encodeURIComponent(id)}`);
+}
+
+export async function updateSection(id, data) {
+  return request("PUT", `/api/v1/sections/${encodeURIComponent(id)}`, { body: data });
+}
+
+export async function deleteSection(id) {
+  await request("DELETE", `/api/v1/sections/${encodeURIComponent(id)}`);
 }

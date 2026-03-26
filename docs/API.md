@@ -200,6 +200,31 @@ When no provider is configured, endpoints return `provider_unavailable` status
 }
 ```
 
+### Sections
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/documents/{documentId}/sections` | SectionRequest | 201 | Create section |
+| GET | `/documents/{documentId}/sections` | — | 200 | List sections (flat) |
+| GET | `/documents/{documentId}/sections/tree` | — | 200 | Get section tree (nested) |
+| GET | `/sections/{id}` | — | 200 | Get section |
+| PUT | `/sections/{id}` | UpdateSectionRequest | 200 | Update section |
+| DELETE | `/sections/{id}` | — | 204 | Delete section (cascades children) |
+
+**SectionRequest:**
+
+```json
+{
+  "parentId": null,
+  "title": "Chapter 1: Introduction",
+  "description": "Overview section",
+  "sortOrder": 0
+}
+```
+
+Sections support arbitrary nesting — set `parentId` to a section UUID to create a child.
+The tree endpoint returns a nested JSON structure with `children` arrays.
+
 ### Documents
 
 | Method | Path | Body | Status | Purpose |

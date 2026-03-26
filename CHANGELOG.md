@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.81.0] - 2026-03-26
+
+### Added
+
+- Hierarchical sections within documents with arbitrary nesting depth,
+  sibling ordering, and nested tree retrieval
+  (`POST /api/v1/documents/{id}/sections`,
+  `GET /api/v1/documents/{id}/sections/tree`)
+- MCP tools: `gc_create_section`, `gc_list_sections`, `gc_get_section_tree`,
+  `gc_get_section`, `gc_update_section`, `gc_delete_section`
+
 ## [0.80.0] - 2026-03-25
 
 ### Added

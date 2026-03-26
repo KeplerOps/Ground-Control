@@ -70,6 +70,12 @@ import {
   getDocument,
   updateDocument,
   deleteDocument,
+  createSection,
+  listSections,
+  getSectionTree,
+  getSection,
+  updateSection,
+  deleteSection,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -1353,6 +1359,120 @@ server.tool(
     try {
       await deleteDocument(id);
       return ok("Document deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Section tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_section",
+  "Create a section within a document. Sections support arbitrary nesting via optional parentId.",
+  {
+    document_id: z.string().uuid().describe("Document UUID"),
+    parent_id: z.string().uuid().optional().describe("Parent section UUID (omit for root section)"),
+    title: z.string().max(200).describe("Section title"),
+    description: z.string().optional().describe("Section description"),
+    sort_order: z.number().int().optional().describe("Sort order among siblings (default 0)"),
+  },
+  async ({ document_id, parent_id, title, description, sort_order }) => {
+    try {
+      const data = { title };
+      if (parent_id !== undefined) data.parent_id = parent_id;
+      if (description !== undefined) data.description = description;
+      if (sort_order !== undefined) data.sort_order = sort_order;
+      return ok(JSON.stringify(await createSection(document_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_sections",
+  "List all sections in a document (flat, ordered by sort order).",
+  {
+    document_id: z.string().uuid().describe("Document UUID"),
+  },
+  async ({ document_id }) => {
+    try {
+      const sections = await listSections(document_id);
+      if (Array.isArray(sections) && sections.length === 0) return ok("No sections found.");
+      return ok(JSON.stringify(sections, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_section_tree",
+  "Get sections as a nested tree structure for a document.",
+  {
+    document_id: z.string().uuid().describe("Document UUID"),
+  },
+  async ({ document_id }) => {
+    try {
+      const tree = await getSectionTree(document_id);
+      if (Array.isArray(tree) && tree.length === 0) return ok("No sections found.");
+      return ok(JSON.stringify(tree, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_section",
+  "Get a section by its UUID.",
+  {
+    id: z.string().uuid().describe("Section UUID"),
+  },
+  async ({ id }) => {
+    try {
+      return ok(JSON.stringify(await getSection(id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_section",
+  "Update a section. Only specified fields are changed.",
+  {
+    id: z.string().uuid().describe("Section UUID"),
+    title: z.string().max(200).optional().describe("New title"),
+    description: z.string().optional().describe("New description"),
+    sort_order: z.number().int().optional().describe("New sort order"),
+  },
+  async ({ id, ...fields }) => {
+    try {
+      const data = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined) data[k] = v;
+      }
+      return ok(JSON.stringify(await updateSection(id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_section",
+  "Delete a section and all its children (cascading).",
+  {
+    id: z.string().uuid().describe("Section UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteSection(id);
+      return ok("Section deleted.");
     } catch (e) {
       return err(e);
     }
