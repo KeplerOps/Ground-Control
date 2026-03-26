@@ -64,3 +64,15 @@ After implementation is complete (or if already implemented):
 - use the `gc_transition_status` MCP tool to transition the requirement to `ACTIVE` if it was `DRAFT`.
 
 Do not update the Changelog if all you did was operate Ground Control tools.
+
+## Step 6: Completion Gate
+
+Implementation is NOT complete until ALL of the following are verified:
+
+1. **`make check` passes** — run it and confirm BUILD SUCCESSFUL.
+2. **CHANGELOG.md updated** — verify it is in `git diff --name-only` if any source files changed.
+3. **Traceability links exist** — re-fetch with `gc_get_traceability` and confirm IMPLEMENTS and TESTS links are present.
+4. **Requirement status is ACTIVE** — re-fetch with `gc_get_requirement` and confirm status.
+5. **Step 4.5 clause mapping was completed** — if you skipped it, go back and do it now.
+
+If any check fails, fix it before reporting completion. Do NOT report the implementation as done until every check passes.

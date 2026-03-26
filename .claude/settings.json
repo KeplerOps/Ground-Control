@@ -16,11 +16,9 @@
       {
         "hooks": [
           {
-            "type": "agent",
-            "prompt": "You are a completion verifier. Check whether the work session completed all required steps. Run 'git diff --name-only HEAD' to see changed files. Check: (1) If any .java/.ts/.tsx source files were changed, verify CHANGELOG.md is also in the diff. If not, return {\"ok\": false, \"reason\": \"CHANGELOG.md not updated despite source code changes\"}. (2) Check the branch name and git log for signs of requirement implementation (GC-* UIDs, issue numbers). If this looks like a requirement implementation, flag if traceability links or status transitions may have been missed. Return {\"ok\": true} if all checks pass, or {\"ok\": false, \"reason\": \"...\"} with specifics about what is missing.",
-            "timeout": 120,
-            "model": "claude-sonnet-4-6",
-            "statusMessage": "Verifying completion checklist..."
+            "type": "command",
+            "command": "/home/atomik/src/Ground-Control/.claude/hooks/verify-implementation.sh",
+            "timeout": 30
           }
         ]
       }
