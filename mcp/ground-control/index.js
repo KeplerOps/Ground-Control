@@ -80,6 +80,7 @@ import {
   listSectionContent,
   updateSectionContent,
   deleteSectionContent,
+  getDocumentReadingOrder,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -1558,6 +1559,26 @@ server.tool(
     try {
       await deleteSectionContent(id);
       return ok("Section content deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Document Reading Order tools
+// ==========================================================================
+
+server.tool(
+  "gc_get_document_reading_order",
+  "Get a document rendered in reading order: sections with their content (text blocks and requirement references) nested in authored sequence.",
+  {
+    document_id: z.string().uuid().describe("Document UUID"),
+  },
+  async ({ document_id }) => {
+    try {
+      const result = await getDocumentReadingOrder(document_id);
+      return ok(JSON.stringify(result, null, 2));
     } catch (e) {
       return err(e);
     }

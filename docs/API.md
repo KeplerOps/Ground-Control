@@ -200,6 +200,15 @@ When no provider is configured, endpoints return `provider_unavailable` status
 }
 ```
 
+### Document Reading Order
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| GET | `/documents/{id}/reading-order` | — | 200 | Full document in reading order |
+
+Returns the document with all sections nested, each containing its content items
+(requirement references and text blocks) in authored sequence.
+
 ### Section Content
 
 | Method | Path | Body | Status | Purpose |
