@@ -870,13 +870,14 @@ server.tool(
 
 server.tool(
   "gc_get_graph_visualization",
-  "Get the full graph visualization data (all requirement nodes and relation edges with metadata) for a project. Returns data suitable for rendering dependency diagrams.",
+  "Get the full graph visualization data (nodes and relation edges with metadata) for a project. Supports filtering by entity type.",
   {
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    entity_types: z.array(z.string()).optional().describe("Filter by entity types (e.g. ['REQUIREMENT']). Omit to include all types."),
   },
-  async ({ project }) => {
+  async ({ project, entity_types }) => {
     try {
-      const data = await getGraphVisualization(project);
+      const data = await getGraphVisualization(project, entity_types);
       return ok(JSON.stringify(data, null, 2));
     } catch (e) {
       return err(e);
@@ -886,14 +887,15 @@ server.tool(
 
 server.tool(
   "gc_extract_subgraph",
-  "Extract a subgraph starting from one or more root requirements. Returns all transitively reachable requirements and their relations as a self-contained graph.",
+  "Extract a subgraph starting from one or more root nodes. Returns all transitively reachable nodes and their relations. Supports filtering by entity type.",
   {
     roots: z.array(z.string()).describe("Root requirement UIDs to start traversal from (e.g. ['GC-G001', 'GC-G002'])"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    entity_types: z.array(z.string()).optional().describe("Filter by entity types (e.g. ['REQUIREMENT']). Omit to include all types."),
   },
-  async ({ roots, project }) => {
+  async ({ roots, project, entity_types }) => {
     try {
-      const data = await extractSubgraph(roots, project);
+      const data = await extractSubgraph(roots, project, entity_types);
       return ok(JSON.stringify(data, null, 2));
     } catch (e) {
       return err(e);
