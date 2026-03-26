@@ -1,8 +1,11 @@
 package com.keplerops.groundcontrol.api.sections;
 
 import com.keplerops.groundcontrol.domain.documents.service.CreateSectionCommand;
+import com.keplerops.groundcontrol.domain.documents.service.CreateSectionContentCommand;
+import com.keplerops.groundcontrol.domain.documents.service.SectionContentService;
 import com.keplerops.groundcontrol.domain.documents.service.SectionService;
 import com.keplerops.groundcontrol.domain.documents.service.UpdateSectionCommand;
+import com.keplerops.groundcontrol.domain.documents.service.UpdateSectionContentCommand;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -22,9 +25,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class SectionController {
 
     private final SectionService sectionService;
+    private final SectionContentService contentService;
 
-    public SectionController(SectionService sectionService) {
+    public SectionController(SectionService sectionService, SectionContentService contentService) {
         this.sectionService = sectionService;
+        this.contentService = contentService;
     }
 
     @PostMapping("/documents/{documentId}/sections")
@@ -68,5 +73,40 @@ public class SectionController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable UUID id) {
         sectionService.delete(id);
+    }
+
+    // --- Section Content endpoints ---
+
+    @PostMapping("/sections/{sectionId}/content")
+    @ResponseStatus(HttpStatus.CREATED)
+    public SectionContentResponse addContent(
+            @PathVariable UUID sectionId, @Valid @RequestBody SectionContentRequest request) {
+        var command = new CreateSectionContentCommand(
+                sectionId,
+                request.contentType(),
+                request.requirementId(),
+                request.textContent(),
+                request.sortOrder() != null ? request.sortOrder() : 0);
+        return SectionContentResponse.from(contentService.create(command));
+    }
+
+    @GetMapping("/sections/{sectionId}/content")
+    public List<SectionContentResponse> listContent(@PathVariable UUID sectionId) {
+        return contentService.listBySection(sectionId).stream()
+                .map(SectionContentResponse::from)
+                .toList();
+    }
+
+    @PutMapping("/sections/content/{id}")
+    public SectionContentResponse updateContent(
+            @PathVariable UUID id, @Valid @RequestBody UpdateSectionContentRequest request) {
+        var command = new UpdateSectionContentCommand(request.textContent(), request.sortOrder());
+        return SectionContentResponse.from(contentService.update(id, command));
+    }
+
+    @DeleteMapping("/sections/content/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteContent(@PathVariable UUID id) {
+        contentService.delete(id);
     }
 }

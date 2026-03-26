@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.unit.api;
 
+import static com.keplerops.groundcontrol.TestUtil.setField;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
@@ -17,7 +18,6 @@ import com.keplerops.groundcontrol.domain.documents.model.Document;
 import com.keplerops.groundcontrol.domain.documents.service.DocumentService;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
-import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -108,15 +108,5 @@ class DocumentControllerTest {
         setField(doc, "createdAt", Instant.parse("2026-03-25T06:00:00Z"));
         setField(doc, "updatedAt", Instant.parse("2026-03-25T06:00:00Z"));
         return doc;
-    }
-
-    private static void setField(Object obj, String fieldName, Object value) {
-        try {
-            Field f = obj.getClass().getDeclaredField(fieldName);
-            f.setAccessible(true);
-            f.set(obj, value);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
     }
 }

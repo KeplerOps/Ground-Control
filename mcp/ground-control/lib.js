@@ -104,6 +104,10 @@ const TO_CAMEL = {
   document_id: "documentId",
   parent_id: "parentId",
   sort_order: "sortOrder",
+  section_id: "sectionId",
+  content_type: "contentType",
+  text_content: "textContent",
+  requirement_uid: "requirementUid",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -649,4 +653,24 @@ export async function updateSection(id, data) {
 
 export async function deleteSection(id) {
   await request("DELETE", `/api/v1/sections/${encodeURIComponent(id)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Section Content API functions
+// ---------------------------------------------------------------------------
+
+export async function addSectionContent(sectionId, data) {
+  return request("POST", `/api/v1/sections/${encodeURIComponent(sectionId)}/content`, { body: data });
+}
+
+export async function listSectionContent(sectionId) {
+  return request("GET", `/api/v1/sections/${encodeURIComponent(sectionId)}/content`);
+}
+
+export async function updateSectionContent(id, data) {
+  return request("PUT", `/api/v1/sections/content/${encodeURIComponent(id)}`, { body: data });
+}
+
+export async function deleteSectionContent(id) {
+  await request("DELETE", `/api/v1/sections/content/${encodeURIComponent(id)}`);
 }

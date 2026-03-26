@@ -76,6 +76,10 @@ import {
   getSection,
   updateSection,
   deleteSection,
+  addSectionContent,
+  listSectionContent,
+  updateSectionContent,
+  deleteSectionContent,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -1473,6 +1477,87 @@ server.tool(
     try {
       await deleteSection(id);
       return ok("Section deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Section Content tools
+// ==========================================================================
+
+server.tool(
+  "gc_add_section_content",
+  "Add a content item to a section — either a requirement reference or a text block. Items are ordered by sort_order for rendering.",
+  {
+    section_id: z.string().uuid().describe("Section UUID"),
+    content_type: z.enum(["REQUIREMENT", "TEXT_BLOCK"]).describe("Content type"),
+    requirement_id: z.string().uuid().optional().describe("Requirement UUID (required for REQUIREMENT type)"),
+    text_content: z.string().optional().describe("Text content (required for TEXT_BLOCK type)"),
+    sort_order: z.number().int().optional().describe("Sort order for rendering sequence (default 0)"),
+  },
+  async ({ section_id, content_type, requirement_id, text_content, sort_order }) => {
+    try {
+      const data = { content_type };
+      if (requirement_id !== undefined) data.requirement_id = requirement_id;
+      if (text_content !== undefined) data.text_content = text_content;
+      if (sort_order !== undefined) data.sort_order = sort_order;
+      return ok(JSON.stringify(await addSectionContent(section_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_section_content",
+  "List content items in a section, ordered by sort_order for rendering in reading order.",
+  {
+    section_id: z.string().uuid().describe("Section UUID"),
+  },
+  async ({ section_id }) => {
+    try {
+      const items = await listSectionContent(section_id);
+      if (Array.isArray(items) && items.length === 0) return ok("No content items found.");
+      return ok(JSON.stringify(items, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_section_content",
+  "Update a section content item. Only text_content (for TEXT_BLOCK) and sort_order can be changed.",
+  {
+    id: z.string().uuid().describe("Section content UUID"),
+    text_content: z.string().optional().describe("New text content (TEXT_BLOCK only)"),
+    sort_order: z.number().int().optional().describe("New sort order"),
+  },
+  async ({ id, ...fields }) => {
+    try {
+      const data = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined) data[k] = v;
+      }
+      return ok(JSON.stringify(await updateSectionContent(id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_section_content",
+  "Delete a content item from a section.",
+  {
+    id: z.string().uuid().describe("Section content UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteSectionContent(id);
+      return ok("Section content deleted.");
     } catch (e) {
       return err(e);
     }
