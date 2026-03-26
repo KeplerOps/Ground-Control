@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   most one document section, enforced by partial unique index and service
   validation
 
+### Fixed
+
+- `gc_create_github_issue` MCP tool now uses local `gh` CLI instead of
+  the backend API, fixing "gh not found" errors when the backend Docker
+  container lacks `gh` authentication
+
 ## [0.84.0] - 2026-03-26
 
 ### Added

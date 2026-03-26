@@ -49,3 +49,7 @@ Don't surface nitpicks about PR titles or descriptions unless they are grossly m
 ## Implementation
 
 Always check your work against the requirement you are implementing to be sure you have implemented all the functionality described in the requirement.
+
+## Answer Questions
+
+If you are asked a question that you don't know the answer to but you have the means to find the facts, go find the facts and answer the question. This is especially important for questions about the codebase, requirements, or the project. You have all the tools at your disposal to answer any of thess questions, so use them.
