@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.unit.domain;
 
+import static com.keplerops.groundcontrol.TestUtil.setField;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -15,7 +16,6 @@ import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
-import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -158,15 +158,5 @@ class DocumentServiceTest {
         setField(doc, "createdAt", Instant.now());
         setField(doc, "updatedAt", Instant.now());
         return doc;
-    }
-
-    private static void setField(Object obj, String fieldName, Object value) {
-        try {
-            Field f = obj.getClass().getDeclaredField(fieldName);
-            f.setAccessible(true);
-            f.set(obj, value);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
     }
 }

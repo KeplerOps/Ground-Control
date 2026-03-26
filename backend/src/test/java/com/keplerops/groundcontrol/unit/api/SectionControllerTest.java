@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.unit.api;
 
+import static com.keplerops.groundcontrol.TestUtil.setField;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
@@ -23,7 +24,6 @@ import com.keplerops.groundcontrol.domain.documents.service.SectionContentServic
 import com.keplerops.groundcontrol.domain.documents.service.SectionService;
 import com.keplerops.groundcontrol.domain.documents.service.SectionTreeNode;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
-import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -189,15 +189,5 @@ class SectionControllerTest {
         setField(section, "createdAt", Instant.parse("2026-03-25T06:00:00Z"));
         setField(section, "updatedAt", Instant.parse("2026-03-25T06:00:00Z"));
         return section;
-    }
-
-    private static void setField(Object obj, String fieldName, Object value) {
-        try {
-            Field f = obj.getClass().getDeclaredField(fieldName);
-            f.setAccessible(true);
-            f.set(obj, value);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
     }
 }
