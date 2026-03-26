@@ -682,3 +682,19 @@ export async function deleteSectionContent(id) {
 export async function getDocumentReadingOrder(documentId) {
   return request("GET", `/api/v1/documents/${encodeURIComponent(documentId)}/reading-order`);
 }
+
+// ---------------------------------------------------------------------------
+// Document Grammar API functions
+// ---------------------------------------------------------------------------
+
+export async function setDocumentGrammar(documentId, grammar) {
+  return request("PUT", `/api/v1/documents/${encodeURIComponent(documentId)}/grammar`, { body: grammar });
+}
+
+export async function getDocumentGrammar(documentId) {
+  return request("GET", `/api/v1/documents/${encodeURIComponent(documentId)}/grammar`);
+}
+
+export async function deleteDocumentGrammar(documentId) {
+  await request("DELETE", `/api/v1/documents/${encodeURIComponent(documentId)}/grammar`);
+}

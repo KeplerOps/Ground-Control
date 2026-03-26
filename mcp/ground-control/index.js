@@ -81,6 +81,9 @@ import {
   updateSectionContent,
   deleteSectionContent,
   getDocumentReadingOrder,
+  setDocumentGrammar,
+  getDocumentGrammar,
+  deleteDocumentGrammar,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -1579,6 +1582,70 @@ server.tool(
     try {
       const result = await getDocumentReadingOrder(document_id);
       return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Document Grammar tools
+// ==========================================================================
+
+server.tool(
+  "gc_set_document_grammar",
+  "Set or replace the grammar for a document. Defines custom fields, allowed requirement types, and allowed relation types.",
+  {
+    document_id: z.string().uuid().describe("Document UUID"),
+    fields: z.array(z.object({
+      name: z.string().describe("Field name"),
+      type: z.enum(["STRING", "INTEGER", "BOOLEAN", "ENUM"]).describe("Field data type"),
+      required: z.boolean().describe("Whether the field is required"),
+      enum_values: z.array(z.string()).optional().describe("Valid values for ENUM type"),
+    })).optional().describe("Custom field definitions"),
+    allowed_requirement_types: z.array(z.string()).optional().describe("Allowed requirement types (e.g. FUNCTIONAL, NON_FUNCTIONAL)"),
+    allowed_relation_types: z.array(z.string()).optional().describe("Allowed relation types (e.g. PARENT, DEPENDS_ON)"),
+  },
+  async ({ document_id, fields, allowed_requirement_types, allowed_relation_types }) => {
+    try {
+      const grammar = {};
+      if (fields !== undefined) grammar.fields = fields;
+      if (allowed_requirement_types !== undefined) grammar.allowedRequirementTypes = allowed_requirement_types;
+      if (allowed_relation_types !== undefined) grammar.allowedRelationTypes = allowed_relation_types;
+      return ok(JSON.stringify(await setDocumentGrammar(document_id, grammar), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_document_grammar",
+  "Get the grammar for a document.",
+  {
+    document_id: z.string().uuid().describe("Document UUID"),
+  },
+  async ({ document_id }) => {
+    try {
+      const grammar = await getDocumentGrammar(document_id);
+      if (!grammar) return ok("No grammar defined for this document.");
+      return ok(JSON.stringify(grammar, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_document_grammar",
+  "Remove the grammar from a document.",
+  {
+    document_id: z.string().uuid().describe("Document UUID"),
+  },
+  async ({ document_id }) => {
+    try {
+      await deleteDocumentGrammar(document_id);
+      return ok("Document grammar deleted.");
     } catch (e) {
       return err(e);
     }

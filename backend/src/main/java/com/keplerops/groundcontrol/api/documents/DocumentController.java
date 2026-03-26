@@ -75,4 +75,25 @@ public class DocumentController {
     public DocumentReadingOrderResponse readingOrder(@PathVariable UUID id) {
         return DocumentReadingOrderResponse.from(readingOrderService.getReadingOrder(id));
     }
+
+    @PutMapping("/{id}/grammar")
+    public String setGrammar(@PathVariable UUID id, @RequestBody String grammarJson) {
+        documentService.setGrammar(id, grammarJson);
+        return documentService.getGrammar(id);
+    }
+
+    @GetMapping("/{id}/grammar")
+    public String getGrammar(@PathVariable UUID id) {
+        var grammar = documentService.getGrammar(id);
+        if (grammar == null) {
+            return "null";
+        }
+        return grammar;
+    }
+
+    @DeleteMapping("/{id}/grammar")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteGrammar(@PathVariable UUID id) {
+        documentService.deleteGrammar(id);
+    }
 }

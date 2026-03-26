@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.84.0] - 2026-03-26
+
+### Added
+
+- Per-document grammars defining custom fields, allowed requirement types, and
+  allowed relation types as JSONB metadata (`PUT /api/v1/documents/{id}/grammar`,
+  `GET /api/v1/documents/{id}/grammar`, `DELETE /api/v1/documents/{id}/grammar`)
+- `custom_fields` JSONB column on requirements for project-specific field values
+- MCP tools: `gc_set_document_grammar`, `gc_get_document_grammar`,
+  `gc_delete_document_grammar`
+
 ## [0.83.0] - 2026-03-26
 
 ### Added

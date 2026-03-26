@@ -85,4 +85,24 @@ public class DocumentService {
         documentRepository.delete(doc);
         log.info("document_deleted: id={} title={}", doc.getId(), doc.getTitle());
     }
+
+    public void setGrammar(UUID id, String grammarJson) {
+        var doc = documentRepository.findById(id).orElseThrow(() -> new NotFoundException("Document not found: " + id));
+        doc.setGrammar(grammarJson);
+        documentRepository.save(doc);
+        log.info("document_grammar_set: id={} title={}", doc.getId(), doc.getTitle());
+    }
+
+    @Transactional(readOnly = true)
+    public String getGrammar(UUID id) {
+        var doc = documentRepository.findById(id).orElseThrow(() -> new NotFoundException("Document not found: " + id));
+        return doc.getGrammar();
+    }
+
+    public void deleteGrammar(UUID id) {
+        var doc = documentRepository.findById(id).orElseThrow(() -> new NotFoundException("Document not found: " + id));
+        doc.setGrammar(null);
+        documentRepository.save(doc);
+        log.info("document_grammar_deleted: id={} title={}", doc.getId(), doc.getTitle());
+    }
 }

@@ -26,6 +26,9 @@ public class Document extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String description;
 
+    @Column(columnDefinition = "JSONB")
+    private String grammar;
+
     @Column(length = 100)
     private String createdBy;
 
@@ -67,6 +70,14 @@ public class Document extends BaseEntity {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public String getGrammar() {
+        return grammar;
+    }
+
+    public void setGrammar(String grammar) {
+        this.grammar = grammar;
     }
 
     public String getCreatedBy() {

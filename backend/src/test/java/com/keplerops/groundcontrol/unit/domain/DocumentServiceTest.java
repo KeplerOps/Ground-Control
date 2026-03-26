@@ -152,6 +152,42 @@ class DocumentServiceTest {
         }
     }
 
+    @Nested
+    class Grammar {
+
+        @Test
+        void setsGrammar() {
+            var doc = makeDocument("SRS", "1.0.0");
+            when(documentRepository.findById(doc.getId())).thenReturn(Optional.of(doc));
+            when(documentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            service.setGrammar(doc.getId(), "{\"fields\":[]}");
+
+            verify(documentRepository).save(any(Document.class));
+        }
+
+        @Test
+        void getsGrammar() {
+            var doc = makeDocument("SRS", "1.0.0");
+            setField(doc, "grammar", "{\"fields\":[]}");
+            when(documentRepository.findById(doc.getId())).thenReturn(Optional.of(doc));
+
+            assertThat(service.getGrammar(doc.getId())).isEqualTo("{\"fields\":[]}");
+        }
+
+        @Test
+        void deletesGrammar() {
+            var doc = makeDocument("SRS", "1.0.0");
+            setField(doc, "grammar", "{\"fields\":[]}");
+            when(documentRepository.findById(doc.getId())).thenReturn(Optional.of(doc));
+            when(documentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            service.deleteGrammar(doc.getId());
+
+            verify(documentRepository).save(any(Document.class));
+        }
+    }
+
     private static Document makeDocument(String title, String version) {
         var doc = new Document(TEST_PROJECT, title, version, null, null);
         setField(doc, "id", UUID.randomUUID());
