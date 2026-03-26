@@ -10,4 +10,6 @@ public interface SectionContentRepository extends JpaRepository<SectionContent, 
     List<SectionContent> findBySectionIdOrderBySortOrder(UUID sectionId);
 
     List<SectionContent> findBySectionIdInOrderBySortOrder(List<UUID> sectionIds);
+
+    boolean existsByRequirementId(UUID requirementId);
 }
