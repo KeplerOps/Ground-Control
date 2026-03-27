@@ -101,6 +101,8 @@ be related, linked, or analyzed.
 | `gc_get_timeline` | `id` (required), `change_category`, `actor`, `from`, `to`, `limit`, `offset` | Unified audit timeline for a requirement |
 | `gc_get_project_timeline` | `project`, `change_category`, `actor`, `from`, `to`, `limit`, `offset` | Unified audit timeline across all requirements in a project |
 | `gc_export_audit_timeline` | `project`, `change_category`, `actor`, `from`, `to`, `limit` | Export project audit timeline as CSV |
+| `gc_export_requirements` | `project`, `format` | Export requirements as CSV, Excel (.xlsx), or PDF |
+| `gc_export_sweep_report` | `project`, `format` | Run sweep analysis and export as CSV, Excel, or PDF |
 
 ## Enums
 

@@ -37,6 +37,8 @@ import {
   getRequirementDiff,
   getProjectTimeline,
   exportAuditTimeline,
+  exportRequirements,
+  exportSweepReport,
   deleteRelation,
   deleteTraceabilityLink,
   materializeGraph,
@@ -619,6 +621,40 @@ server.tool(
     try {
       const csv = await exportAuditTimeline(project, change_category, actor, from, to, limit);
       return ok(csv);
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_export_requirements",
+  "Export all requirements for a project as CSV, Excel (.xlsx), or PDF. CSV is returned as text; binary formats (xlsx, pdf) are returned as base64-encoded data.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    format: z.enum(["csv", "xlsx", "pdf"]).optional().describe("Export format (default: csv)"),
+  },
+  async ({ project, format }) => {
+    try {
+      const result = await exportRequirements(project, format);
+      return ok(result);
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_export_sweep_report",
+  "Run a comprehensive sweep analysis and export results as CSV, Excel (.xlsx), or PDF. Includes cycles, orphans, coverage gaps, violations, and quality gate results. CSV is returned as text; binary formats are returned as base64-encoded data.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    format: z.enum(["csv", "xlsx", "pdf"]).optional().describe("Export format (default: csv)"),
+  },
+  async ({ project, format }) => {
+    try {
+      const result = await exportSweepReport(project, format);
+      return ok(result);
     } catch (e) {
       return err(e);
     }

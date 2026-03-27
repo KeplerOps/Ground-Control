@@ -17,9 +17,9 @@ public final class SdocParser {
     private static final Pattern SECTION_START = Pattern.compile("\\[\\[SECTION]]");
     private static final Pattern SECTION_END = Pattern.compile("\\[\\[/SECTION]]");
     private static final Pattern REQUIREMENT_MARKER = Pattern.compile("\\[REQUIREMENT]");
-    private static final Pattern UID_RE = Pattern.compile("^UID:\\s*(.+)$", Pattern.MULTILINE);
-    private static final Pattern TITLE_RE = Pattern.compile("^TITLE:\\s*(.+)$", Pattern.MULTILINE);
-    private static final Pattern STATEMENT_RE = Pattern.compile("STATEMENT: >>>\\n(.*?)\\n<<<", Pattern.DOTALL);
+    private static final Pattern UID_RE = Pattern.compile("^UID:\\s*([^\\n]++)$", Pattern.MULTILINE);
+    private static final Pattern TITLE_RE = Pattern.compile("^TITLE:\\s*([^\\n]++)$", Pattern.MULTILINE);
+    private static final Pattern STATEMENT_RE = Pattern.compile("STATEMENT: >>>\\n([\\s\\S]*?)\\n<<<");
     private static final Pattern COMMENT_RE = Pattern.compile("^COMMENT:\\s*(.+)$", Pattern.MULTILINE);
     private static final Pattern WAVE_RE = Pattern.compile("Wave\\s+(\\d+)");
     private static final Pattern PARENT_RE = Pattern.compile("- TYPE: Parent\\s+VALUE:\\s*(\\S+)");
@@ -28,7 +28,11 @@ public final class SdocParser {
     private SdocParser() {}
 
     public static List<SdocRequirement> parse(String text) {
-        // Phase 1: Build wave ranges from section markers
+        List<WaveRange> waveRanges = buildWaveRanges(text);
+        return parseRequirementBlocks(text, waveRanges);
+    }
+
+    private static List<WaveRange> buildWaveRanges(String text) {
         List<int[]> sectionStarts = collectPositions(SECTION_START, text);
         List<int[]> sectionEnds = collectPositions(SECTION_END, text);
 
@@ -36,86 +40,100 @@ public final class SdocParser {
         for (int i = 0; i < sectionStarts.size(); i++) {
             int start = sectionStarts.get(i)[0];
             int end = i < sectionEnds.size() ? sectionEnds.get(i)[0] : text.length();
-
-            // Find TITLE within 200 chars of section start
-            int searchEnd = Math.min(start + 200, text.length());
-            String titleSearchArea = text.substring(start, searchEnd);
-            Matcher titleMatcher = TITLE_RE.matcher(titleSearchArea);
-
-            Integer wave = null;
-            if (titleMatcher.find()) {
-                Matcher waveMatcher = WAVE_RE.matcher(titleMatcher.group(1));
-                if (waveMatcher.find()) {
-                    wave = Integer.parseInt(waveMatcher.group(1));
-                }
-            }
+            Integer wave = extractWaveFromSection(text, start);
             waveRanges.add(new WaveRange(start, end, wave));
         }
+        return waveRanges;
+    }
 
-        // Phase 2: Parse requirement blocks
+    private static Integer extractWaveFromSection(String text, int sectionStart) {
+        int searchEnd = Math.min(sectionStart + 200, text.length());
+        String titleSearchArea = text.substring(sectionStart, searchEnd);
+        Matcher titleMatcher = TITLE_RE.matcher(titleSearchArea);
+        if (titleMatcher.find()) {
+            Matcher waveMatcher = WAVE_RE.matcher(titleMatcher.group(1));
+            if (waveMatcher.find()) {
+                return Integer.parseInt(waveMatcher.group(1));
+            }
+        }
+        return null;
+    }
+
+    private static List<SdocRequirement> parseRequirementBlocks(String text, List<WaveRange> waveRanges) {
         List<SdocRequirement> requirements = new ArrayList<>();
         Matcher reqMatcher = REQUIREMENT_MARKER.matcher(text);
 
         while (reqMatcher.find()) {
-            int blockStart = reqMatcher.end();
-            int blockEnd = text.length();
-
-            // Find end of this block (next marker of any type)
-            for (String marker : List.of("[REQUIREMENT]", "[TEXT]", "[[SECTION]]", "[[/SECTION]]")) {
-                int idx = text.indexOf(marker, blockStart);
-                if (idx != -1 && idx < blockEnd) {
-                    blockEnd = idx;
-                }
+            String block = extractBlock(text, reqMatcher.end());
+            SdocRequirement req = parseBlock(block, waveRanges, reqMatcher.start());
+            if (req != null) {
+                requirements.add(req);
             }
-            String block = text.substring(blockStart, blockEnd);
-
-            Matcher uidMatcher = UID_RE.matcher(block);
-            String uid = uidMatcher.find() ? uidMatcher.group(1).strip() : null;
-
-            if (uid == null) {
-                continue;
-            }
-
-            Matcher blockTitleMatcher = TITLE_RE.matcher(block);
-            String title = blockTitleMatcher.find() ? blockTitleMatcher.group(1).strip() : "";
-
-            Matcher statementMatcher = STATEMENT_RE.matcher(block);
-            String statement =
-                    statementMatcher.find() ? statementMatcher.group(1).strip() : "";
-
-            Matcher commentMatcher = COMMENT_RE.matcher(block);
-            String comment = commentMatcher.find() ? commentMatcher.group(1).strip() : "";
-
-            // Extract issue numbers from comment
-            List<Integer> issueRefs = new ArrayList<>();
-            if (!comment.isEmpty()) {
-                Matcher issueMatcher = ISSUE_REF_RE.matcher(comment);
-                while (issueMatcher.find()) {
-                    issueRefs.add(Integer.parseInt(issueMatcher.group(1)));
-                }
-            }
-
-            // Extract parent relations
-            List<String> parentUids = new ArrayList<>();
-            Matcher parentMatcher = PARENT_RE.matcher(block);
-            while (parentMatcher.find()) {
-                parentUids.add(parentMatcher.group(1));
-            }
-
-            // Determine wave from section context
-            Integer wave = waveForOffset(waveRanges, reqMatcher.start());
-
-            requirements.add(new SdocRequirement(
-                    uid,
-                    title,
-                    statement,
-                    comment,
-                    Collections.unmodifiableList(issueRefs),
-                    Collections.unmodifiableList(parentUids),
-                    wave));
         }
 
         return Collections.unmodifiableList(requirements);
+    }
+
+    private static String extractBlock(String text, int blockStart) {
+        int blockEnd = text.length();
+        for (String marker : List.of("[REQUIREMENT]", "[TEXT]", "[[SECTION]]", "[[/SECTION]]")) {
+            int idx = text.indexOf(marker, blockStart);
+            if (idx != -1 && idx < blockEnd) {
+                blockEnd = idx;
+            }
+        }
+        return text.substring(blockStart, blockEnd);
+    }
+
+    private static SdocRequirement parseBlock(String block, List<WaveRange> waveRanges, int reqOffset) {
+        Matcher uidMatcher = UID_RE.matcher(block);
+        String uid = uidMatcher.find() ? uidMatcher.group(1).strip() : null;
+        if (uid == null) {
+            return null;
+        }
+
+        Matcher blockTitleMatcher = TITLE_RE.matcher(block);
+        String title = blockTitleMatcher.find() ? blockTitleMatcher.group(1).strip() : "";
+
+        Matcher statementMatcher = STATEMENT_RE.matcher(block);
+        String statement = statementMatcher.find() ? statementMatcher.group(1).strip() : "";
+
+        Matcher commentMatcher = COMMENT_RE.matcher(block);
+        String comment = commentMatcher.find() ? commentMatcher.group(1).strip() : "";
+
+        List<Integer> issueRefs = extractIssueRefs(comment);
+        List<String> parentUids = extractParentUids(block);
+        Integer wave = waveForOffset(waveRanges, reqOffset);
+
+        return new SdocRequirement(
+                uid,
+                title,
+                statement,
+                comment,
+                Collections.unmodifiableList(issueRefs),
+                Collections.unmodifiableList(parentUids),
+                wave);
+    }
+
+    private static List<Integer> extractIssueRefs(String comment) {
+        if (comment.isEmpty()) {
+            return List.of();
+        }
+        List<Integer> issueRefs = new ArrayList<>();
+        Matcher issueMatcher = ISSUE_REF_RE.matcher(comment);
+        while (issueMatcher.find()) {
+            issueRefs.add(Integer.parseInt(issueMatcher.group(1)));
+        }
+        return issueRefs;
+    }
+
+    private static List<String> extractParentUids(String block) {
+        List<String> parentUids = new ArrayList<>();
+        Matcher parentMatcher = PARENT_RE.matcher(block);
+        while (parentMatcher.find()) {
+            parentUids.add(parentMatcher.group(1));
+        }
+        return parentUids;
     }
 
     private static Integer waveForOffset(List<WaveRange> waveRanges, int offset) {

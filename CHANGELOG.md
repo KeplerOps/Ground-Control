@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.87.2] - 2026-03-26
+
+### Fixed
+
+- Extract duplicate `"bad_request"` string literal to constant in `GlobalExceptionHandler`
+- Extract duplicate `"relations"` string literal to constant in `ImportService`
+- Replace `Stream.collect(Collectors.toList())` with `Stream.toList()` in `AnalysisService`
+- Use `Map.computeIfPresent()` instead of get-and-check pattern in `ReqifParser`
+- Add explicit regex grouping for alternation precedence in `AgeGraphService`
+- Reduce loop break/continue count in `ImportService` by extracting helper methods
+
+## [0.87.1] - 2026-03-26
+
+### Changed
+
+- Refactor `EmbeddingService.embedProject` to reduce cognitive complexity
+  by extracting batch processing and embedding classification helpers
+- Refactor `AnalysisService.getWorkOrder` to reduce cognitive complexity
+  by extracting dependency mapping, blocking status computation,
+  topological sorting, and wave item building into private methods
+- Refactor `GitHubIssueSyncService.syncGitHubIssues` to reduce cognitive
+  complexity by extracting issue upsert and traceability link update phases
+- Refactor `SdocParser.parse` to reduce cognitive complexity by extracting
+  wave range building, block extraction, and field parsing helpers
+
+## [0.87.0] - 2026-03-26
+
+### Added
+
+- Export requirements data to CSV, Excel (.xlsx), and PDF formats via
+  `GET /api/v1/export/requirements?format={csv|xlsx|pdf}`
+- Export sweep analysis results to CSV, Excel, and PDF via
+  `POST /api/v1/export/sweep?format={csv|xlsx|pdf}`
+- MCP tools `gc_export_requirements` and `gc_export_sweep_report` for
+  programmatic export access
+- Shared `CsvUtils` utility centralizing CSV formula-injection protection
+- Apache POI (Excel) and OpenPDF (PDF) dependencies for report generation
+
 ## [0.86.0] - 2026-03-26
 
 ### Added
