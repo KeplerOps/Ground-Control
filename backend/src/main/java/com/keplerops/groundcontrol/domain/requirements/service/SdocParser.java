@@ -17,9 +17,9 @@ public final class SdocParser {
     private static final Pattern SECTION_START = Pattern.compile("\\[\\[SECTION]]");
     private static final Pattern SECTION_END = Pattern.compile("\\[\\[/SECTION]]");
     private static final Pattern REQUIREMENT_MARKER = Pattern.compile("\\[REQUIREMENT]");
-    private static final Pattern UID_RE = Pattern.compile("^UID:\\s*(.+)$", Pattern.MULTILINE);
-    private static final Pattern TITLE_RE = Pattern.compile("^TITLE:\\s*(.+)$", Pattern.MULTILINE);
-    private static final Pattern STATEMENT_RE = Pattern.compile("STATEMENT: >>>\\n(.*?)\\n<<<", Pattern.DOTALL);
+    private static final Pattern UID_RE = Pattern.compile("^UID:\\s*([^\\n]++)$", Pattern.MULTILINE);
+    private static final Pattern TITLE_RE = Pattern.compile("^TITLE:\\s*([^\\n]++)$", Pattern.MULTILINE);
+    private static final Pattern STATEMENT_RE = Pattern.compile("STATEMENT: >>>\\n([\\s\\S]*?)\\n<<<");
     private static final Pattern COMMENT_RE = Pattern.compile("^COMMENT:\\s*(.+)$", Pattern.MULTILINE);
     private static final Pattern WAVE_RE = Pattern.compile("Wave\\s+(\\d+)");
     private static final Pattern PARENT_RE = Pattern.compile("- TYPE: Parent\\s+VALUE:\\s*(\\S+)");
