@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.87.0] - 2026-03-26
+
+### Added
+
+- Export requirements data to CSV, Excel (.xlsx), and PDF formats via
+  `GET /api/v1/export/requirements?format={csv|xlsx|pdf}`
+- Export sweep analysis results to CSV, Excel, and PDF via
+  `POST /api/v1/export/sweep?format={csv|xlsx|pdf}`
+- MCP tools `gc_export_requirements` and `gc_export_sweep_report` for
+  programmatic export access
+- Shared `CsvUtils` utility centralizing CSV formula-injection protection
+- Apache POI (Excel) and OpenPDF (PDF) dependencies for report generation
+
 ## [0.86.0] - 2026-03-26
 
 ### Added

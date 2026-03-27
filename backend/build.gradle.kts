@@ -13,7 +13,7 @@ plugins {
 }
 
 group = "com.keplerops"
-version = "0.19.0"
+version = "0.20.0"
 
 sonar {
     properties {
@@ -56,6 +56,12 @@ dependencies {
 
     // API docs
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.5")
+
+    // Export: Excel (.xlsx)
+    implementation("org.apache.poi:poi-ooxml:5.3.0")
+
+    // Export: PDF
+    implementation("com.github.librepdf:openpdf:2.0.3")
 
     // Error Prone
     errorprone("com.google.errorprone:error_prone_core:2.36.0")

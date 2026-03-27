@@ -405,6 +405,24 @@ export async function exportAuditTimeline(project, changeCategory, actor, from, 
   return resp.text();
 }
 
+export async function exportRequirements(project, format) {
+  const url = buildUrl("/api/v1/export/requirements", { project, format });
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
+  if (!format || format === "csv") return resp.text();
+  const buf = await resp.arrayBuffer();
+  return Buffer.from(buf).toString("base64");
+}
+
+export async function exportSweepReport(project, format) {
+  const url = buildUrl("/api/v1/export/sweep", { project, format });
+  const resp = await fetch(url, { method: "POST" });
+  if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
+  if (!format || format === "csv") return resp.text();
+  const buf = await resp.arrayBuffer();
+  return Buffer.from(buf).toString("base64");
+}
+
 // ---------------------------------------------------------------------------
 // Delete functions
 // ---------------------------------------------------------------------------
