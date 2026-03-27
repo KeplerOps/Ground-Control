@@ -417,6 +417,29 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
 }
 ```
 
+### Export
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| GET | `/export/requirements?project=&format=csv` | — | 200 | Export requirements as CSV, Excel, or PDF |
+| POST | `/export/sweep?project=&format=csv` | — | 200 | Run sweep and export as CSV, Excel, or PDF |
+
+The `format` query parameter accepts `csv` (default), `xlsx`, or `pdf`. Responses include
+`Content-Disposition: attachment` headers with a generated filename.
+
+Content types by format:
+- `csv` — `text/csv`
+- `xlsx` — `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+- `pdf` — `application/pdf`
+
+**Requirements export** includes: UID, title, statement, rationale, type, priority,
+status, wave, traceability links, timestamps. Excel format adds a second "Traceability"
+sheet with the full link matrix.
+
+**Sweep export** includes: summary, cycles, orphans, coverage gaps, cross-wave violations,
+consistency violations, completeness, and quality gate results. Excel format uses one
+sheet per analysis category.
+
 ### Import / Sync
 
 | Method | Path | Body | Status | Purpose |

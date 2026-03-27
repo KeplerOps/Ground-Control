@@ -19,7 +19,8 @@ class RequirementsExportPdfServiceTest {
         byte[] bytes = service.toPdf(data);
         assertThat(bytes.length).isGreaterThan(0);
         // PDF files start with %PDF
-        assertThat(new String(bytes, 0, 5)).startsWith("%PDF");
+        assertThat(new String(bytes, 0, 5, java.nio.charset.StandardCharsets.UTF_8))
+                .startsWith("%PDF");
     }
 
     @Test
