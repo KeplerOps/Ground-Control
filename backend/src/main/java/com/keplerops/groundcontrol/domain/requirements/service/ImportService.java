@@ -31,6 +31,7 @@ public class ImportService {
 
     private static final Logger log = LoggerFactory.getLogger(ImportService.class);
     private static final String LOG_RELATION_FAILED = "import_relation_failed: source={} target={} error={}";
+    private static final String PHASE_RELATIONS = "relations";
 
     private final RequirementService requirementService;
     private final TraceabilityService traceabilityService;
@@ -132,25 +133,34 @@ public class ImportService {
                 continue;
             }
             for (String parentUid : req.parentUids()) {
-                try {
-                    UUID parentId = resolveRequirementId(projectId, parentUid, uidToId);
-                    if (parentId == null) {
-                        errors.add(new ImportError(
-                                "relations", req.uid(), "Parent not found: " + parentUid, null, null, null));
-                        continue;
-                    }
-                    if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(
-                            childId, parentId, RelationType.PARENT)) {
-                        counters.relationsSkipped++;
-                        continue;
-                    }
-                    requirementService.createRelation(childId, parentId, RelationType.PARENT);
-                    counters.relationsCreated++;
-                } catch (ConflictException | NotFoundException | DomainValidationException e) {
-                    log.warn(LOG_RELATION_FAILED, req.uid(), parentUid, e.getMessage());
-                    errors.add(new ImportError("relations", req.uid(), e.getMessage(), parentUid, null, null));
-                }
+                processParentRelation(projectId, req, childId, parentUid, uidToId, counters, errors);
             }
+        }
+    }
+
+    private void processParentRelation(
+            UUID projectId,
+            ParsedRequirement req,
+            UUID childId,
+            String parentUid,
+            Map<String, UUID> uidToId,
+            ImportCounters counters,
+            List<ImportError> errors) {
+        try {
+            UUID parentId = resolveRequirementId(projectId, parentUid, uidToId);
+            if (parentId == null) {
+                errors.add(new ImportError(
+                        PHASE_RELATIONS, req.uid(), "Parent not found: " + parentUid, null, null, null));
+            } else if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(
+                    childId, parentId, RelationType.PARENT)) {
+                counters.relationsSkipped++;
+            } else {
+                requirementService.createRelation(childId, parentId, RelationType.PARENT);
+                counters.relationsCreated++;
+            }
+        } catch (ConflictException | NotFoundException | DomainValidationException e) {
+            log.warn(LOG_RELATION_FAILED, req.uid(), parentUid, e.getMessage());
+            errors.add(new ImportError(PHASE_RELATIONS, req.uid(), e.getMessage(), parentUid, null, null));
         }
     }
 
@@ -170,41 +180,49 @@ public class ImportService {
             ImportCounters counters,
             List<ImportError> errors) {
         for (ReqifRelation rel : relations) {
-            try {
-                UUID sourceId = resolveRequirementId(projectId, rel.sourceIdentifier(), uidToId);
-                if (sourceId == null) {
-                    errors.add(new ImportError(
-                            "relations",
-                            rel.sourceIdentifier(),
-                            "Source not found: " + rel.sourceIdentifier(),
-                            null,
-                            null,
-                            null));
-                    continue;
-                }
-                UUID targetId = resolveRequirementId(projectId, rel.targetIdentifier(), uidToId);
-                if (targetId == null) {
-                    errors.add(new ImportError(
-                            "relations",
-                            rel.targetIdentifier(),
-                            "Target not found: " + rel.targetIdentifier(),
-                            null,
-                            null,
-                            null));
-                    continue;
-                }
-                if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(
-                        sourceId, targetId, rel.relationType())) {
-                    counters.relationsSkipped++;
-                    continue;
-                }
+            processExplicitRelation(projectId, rel, uidToId, counters, errors);
+        }
+    }
+
+    private void processExplicitRelation(
+            UUID projectId,
+            ReqifRelation rel,
+            Map<String, UUID> uidToId,
+            ImportCounters counters,
+            List<ImportError> errors) {
+        try {
+            UUID sourceId = resolveRequirementId(projectId, rel.sourceIdentifier(), uidToId);
+            if (sourceId == null) {
+                errors.add(new ImportError(
+                        PHASE_RELATIONS,
+                        rel.sourceIdentifier(),
+                        "Source not found: " + rel.sourceIdentifier(),
+                        null,
+                        null,
+                        null));
+                return;
+            }
+            UUID targetId = resolveRequirementId(projectId, rel.targetIdentifier(), uidToId);
+            if (targetId == null) {
+                errors.add(new ImportError(
+                        PHASE_RELATIONS,
+                        rel.targetIdentifier(),
+                        "Target not found: " + rel.targetIdentifier(),
+                        null,
+                        null,
+                        null));
+                return;
+            }
+            if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(sourceId, targetId, rel.relationType())) {
+                counters.relationsSkipped++;
+            } else {
                 requirementService.createRelation(sourceId, targetId, rel.relationType());
                 counters.relationsCreated++;
-            } catch (ConflictException | NotFoundException | DomainValidationException e) {
-                log.warn(LOG_RELATION_FAILED, rel.sourceIdentifier(), rel.targetIdentifier(), e.getMessage());
-                errors.add(new ImportError(
-                        "relations", rel.sourceIdentifier(), e.getMessage(), null, rel.targetIdentifier(), null));
             }
+        } catch (ConflictException | NotFoundException | DomainValidationException e) {
+            log.warn(LOG_RELATION_FAILED, rel.sourceIdentifier(), rel.targetIdentifier(), e.getMessage());
+            errors.add(new ImportError(
+                    PHASE_RELATIONS, rel.sourceIdentifier(), e.getMessage(), null, rel.targetIdentifier(), null));
         }
     }
 

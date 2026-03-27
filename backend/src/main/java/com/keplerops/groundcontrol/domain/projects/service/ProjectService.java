@@ -100,9 +100,4 @@ public class ProjectService {
     public UUID resolveProjectId(String projectIdentifier) {
         return resolveProject(projectIdentifier).getId();
     }
-
-    @Transactional(readOnly = true)
-    public String resolveProjectIdentifier(String projectIdentifier) {
-        return resolveProject(projectIdentifier).getIdentifier();
-    }
 }

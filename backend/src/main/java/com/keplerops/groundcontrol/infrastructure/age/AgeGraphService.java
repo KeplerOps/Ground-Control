@@ -143,7 +143,7 @@ public class AgeGraphService implements GraphClient {
         jdbcTemplate.query(sql, rs -> {
             String agtypeValue = rs.getString(1);
             // agtype string values are returned as "value" (with quotes)
-            String uid = agtypeValue.replaceAll("^\"|\"$", "");
+            String uid = agtypeValue.replaceAll("(^\")|(\"$)", "");
             results.add(uid);
         });
         return results;
@@ -154,7 +154,7 @@ public class AgeGraphService implements GraphClient {
         List<String> uids = new ArrayList<>();
         String stripped = agtypeValue.replaceAll("[\\[\\]]", "");
         for (String part : stripped.split(",", -1)) {
-            String trimmed = part.trim().replaceAll("^\"|\"$", "");
+            String trimmed = part.trim().replaceAll("(^\")|(\"$)", "");
             if (!trimmed.isEmpty()) {
                 uids.add(trimmed);
             }

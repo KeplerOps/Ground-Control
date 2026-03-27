@@ -10,6 +10,7 @@ import com.keplerops.groundcontrol.domain.requirements.service.SweepExportCsvSer
 import com.keplerops.groundcontrol.domain.requirements.service.SweepExportExcelService;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepExportPdfService;
 import java.time.LocalDate;
+import java.util.Locale;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -62,11 +63,10 @@ public class ExportController {
     public ResponseEntity<byte[]> exportRequirements(
             @RequestParam(required = false) String project, @RequestParam(defaultValue = "csv") String format) {
         var projectId = projectService.resolveProjectId(project);
-        var projectIdentifier = projectService.resolveProjectIdentifier(project);
-        var data = analysisService.getRequirementsExportData(projectId, projectIdentifier);
-        String baseName = projectIdentifier + "-requirements-" + LocalDate.now();
+        var data = analysisService.getRequirementsExportData(projectId);
+        String baseName = sanitizeFilename(data.projectIdentifier() + "-requirements-" + LocalDate.now());
 
-        return switch (format.toLowerCase()) {
+        return switch (format.toLowerCase(Locale.ROOT)) {
             case "xlsx" -> binaryResponse(requirementsExcelService.toExcel(data), XLSX_MEDIA_TYPE, baseName + ".xlsx");
             case "pdf" -> binaryResponse(
                     requirementsPdfService.toPdf(data), MediaType.APPLICATION_PDF, baseName + ".pdf");
@@ -78,9 +78,9 @@ public class ExportController {
     public ResponseEntity<byte[]> exportSweep(
             @RequestParam(required = false) String project, @RequestParam(defaultValue = "csv") String format) {
         var report = analysisSweepService.sweep(project);
-        String baseName = report.projectIdentifier() + "-sweep-" + LocalDate.now();
+        String baseName = sanitizeFilename(report.projectIdentifier() + "-sweep-" + LocalDate.now());
 
-        return switch (format.toLowerCase()) {
+        return switch (format.toLowerCase(Locale.ROOT)) {
             case "xlsx" -> binaryResponse(sweepExcelService.toExcel(report), XLSX_MEDIA_TYPE, baseName + ".xlsx");
             case "pdf" -> binaryResponse(sweepPdfService.toPdf(report), MediaType.APPLICATION_PDF, baseName + ".pdf");
             default -> textResponse(sweepCsvService.toCsv(report), CSV_MEDIA_TYPE, baseName + ".csv");
@@ -99,5 +99,9 @@ public class ExportController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .contentType(mediaType)
                 .body(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private static String sanitizeFilename(String name) {
+        return name.replaceAll("[^a-zA-Z0-9._-]", "_");
     }
 }
