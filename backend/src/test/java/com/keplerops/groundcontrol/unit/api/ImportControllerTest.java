@@ -47,7 +47,7 @@ class ImportControllerTest {
 
         @Test
         void returns200WithStats() throws Exception {
-            var result = new ImportResult(UUID.randomUUID(), Instant.now(), 10, 8, 2, 5, 1, 12, 3, List.of());
+            var result = new ImportResult(UUID.randomUUID(), Instant.now(), 10, 8, 2, 5, 1, 12, 3, 1, 2, 5, List.of());
 
             when(projectService.resolveProjectId(any())).thenReturn(UUID.randomUUID());
             when(importService.importStrictdoc(any(UUID.class), anyString(), anyString()))
@@ -92,7 +92,7 @@ class ImportControllerTest {
 
         @Test
         void returns200WithStats() throws Exception {
-            var result = new ImportResult(UUID.randomUUID(), Instant.now(), 5, 4, 1, 3, 0, 0, 0, List.of());
+            var result = new ImportResult(UUID.randomUUID(), Instant.now(), 5, 4, 1, 3, 0, 0, 0, 0, 0, 0, List.of());
 
             when(projectService.resolveProjectId(any())).thenReturn(UUID.randomUUID());
             when(importService.importReqif(any(UUID.class), anyString(), anyString()))
