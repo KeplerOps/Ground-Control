@@ -146,7 +146,13 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
     void cleanup() throws Exception {
         try (var conn = dataSource.getConnection();
                 var stmt = conn.createStatement()) {
-            // Delete in FK-safe order: audit tables, then links/relations, then entities
+            // Delete in FK-safe order: section content (references requirements), then
+            // audit tables, links/relations, requirements, and finally documents/sections
+            stmt.executeUpdate(
+                    "DELETE FROM section_content WHERE section_id IN (SELECT id FROM section WHERE document_id IN (SELECT id FROM document WHERE title = 'test-requirements'))");
+            stmt.executeUpdate(
+                    "DELETE FROM section WHERE document_id IN (SELECT id FROM document WHERE title = 'test-requirements')");
+            stmt.executeUpdate("DELETE FROM document WHERE title = 'test-requirements'");
             stmt.executeUpdate(
                     "DELETE FROM traceability_link_audit WHERE requirement_id IN (SELECT id FROM requirement WHERE uid LIKE 'E2E-%')");
             stmt.executeUpdate(
@@ -161,11 +167,6 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
             stmt.executeUpdate("DELETE FROM requirement WHERE uid LIKE 'E2E-%'");
             stmt.executeUpdate(
                     "DELETE FROM requirement_import WHERE source_file IN ('test-requirements.sdoc', 'test/e2e')");
-            stmt.executeUpdate(
-                    "DELETE FROM section_content WHERE section_id IN (SELECT id FROM section WHERE document_id IN (SELECT id FROM document WHERE title = 'test-requirements'))");
-            stmt.executeUpdate(
-                    "DELETE FROM section WHERE document_id IN (SELECT id FROM document WHERE title = 'test-requirements')");
-            stmt.executeUpdate("DELETE FROM document WHERE title = 'test-requirements'");
         }
     }
 
