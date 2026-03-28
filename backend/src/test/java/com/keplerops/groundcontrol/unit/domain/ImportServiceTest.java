@@ -7,8 +7,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.domain.documents.model.Document;
+import com.keplerops.groundcontrol.domain.documents.model.Section;
 import com.keplerops.groundcontrol.domain.documents.repository.DocumentRepository;
 import com.keplerops.groundcontrol.domain.documents.repository.SectionRepository;
+import com.keplerops.groundcontrol.domain.documents.service.CreateDocumentCommand;
+import com.keplerops.groundcontrol.domain.documents.service.CreateSectionCommand;
+import com.keplerops.groundcontrol.domain.documents.service.CreateSectionContentCommand;
 import com.keplerops.groundcontrol.domain.documents.service.DocumentService;
 import com.keplerops.groundcontrol.domain.documents.service.SectionContentService;
 import com.keplerops.groundcontrol.domain.documents.service.SectionService;
@@ -119,12 +124,24 @@ class ImportServiceTest {
 
     private static void setField(Object obj, String fieldName, Object value) {
         try {
-            Field f = obj.getClass().getDeclaredField(fieldName);
+            Field f = findField(obj.getClass(), fieldName);
             f.setAccessible(true);
             f.set(obj, value);
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static Field findField(Class<?> clazz, String fieldName) throws NoSuchFieldException {
+        Class<?> current = clazz;
+        while (current != null) {
+            try {
+                return current.getDeclaredField(fieldName);
+            } catch (NoSuchFieldException e) {
+                current = current.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException(fieldName + " not found in " + clazz.getName() + " hierarchy");
     }
 
     private static String minimalSdoc(String uid) {
@@ -1192,6 +1209,124 @@ class ImportServiceTest {
             service.importReqif(PROJECT_ID, "test.reqif", reqif);
 
             verify(importRepository).save(any(RequirementImport.class));
+        }
+    }
+
+    @Nested
+    class DocumentStructure {
+
+        private static String sdocWithSection() {
+            return """
+                    [[SECTION]]
+                    TITLE: Wave 1 — Foundation
+
+                    [TEXT]
+                    Introduction text.
+
+                    [REQUIREMENT]
+                    UID: DOC-001
+                    TITLE: First
+                    STATEMENT: >>>
+                    Statement.
+                    <<<
+
+                    [[/SECTION]]
+                    """;
+        }
+
+        private void stubCommonMocks(UUID reqId) {
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "DOC-001"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenReturn(makeRequirement("DOC-001", reqId));
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+        }
+
+        @Test
+        void createsDocumentAndSectionFromSdoc() {
+            UUID reqId = UUID.randomUUID();
+            UUID docId = UUID.randomUUID();
+            UUID sectionId = UUID.randomUUID();
+            stubCommonMocks(reqId);
+
+            var mockDoc = new Document(TEST_PROJECT, "my-doc", "1.0.0", "", "");
+            setField(mockDoc, "id", docId);
+            when(documentRepository.findByProjectIdAndTitle(eq(PROJECT_ID), eq("my-doc")))
+                    .thenReturn(Optional.empty());
+            when(documentService.create(any(CreateDocumentCommand.class))).thenReturn(mockDoc);
+
+            var mockSection = new Section(mockDoc, null, "Wave 1 — Foundation", "", 0);
+            setField(mockSection, "id", sectionId);
+            when(sectionRepository.findFirstByDocumentIdAndParentIdIsNullAndTitle(eq(docId), any()))
+                    .thenReturn(Optional.empty());
+            when(sectionService.create(any(CreateSectionCommand.class))).thenReturn(mockSection);
+
+            ImportResult result = service.importStrictdoc(PROJECT_ID, "my-doc.sdoc", sdocWithSection());
+
+            assertThat(result.documentsCreated()).isEqualTo(1);
+            assertThat(result.sectionsCreated()).isEqualTo(1);
+            // 1 text block + 1 requirement ref = 2 content items
+            assertThat(result.sectionContentsCreated()).isEqualTo(2);
+            verify(documentService).create(any(CreateDocumentCommand.class));
+            verify(sectionService).create(any(CreateSectionCommand.class));
+            verify(sectionContentService, org.mockito.Mockito.times(2)).create(any(CreateSectionContentCommand.class));
+        }
+
+        @Test
+        void skipsExistingDocumentOnReimport() {
+            UUID reqId = UUID.randomUUID();
+            UUID docId = UUID.randomUUID();
+            UUID sectionId = UUID.randomUUID();
+            stubCommonMocks(reqId);
+
+            var mockDoc = new Document(TEST_PROJECT, "my-doc", "1.0.0", "", "");
+            setField(mockDoc, "id", docId);
+            when(documentRepository.findByProjectIdAndTitle(eq(PROJECT_ID), eq("my-doc")))
+                    .thenReturn(Optional.of(mockDoc));
+
+            var mockSection = new Section(mockDoc, null, "Wave 1 — Foundation", "", 0);
+            setField(mockSection, "id", sectionId);
+            when(sectionRepository.findFirstByDocumentIdAndParentIdIsNullAndTitle(eq(docId), any()))
+                    .thenReturn(Optional.of(mockSection));
+
+            ImportResult result = service.importStrictdoc(PROJECT_ID, "my-doc.sdoc", sdocWithSection());
+
+            assertThat(result.documentsCreated()).isEqualTo(0);
+            assertThat(result.sectionsCreated()).isEqualTo(0);
+            assertThat(result.sectionContentsCreated()).isEqualTo(0);
+            verify(documentService, never()).create(any(CreateDocumentCommand.class));
+            verify(sectionContentService, never()).create(any(CreateSectionContentCommand.class));
+        }
+
+        @Test
+        void reportsDocumentCountersInResult() {
+            UUID reqId = UUID.randomUUID();
+            UUID docId = UUID.randomUUID();
+            UUID sectionId = UUID.randomUUID();
+            stubCommonMocks(reqId);
+
+            var mockDoc = new Document(TEST_PROJECT, "my-doc", "1.0.0", "", "");
+            setField(mockDoc, "id", docId);
+            when(documentRepository.findByProjectIdAndTitle(eq(PROJECT_ID), eq("my-doc")))
+                    .thenReturn(Optional.empty());
+            when(documentService.create(any(CreateDocumentCommand.class))).thenReturn(mockDoc);
+
+            var mockSection = new Section(mockDoc, null, "Wave 1 — Foundation", "", 0);
+            setField(mockSection, "id", sectionId);
+            when(sectionRepository.findFirstByDocumentIdAndParentIdIsNullAndTitle(eq(docId), any()))
+                    .thenReturn(Optional.empty());
+            when(sectionService.create(any(CreateSectionCommand.class))).thenReturn(mockSection);
+
+            ImportResult result = service.importStrictdoc(PROJECT_ID, "my-doc.sdoc", sdocWithSection());
+
+            assertThat(result.requirementsCreated()).isEqualTo(1);
+            assertThat(result.documentsCreated()).isEqualTo(1);
+            assertThat(result.sectionsCreated()).isEqualTo(1);
+            assertThat(result.sectionContentsCreated()).isEqualTo(2);
         }
     }
 }
