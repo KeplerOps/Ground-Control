@@ -123,6 +123,15 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
     private GitHubIssueSyncRepository issueSyncRepository;
 
     @Autowired
+    private com.keplerops.groundcontrol.domain.documents.repository.DocumentRepository documentRepository;
+
+    @Autowired
+    private com.keplerops.groundcontrol.domain.documents.repository.SectionRepository sectionRepository;
+
+    @Autowired
+    private com.keplerops.groundcontrol.domain.documents.repository.SectionContentRepository sectionContentRepository;
+
+    @Autowired
     private EntityManager entityManager;
 
     @Autowired
@@ -152,6 +161,11 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
             stmt.executeUpdate("DELETE FROM requirement WHERE uid LIKE 'E2E-%'");
             stmt.executeUpdate(
                     "DELETE FROM requirement_import WHERE source_file IN ('test-requirements.sdoc', 'test/e2e')");
+            stmt.executeUpdate(
+                    "DELETE FROM section_content WHERE section_id IN (SELECT id FROM section WHERE document_id IN (SELECT id FROM document WHERE title = 'test-requirements'))");
+            stmt.executeUpdate(
+                    "DELETE FROM section WHERE document_id IN (SELECT id FROM document WHERE title = 'test-requirements')");
+            stmt.executeUpdate("DELETE FROM document WHERE title = 'test-requirements'");
         }
     }
 
@@ -173,9 +187,12 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.requirementsParsed", is(5)))
                 .andExpect(jsonPath("$.requirementsCreated", is(5)))
                 .andExpect(jsonPath("$.relationsCreated", is(2)))
-                .andExpect(jsonPath("$.traceabilityLinksCreated", is(5)));
+                .andExpect(jsonPath("$.traceabilityLinksCreated", is(5)))
+                .andExpect(jsonPath("$.documentsCreated", is(1)))
+                .andExpect(jsonPath("$.sectionsCreated", is(2)))
+                .andExpect(jsonPath("$.sectionContentsCreated", is(7)));
 
-        // Verify via repositories
+        // Verify requirements via repositories
         assertThat(requirementRepository.findByUid("E2E-REQ-001")).isPresent();
         assertThat(requirementRepository.findByUid("E2E-REQ-002")).isPresent();
         assertThat(requirementRepository.findByUid("E2E-REQ-003")).isPresent();
@@ -196,6 +213,31 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
         assertThat(traceabilityLinkRepository.findByRequirementId(req001Id)).hasSize(1);
         assertThat(traceabilityLinkRepository.findByRequirementId(req003.getId()))
                 .hasSize(2);
+
+        // Verify document structure created
+        var doc = documentRepository.findByProjectIdAndTitle(
+                requirementRepository
+                        .findByUid("E2E-REQ-001")
+                        .get()
+                        .getProject()
+                        .getId(),
+                "test-requirements");
+        assertThat(doc).isPresent();
+        var sections =
+                sectionRepository.findByDocumentIdOrderBySortOrder(doc.get().getId());
+        assertThat(sections).hasSize(2);
+        assertThat(sections.get(0).getTitle()).isEqualTo("Wave 1 — Foundation");
+        assertThat(sections.get(1).getTitle()).isEqualTo("Wave 2 — Integration");
+
+        // Verify section content: Wave 1 has 1 text block + 3 requirements = 4 items
+        var wave1Content = sectionContentRepository.findBySectionIdOrderBySortOrder(
+                sections.get(0).getId());
+        assertThat(wave1Content).hasSize(4);
+
+        // Verify section content: Wave 2 has 1 requirement + 1 text block + 1 requirement = 3 items
+        var wave2Content = sectionContentRepository.findBySectionIdOrderBySortOrder(
+                sections.get(1).getId());
+        assertThat(wave2Content).hasSize(3);
     }
 
     @Test
