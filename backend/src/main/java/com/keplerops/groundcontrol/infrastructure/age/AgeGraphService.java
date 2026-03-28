@@ -48,13 +48,13 @@ public class AgeGraphService implements GraphClient {
 
         // Clear existing graph data — graph name is validated against allowlist pattern
         jdbcTemplate.execute( // NOSONAR — AGE Cypher does not support prepared statements; graph name is validated
-                "SELECT * FROM ag_catalog.cypher('" + graph + "', $$ MATCH (n) DETACH DELETE n $$) AS (v agtype)");
+                "SELECT * FROM ag_catalog.cypher('" + graph + "', $gc$MATCH (n) DETACH DELETE n $gc$) AS (v agtype)");
 
         // Create nodes for all requirements
         List<Requirement> requirements = requirementRepository.findAll();
         for (Requirement req : requirements) {
             String cypher = String.format(
-                    "SELECT * FROM ag_catalog.cypher('%s', $$ CREATE (:Requirement {uid: '%s', title: '%s', status: '%s', wave: %s, requirement_type: '%s', priority: '%s'}) $$) AS (v agtype)",
+                    "SELECT * FROM ag_catalog.cypher('%s', $gc$CREATE (:Requirement {uid: '%s', title: '%s', status: '%s', wave: %s, requirement_type: '%s', priority: '%s'}) $gc$) AS (v agtype)",
                     graph,
                     escapeCypher(req.getUid()),
                     escapeCypher(req.getTitle()),
@@ -69,7 +69,7 @@ public class AgeGraphService implements GraphClient {
         List<RequirementRelation> relations = relationRepository.findAllWithSourceAndTarget();
         for (RequirementRelation rel : relations) {
             String cypher = String.format(
-                    "SELECT * FROM ag_catalog.cypher('%s', $$ MATCH (s:Requirement {uid: '%s'}), (t:Requirement {uid: '%s'}) CREATE (s)-[:%s]->(t) $$) AS (v agtype)",
+                    "SELECT * FROM ag_catalog.cypher('%s', $gc$MATCH (s:Requirement {uid: '%s'}), (t:Requirement {uid: '%s'}) CREATE (s)-[:%s]->(t) $gc$) AS (v agtype)",
                     graph,
                     escapeCypher(rel.getSource().getUid()),
                     escapeCypher(rel.getTarget().getUid()),
@@ -91,7 +91,7 @@ public class AgeGraphService implements GraphClient {
         setupSearchPath();
 
         String sql = String.format(
-                "SELECT * FROM ag_catalog.cypher('%s', $$ MATCH (n:Requirement {uid: '%s'})<-[:PARENT*1..%d]-(a) RETURN a.uid $$) AS (v agtype)",
+                "SELECT * FROM ag_catalog.cypher('%s', $gc$MATCH (n:Requirement {uid: '%s'})<-[:PARENT*1..%d]-(a) RETURN a.uid $gc$) AS (v agtype)",
                 graph, escapeCypher(uid), depth);
 
         return extractUidResults(sql);
@@ -108,7 +108,7 @@ public class AgeGraphService implements GraphClient {
         setupSearchPath();
 
         String sql = String.format(
-                "SELECT * FROM ag_catalog.cypher('%s', $$ MATCH (n:Requirement {uid: '%s'})-[:PARENT*1..%d]->(d) RETURN d.uid $$) AS (v agtype)",
+                "SELECT * FROM ag_catalog.cypher('%s', $gc$MATCH (n:Requirement {uid: '%s'})-[:PARENT*1..%d]->(d) RETURN d.uid $gc$) AS (v agtype)",
                 graph, escapeCypher(uid), depth);
 
         return extractUidResults(sql);
@@ -126,7 +126,7 @@ public class AgeGraphService implements GraphClient {
         setupSearchPath();
 
         String sql = String.format(
-                "SELECT * FROM ag_catalog.cypher('%s', $$ MATCH path = (s:Requirement {uid: '%s'})-[*]->(t:Requirement {uid: '%s'}) RETURN [n IN nodes(path) | n.uid], [r IN relationships(path) | label(r)] $$) AS (nodes agtype, rels agtype)",
+                "SELECT * FROM ag_catalog.cypher('%s', $gc$MATCH path = (s:Requirement {uid: '%s'})-[*]->(t:Requirement {uid: '%s'}) RETURN [n IN nodes(path) | n.uid], [r IN relationships(path) | label(r)] $gc$) AS (nodes agtype, rels agtype)",
                 graph, escapeCypher(sourceUid), escapeCypher(targetUid));
 
         List<PathResult> paths = new ArrayList<>();
@@ -175,6 +175,7 @@ public class AgeGraphService implements GraphClient {
         }
         return value.replace("\\", "\\\\")
                 .replace("'", "\\'")
+                .replace("$", "\\u0024")
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
