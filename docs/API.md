@@ -448,6 +448,12 @@ sheet per analysis category.
 | POST | `/admin/import/reqif` | multipart/form-data | 200 | Import .reqif file |
 | POST | `/admin/sync/github?owner=X&repo=Y` | — | 200 | Sync GitHub issues |
 
+StrictDoc import creates requirements, relations, traceability links, and preserves the
+document structure (document, sections, text blocks). The response includes all counters:
+`requirementsParsed`, `requirementsCreated`, `requirementsUpdated`, `relationsCreated`,
+`relationsSkipped`, `traceabilityLinksCreated`, `traceabilityLinksSkipped`,
+`documentsCreated`, `sectionsCreated`, `sectionContentsCreated`, `errors`.
+
 ## Request / Response Format
 
 JSON. Error responses use a nested envelope:

@@ -7,6 +7,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.domain.documents.repository.DocumentRepository;
+import com.keplerops.groundcontrol.domain.documents.repository.SectionRepository;
+import com.keplerops.groundcontrol.domain.documents.service.DocumentService;
+import com.keplerops.groundcontrol.domain.documents.service.SectionContentService;
+import com.keplerops.groundcontrol.domain.documents.service.SectionService;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
@@ -58,6 +63,21 @@ class ImportServiceTest {
     @Mock
     private RequirementImportRepository importRepository;
 
+    @Mock
+    private DocumentService documentService;
+
+    @Mock
+    private DocumentRepository documentRepository;
+
+    @Mock
+    private SectionService sectionService;
+
+    @Mock
+    private SectionRepository sectionRepository;
+
+    @Mock
+    private SectionContentService sectionContentService;
+
     private ImportService service;
 
     private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
@@ -83,7 +103,12 @@ class ImportServiceTest {
                 requirementRepository,
                 relationRepository,
                 traceabilityLinkRepository,
-                importRepository);
+                importRepository,
+                documentService,
+                documentRepository,
+                sectionService,
+                sectionRepository,
+                sectionContentService);
     }
 
     private static Requirement makeRequirement(String uid, UUID id) {

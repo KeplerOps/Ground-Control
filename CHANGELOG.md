@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.88.0] - 2026-03-28
+
+### Added
+
+- StrictDoc import now creates documents, sections, and text blocks,
+  preserving the source file hierarchy (GC-B006)
+- SdocParser returns structured `SdocDocument` with sections and ordered
+  content items (requirement references and text blocks)
+- Import response includes `documentsCreated`, `sectionsCreated`, and
+  `sectionContentsCreated` counters
+- Idempotent document/section creation — re-importing skips existing
+  documents and sections by title match
+
 ## [0.87.2] - 2026-03-26
 
 ### Fixed

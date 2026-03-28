@@ -1047,7 +1047,7 @@ server.tool(
 
 server.tool(
   "gc_import_strictdoc",
-  "Import requirements from a StrictDoc (.sdoc) file. Idempotent: re-importing updates existing requirements by UID.",
+  "Import a StrictDoc (.sdoc) file, creating documents, sections, text blocks, requirements, and relations preserving the source hierarchy. Idempotent: re-importing updates existing requirements by UID and skips existing documents/sections.",
   {
     file_path: z.string().describe("Absolute path to the .sdoc file"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
