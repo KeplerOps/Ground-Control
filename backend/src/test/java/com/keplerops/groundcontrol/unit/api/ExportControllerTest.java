@@ -66,6 +66,9 @@ class ExportControllerTest {
     @MockitoBean
     private SweepExportPdfService sweepPdfService;
 
+    @MockitoBean
+    private com.keplerops.groundcontrol.domain.documents.service.DocumentExportService documentExportService;
+
     private static final UUID PROJECT_ID = UUID.randomUUID();
 
     @Test
@@ -170,5 +173,16 @@ class ExportControllerTest {
         mockMvc.perform(post("/api/v1/export/sweep").param("format", "pdf"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith("application/pdf"));
+    }
+
+    @Test
+    void exportDocument_sdoc_returnsSdocResponse() throws Exception {
+        UUID docId = UUID.randomUUID();
+        when(documentExportService.exportToSdoc(eq(docId))).thenReturn("[[SECTION]]\nTITLE: Test\n[[/SECTION]]\n");
+
+        mockMvc.perform(get("/api/v1/export/document/" + docId))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith("text/plain"))
+                .andExpect(header().string("Content-Disposition", containsString(".sdoc")));
     }
 }

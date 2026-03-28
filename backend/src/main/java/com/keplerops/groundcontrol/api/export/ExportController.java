@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.api.export;
 
+import com.keplerops.groundcontrol.domain.documents.service.DocumentExportService;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisSweepService;
@@ -11,10 +12,12 @@ import com.keplerops.groundcontrol.domain.requirements.service.SweepExportExcelS
 import com.keplerops.groundcontrol.domain.requirements.service.SweepExportPdfService;
 import java.time.LocalDate;
 import java.util.Locale;
+import java.util.UUID;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -28,6 +31,7 @@ public class ExportController {
     private static final MediaType XLSX_MEDIA_TYPE =
             MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
+    private final DocumentExportService documentExportService;
     private final ProjectService projectService;
     private final AnalysisService analysisService;
     private final AnalysisSweepService analysisSweepService;
@@ -39,6 +43,7 @@ public class ExportController {
     private final SweepExportPdfService sweepPdfService;
 
     public ExportController(
+            DocumentExportService documentExportService,
             ProjectService projectService,
             AnalysisService analysisService,
             AnalysisSweepService analysisSweepService,
@@ -48,6 +53,7 @@ public class ExportController {
             SweepExportCsvService sweepCsvService,
             SweepExportExcelService sweepExcelService,
             SweepExportPdfService sweepPdfService) {
+        this.documentExportService = documentExportService;
         this.projectService = projectService;
         this.analysisService = analysisService;
         this.analysisSweepService = analysisSweepService;
@@ -99,6 +105,13 @@ public class ExportController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .contentType(mediaType)
                 .body(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @GetMapping("/document/{documentId}")
+    public ResponseEntity<byte[]> exportDocument(@PathVariable UUID documentId) {
+        String sdoc = documentExportService.exportToSdoc(documentId);
+        String filename = sanitizeFilename("document-" + documentId) + ".sdoc";
+        return textResponse(sdoc, MediaType.TEXT_PLAIN, filename);
     }
 
     private static String sanitizeFilename(String name) {
