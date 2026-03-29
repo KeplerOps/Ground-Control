@@ -39,6 +39,7 @@ import {
   exportAuditTimeline,
   exportRequirements,
   exportSweepReport,
+  exportDocumentSdoc,
   deleteRelation,
   deleteTraceabilityLink,
   materializeGraph,
@@ -654,6 +655,22 @@ server.tool(
   async ({ project, format }) => {
     try {
       const result = await exportSweepReport(project, format);
+      return ok(result);
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_export_document",
+  "Export a document to StrictDoc (.sdoc) format. Returns the .sdoc text content preserving sections, requirements, text blocks, and parent relations.",
+  {
+    document_id: z.string().uuid().describe("Document UUID to export"),
+  },
+  async ({ document_id }) => {
+    try {
+      const result = await exportDocumentSdoc(document_id);
       return ok(result);
     } catch (e) {
       return err(e);

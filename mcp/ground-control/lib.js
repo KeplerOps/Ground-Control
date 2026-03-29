@@ -423,6 +423,13 @@ export async function exportSweepReport(project, format) {
   return Buffer.from(buf).toString("base64");
 }
 
+export async function exportDocumentSdoc(documentId) {
+  const url = buildUrl(`/api/v1/export/document/${encodeURIComponent(documentId)}`, {});
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
+  return resp.text();
+}
+
 // ---------------------------------------------------------------------------
 // Delete functions
 // ---------------------------------------------------------------------------
