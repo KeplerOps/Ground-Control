@@ -1,6 +1,6 @@
 # Ground Control REST API
 
-HTTP API for direct REST usage. Pre-alpha, localhost only, no authentication.
+REST API for direct HTTP usage. Pre-alpha, localhost only, no authentication.
 
 ## Base URL
 

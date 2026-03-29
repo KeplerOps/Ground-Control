@@ -2,12 +2,16 @@ package com.keplerops.groundcontrol.unit.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyIterable;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
+import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
@@ -21,9 +25,11 @@ import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
 import com.keplerops.groundcontrol.domain.requirements.service.DashboardStats;
 import com.keplerops.groundcontrol.domain.requirements.service.RecentChange;
+import com.keplerops.groundcontrol.domain.requirements.service.RequirementExportRecord;
 import com.keplerops.groundcontrol.domain.requirements.service.WorkOrderItem;
 import com.keplerops.groundcontrol.domain.requirements.service.WorkOrderResult;
 import com.keplerops.groundcontrol.domain.requirements.service.WorkOrderWave;
+import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
@@ -39,6 +45,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
@@ -224,6 +231,7 @@ class AnalysisServiceTest {
             var seed = makeRequirement("REQ-SEED", seedId);
 
             when(requirementRepository.findById(seedId)).thenReturn(Optional.of(seed));
+            when(requirementRepository.findAllById(anyIterable())).thenReturn(List.of(seed));
             when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of());
 
@@ -243,7 +251,7 @@ class AnalysisServiceTest {
             var rel = new RequirementRelation(child, parent, RelationType.PARENT);
 
             when(requirementRepository.findById(parentId)).thenReturn(Optional.of(parent));
-            when(requirementRepository.findById(childId)).thenReturn(Optional.of(child));
+            when(requirementRepository.findAllById(anyIterable())).thenReturn(List.of(parent, child));
             when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(rel));
 
@@ -266,8 +274,7 @@ class AnalysisServiceTest {
             var relCB = new RequirementRelation(c, b, RelationType.PARENT);
 
             when(requirementRepository.findById(aId)).thenReturn(Optional.of(a));
-            when(requirementRepository.findById(bId)).thenReturn(Optional.of(b));
-            when(requirementRepository.findById(cId)).thenReturn(Optional.of(c));
+            when(requirementRepository.findAllById(anyIterable())).thenReturn(List.of(a, b, c));
             when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(relBA, relCB));
 
@@ -294,9 +301,7 @@ class AnalysisServiceTest {
             var relDC = new RequirementRelation(d, c, RelationType.DEPENDS_ON);
 
             when(requirementRepository.findById(aId)).thenReturn(Optional.of(a));
-            when(requirementRepository.findById(bId)).thenReturn(Optional.of(b));
-            when(requirementRepository.findById(cId)).thenReturn(Optional.of(c));
-            when(requirementRepository.findById(dId)).thenReturn(Optional.of(d));
+            when(requirementRepository.findAllById(anyIterable())).thenReturn(List.of(a, b, c, d));
             when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
                     .thenReturn(List.of(relBA, relCA, relDB, relDC));
 
@@ -312,6 +317,25 @@ class AnalysisServiceTest {
             when(requirementRepository.findById(missingId)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.impactAnalysis(missingId)).isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void reachableRequirementMissingFromDb_throwsNotFoundException() {
+            UUID seedId = UUID.randomUUID();
+            UUID downstreamId = UUID.randomUUID();
+            var seed = makeRequirement("REQ-SEED", seedId);
+            var downstream = makeRequirement("REQ-DOWN", downstreamId);
+
+            // downstream depends on seed, so downstream is reachable in impact traversal
+            var rel = new RequirementRelation(downstream, seed, RelationType.PARENT);
+
+            when(requirementRepository.findById(seedId)).thenReturn(Optional.of(seed));
+            // findAllById returns only seed — downstream is missing from DB
+            when(requirementRepository.findAllById(anyIterable())).thenReturn(List.of(seed));
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+                    .thenReturn(List.of(rel));
+
+            assertThatThrownBy(() -> service.impactAnalysis(seedId)).isInstanceOf(NotFoundException.class);
         }
     }
 
@@ -569,16 +593,16 @@ class AnalysisServiceTest {
 
             when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
                     .thenReturn(List.of(req));
-            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.IMPLEMENTS))
-                    .thenReturn(true);
-            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.TESTS))
-                    .thenReturn(false);
-            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.DOCUMENTS))
-                    .thenReturn(false);
-            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.CONSTRAINS))
-                    .thenReturn(false);
-            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.VERIFIES))
-                    .thenReturn(false);
+            when(traceabilityLinkRepository.findRequirementIdsWithLinkType(anyCollection(), eq(LinkType.IMPLEMENTS)))
+                    .thenReturn(Set.of(reqId));
+            when(traceabilityLinkRepository.findRequirementIdsWithLinkType(anyCollection(), eq(LinkType.TESTS)))
+                    .thenReturn(Set.of());
+            when(traceabilityLinkRepository.findRequirementIdsWithLinkType(anyCollection(), eq(LinkType.DOCUMENTS)))
+                    .thenReturn(Set.of());
+            when(traceabilityLinkRepository.findRequirementIdsWithLinkType(anyCollection(), eq(LinkType.CONSTRAINS)))
+                    .thenReturn(Set.of());
+            when(traceabilityLinkRepository.findRequirementIdsWithLinkType(anyCollection(), eq(LinkType.VERIFIES)))
+                    .thenReturn(Set.of());
             when(auditService.getRecentRequirementChanges(Set.of(reqId), 10))
                     .thenReturn(
                             List.of(new RecentChange("REQ-COV", "Title", "ADD", Instant.now(), "test-actor", null)));
@@ -913,6 +937,88 @@ class AnalysisServiceTest {
 
             assertThatThrownBy(() -> service.extractSubgraph(PROJECT_ID, List.of("REQ-UNKNOWN")))
                     .isInstanceOf(NotFoundException.class);
+        }
+    }
+
+    @Nested
+    class GetRequirementsExportData {
+
+        @Test
+        void emptyProject_returnsEmptyList() {
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of());
+
+            List<RequirementExportRecord> result = service.getRequirementsExportData(PROJECT_ID);
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        void requirementWithNoLinks_hasEmptyLinks() {
+            UUID reqId = UUID.randomUUID();
+            var req = makeRequirement("REQ-A", reqId);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(req));
+            when(traceabilityLinkRepository.findByRequirementIdIn(anyCollection()))
+                    .thenReturn(List.of());
+
+            List<RequirementExportRecord> result = service.getRequirementsExportData(PROJECT_ID);
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).requirement()).isSameAs(req);
+            assertThat(result.get(0).traceabilityLinks()).isEmpty();
+        }
+
+        @Test
+        void linksGroupedCorrectlyByRequirement() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            var reqA = makeRequirement("REQ-A", aId);
+            var reqB = makeRequirement("REQ-B", bId);
+            var linkA = new TraceabilityLink(reqA, ArtifactType.GITHUB_ISSUE, "issue-1", LinkType.IMPLEMENTS);
+            var linkB1 = new TraceabilityLink(reqB, ArtifactType.GITHUB_ISSUE, "issue-2", LinkType.TESTS);
+            var linkB2 = new TraceabilityLink(reqB, ArtifactType.GITHUB_ISSUE, "issue-3", LinkType.DOCUMENTS);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(reqA, reqB));
+            when(traceabilityLinkRepository.findByRequirementIdIn(anyCollection()))
+                    .thenReturn(List.of(linkA, linkB1, linkB2));
+
+            List<RequirementExportRecord> result = service.getRequirementsExportData(PROJECT_ID);
+
+            assertThat(result).hasSize(2);
+            RequirementExportRecord exportA = result.stream()
+                    .filter(r -> r.requirement().equals(reqA))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(exportA.traceabilityLinks()).containsExactly(linkA);
+            RequirementExportRecord exportB = result.stream()
+                    .filter(r -> r.requirement().equals(reqB))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(exportB.traceabilityLinks()).containsExactlyInAnyOrder(linkB1, linkB2);
+        }
+
+        @Test
+        void singleBatchQueryIssuedForLinks() {
+            UUID aId = UUID.randomUUID();
+            UUID bId = UUID.randomUUID();
+            UUID cId = UUID.randomUUID();
+            var reqA = makeRequirement("REQ-A", aId);
+            var reqB = makeRequirement("REQ-B", bId);
+            var reqC = makeRequirement("REQ-C", cId);
+
+            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+                    .thenReturn(List.of(reqA, reqB, reqC));
+            when(traceabilityLinkRepository.findByRequirementIdIn(anyCollection()))
+                    .thenReturn(List.of());
+
+            List<RequirementExportRecord> result = service.getRequirementsExportData(PROJECT_ID);
+
+            assertThat(result).hasSize(3);
+            Mockito.verify(traceabilityLinkRepository, Mockito.times(1)).findByRequirementIdIn(anyCollection());
+            Mockito.verify(traceabilityLinkRepository, Mockito.never()).findByRequirementId(Mockito.any());
         }
     }
 }

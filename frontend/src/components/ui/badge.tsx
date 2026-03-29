@@ -20,9 +20,6 @@ const typeColors: Record<RequirementType, string> = {
   NON_FUNCTIONAL: "bg-cyan-500/15 text-cyan-400",
   CONSTRAINT: "bg-amber-500/15 text-amber-400",
   INTERFACE: "bg-teal-500/15 text-teal-400",
-  PERFORMANCE: "bg-pink-500/15 text-pink-400",
-  SECURITY: "bg-rose-500/15 text-rose-400",
-  DATA: "bg-indigo-500/15 text-indigo-400",
 };
 
 interface BadgeProps {

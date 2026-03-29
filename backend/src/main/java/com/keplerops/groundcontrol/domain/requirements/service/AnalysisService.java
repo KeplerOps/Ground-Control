@@ -11,7 +11,6 @@ import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -117,13 +116,16 @@ public class AnalysisService {
 
         Set<UUID> reachableIds = GraphAlgorithms.findReachable(requirementId, reverseAdj);
 
-        return reachableIds.stream()
-                .map(id -> id.equals(seed.getId())
-                        ? seed
-                        : requirementRepository
-                                .findById(id)
-                                .orElseThrow(() -> new NotFoundException("Requirement not found: " + id)))
-                .collect(Collectors.toSet());
+        List<Requirement> fetched = requirementRepository.findAllById(reachableIds);
+        if (fetched.size() != reachableIds.size()) {
+            Set<UUID> foundIds = fetched.stream().map(Requirement::getId).collect(Collectors.toSet());
+            UUID missingId = reachableIds.stream()
+                    .filter(id -> !foundIds.contains(id))
+                    .findFirst()
+                    .orElseThrow();
+            throw new NotFoundException("Requirement not found: " + missingId);
+        }
+        return new HashSet<>(fetched);
     }
 
     public List<ConsistencyViolation> detectConsistencyViolations(UUID projectId) {
@@ -389,25 +391,39 @@ public class AnalysisService {
                 })
                 .toList();
 
-        // coverageByLinkType — for each LinkType, count covered requirements
+        // coverageByLinkType — one set-based query per LinkType, no per-requirement calls
         int total = allRequirements.size();
+        Set<UUID> reqIds = allRequirements.stream().map(Requirement::getId).collect(Collectors.toSet());
         Map<String, CoverageStats> coverageByLinkType = new LinkedHashMap<>();
         for (LinkType linkType : LinkType.values()) {
             int covered = 0;
-            for (Requirement req : allRequirements) {
-                if (traceabilityLinkRepository.existsByRequirementIdAndLinkType(req.getId(), linkType)) {
-                    covered++;
-                }
+            if (!reqIds.isEmpty()) {
+                covered = traceabilityLinkRepository
+                        .findRequirementIdsWithLinkType(reqIds, linkType)
+                        .size();
             }
             double percentage = total > 0 ? Math.round(covered * 1000.0 / total) / 10.0 : 0.0;
             coverageByLinkType.put(linkType.name(), new CoverageStats(total, covered, percentage));
         }
 
         // recentChanges — delegate to AuditService
-        Set<UUID> reqIds = allRequirements.stream().map(Requirement::getId).collect(Collectors.toSet());
         List<RecentChange> recentChanges = auditService.getRecentRequirementChanges(reqIds, 10);
 
         return new DashboardStats(total, byStatus, byWave, coverageByLinkType, recentChanges);
+    }
+
+    public List<RequirementExportRecord> getRequirementsExportData(UUID projectId) {
+        List<Requirement> requirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
+        if (requirements.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> reqIds = requirements.stream().map(Requirement::getId).collect(Collectors.toSet());
+        List<TraceabilityLink> allLinks = traceabilityLinkRepository.findByRequirementIdIn(reqIds);
+        Map<UUID, List<TraceabilityLink>> linksByReqId = allLinks.stream()
+                .collect(Collectors.groupingBy(link -> link.getRequirement().getId()));
+        return requirements.stream()
+                .map(req -> new RequirementExportRecord(req, linksByReqId.getOrDefault(req.getId(), List.of())))
+                .toList();
     }
 
     public SubgraphResult extractSubgraph(UUID projectId, List<String> rootUids) {
@@ -456,39 +472,5 @@ public class AnalysisService {
         List<Requirement> requirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
         List<RequirementRelation> relations = relationRepository.findActiveWithSourceAndTargetByProjectId(projectId);
         return new GraphVisualizationResult(requirements, relations);
-    }
-
-    public RequirementsExportData getRequirementsExportData(UUID projectId) {
-        List<Requirement> requirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
-        String projectIdentifier =
-                requirements.isEmpty() ? "" : requirements.get(0).getProject().getIdentifier();
-        List<RequirementsExportData.RequirementSnapshot> snapshots = new ArrayList<>();
-
-        for (Requirement req : requirements) {
-            List<TraceabilityLink> links = traceabilityLinkRepository.findByRequirementId(req.getId());
-            List<RequirementsExportData.TraceabilityLinkSnapshot> linkSnapshots = links.stream()
-                    .map(link -> new RequirementsExportData.TraceabilityLinkSnapshot(
-                            link.getArtifactType().name(),
-                            link.getArtifactIdentifier(),
-                            link.getLinkType().name(),
-                            link.getArtifactUrl(),
-                            link.getArtifactTitle()))
-                    .toList();
-
-            snapshots.add(new RequirementsExportData.RequirementSnapshot(
-                    req.getUid(),
-                    req.getTitle(),
-                    req.getStatement(),
-                    req.getRationale(),
-                    req.getRequirementType().name(),
-                    req.getPriority().name(),
-                    req.getStatus().name(),
-                    req.getWave(),
-                    linkSnapshots,
-                    req.getCreatedAt(),
-                    req.getUpdatedAt()));
-        }
-
-        return new RequirementsExportData(projectIdentifier, Instant.now(), snapshots);
     }
 }

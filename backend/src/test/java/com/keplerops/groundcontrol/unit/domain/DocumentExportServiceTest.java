@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.unit.domain;
 
+import static com.keplerops.groundcontrol.TestUtil.setField;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -24,8 +25,6 @@ import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
-import static com.keplerops.groundcontrol.TestUtil.setField;
-
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -112,11 +111,7 @@ class DocumentExportServiceTest {
         return req;
     }
 
-    private static void setField(Object obj, String fieldName, Object value) {
-        com.keplerops.groundcontrol.TestUtil.setField(obj, fieldName, value);
-    }
-
-    // --- delegation tests (from dev) ---
+    // --- delegation tests ---
 
     @Test
     void exportToSdoc_delegatesToSdocService() {

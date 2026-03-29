@@ -17,6 +17,7 @@ import com.keplerops.groundcontrol.domain.requirements.repository.RequirementImp
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateGitHubIssueCommand;
+import com.keplerops.groundcontrol.domain.requirements.service.CreateTraceabilityLinkCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubClient;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueSyncService;
@@ -355,7 +356,7 @@ class GitHubIssueSyncServiceTest {
             when(gitHubClient.createIssue(anyString(), anyString(), anyString(), anyList()))
                     .thenReturn(issueData);
 
-            var traceLink = new TraceabilityLink(requirement, ArtifactType.GITHUB_ISSUE, "#42", LinkType.IMPLEMENTS);
+            var traceLink = new TraceabilityLink(requirement, ArtifactType.GITHUB_ISSUE, "42", LinkType.IMPLEMENTS);
             setField(traceLink, "id", UUID.randomUUID());
             when(traceabilityService.createLink(any(UUID.class), any())).thenReturn(traceLink);
 
@@ -366,6 +367,33 @@ class GitHubIssueSyncServiceTest {
             assertThat(result.issueNumber()).isEqualTo(42);
             assertThat(result.traceabilityLinkId()).isNotNull();
             assertThat(result.warning()).isNull();
+        }
+
+        @Test
+        void storesTraceabilityLinkWithRawIntegerIdentifier() {
+            var requirement = new Requirement(TEST_PROJECT, "GC-A001", "Test Title", "Test statement");
+            setField(requirement, "id", UUID.randomUUID());
+
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "GC-A001"))
+                    .thenReturn(Optional.of(requirement));
+
+            var issueData = new GitHubIssueData(
+                    42, "GC-A001: Test Title", "OPEN", "https://github.com/o/r/issues/42", "body", List.of());
+            when(gitHubClient.createIssue(anyString(), anyString(), anyString(), anyList()))
+                    .thenReturn(issueData);
+
+            var traceLink = new TraceabilityLink(requirement, ArtifactType.GITHUB_ISSUE, "42", LinkType.IMPLEMENTS);
+            setField(traceLink, "id", UUID.randomUUID());
+            when(traceabilityService.createLink(any(UUID.class), any())).thenReturn(traceLink);
+
+            var command = new CreateGitHubIssueCommand(PROJECT_ID, "GC-A001", "o/r", null, List.of());
+            service.createIssueFromRequirement(command);
+
+            ArgumentCaptor<CreateTraceabilityLinkCommand> captor =
+                    ArgumentCaptor.forClass(CreateTraceabilityLinkCommand.class);
+            verify(traceabilityService).createLink(any(UUID.class), captor.capture());
+            assertThat(captor.getValue().artifactIdentifier()).isEqualTo("42");
+            assertThat(captor.getValue().artifactIdentifier()).doesNotStartWith("#");
         }
     }
 }
