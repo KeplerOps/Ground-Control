@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.90.0] - 2026-03-28
+
+### Added
+
+- Export documents to HTML format for web publishing via
+  `GET /api/v1/export/document/{id}?format=html` (GC-B008)
+- Self-contained HTML with inline CSS, print-friendly styles,
+  XSS-safe escaping, and responsive layout
+- `gc_export_document` MCP tool now accepts `format` param (`sdoc` or `html`)
+
 ## [0.89.0] - 2026-03-28
 
 ### Added

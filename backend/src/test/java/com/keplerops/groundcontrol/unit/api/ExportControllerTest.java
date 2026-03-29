@@ -185,4 +185,15 @@ class ExportControllerTest {
                 .andExpect(content().contentTypeCompatibleWith("text/plain"))
                 .andExpect(header().string("Content-Disposition", containsString(".sdoc")));
     }
+
+    @Test
+    void exportDocument_html_returnsHtmlResponse() throws Exception {
+        UUID docId = UUID.randomUUID();
+        when(documentExportService.exportToHtml(eq(docId))).thenReturn("<!DOCTYPE html><html></html>");
+
+        mockMvc.perform(get("/api/v1/export/document/" + docId).param("format", "html"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith("text/html"))
+                .andExpect(header().string("Content-Disposition", containsString(".html")));
+    }
 }
