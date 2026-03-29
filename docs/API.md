@@ -200,6 +200,168 @@ When no provider is configured, endpoints return `provider_unavailable` status
 }
 ```
 
+### Document Grammar
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| PUT | `/documents/{id}/grammar` | Grammar JSON | 200 | Set/replace grammar |
+| GET | `/documents/{id}/grammar` | — | 200 | Get grammar |
+| DELETE | `/documents/{id}/grammar` | — | 204 | Remove grammar |
+
+**Grammar JSON:**
+
+```json
+{
+  "fields": [
+    {"name": "acceptance_criteria", "type": "STRING", "required": false},
+    {"name": "risk_level", "type": "ENUM", "required": true, "enumValues": ["LOW", "MEDIUM", "HIGH"]}
+  ],
+  "allowedRequirementTypes": ["FUNCTIONAL", "NON_FUNCTIONAL"],
+  "allowedRelationTypes": ["PARENT", "DEPENDS_ON", "REFINES"]
+}
+```
+
+Field types: `STRING`, `INTEGER`, `BOOLEAN`, `ENUM`. Declarative metadata — no runtime enforcement.
+
+### Document Reading Order
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| GET | `/documents/{id}/reading-order` | — | 200 | Full document in reading order |
+
+Returns the document with all sections nested, each containing its content items
+(requirement references and text blocks) in authored sequence.
+
+### Section Content
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/sections/{sectionId}/content` | SectionContentRequest | 201 | Add content item |
+| GET | `/sections/{sectionId}/content` | — | 200 | List content in order |
+| PUT | `/sections/content/{id}` | UpdateSectionContentRequest | 200 | Update content item |
+| DELETE | `/sections/content/{id}` | — | 204 | Delete content item |
+
+**SectionContentRequest:**
+
+```json
+{
+  "contentType": "REQUIREMENT",
+  "requirementId": "uuid",
+  "sortOrder": 0
+}
+```
+
+or for text blocks:
+
+```json
+{
+  "contentType": "TEXT_BLOCK",
+  "textContent": "This section describes...",
+  "sortOrder": 1
+}
+```
+
+### Sections
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/documents/{documentId}/sections` | SectionRequest | 201 | Create section |
+| GET | `/documents/{documentId}/sections` | — | 200 | List sections (flat) |
+| GET | `/documents/{documentId}/sections/tree` | — | 200 | Get section tree (nested) |
+| GET | `/sections/{id}` | — | 200 | Get section |
+| PUT | `/sections/{id}` | UpdateSectionRequest | 200 | Update section |
+| DELETE | `/sections/{id}` | — | 204 | Delete section (cascades children) |
+
+**SectionRequest:**
+
+```json
+{
+  "parentId": null,
+  "title": "Chapter 1: Introduction",
+  "description": "Overview section",
+  "sortOrder": 0
+}
+```
+
+Sections support arbitrary nesting — set `parentId` to a section UUID to create a child.
+The tree endpoint returns a nested JSON structure with `children` arrays.
+
+### Documents
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/documents?project=` | DocumentRequest | 201 | Create document |
+| GET | `/documents?project=` | — | 200 | List documents |
+| GET | `/documents/{id}` | — | 200 | Get document |
+| PUT | `/documents/{id}` | UpdateDocumentRequest | 200 | Update document |
+| DELETE | `/documents/{id}` | — | 204 | Delete document |
+
+**DocumentRequest:**
+
+```json
+{
+  "title": "System Requirements Specification",
+  "version": "1.0.0",
+  "description": "Top-level SRS document"
+}
+```
+
+### Quality Gates
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/quality-gates?project=` | QualityGateRequest | 201 | Create quality gate |
+| GET | `/quality-gates?project=` | — | 200 | List quality gates |
+| GET | `/quality-gates/{id}` | — | 200 | Get quality gate |
+| PUT | `/quality-gates/{id}` | UpdateQualityGateRequest | 200 | Update quality gate |
+| DELETE | `/quality-gates/{id}` | — | 204 | Delete quality gate |
+| POST | `/quality-gates/evaluate?project=` | — | 200 | Evaluate all enabled gates (CI/CD) |
+
+**QualityGateRequest:**
+
+```json
+{
+  "name": "Test Coverage Gate",
+  "description": "Minimum 80% of ACTIVE requirements must have TESTS link",
+  "metricType": "COVERAGE",
+  "metricParam": "TESTS",
+  "scopeStatus": "ACTIVE",
+  "operator": "GTE",
+  "threshold": 80.0
+}
+```
+
+- `metricType`: `COVERAGE` (% with link type), `ORPHAN_COUNT`, `COMPLETENESS` (issue count)
+- `metricParam`: Required for `COVERAGE` — a LinkType (`IMPLEMENTS`, `TESTS`, `DOCUMENTS`, `CONSTRAINS`, `VERIFIES`)
+- `scopeStatus`: Filter requirements by status. Omit to check all non-archived
+- `operator`: `GTE` (>=), `LTE` (<=), `EQ` (==), `GT` (>), `LT` (<)
+
+**QualityGateEvaluationResponse** (`POST /quality-gates/evaluate`):
+
+```json
+{
+  "projectIdentifier": "ground-control",
+  "timestamp": "2026-03-24T06:00:00Z",
+  "passed": false,
+  "totalGates": 2,
+  "passedCount": 1,
+  "failedCount": 1,
+  "gates": [
+    {
+      "gateId": "uuid",
+      "gateName": "Test Coverage Gate",
+      "metricType": "COVERAGE",
+      "metricParam": "TESTS",
+      "scopeStatus": "ACTIVE",
+      "operator": "GTE",
+      "threshold": 80.0,
+      "actualValue": 65.0,
+      "passed": false
+    }
+  ]
+}
+```
+
 ### Graph
 
 | Method | Path | Body | Status | Purpose |
@@ -207,7 +369,11 @@ When no provider is configured, endpoints return `provider_unavailable` status
 | POST | `/admin/graph/materialize` | — | 200 | Materialize graph (AGE) |
 | GET | `/graph/ancestors/{uid}?depth=N` | — | 200 | Ancestor UIDs |
 | GET | `/graph/descendants/{uid}?depth=N` | — | 200 | Descendant UIDs |
+| GET | `/graph/visualization?entityTypes=X,Y` | — | 200 | Full graph (filterable by entity type) |
+| GET | `/graph/subgraph?roots=X&entityTypes=Y` | — | 200 | Subgraph (filterable by entity type) |
 | GET | `/graph/paths?source=X&target=Y` | — | 200 | All paths between two UIDs (with edges) |
+
+`entityTypes` is an optional comma-separated list (e.g. `REQUIREMENT`). When omitted, all entity types are returned. Each node includes an `entityType` field.
 
 **Path response shape:**
 
@@ -251,6 +417,30 @@ When no provider is configured, endpoints return `provider_unavailable` status
 }
 ```
 
+### Export
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| GET | `/export/requirements?project=&format=csv` | — | 200 | Export requirements as CSV, Excel, or PDF |
+| POST | `/export/sweep?project=&format=csv` | — | 200 | Run sweep and export as CSV, Excel, or PDF |
+| GET | `/export/document/{documentId}?format=sdoc` | — | 200 | Export document (sdoc, html, pdf, or reqif) |
+
+The `format` query parameter accepts `csv` (default), `xlsx`, or `pdf`. Responses include
+`Content-Disposition: attachment` headers with a generated filename.
+
+Content types by format:
+- `csv` — `text/csv`
+- `xlsx` — `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+- `pdf` — `application/pdf`
+
+**Requirements export** includes: UID, title, statement, rationale, type, priority,
+status, wave, traceability links, timestamps. Excel format adds a second "Traceability"
+sheet with the full link matrix.
+
+**Sweep export** includes: summary, cycles, orphans, coverage gaps, cross-wave violations,
+consistency violations, completeness, and quality gate results. Excel format uses one
+sheet per analysis category.
+
 ### Import / Sync
 
 | Method | Path | Body | Status | Purpose |
@@ -258,6 +448,12 @@ When no provider is configured, endpoints return `provider_unavailable` status
 | POST | `/admin/import/strictdoc` | multipart/form-data | 200 | Import .sdoc file |
 | POST | `/admin/import/reqif` | multipart/form-data | 200 | Import .reqif file |
 | POST | `/admin/sync/github?owner=X&repo=Y` | — | 200 | Sync GitHub issues |
+
+StrictDoc import creates requirements, relations, traceability links, and preserves the
+document structure (document, sections, text blocks). The response includes all counters:
+`requirementsParsed`, `requirementsCreated`, `requirementsUpdated`, `relationsCreated`,
+`relationsSkipped`, `traceabilityLinksCreated`, `traceabilityLinksSkipped`,
+`documentsCreated`, `sectionsCreated`, `sectionContentsCreated`, `errors`.
 
 ## Request / Response Format
 
