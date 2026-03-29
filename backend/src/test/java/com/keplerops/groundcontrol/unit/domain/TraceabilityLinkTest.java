@@ -19,11 +19,15 @@ class TraceabilityLinkTest {
     private static final Project TEST_PROJECT = createTestProject();
 
     private static Project createTestProject() {
-        var project = new Project("test-project", "Test Project");
+        return createTestProject("test-project", UUID.fromString("00000000-0000-0000-0000-000000000001"));
+    }
+
+    private static Project createTestProject(String identifier, UUID id) {
+        var project = new Project(identifier, "Test Project");
         try {
             var field = Project.class.getDeclaredField("id");
             field.setAccessible(true);
-            field.set(project, UUID.fromString("00000000-0000-0000-0000-000000000001"));
+            field.set(project, id);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -31,7 +35,11 @@ class TraceabilityLinkTest {
     }
 
     private static Requirement createRequirement() {
-        return new Requirement(TEST_PROJECT, "REQ-001", "Title", "Statement");
+        return createRequirement(TEST_PROJECT, "REQ-001");
+    }
+
+    private static Requirement createRequirement(Project project, String uid) {
+        return new Requirement(project, uid, "Title", "Statement");
     }
 
     private static TraceabilityLink createLink() {
@@ -81,6 +89,79 @@ class TraceabilityLinkTest {
             assertThat(link.getArtifactType()).isEqualTo(ArtifactType.ADR);
             assertThat(link.getArtifactIdentifier()).isEqualTo("adr:011");
             assertThat(link.getLinkType()).isEqualTo(LinkType.DOCUMENTS);
+        }
+    }
+
+    @Nested
+    class Equality {
+
+        private static Requirement createRequirementWithId(Project project, String uid, UUID id) {
+            var req = new Requirement(project, uid, "Title", "Statement");
+            try {
+                var f = Requirement.class.getDeclaredField("id");
+                f.setAccessible(true);
+                f.set(req, id);
+            } catch (ReflectiveOperationException e) {
+                throw new RuntimeException(e);
+            }
+            return req;
+        }
+
+        @Test
+        void linksWithSameNaturalKeyAreEqual() {
+            var req1 = createRequirement();
+            var req2 = createRequirement(TEST_PROJECT, "req-001");
+            var link1 = new TraceabilityLink(req1, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
+            var link2 = new TraceabilityLink(req2, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
+            assertThat(link1).isEqualTo(link2);
+        }
+
+        @Test
+        void differentLinkTypeIsNotEqual() {
+            var reqId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+            var req1 = createRequirementWithId(TEST_PROJECT, "REQ-001", reqId);
+            var req2 = createRequirementWithId(TEST_PROJECT, "REQ-001", reqId);
+            var link1 = new TraceabilityLink(req1, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
+            var link2 = new TraceabilityLink(req2, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.TESTS);
+            assertThat(link1).isNotEqualTo(link2);
+        }
+
+        @Test
+        void equalLinksHaveSameHashCode() {
+            var req1 = createRequirement();
+            var req2 = createRequirement(TEST_PROJECT, "req-001");
+            var link1 = new TraceabilityLink(req1, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
+            var link2 = new TraceabilityLink(req2, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
+            assertThat(link1.hashCode()).isEqualTo(link2.hashCode());
+        }
+
+        @Test
+        void sameNaturalKeyInSetDeduplicates() {
+            var req1 = createRequirement();
+            var req2 = createRequirement(TEST_PROJECT, "req-001");
+            var link1 = new TraceabilityLink(req1, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
+            var link2 = new TraceabilityLink(req2, ArtifactType.CODE_FILE, "file:src/Main.java", LinkType.IMPLEMENTS);
+            var set = new java.util.HashSet<TraceabilityLink>();
+            set.add(link1);
+            set.add(link2);
+            assertThat(set).hasSize(1);
+        }
+
+        @Test
+        void linksForDifferentTransientRequirementsAreNotEqual() {
+            var otherProject =
+                    createTestProject("other-project", UUID.fromString("00000000-0000-0000-0000-000000000002"));
+            var link1 = new TraceabilityLink(
+                    createRequirement(TEST_PROJECT, "REQ-001"),
+                    ArtifactType.CODE_FILE,
+                    "file:src/Main.java",
+                    LinkType.IMPLEMENTS);
+            var link2 = new TraceabilityLink(
+                    createRequirement(otherProject, "REQ-001"),
+                    ArtifactType.CODE_FILE,
+                    "file:src/Main.java",
+                    LinkType.IMPLEMENTS);
+            assertThat(link1).isNotEqualTo(link2);
         }
     }
 

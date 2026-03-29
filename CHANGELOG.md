@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.92.1] - 2025-03-29
+
+### Fixed
+
+- Requirement, relation, and traceability-link equality now use project-scoped natural keys so merged-domain objects deduplicate correctly after case-insensitive UID scoping.
+
 ## [0.92.0] - 2026-03-28
 
 ### Added

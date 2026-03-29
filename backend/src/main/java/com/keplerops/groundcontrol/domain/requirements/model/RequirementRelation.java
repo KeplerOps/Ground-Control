@@ -16,6 +16,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 import org.hibernate.envers.Audited;
 
@@ -104,6 +105,21 @@ public class RequirementRelation {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof RequirementRelation other)) return false;
+        return relationType != null
+                && Objects.equals(source, other.source)
+                && Objects.equals(target, other.target)
+                && relationType.equals(other.relationType);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(source, target, relationType);
     }
 
     @Override
