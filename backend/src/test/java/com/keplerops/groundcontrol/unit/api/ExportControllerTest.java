@@ -207,4 +207,15 @@ class ExportControllerTest {
                 .andExpect(content().contentTypeCompatibleWith("application/pdf"))
                 .andExpect(header().string("Content-Disposition", containsString(".pdf")));
     }
+
+    @Test
+    void exportDocument_reqif_returnsXmlResponse() throws Exception {
+        UUID docId = UUID.randomUUID();
+        when(documentExportService.exportToReqif(eq(docId))).thenReturn("<?xml version=\"1.0\"?><REQ-IF/>");
+
+        mockMvc.perform(get("/api/v1/export/document/" + docId).param("format", "reqif"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith("application/xml"))
+                .andExpect(header().string("Content-Disposition", containsString(".reqif")));
+    }
 }

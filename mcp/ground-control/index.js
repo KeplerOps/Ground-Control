@@ -664,10 +664,10 @@ server.tool(
 
 server.tool(
   "gc_export_document",
-  "Export a document to StrictDoc (.sdoc), HTML, or PDF format. Text formats return content directly; PDF returns base64-encoded data.",
+  "Export a document to StrictDoc (.sdoc), HTML, PDF, or ReqIF 1.2 format. Text formats return content directly; PDF returns base64-encoded data.",
   {
     document_id: z.string().uuid().describe("Document UUID to export"),
-    format: z.enum(["sdoc", "html", "pdf"]).optional().describe("Export format (default: sdoc)"),
+    format: z.enum(["sdoc", "html", "pdf", "reqif"]).optional().describe("Export format (default: sdoc)"),
   },
   async ({ document_id, format }) => {
     try {

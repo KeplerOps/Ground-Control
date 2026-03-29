@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.documents.service.DocumentExportHtmlService;
 import com.keplerops.groundcontrol.domain.documents.service.DocumentExportPdfService;
+import com.keplerops.groundcontrol.domain.documents.service.DocumentExportReqifService;
 import com.keplerops.groundcontrol.domain.documents.service.DocumentExportSdocService;
 import com.keplerops.groundcontrol.domain.documents.service.DocumentExportService;
 import com.keplerops.groundcontrol.domain.documents.service.DocumentReadingOrder;
@@ -48,6 +49,9 @@ class DocumentExportServiceTest {
     private DocumentExportPdfService pdfService;
 
     @Mock
+    private DocumentExportReqifService reqifService;
+
+    @Mock
     private RequirementRepository requirementRepository;
 
     @Mock
@@ -63,7 +67,13 @@ class DocumentExportServiceTest {
     @BeforeEach
     void setUp() {
         service = new DocumentExportService(
-                readingOrderService, sdocService, htmlService, pdfService, requirementRepository, relationRepository);
+                readingOrderService,
+                sdocService,
+                htmlService,
+                pdfService,
+                reqifService,
+                requirementRepository,
+                relationRepository);
     }
 
     @Test
