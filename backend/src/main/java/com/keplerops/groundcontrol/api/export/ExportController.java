@@ -116,6 +116,8 @@ public class ExportController {
                     documentExportService.exportToHtml(documentId), MediaType.TEXT_HTML, baseName + ".html");
             case "pdf" -> binaryResponse(
                     documentExportService.exportToPdf(documentId), MediaType.APPLICATION_PDF, baseName + ".pdf");
+            case "reqif" -> textResponse(
+                    documentExportService.exportToReqif(documentId), MediaType.APPLICATION_XML, baseName + ".reqif");
             default -> textResponse(
                     documentExportService.exportToSdoc(documentId), MediaType.TEXT_PLAIN, baseName + ".sdoc");
         };

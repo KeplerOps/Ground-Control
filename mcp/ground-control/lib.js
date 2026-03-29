@@ -427,6 +427,7 @@ export async function exportDocument(documentId, format) {
   const url = buildUrl(`/api/v1/export/document/${encodeURIComponent(documentId)}`, { format });
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
+  // PDF is binary (base64); sdoc, html, reqif are text
   if (format === "pdf") {
     const buf = await resp.arrayBuffer();
     return Buffer.from(buf).toString("base64");

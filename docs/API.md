@@ -423,7 +423,7 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
 |--------|------|------|--------|---------|
 | GET | `/export/requirements?project=&format=csv` | — | 200 | Export requirements as CSV, Excel, or PDF |
 | POST | `/export/sweep?project=&format=csv` | — | 200 | Run sweep and export as CSV, Excel, or PDF |
-| GET | `/export/document/{documentId}?format=sdoc` | — | 200 | Export document (sdoc, html, or pdf) |
+| GET | `/export/document/{documentId}?format=sdoc` | — | 200 | Export document (sdoc, html, pdf, or reqif) |
 
 The `format` query parameter accepts `csv` (default), `xlsx`, or `pdf`. Responses include
 `Content-Disposition: attachment` headers with a generated filename.
