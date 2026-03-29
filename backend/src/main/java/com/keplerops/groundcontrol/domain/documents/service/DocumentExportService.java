@@ -1,5 +1,7 @@
 package com.keplerops.groundcontrol.domain.documents.service;
 
+import com.keplerops.groundcontrol.domain.documents.repository.DocumentRepository;
+import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
@@ -24,6 +26,7 @@ public class DocumentExportService {
     private final DocumentExportHtmlService htmlService;
     private final DocumentExportPdfService pdfService;
     private final DocumentExportReqifService reqifService;
+    private final DocumentRepository documentRepository;
     private final RequirementRepository requirementRepository;
     private final RequirementRelationRepository relationRepository;
 
@@ -33,6 +36,7 @@ public class DocumentExportService {
             DocumentExportHtmlService htmlService,
             DocumentExportPdfService pdfService,
             DocumentExportReqifService reqifService,
+            DocumentRepository documentRepository,
             RequirementRepository requirementRepository,
             RequirementRelationRepository relationRepository) {
         this.readingOrderService = readingOrderService;
@@ -40,36 +44,49 @@ public class DocumentExportService {
         this.htmlService = htmlService;
         this.pdfService = pdfService;
         this.reqifService = reqifService;
+        this.documentRepository = documentRepository;
         this.requirementRepository = requirementRepository;
         this.relationRepository = relationRepository;
     }
 
     public String exportToSdoc(UUID documentId) {
+        UUID projectId = getProjectId(documentId);
         var readingOrder = readingOrderService.getReadingOrder(documentId);
         Set<String> uids = collectRequirementUids(readingOrder.sections());
-        Map<String, RequirementExportData> requirementsByUid = buildRequirementMap(uids);
+        Map<String, RequirementExportData> requirementsByUid = buildRequirementMap(uids, projectId);
         return sdocService.toSdoc(readingOrder, requirementsByUid);
     }
 
     public String exportToHtml(UUID documentId) {
+        UUID projectId = getProjectId(documentId);
         var readingOrder = readingOrderService.getReadingOrder(documentId);
         Set<String> uids = collectRequirementUids(readingOrder.sections());
-        Map<String, RequirementExportData> requirementsByUid = buildRequirementMap(uids);
+        Map<String, RequirementExportData> requirementsByUid = buildRequirementMap(uids, projectId);
         return htmlService.toHtml(readingOrder, requirementsByUid);
     }
 
     public byte[] exportToPdf(UUID documentId) {
+        UUID projectId = getProjectId(documentId);
         var readingOrder = readingOrderService.getReadingOrder(documentId);
         Set<String> uids = collectRequirementUids(readingOrder.sections());
-        Map<String, RequirementExportData> requirementsByUid = buildRequirementMap(uids);
+        Map<String, RequirementExportData> requirementsByUid = buildRequirementMap(uids, projectId);
         return pdfService.toPdf(readingOrder, requirementsByUid);
     }
 
     public String exportToReqif(UUID documentId) {
+        UUID projectId = getProjectId(documentId);
         var readingOrder = readingOrderService.getReadingOrder(documentId);
         Set<String> uids = collectRequirementUids(readingOrder.sections());
-        Map<String, RequirementExportData> requirementsByUid = buildRequirementMap(uids);
+        Map<String, RequirementExportData> requirementsByUid = buildRequirementMap(uids, projectId);
         return reqifService.toReqif(readingOrder, requirementsByUid);
+    }
+
+    private UUID getProjectId(UUID documentId) {
+        return documentRepository
+                .findById(documentId)
+                .orElseThrow(() -> new NotFoundException("Document not found: " + documentId))
+                .getProject()
+                .getId();
     }
 
     private Set<String> collectRequirementUids(List<ReadingOrderNode> sections) {
@@ -85,16 +102,22 @@ public class DocumentExportService {
         return uids;
     }
 
-    private Map<String, RequirementExportData> buildRequirementMap(Set<String> uids) {
+    private Map<String, RequirementExportData> buildRequirementMap(Set<String> uids, UUID projectId) {
         Map<String, RequirementExportData> map = new HashMap<>();
         for (String uid : uids) {
-            requirementRepository.findByUid(uid).ifPresent(req -> {
-                List<String> parentUids = findParentUids(req.getId());
-                map.put(
-                        uid,
-                        new RequirementExportData(
-                                req.getUid(), req.getTitle(), req.getStatement(), buildComment(req), parentUids));
-            });
+            requirementRepository
+                    .findByProjectIdAndUidIgnoreCase(projectId, uid)
+                    .ifPresent(req -> {
+                        List<String> parentUids = findParentUids(req.getId());
+                        map.put(
+                                uid,
+                                new RequirementExportData(
+                                        req.getUid(),
+                                        req.getTitle(),
+                                        req.getStatement(),
+                                        buildComment(req),
+                                        parentUids));
+                    });
         }
         return map;
     }
