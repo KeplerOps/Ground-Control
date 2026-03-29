@@ -1,10 +1,17 @@
-# Ground Control — Coding Standards & Development Practices
+# Ground Control — Coding Standards
 
-**Version:** 1.0.0
+> **This document is superseded.**
+>
+> The canonical coding standards for the current Java 21 / Spring Boot 3.4 stack
+> are in [`docs/CODING_STANDARDS.md`](../docs/CODING_STANDARDS.md).
+>
+> The content below describes the previous Python / Django / Pydantic architecture
+> (see [ADR-013](adrs/013-java-spring-boot-rewrite.md) for the migration rationale)
+> and is **no longer applicable**. It is retained here for historical reference only.
 
 ---
 
-## 1. Project Structure
+## 1. Project Structure (HISTORICAL — Python/Django era)
 
 ```
 Ground-Control/

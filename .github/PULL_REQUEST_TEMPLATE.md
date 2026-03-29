@@ -24,3 +24,4 @@
 - [ ] Domain layer has no framework imports
 - [ ] Envers `@Audited` on new entities if applicable
 - [ ] CHANGELOG.md updated
+- [ ] Architectural docs updated if stack, package structure, or key behaviors changed (`docs/architecture/ARCHITECTURE.md`, `docs/CODING_STANDARDS.md`, relevant ADRs)

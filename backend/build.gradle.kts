@@ -12,7 +12,7 @@ plugins {
 }
 
 group = "com.keplerops"
-version = "0.19.0"
+version = "0.76.0"
 
 // -Pquick: disable slow static analysis for fast dev loops
 val quick = providers.gradleProperty("quick").isPresent
@@ -80,6 +80,11 @@ tasks.withType<JavaCompile>().configureEach {
 if (quick) {
     tasks.withType<com.github.spotbugs.snom.SpotBugsTask>().configureEach { enabled = false }
     tasks.named("checkstyleMain") { enabled = false }
+}
+
+// Generate META-INF/build-info.properties so logback can read the version dynamically
+springBoot {
+    buildInfo()
 }
 
 tasks.register("rapid") {

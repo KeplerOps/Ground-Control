@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
 
+    <!-- Read the service version from Spring Boot build-info (set in build.gradle.kts) -->
+    <springProperty scope="context" name="SERVICE_VERSION" source="info.app.version" defaultValue="unknown"/>
+
     <!-- Console appender for dev (human-readable) -->
     <springProfile name="!prod">
         <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
@@ -17,7 +20,7 @@
     <springProfile name="prod">
         <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
             <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-                <customFields>{"service.name":"ground-control","service.version":"0.19.0"}</customFields>
+                <customFields>{"service.name":"ground-control","service.version":"${SERVICE_VERSION}"}</customFields>
                 <includeMdcKeyName>request_id</includeMdcKeyName>
                 <includeMdcKeyName>tenant_id</includeMdcKeyName>
                 <includeMdcKeyName>actor_id</includeMdcKeyName>
