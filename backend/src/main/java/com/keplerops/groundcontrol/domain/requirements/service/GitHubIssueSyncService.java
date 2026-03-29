@@ -177,7 +177,7 @@ public class GitHubIssueSyncService {
         String warning = null;
         try {
             var linkCommand = new CreateTraceabilityLinkCommand(
-                    ArtifactType.GITHUB_ISSUE, "#" + issue.number(), issue.url(), title, LinkType.IMPLEMENTS);
+                    ArtifactType.GITHUB_ISSUE, String.valueOf(issue.number()), issue.url(), title, LinkType.IMPLEMENTS);
             var link = traceabilityService.createLink(requirement.getId(), linkCommand);
             traceabilityLinkId = link.getId();
         } catch (RuntimeException e) {
