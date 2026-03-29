@@ -42,7 +42,8 @@ class SweepControllerTest {
                 Map.of(),
                 List.of(),
                 List.of(),
-                new CompletenessResult(5, Map.of("DRAFT", 3, "ACTIVE", 2), List.of()));
+                new CompletenessResult(5, Map.of("DRAFT", 3, "ACTIVE", 2), List.of()),
+                null);
     }
 
     private static SweepReport reportWithOrphans(String projectIdentifier) {
@@ -56,7 +57,8 @@ class SweepControllerTest {
                 Map.of(),
                 List.of(),
                 List.of(),
-                new CompletenessResult(5, Map.of("DRAFT", 3, "ACTIVE", 2), List.of()));
+                new CompletenessResult(5, Map.of("DRAFT", 3, "ACTIVE", 2), List.of()),
+                null);
     }
 
     @Test
@@ -94,7 +96,8 @@ class SweepControllerTest {
                 List.of(new SweepReport.CrossWaveViolationSummary("GC-A", 1, "GC-B", 2, "DEPENDS_ON")),
                 List.of(new SweepReport.ConsistencyViolationSummary(
                         "GC-X", "ACTIVE", "GC-Y", "ACTIVE", "ACTIVE_CONFLICT")),
-                new CompletenessResult(5, Map.of("DRAFT", 3), List.of()));
+                new CompletenessResult(5, Map.of("DRAFT", 3), List.of()),
+                null);
 
         when(analysisSweepService.sweep(any())).thenReturn(fullReport);
 

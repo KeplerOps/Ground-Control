@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.api.admin;
 
+import com.keplerops.groundcontrol.api.qualitygates.QualityGateEvaluationResponse;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -16,7 +17,8 @@ public record SweepReportResponse(
         Map<String, List<RequirementRef>> coverageGaps,
         List<CrossWaveViolationRef> crossWaveViolations,
         List<ConsistencyViolationRef> consistencyViolations,
-        CompletenessResponse completeness) {
+        CompletenessResponse completeness,
+        QualityGateEvaluationResponse qualityGateResults) {
 
     public static SweepReportResponse from(SweepReport report) {
         var cycles = report.cycles().stream().map(CycleResponse::from).toList();
@@ -44,6 +46,10 @@ public record SweepReportResponse(
                         v.sourceUid(), v.sourceStatus(), v.targetUid(), v.targetStatus(), v.violationType()))
                 .toList();
 
+        var qualityGateResults = report.qualityGateResults() != null
+                ? QualityGateEvaluationResponse.from(report.qualityGateResults())
+                : null;
+
         return new SweepReportResponse(
                 report.projectIdentifier(),
                 report.timestamp(),
@@ -54,7 +60,8 @@ public record SweepReportResponse(
                 coverageGaps,
                 crossWave,
                 consistency,
-                CompletenessResponse.from(report.completeness()));
+                CompletenessResponse.from(report.completeness()),
+                qualityGateResults);
     }
 
     public record RequirementRef(String uid, String title) {}

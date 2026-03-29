@@ -29,14 +29,18 @@ import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
 import com.keplerops.groundcontrol.domain.requirements.service.AuditService;
 import com.keplerops.groundcontrol.domain.requirements.service.BulkTransitionResult;
+import com.keplerops.groundcontrol.domain.requirements.service.ChangeType;
 import com.keplerops.groundcontrol.domain.requirements.service.CloneRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateRequirementCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.CreateTraceabilityLinkCommand;
 import com.keplerops.groundcontrol.domain.requirements.service.FieldChange;
+import com.keplerops.groundcontrol.domain.requirements.service.RelationChange;
 import com.keplerops.groundcontrol.domain.requirements.service.RelationRevision;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementService;
+import com.keplerops.groundcontrol.domain.requirements.service.RequirementVersionDiff;
 import com.keplerops.groundcontrol.domain.requirements.service.TimelineEntry;
+import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityLinkChange;
 import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityLinkRevision;
 import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityService;
 import com.keplerops.groundcontrol.domain.requirements.service.UpdateRequirementCommand;
@@ -695,6 +699,88 @@ class RequirementControllerTest {
             mockMvc.perform(get("/api/v1/requirements/" + reqId + "/timeline"))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.error.code", is("not_found")));
+        }
+    }
+
+    @Nested
+    class VersionDiff {
+
+        @Test
+        void returns200WithStructuredDiff() throws Exception {
+            var reqId = UUID.randomUUID();
+            var relId = UUID.randomUUID();
+            var linkId = UUID.randomUUID();
+
+            var fieldChanges = Map.of("title", new FieldChange("Old Title", "New Title"));
+            var relationChanges = List.of(
+                    new RelationChange(relId, ChangeType.ADDED, Map.of("relationType", "DEPENDS_ON"), Map.of()));
+            var linkChanges = List.of(new TraceabilityLinkChange(
+                    linkId, ChangeType.REMOVED, Map.of("artifactType", "CODE_FILE"), Map.of()));
+
+            var diff = new RequirementVersionDiff(reqId, 1, 5, fieldChanges, relationChanges, linkChanges);
+            when(auditService.getRequirementDiff(reqId, 1, 5)).thenReturn(diff);
+
+            mockMvc.perform(get("/api/v1/requirements/" + reqId + "/diff")
+                            .param("fromRevision", "1")
+                            .param("toRevision", "5"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.requirementId", is(reqId.toString())))
+                    .andExpect(jsonPath("$.fromRevision", is(1)))
+                    .andExpect(jsonPath("$.toRevision", is(5)))
+                    .andExpect(jsonPath("$.fieldChanges.title.oldValue", is("Old Title")))
+                    .andExpect(jsonPath("$.fieldChanges.title.newValue", is("New Title")))
+                    .andExpect(jsonPath("$.relationChanges[0].changeType", is("ADDED")))
+                    .andExpect(jsonPath("$.relationChanges[0].relationId", is(relId.toString())))
+                    .andExpect(jsonPath("$.traceabilityLinkChanges[0].changeType", is("REMOVED")))
+                    .andExpect(jsonPath("$.traceabilityLinkChanges[0].linkId", is(linkId.toString())));
+        }
+
+        @Test
+        void notFound_returns404() throws Exception {
+            var reqId = UUID.randomUUID();
+            when(auditService.getRequirementDiff(reqId, 1, 5))
+                    .thenThrow(new NotFoundException("Requirement not found"));
+
+            mockMvc.perform(get("/api/v1/requirements/" + reqId + "/diff")
+                            .param("fromRevision", "1")
+                            .param("toRevision", "5"))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.error.code", is("not_found")));
+        }
+
+        @Test
+        void invalidRevisions_returns422() throws Exception {
+            var reqId = UUID.randomUUID();
+            when(auditService.getRequirementDiff(reqId, 5, 1))
+                    .thenThrow(new DomainValidationException("fromRevision must be less than toRevision"));
+
+            mockMvc.perform(get("/api/v1/requirements/" + reqId + "/diff")
+                            .param("fromRevision", "5")
+                            .param("toRevision", "1"))
+                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(jsonPath("$.error.code", is("validation_error")));
+        }
+
+        @Test
+        void missingParams_returns400() throws Exception {
+            var reqId = UUID.randomUUID();
+
+            mockMvc.perform(get("/api/v1/requirements/" + reqId + "/diff")).andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void emptyDiff_returnsEmptyCollections() throws Exception {
+            var reqId = UUID.randomUUID();
+            var diff = new RequirementVersionDiff(reqId, 1, 2, Map.of(), List.of(), List.of());
+            when(auditService.getRequirementDiff(reqId, 1, 2)).thenReturn(diff);
+
+            mockMvc.perform(get("/api/v1/requirements/" + reqId + "/diff")
+                            .param("fromRevision", "1")
+                            .param("toRevision", "2"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.fieldChanges").isEmpty())
+                    .andExpect(jsonPath("$.relationChanges").isEmpty())
+                    .andExpect(jsonPath("$.traceabilityLinkChanges").isEmpty());
         }
     }
 
