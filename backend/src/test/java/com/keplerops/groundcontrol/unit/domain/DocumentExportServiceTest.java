@@ -129,6 +129,78 @@ class DocumentExportServiceTest {
     }
 
     @Test
+    void exportToHtml_delegatesToHtmlService() {
+        var doc = makeDocument(DOC_ID, TEST_PROJECT_A);
+        when(documentRepository.findById(DOC_ID)).thenReturn(Optional.of(doc));
+        var order = new DocumentReadingOrder(DOC_ID, "Test Doc", "1.0", "", List.of());
+        when(readingOrderService.getReadingOrder(DOC_ID)).thenReturn(order);
+        when(htmlService.toHtml(eq(order), any())).thenReturn("<html></html>");
+
+        String result = service.exportToHtml(DOC_ID);
+
+        assertThat(result).isEqualTo("<html></html>");
+        verify(htmlService).toHtml(eq(order), any());
+    }
+
+    @Test
+    void exportToPdf_delegatesToPdfService() {
+        var doc = makeDocument(DOC_ID, TEST_PROJECT_A);
+        when(documentRepository.findById(DOC_ID)).thenReturn(Optional.of(doc));
+        var order = new DocumentReadingOrder(DOC_ID, "Test Doc", "1.0", "", List.of());
+        when(readingOrderService.getReadingOrder(DOC_ID)).thenReturn(order);
+        byte[] pdfBytes = new byte[] {0x25, 0x50, 0x44, 0x46};
+        when(pdfService.toPdf(eq(order), any())).thenReturn(pdfBytes);
+
+        byte[] result = service.exportToPdf(DOC_ID);
+
+        assertThat(result).isEqualTo(pdfBytes);
+        verify(pdfService).toPdf(eq(order), any());
+    }
+
+    @Test
+    void exportToReqif_delegatesToReqifService() {
+        var doc = makeDocument(DOC_ID, TEST_PROJECT_A);
+        when(documentRepository.findById(DOC_ID)).thenReturn(Optional.of(doc));
+        var order = new DocumentReadingOrder(DOC_ID, "Test Doc", "1.0", "", List.of());
+        when(readingOrderService.getReadingOrder(DOC_ID)).thenReturn(order);
+        when(reqifService.toReqif(eq(order), any())).thenReturn("<?xml version=\"1.0\"?><REQ-IF/>");
+
+        String result = service.exportToReqif(DOC_ID);
+
+        assertThat(result).isEqualTo("<?xml version=\"1.0\"?><REQ-IF/>");
+        verify(reqifService).toReqif(eq(order), any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void exportToSdoc_nonParentRelationsAreExcludedFromParentUids() {
+        var doc = makeDocument(DOC_ID, TEST_PROJECT_A);
+        when(documentRepository.findById(DOC_ID)).thenReturn(Optional.of(doc));
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "REQ-001", "Title", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var order = new DocumentReadingOrder(DOC_ID, "Test Doc", "1.0", "", List.of(section));
+        when(readingOrderService.getReadingOrder(DOC_ID)).thenReturn(order);
+
+        var req = makeRequirement("REQ-001", REQ_ID);
+        var otherReq = makeRequirement("OTHER-001", PARENT_REQ_ID);
+        when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID_A, "REQ-001"))
+                .thenReturn(Optional.of(req));
+        // DEPENDS_ON is not PARENT, so should not appear in parentUids
+        var relation = new RequirementRelation(req, otherReq, RelationType.DEPENDS_ON);
+        when(relationRepository.findBySourceId(REQ_ID)).thenReturn(List.of(relation));
+
+        var captor = ArgumentCaptor.forClass(Map.class);
+        when(sdocService.toSdoc(any(), captor.capture())).thenReturn("");
+
+        service.exportToSdoc(DOC_ID);
+
+        var exportData = (com.keplerops.groundcontrol.domain.documents.service.RequirementExportData)
+                captor.getValue().get("REQ-001");
+        assertThat(exportData).isNotNull();
+        assertThat(exportData.parentUids()).isEmpty();
+    }
+
+    @Test
     void exportToSdoc_collectsRequirementUidsAndFetchesDataScopedToProject() {
         var doc = makeDocument(DOC_ID, TEST_PROJECT_A);
         when(documentRepository.findById(DOC_ID)).thenReturn(Optional.of(doc));
