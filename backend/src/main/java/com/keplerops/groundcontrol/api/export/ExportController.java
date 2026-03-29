@@ -108,10 +108,15 @@ public class ExportController {
     }
 
     @GetMapping("/document/{documentId}")
-    public ResponseEntity<byte[]> exportDocument(@PathVariable UUID documentId) {
-        String sdoc = documentExportService.exportToSdoc(documentId);
-        String filename = sanitizeFilename("document-" + documentId) + ".sdoc";
-        return textResponse(sdoc, MediaType.TEXT_PLAIN, filename);
+    public ResponseEntity<byte[]> exportDocument(
+            @PathVariable UUID documentId, @RequestParam(defaultValue = "sdoc") String format) {
+        String baseName = sanitizeFilename("document-" + documentId);
+        return switch (format.toLowerCase(Locale.ROOT)) {
+            case "html" -> textResponse(
+                    documentExportService.exportToHtml(documentId), MediaType.TEXT_HTML, baseName + ".html");
+            default -> textResponse(
+                    documentExportService.exportToSdoc(documentId), MediaType.TEXT_PLAIN, baseName + ".sdoc");
+        };
     }
 
     private static String sanitizeFilename(String name) {

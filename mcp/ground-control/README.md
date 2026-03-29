@@ -103,7 +103,7 @@ be related, linked, or analyzed.
 | `gc_export_audit_timeline` | `project`, `change_category`, `actor`, `from`, `to`, `limit` | Export project audit timeline as CSV |
 | `gc_export_requirements` | `project`, `format` | Export requirements as CSV, Excel (.xlsx), or PDF |
 | `gc_export_sweep_report` | `project`, `format` | Run sweep analysis and export as CSV, Excel, or PDF |
-| `gc_export_document` | `document_id` | Export document to StrictDoc (.sdoc) format |
+| `gc_export_document` | `document_id`, `format` | Export document to StrictDoc (.sdoc) or HTML format |
 
 ## Enums
 
