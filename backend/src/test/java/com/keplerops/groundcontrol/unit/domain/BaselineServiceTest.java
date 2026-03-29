@@ -237,6 +237,24 @@ class BaselineServiceTest {
         }
 
         @Test
+        void rejectsCrossProjectComparison() {
+            var baseline = makeBaseline(BASELINE_ID, "v1.0", 10);
+            var otherProjectId = UUID.fromString("a0000000-0000-0000-0000-000000000002");
+            var otherProject = new Project("other-project", "Other Project");
+            setField(otherProject, "id", otherProjectId);
+            var otherBaseline = new Baseline(otherProject, "v1.0", "desc", 10, "test-actor");
+            setField(otherBaseline, "id", OTHER_BASELINE_ID);
+            setField(otherBaseline, "createdAt", Instant.now());
+
+            when(baselineRepository.findById(BASELINE_ID)).thenReturn(Optional.of(baseline));
+            when(baselineRepository.findById(OTHER_BASELINE_ID)).thenReturn(Optional.of(otherBaseline));
+
+            assertThatThrownBy(() -> service.compare(BASELINE_ID, OTHER_BASELINE_ID))
+                    .isInstanceOf(com.keplerops.groundcontrol.domain.exception.DomainValidationException.class)
+                    .hasMessageContaining("different projects");
+        }
+
+        @Test
         void returnsEmptyDiffForIdenticalBaselines() {
             var baseline = makeBaseline(BASELINE_ID, "v1.0", 10);
             var other = makeBaseline(OTHER_BASELINE_ID, "v1.0-copy", 10);
