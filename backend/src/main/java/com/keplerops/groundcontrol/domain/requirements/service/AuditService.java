@@ -1,6 +1,7 @@
 package com.keplerops.groundcontrol.domain.requirements.service;
 
 import com.keplerops.groundcontrol.domain.audit.GroundControlRevisionEntity;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
@@ -69,6 +70,7 @@ public class AuditService {
                             java.time.Instant.ofEpochMilli(revInfo.getTimestamp()),
                             revType.name(),
                             revInfo.getActor(),
+                            revInfo.getReason(),
                             entity);
                 })
                 .toList();
@@ -99,6 +101,7 @@ public class AuditService {
                             java.time.Instant.ofEpochMilli(revInfo.getTimestamp()),
                             revType.name(),
                             revInfo.getActor(),
+                            revInfo.getReason(),
                             entity);
                 })
                 .toList();
@@ -130,7 +133,8 @@ public class AuditService {
                             entity.getTitle(),
                             revType.name(),
                             java.time.Instant.ofEpochMilli(revInfo.getTimestamp()),
-                            revInfo.getActor());
+                            revInfo.getActor(),
+                            revInfo.getReason());
                 })
                 .toList();
     }
@@ -160,9 +164,108 @@ public class AuditService {
                             java.time.Instant.ofEpochMilli(revInfo.getTimestamp()),
                             revType.name(),
                             revInfo.getActor(),
+                            revInfo.getReason(),
                             entity);
                 })
                 .toList();
+    }
+
+    /**
+     * Returns a structured diff between two revisions of a single requirement, including per-field
+     * changes, added/removed/modified relations, and added/removed/modified traceability links.
+     */
+    public RequirementVersionDiff getRequirementDiff(UUID id, int fromRevision, int toRevision) {
+        if (!requirementRepository.existsById(id)) {
+            throw new NotFoundException("Requirement not found: " + id);
+        }
+        if (fromRevision >= toRevision) {
+            throw new DomainValidationException("fromRevision must be less than toRevision");
+        }
+
+        var auditReader = AuditReaderFactory.get(entityManager);
+
+        var fromEntity = auditReader.find(Requirement.class, id, fromRevision);
+        if (fromEntity == null) {
+            throw new DomainValidationException("Requirement does not exist at revision " + fromRevision);
+        }
+        var toEntity = auditReader.find(Requirement.class, id, toRevision);
+        if (toEntity == null) {
+            throw new DomainValidationException("Requirement does not exist at revision " + toRevision);
+        }
+
+        var fieldChanges = SnapshotMapper.computeDiff(
+                SnapshotMapper.fromRequirement(fromEntity), SnapshotMapper.fromRequirement(toEntity));
+
+        var fromRelations = getRelationSnapshotsAtRevision(id, fromRevision);
+        var toRelations = getRelationSnapshotsAtRevision(id, toRevision);
+        var relationChanges = SnapshotMapper.computeRelationChanges(fromRelations, toRelations);
+
+        var fromLinks = getTraceabilityLinkSnapshotsAtRevision(id, fromRevision);
+        var toLinks = getTraceabilityLinkSnapshotsAtRevision(id, toRevision);
+        var linkChanges = SnapshotMapper.computeTraceabilityLinkChanges(fromLinks, toLinks);
+
+        return new RequirementVersionDiff(id, fromRevision, toRevision, fieldChanges, relationChanges, linkChanges);
+    }
+
+    Map<UUID, Map<String, Object>> getRelationSnapshotsAtRevision(UUID requirementId, int revision) {
+        var auditReader = AuditReaderFactory.get(entityManager);
+
+        @SuppressWarnings("unchecked")
+        List<Object[]> results = auditReader
+                .createQuery()
+                .forRevisionsOfEntity(RequirementRelation.class, false, true)
+                .add(AuditEntity.revisionNumber().le(revision))
+                .add(AuditEntity.disjunction()
+                        .add(AuditEntity.relatedId("source").eq(requirementId))
+                        .add(AuditEntity.relatedId("target").eq(requirementId)))
+                .addOrder(AuditEntity.revisionNumber().asc())
+                .getResultList();
+
+        return replayToAliveSnapshots(
+                results,
+                row -> {
+                    var entity = (RequirementRelation) row[0];
+                    return Map.entry(entity.getId(), SnapshotMapper.fromRelation(entity));
+                },
+                row -> ((RevisionType) row[2]));
+    }
+
+    Map<UUID, Map<String, Object>> getTraceabilityLinkSnapshotsAtRevision(UUID requirementId, int revision) {
+        var auditReader = AuditReaderFactory.get(entityManager);
+
+        @SuppressWarnings("unchecked")
+        List<Object[]> results = auditReader
+                .createQuery()
+                .forRevisionsOfEntity(TraceabilityLink.class, false, true)
+                .add(AuditEntity.revisionNumber().le(revision))
+                .add(AuditEntity.relatedId("requirement").eq(requirementId))
+                .addOrder(AuditEntity.revisionNumber().asc())
+                .getResultList();
+
+        return replayToAliveSnapshots(
+                results,
+                row -> {
+                    var entity = (TraceabilityLink) row[0];
+                    return Map.entry(entity.getId(), SnapshotMapper.fromTraceabilityLink(entity));
+                },
+                row -> ((RevisionType) row[2]));
+    }
+
+    Map<UUID, Map<String, Object>> replayToAliveSnapshots(
+            List<Object[]> results,
+            java.util.function.Function<Object[], Map.Entry<UUID, Map<String, Object>>> snapshotExtractor,
+            java.util.function.Function<Object[], RevisionType> revTypeExtractor) {
+        var alive = new HashMap<UUID, Map<String, Object>>();
+        for (Object[] row : results) {
+            var entry = snapshotExtractor.apply(row);
+            var revType = revTypeExtractor.apply(row);
+            if (revType == RevisionType.DEL) {
+                alive.remove(entry.getKey());
+            } else {
+                alive.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return alive;
     }
 
     /**
@@ -170,7 +273,7 @@ public class AuditService {
      * including requirement field changes, relation changes, and traceability link changes.
      */
     public List<TimelineEntry> getRequirementTimeline(
-            UUID id, ChangeCategory changeCategory, Instant from, Instant to, int limit, int offset) {
+            UUID id, ChangeCategory changeCategory, String actor, Instant from, Instant to, int limit, int offset) {
         if (!requirementRepository.existsById(id)) {
             throw new NotFoundException("Requirement not found: " + id);
         }
@@ -187,7 +290,49 @@ public class AuditService {
             entries.addAll(buildTraceabilityLinkEntries(id));
         }
 
+        return filterAndPaginate(entries, actor, from, to, limit, offset);
+    }
+
+    /**
+     * Returns a unified, chronologically-sorted audit timeline across all requirements in a project.
+     *
+     * <p>TODO: This loads all revisions into memory then filters/paginates. Move to DB-level
+     * pagination (e.g. a native query joining revinfo with audit tables) before beta to avoid
+     * O(requirements * revisions) memory usage on large projects.
+     */
+    public List<TimelineEntry> getProjectTimeline(
+            UUID projectId,
+            ChangeCategory changeCategory,
+            String actor,
+            Instant from,
+            Instant to,
+            int limit,
+            int offset) {
+        var requirements = requirementRepository.findByProjectId(projectId);
+        var entries = new ArrayList<TimelineEntry>();
+
+        for (var requirement : requirements) {
+            var reqId = requirement.getId();
+            if (changeCategory == null || changeCategory == ChangeCategory.REQUIREMENT) {
+                entries.addAll(buildRequirementEntries(reqId));
+            }
+            if (changeCategory == null || changeCategory == ChangeCategory.RELATION) {
+                entries.addAll(buildRelationEntries(reqId));
+            }
+            if (changeCategory == null || changeCategory == ChangeCategory.TRACEABILITY_LINK) {
+                entries.addAll(buildTraceabilityLinkEntries(reqId));
+            }
+        }
+
+        return filterAndPaginate(entries, actor, from, to, limit, offset);
+    }
+
+    private List<TimelineEntry> filterAndPaginate(
+            List<TimelineEntry> entries, String actor, Instant from, Instant to, int limit, int offset) {
         var stream = entries.stream();
+        if (actor != null && !actor.isBlank()) {
+            stream = stream.filter(e -> actor.equals(e.actor()));
+        }
         if (from != null) {
             stream = stream.filter(e -> !e.timestamp().isBefore(from));
         }
@@ -231,6 +376,7 @@ public class AuditService {
                     revType.name(),
                     Instant.ofEpochMilli(revInfo.getTimestamp()),
                     revInfo.getActor(),
+                    revInfo.getReason(),
                     ChangeCategory.REQUIREMENT,
                     entity.getId(),
                     snapshot,
@@ -278,6 +424,7 @@ public class AuditService {
                     revType.name(),
                     Instant.ofEpochMilli(revInfo.getTimestamp()),
                     revInfo.getActor(),
+                    revInfo.getReason(),
                     ChangeCategory.RELATION,
                     entity.getId(),
                     snapshot,
@@ -323,6 +470,7 @@ public class AuditService {
                     revType.name(),
                     Instant.ofEpochMilli(revInfo.getTimestamp()),
                     revInfo.getActor(),
+                    revInfo.getReason(),
                     ChangeCategory.TRACEABILITY_LINK,
                     entity.getId(),
                     snapshot,

@@ -1,5 +1,14 @@
 package com.keplerops.groundcontrol.domain.requirements.service;
 
+import com.keplerops.groundcontrol.domain.documents.model.ContentType;
+import com.keplerops.groundcontrol.domain.documents.repository.DocumentRepository;
+import com.keplerops.groundcontrol.domain.documents.repository.SectionRepository;
+import com.keplerops.groundcontrol.domain.documents.service.CreateDocumentCommand;
+import com.keplerops.groundcontrol.domain.documents.service.CreateSectionCommand;
+import com.keplerops.groundcontrol.domain.documents.service.CreateSectionContentCommand;
+import com.keplerops.groundcontrol.domain.documents.service.DocumentService;
+import com.keplerops.groundcontrol.domain.documents.service.SectionContentService;
+import com.keplerops.groundcontrol.domain.documents.service.SectionService;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
@@ -16,6 +25,7 @@ import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -30,6 +40,7 @@ public class ImportService {
 
     private static final Logger log = LoggerFactory.getLogger(ImportService.class);
     private static final String LOG_RELATION_FAILED = "import_relation_failed: source={} target={} error={}";
+    private static final String PHASE_RELATIONS = "relations";
 
     private final RequirementService requirementService;
     private final TraceabilityService traceabilityService;
@@ -37,6 +48,11 @@ public class ImportService {
     private final RequirementRelationRepository relationRepository;
     private final TraceabilityLinkRepository traceabilityLinkRepository;
     private final RequirementImportRepository importRepository;
+    private final DocumentService documentService;
+    private final DocumentRepository documentRepository;
+    private final SectionService sectionService;
+    private final SectionRepository sectionRepository;
+    private final SectionContentService sectionContentService;
 
     public ImportService(
             RequirementService requirementService,
@@ -44,26 +60,37 @@ public class ImportService {
             RequirementRepository requirementRepository,
             RequirementRelationRepository relationRepository,
             TraceabilityLinkRepository traceabilityLinkRepository,
-            RequirementImportRepository importRepository) {
+            RequirementImportRepository importRepository,
+            DocumentService documentService,
+            DocumentRepository documentRepository,
+            SectionService sectionService,
+            SectionRepository sectionRepository,
+            SectionContentService sectionContentService) {
         this.requirementService = requirementService;
         this.traceabilityService = traceabilityService;
         this.requirementRepository = requirementRepository;
         this.relationRepository = relationRepository;
         this.traceabilityLinkRepository = traceabilityLinkRepository;
         this.importRepository = importRepository;
+        this.documentService = documentService;
+        this.documentRepository = documentRepository;
+        this.sectionService = sectionService;
+        this.sectionRepository = sectionRepository;
+        this.sectionContentService = sectionContentService;
     }
 
     public ImportResult importStrictdoc(UUID projectId, String filename, String content) {
-        List<SdocRequirement> parsed = SdocParser.parse(content);
-        var reqs = parsed.stream()
+        SdocDocument doc = SdocParser.parse(content);
+        var reqs = doc.requirements().stream()
                 .map(r -> new ParsedRequirement(r.uid(), r.title(), r.statement(), r.wave(), r.parentUids()))
                 .toList();
         var counters = new ImportCounters();
-        List<Map<String, Object>> errors = new ArrayList<>();
+        List<ImportError> errors = new ArrayList<>();
 
         var uidToId = upsertRequirements(projectId, reqs, counters, errors);
         createParentRelations(projectId, reqs, uidToId, counters, errors);
-        createTraceabilityLinks(parsed, uidToId, counters, errors);
+        createTraceabilityLinks(doc.requirements(), uidToId, counters, errors);
+        createDocumentStructure(projectId, doc, filename, uidToId, counters, errors);
 
         return saveAuditAndBuildResult(ImportSourceType.STRICTDOC, filename, reqs.size(), counters, errors);
     }
@@ -74,7 +101,7 @@ public class ImportService {
                 .map(r -> new ParsedRequirement(r.identifier(), r.title(), r.statement(), null, r.parentIdentifiers()))
                 .toList();
         var counters = new ImportCounters();
-        List<Map<String, Object>> errors = new ArrayList<>();
+        List<ImportError> errors = new ArrayList<>();
 
         var uidToId = upsertRequirements(projectId, reqs, counters, errors);
         createParentRelations(projectId, reqs, uidToId, counters, errors);
@@ -83,11 +110,12 @@ public class ImportService {
         return saveAuditAndBuildResult(ImportSourceType.REQIF, filename, reqs.size(), counters, errors);
     }
 
+    // -----------------------------------------------------------------------
+    // Requirement upsert
+    // -----------------------------------------------------------------------
+
     private Map<String, UUID> upsertRequirements(
-            UUID projectId,
-            List<ParsedRequirement> requirements,
-            ImportCounters counters,
-            List<Map<String, Object>> errors) {
+            UUID projectId, List<ParsedRequirement> requirements, ImportCounters counters, List<ImportError> errors) {
         Map<String, UUID> uidToId = new HashMap<>();
         for (ParsedRequirement req : requirements) {
             try {
@@ -116,44 +144,56 @@ public class ImportService {
                 uidToId.put(req.uid(), reqId);
             } catch (ConflictException | NotFoundException | DomainValidationException e) {
                 log.warn("import_requirement_failed: uid={} error={}", req.uid(), e.getMessage());
-                errors.add(Map.of("phase", "requirements", "uid", req.uid(), "error", e.getMessage()));
+                errors.add(new ImportError("requirements", req.uid(), e.getMessage(), null, null, null));
             }
         }
         return uidToId;
     }
+
+    // -----------------------------------------------------------------------
+    // Relations
+    // -----------------------------------------------------------------------
 
     private void createParentRelations(
             UUID projectId,
             List<ParsedRequirement> requirements,
             Map<String, UUID> uidToId,
             ImportCounters counters,
-            List<Map<String, Object>> errors) {
+            List<ImportError> errors) {
         for (ParsedRequirement req : requirements) {
             UUID childId = uidToId.get(req.uid());
             if (childId == null) {
                 continue;
             }
             for (String parentUid : req.parentUids()) {
-                try {
-                    UUID parentId = resolveRequirementId(projectId, parentUid, uidToId);
-                    if (parentId == null) {
-                        errors.add(Map.of(
-                                "phase", "relations", "uid", req.uid(), "error", "Parent not found: " + parentUid));
-                        continue;
-                    }
-                    if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(
-                            childId, parentId, RelationType.PARENT)) {
-                        counters.relationsSkipped++;
-                        continue;
-                    }
-                    requirementService.createRelation(childId, parentId, RelationType.PARENT);
-                    counters.relationsCreated++;
-                } catch (ConflictException | NotFoundException | DomainValidationException e) {
-                    log.warn(LOG_RELATION_FAILED, req.uid(), parentUid, e.getMessage());
-                    errors.add(Map.of(
-                            "phase", "relations", "uid", req.uid(), "parent", parentUid, "error", e.getMessage()));
-                }
+                processParentRelation(projectId, req, childId, parentUid, uidToId, counters, errors);
             }
+        }
+    }
+
+    private void processParentRelation(
+            UUID projectId,
+            ParsedRequirement req,
+            UUID childId,
+            String parentUid,
+            Map<String, UUID> uidToId,
+            ImportCounters counters,
+            List<ImportError> errors) {
+        try {
+            UUID parentId = resolveRequirementId(projectId, parentUid, uidToId);
+            if (parentId == null) {
+                errors.add(new ImportError(
+                        PHASE_RELATIONS, req.uid(), "Parent not found: " + parentUid, null, null, null));
+            } else if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(
+                    childId, parentId, RelationType.PARENT)) {
+                counters.relationsSkipped++;
+            } else {
+                requirementService.createRelation(childId, parentId, RelationType.PARENT);
+                counters.relationsCreated++;
+            }
+        } catch (ConflictException | NotFoundException | DomainValidationException e) {
+            log.warn(LOG_RELATION_FAILED, req.uid(), parentUid, e.getMessage());
+            errors.add(new ImportError(PHASE_RELATIONS, req.uid(), e.getMessage(), parentUid, null, null));
         }
     }
 
@@ -171,58 +211,63 @@ public class ImportService {
             List<ReqifRelation> relations,
             Map<String, UUID> uidToId,
             ImportCounters counters,
-            List<Map<String, Object>> errors) {
+            List<ImportError> errors) {
         for (ReqifRelation rel : relations) {
-            try {
-                UUID sourceId = resolveRequirementId(projectId, rel.sourceIdentifier(), uidToId);
-                if (sourceId == null) {
-                    errors.add(Map.of(
-                            "phase",
-                            "relations",
-                            "uid",
-                            rel.sourceIdentifier(),
-                            "error",
-                            "Source not found: " + rel.sourceIdentifier()));
-                    continue;
-                }
-                UUID targetId = resolveRequirementId(projectId, rel.targetIdentifier(), uidToId);
-                if (targetId == null) {
-                    errors.add(Map.of(
-                            "phase",
-                            "relations",
-                            "uid",
-                            rel.targetIdentifier(),
-                            "error",
-                            "Target not found: " + rel.targetIdentifier()));
-                    continue;
-                }
-                if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(
-                        sourceId, targetId, rel.relationType())) {
-                    counters.relationsSkipped++;
-                    continue;
-                }
-                requirementService.createRelation(sourceId, targetId, rel.relationType());
-                counters.relationsCreated++;
-            } catch (ConflictException | NotFoundException | DomainValidationException e) {
-                log.warn(LOG_RELATION_FAILED, rel.sourceIdentifier(), rel.targetIdentifier(), e.getMessage());
-                errors.add(Map.of(
-                        "phase",
-                        "relations",
-                        "uid",
-                        rel.sourceIdentifier(),
-                        "target",
-                        rel.targetIdentifier(),
-                        "error",
-                        e.getMessage()));
-            }
+            processExplicitRelation(projectId, rel, uidToId, counters, errors);
         }
     }
+
+    private void processExplicitRelation(
+            UUID projectId,
+            ReqifRelation rel,
+            Map<String, UUID> uidToId,
+            ImportCounters counters,
+            List<ImportError> errors) {
+        try {
+            UUID sourceId = resolveRequirementId(projectId, rel.sourceIdentifier(), uidToId);
+            if (sourceId == null) {
+                errors.add(new ImportError(
+                        PHASE_RELATIONS,
+                        rel.sourceIdentifier(),
+                        "Source not found: " + rel.sourceIdentifier(),
+                        null,
+                        null,
+                        null));
+                return;
+            }
+            UUID targetId = resolveRequirementId(projectId, rel.targetIdentifier(), uidToId);
+            if (targetId == null) {
+                errors.add(new ImportError(
+                        PHASE_RELATIONS,
+                        rel.targetIdentifier(),
+                        "Target not found: " + rel.targetIdentifier(),
+                        null,
+                        null,
+                        null));
+                return;
+            }
+            if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(sourceId, targetId, rel.relationType())) {
+                counters.relationsSkipped++;
+            } else {
+                requirementService.createRelation(sourceId, targetId, rel.relationType());
+                counters.relationsCreated++;
+            }
+        } catch (ConflictException | NotFoundException | DomainValidationException e) {
+            log.warn(LOG_RELATION_FAILED, rel.sourceIdentifier(), rel.targetIdentifier(), e.getMessage());
+            errors.add(new ImportError(
+                    PHASE_RELATIONS, rel.sourceIdentifier(), e.getMessage(), null, rel.targetIdentifier(), null));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Traceability links
+    // -----------------------------------------------------------------------
 
     private void createTraceabilityLinks(
             List<SdocRequirement> parsed,
             Map<String, UUID> uidToId,
             ImportCounters counters,
-            List<Map<String, Object>> errors) {
+            List<ImportError> errors) {
         for (SdocRequirement sdocReq : parsed) {
             UUID reqId = uidToId.get(sdocReq.uid());
             if (reqId == null) {
@@ -246,26 +291,150 @@ public class ImportService {
                             sdocReq.uid(),
                             issueNum,
                             e.getMessage());
-                    errors.add(Map.of(
-                            "phase",
-                            "traceability",
-                            "uid",
-                            sdocReq.uid(),
-                            "issueRef",
-                            String.valueOf(issueNum),
-                            "error",
-                            e.getMessage()));
+                    errors.add(new ImportError(
+                            "traceability", sdocReq.uid(), e.getMessage(), null, null, String.valueOf(issueNum)));
                 }
             }
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Document structure creation
+    // -----------------------------------------------------------------------
+
+    private void createDocumentStructure(
+            UUID projectId,
+            SdocDocument doc,
+            String filename,
+            Map<String, UUID> uidToId,
+            ImportCounters counters,
+            List<ImportError> errors) {
+        if (doc.sections().isEmpty()) {
+            return;
+        }
+
+        try {
+            UUID documentId = findOrCreateDocument(projectId, filename, counters);
+            int sectionOrder = 0;
+            for (SdocSection section : doc.sections()) {
+                createSectionWithContent(documentId, section, sectionOrder++, uidToId, counters, errors);
+            }
+        } catch (ConflictException | NotFoundException | DomainValidationException e) {
+            log.warn("import_document_failed: filename={} error={}", filename, e.getMessage());
+            errors.add(new ImportError("documents", filename, e.getMessage(), null, null, null));
+        }
+    }
+
+    private UUID findOrCreateDocument(UUID projectId, String filename, ImportCounters counters) {
+        String docTitle = deriveDocumentTitle(filename);
+        var existing = documentRepository.findByProjectIdAndTitle(projectId, docTitle);
+        if (existing.isPresent()) {
+            return existing.get().getId();
+        }
+        var created = documentService.create(
+                new CreateDocumentCommand(projectId, docTitle, "1.0.0", "Imported from " + filename));
+        counters.documentsCreated++;
+        return created.getId();
+    }
+
+    private void createSectionWithContent(
+            UUID documentId,
+            SdocSection section,
+            int sortOrder,
+            Map<String, UUID> uidToId,
+            ImportCounters counters,
+            List<ImportError> errors) {
+        try {
+            var existingSection =
+                    sectionRepository.findFirstByDocumentIdAndParentIdIsNullAndTitle(documentId, section.title());
+            UUID sectionId;
+            boolean sectionAlreadyExisted;
+            if (existingSection.isPresent()) {
+                sectionId = existingSection.get().getId();
+                sectionAlreadyExisted = true;
+            } else {
+                var created = sectionService.create(
+                        new CreateSectionCommand(documentId, null, section.title(), "", sortOrder));
+                sectionId = created.getId();
+                counters.sectionsCreated++;
+                sectionAlreadyExisted = false;
+            }
+
+            if (!sectionAlreadyExisted) {
+                int contentOrder = 0;
+                for (SdocContentItem item : section.items()) {
+                    createContentItem(sectionId, item, contentOrder++, uidToId, counters, errors);
+                }
+            }
+        } catch (ConflictException | NotFoundException | DomainValidationException e) {
+            log.warn("import_section_failed: title={} error={}", section.title(), e.getMessage());
+            errors.add(new ImportError("sections", section.title(), e.getMessage(), null, null, null));
+        }
+    }
+
+    private void createContentItem(
+            UUID sectionId,
+            SdocContentItem item,
+            int sortOrder,
+            Map<String, UUID> uidToId,
+            ImportCounters counters,
+            List<ImportError> errors) {
+        try {
+            switch (item) {
+                case SdocContentItem.RequirementRef ref -> {
+                    UUID reqId = uidToId.get(ref.uid());
+                    if (reqId == null) {
+                        errors.add(new ImportError(
+                                "section_content",
+                                ref.uid(),
+                                "Requirement not found for section content",
+                                null,
+                                null,
+                                null));
+                        return;
+                    }
+                    sectionContentService.create(new CreateSectionContentCommand(
+                            sectionId, ContentType.REQUIREMENT, reqId, null, sortOrder));
+                    counters.sectionContentsCreated++;
+                }
+                case SdocContentItem.TextBlock tb -> {
+                    sectionContentService.create(new CreateSectionContentCommand(
+                            sectionId, ContentType.TEXT_BLOCK, null, tb.text(), sortOrder));
+                    counters.sectionContentsCreated++;
+                }
+            }
+        } catch (ConflictException | NotFoundException | DomainValidationException e) {
+            log.warn("import_section_content_failed: error={}", e.getMessage());
+            errors.add(new ImportError("section_content", null, e.getMessage(), null, null, null));
+        }
+    }
+
+    private static String deriveDocumentTitle(String filename) {
+        if (filename == null || filename.isBlank()) {
+            return "Imported Document";
+        }
+        String name = filename;
+        int lastSlash = name.lastIndexOf('/');
+        if (lastSlash >= 0) {
+            name = name.substring(lastSlash + 1);
+        }
+        int dotIndex = name.lastIndexOf('.');
+        if (dotIndex > 0) {
+            name = name.substring(0, dotIndex);
+        }
+        return name;
+    }
+
+    // -----------------------------------------------------------------------
+    // Audit and result
+    // -----------------------------------------------------------------------
 
     private ImportResult saveAuditAndBuildResult(
             ImportSourceType sourceType,
             String filename,
             int parsedCount,
             ImportCounters counters,
-            List<Map<String, Object>> errors) {
+            List<ImportError> errors) {
         var audit = new RequirementImport(sourceType);
         audit.setSourceFile(filename);
         audit.setStats(Map.of(
@@ -275,8 +444,11 @@ public class ImportService {
                 "relationsCreated", counters.relationsCreated,
                 "relationsSkipped", counters.relationsSkipped,
                 "traceabilityLinksCreated", counters.traceabilityLinksCreated,
-                "traceabilityLinksSkipped", counters.traceabilityLinksSkipped));
-        audit.setErrors(errors);
+                "traceabilityLinksSkipped", counters.traceabilityLinksSkipped,
+                "documentsCreated", counters.documentsCreated,
+                "sectionsCreated", counters.sectionsCreated,
+                "sectionContentsCreated", counters.sectionContentsCreated));
+        audit.setErrors(toAuditErrors(errors));
         var savedAudit = importRepository.save(audit);
 
         return new ImportResult(
@@ -289,6 +461,24 @@ public class ImportService {
                 counters.relationsSkipped,
                 counters.traceabilityLinksCreated,
                 counters.traceabilityLinksSkipped,
+                counters.documentsCreated,
+                counters.sectionsCreated,
+                counters.sectionContentsCreated,
                 errors);
+    }
+
+    private static List<Map<String, Object>> toAuditErrors(List<ImportError> errors) {
+        return errors.stream()
+                .map(e -> {
+                    var m = new LinkedHashMap<String, Object>();
+                    m.put("phase", e.phase());
+                    m.put("uid", e.uid());
+                    m.put("error", e.error());
+                    if (e.parent() != null) m.put("parent", e.parent());
+                    if (e.target() != null) m.put("target", e.target());
+                    if (e.issueRef() != null) m.put("issueRef", e.issueRef());
+                    return (Map<String, Object>) m;
+                })
+                .toList();
     }
 }

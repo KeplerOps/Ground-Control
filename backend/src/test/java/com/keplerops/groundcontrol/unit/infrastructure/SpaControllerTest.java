@@ -25,4 +25,21 @@ class SpaControllerTest {
     void nestedClientRoute_forwardsToIndexHtml() throws Exception {
         mockMvc.perform(get("/graph")).andExpect(status().isOk()).andExpect(forwardedUrl("/index.html"));
     }
+
+    @Test
+    void twoSegmentRoute_forwardsToIndexHtml() throws Exception {
+        mockMvc.perform(get("/p/aptl")).andExpect(status().isOk()).andExpect(forwardedUrl("/index.html"));
+    }
+
+    @Test
+    void threeSegmentRoute_forwardsToIndexHtml() throws Exception {
+        mockMvc.perform(get("/p/aptl/graph")).andExpect(status().isOk()).andExpect(forwardedUrl("/index.html"));
+    }
+
+    @Test
+    void fourSegmentRoute_forwardsToIndexHtml() throws Exception {
+        mockMvc.perform(get("/p/aptl/requirements/some-id"))
+                .andExpect(status().isOk())
+                .andExpect(forwardedUrl("/index.html"));
+    }
 }

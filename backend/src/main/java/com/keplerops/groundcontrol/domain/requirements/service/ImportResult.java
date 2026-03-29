@@ -2,7 +2,6 @@ package com.keplerops.groundcontrol.domain.requirements.service;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 public record ImportResult(
@@ -15,7 +14,10 @@ public record ImportResult(
         int relationsSkipped,
         int traceabilityLinksCreated,
         int traceabilityLinksSkipped,
-        List<Map<String, Object>> errors) {
+        int documentsCreated,
+        int sectionsCreated,
+        int sectionContentsCreated,
+        List<ImportError> errors) {
 
     public ImportResult {
         errors = List.copyOf(errors);

@@ -4,4 +4,9 @@ import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
 import java.time.Instant;
 
 public record TraceabilityLinkRevision(
-        int revisionNumber, Instant timestamp, String revisionType, String actor, TraceabilityLink entity) {}
+        int revisionNumber,
+        Instant timestamp,
+        String revisionType,
+        String actor,
+        String reason,
+        TraceabilityLink entity) {}

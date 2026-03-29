@@ -1,12 +1,13 @@
 package com.keplerops.groundcontrol.domain.audit;
 
 /**
- * Thread-local holder for the current actor identity.
+ * Thread-local holder for the current actor identity and optional reason.
  * Set before a mutation, cleared after commit.
  */
 public final class ActorHolder {
 
     private static final ThreadLocal<String> CURRENT = new ThreadLocal<>();
+    private static final ThreadLocal<String> REASON = new ThreadLocal<>();
 
     private ActorHolder() {}
 
@@ -18,7 +19,16 @@ public final class ActorHolder {
         return CURRENT.get();
     }
 
+    public static void setReason(String reason) {
+        REASON.set(reason);
+    }
+
+    public static String getReason() {
+        return REASON.get();
+    }
+
     public static void clear() {
         CURRENT.remove();
+        REASON.remove();
     }
 }

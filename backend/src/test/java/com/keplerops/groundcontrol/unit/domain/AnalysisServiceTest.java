@@ -171,11 +171,7 @@ class AnalysisServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-ORPHAN", reqId);
 
-            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
-                    .thenReturn(List.of(req));
-            when(relationRepository.findBySourceId(reqId)).thenReturn(List.of());
-            when(relationRepository.findByTargetId(reqId)).thenReturn(List.of());
-            when(traceabilityLinkRepository.existsByRequirementId(reqId)).thenReturn(false);
+            when(requirementRepository.findOrphansByProjectId(PROJECT_ID)).thenReturn(List.of(req));
 
             var result = service.findOrphans(PROJECT_ID);
 
@@ -183,32 +179,8 @@ class AnalysisServiceTest {
         }
 
         @Test
-        void withRelation_notOrphan() {
-            UUID reqId = UUID.randomUUID();
-            UUID otherId = UUID.randomUUID();
-            var req = makeRequirement("REQ-LINKED", reqId);
-            var other = makeRequirement("REQ-OTHER", otherId);
-            var rel = new RequirementRelation(req, other, RelationType.PARENT);
-
-            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
-                    .thenReturn(List.of(req));
-            when(relationRepository.findBySourceId(reqId)).thenReturn(List.of(rel));
-
-            var result = service.findOrphans(PROJECT_ID);
-
-            assertThat(result).isEmpty();
-        }
-
-        @Test
-        void withLink_notOrphan() {
-            UUID reqId = UUID.randomUUID();
-            var req = makeRequirement("REQ-TRACED", reqId);
-
-            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
-                    .thenReturn(List.of(req));
-            when(relationRepository.findBySourceId(reqId)).thenReturn(List.of());
-            when(relationRepository.findByTargetId(reqId)).thenReturn(List.of());
-            when(traceabilityLinkRepository.existsByRequirementId(reqId)).thenReturn(true);
+        void withRelationOrLink_notOrphan() {
+            when(requirementRepository.findOrphansByProjectId(PROJECT_ID)).thenReturn(List.of());
 
             var result = service.findOrphans(PROJECT_ID);
 
@@ -224,10 +196,8 @@ class AnalysisServiceTest {
             UUID reqId = UUID.randomUUID();
             var req = makeRequirement("REQ-GAP", reqId);
 
-            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
+            when(requirementRepository.findCoverageGapsByProjectIdAndLinkType(PROJECT_ID, LinkType.TESTS))
                     .thenReturn(List.of(req));
-            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.TESTS))
-                    .thenReturn(false);
 
             var result = service.findCoverageGaps(PROJECT_ID, LinkType.TESTS);
 
@@ -236,13 +206,8 @@ class AnalysisServiceTest {
 
         @Test
         void withLinkType_notGap() {
-            UUID reqId = UUID.randomUUID();
-            var req = makeRequirement("REQ-COVERED", reqId);
-
-            when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
-                    .thenReturn(List.of(req));
-            when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.TESTS))
-                    .thenReturn(true);
+            when(requirementRepository.findCoverageGapsByProjectIdAndLinkType(PROJECT_ID, LinkType.TESTS))
+                    .thenReturn(List.of());
 
             var result = service.findCoverageGaps(PROJECT_ID, LinkType.TESTS);
 
@@ -615,7 +580,8 @@ class AnalysisServiceTest {
             when(traceabilityLinkRepository.existsByRequirementIdAndLinkType(reqId, LinkType.VERIFIES))
                     .thenReturn(false);
             when(auditService.getRecentRequirementChanges(Set.of(reqId), 10))
-                    .thenReturn(List.of(new RecentChange("REQ-COV", "Title", "ADD", Instant.now(), "test-actor")));
+                    .thenReturn(
+                            List.of(new RecentChange("REQ-COV", "Title", "ADD", Instant.now(), "test-actor", null)));
 
             DashboardStats result = service.getDashboardStats(PROJECT_ID);
 

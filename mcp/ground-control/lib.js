@@ -25,6 +25,8 @@ export const ARTIFACT_TYPES = [
   "DOCUMENTATION",
 ];
 export const LINK_TYPES = ["IMPLEMENTS", "TESTS", "DOCUMENTS", "CONSTRAINS", "VERIFIES"];
+export const METRIC_TYPES = ["COVERAGE", "ORPHAN_COUNT", "COMPLETENESS"];
+export const COMPARISON_OPERATORS = ["GTE", "LTE", "EQ", "GT", "LT"];
 
 // ---------------------------------------------------------------------------
 // Field name mapping (snake_case MCP <-> camelCase API)
@@ -79,6 +81,35 @@ const TO_CAMEL = {
   modified_count: "modifiedCount",
   requirement_count: "requirementCount",
   requirement_id: "requirementId",
+  from_revision: "fromRevision",
+  to_revision: "toRevision",
+  field_changes: "fieldChanges",
+  relation_changes: "relationChanges",
+  traceability_link_changes: "traceabilityLinkChanges",
+  change_type: "changeType",
+  old_value: "oldValue",
+  new_value: "newValue",
+  relation_id: "relationId",
+  link_id: "linkId",
+  metric_type: "metricType",
+  metric_param: "metricParam",
+  scope_status: "scopeStatus",
+  total_gates: "totalGates",
+  passed_count: "passedCount",
+  failed_count: "failedCount",
+  gate_id: "gateId",
+  gate_name: "gateName",
+  actual_value: "actualValue",
+  created_by: "createdBy",
+  document_id: "documentId",
+  parent_id: "parentId",
+  sort_order: "sortOrder",
+  section_id: "sectionId",
+  content_type: "contentType",
+  text_content: "textContent",
+  entity_type: "entityType",
+  entity_types: "entityTypes",
+  requirement_uid: "requirementUid",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -211,20 +242,20 @@ export async function updateRequirement(id, data) {
   return request("PUT", `/api/v1/requirements/${encodeURIComponent(id)}`, { body: data });
 }
 
-export async function transitionStatus(id, status) {
-  return request("POST", `/api/v1/requirements/${encodeURIComponent(id)}/transition`, {
-    body: { status },
-  });
+export async function transitionStatus(id, status, reason) {
+  const body = { status };
+  if (reason) body.reason = reason;
+  return request("POST", `/api/v1/requirements/${encodeURIComponent(id)}/transition`, { body });
 }
 
 export async function archiveRequirement(id) {
   return request("POST", `/api/v1/requirements/${encodeURIComponent(id)}/archive`);
 }
 
-export async function bulkTransitionStatus(ids, status) {
-  return request("POST", "/api/v1/requirements/bulk/transition", {
-    body: { ids, status },
-  });
+export async function bulkTransitionStatus(ids, status, reason) {
+  const body = { ids, status };
+  if (reason) body.reason = reason;
+  return request("POST", "/api/v1/requirements/bulk/transition", { body });
 }
 
 export async function cloneRequirement(id, newUid, copyRelations) {
@@ -333,15 +364,75 @@ export async function getTraceabilityLinkHistory(reqId, linkId) {
   return request("GET", `/api/v1/requirements/${encodeURIComponent(reqId)}/traceability/${encodeURIComponent(linkId)}/history`);
 }
 
-export async function getRequirementTimeline(id, changeCategory, from, to, limit, offset) {
+export async function getRequirementTimeline(id, changeCategory, actor, from, to, limit, offset) {
   const params = new URLSearchParams();
   if (changeCategory) params.set("changeCategory", changeCategory);
+  if (actor) params.set("actor", actor);
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   if (limit != null) params.set("limit", String(limit));
   if (offset != null) params.set("offset", String(offset));
   const qs = params.toString();
   return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}/timeline${qs ? `?${qs}` : ""}`);
+}
+
+export async function getRequirementDiff(id, fromRevision, toRevision) {
+  const params = new URLSearchParams();
+  params.set("fromRevision", String(fromRevision));
+  params.set("toRevision", String(toRevision));
+  return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}/diff?${params.toString()}`);
+}
+
+export async function getProjectTimeline(project, changeCategory, actor, from, to, limit, offset) {
+  const params = new URLSearchParams();
+  if (project) params.set("project", project);
+  if (changeCategory) params.set("changeCategory", changeCategory);
+  if (actor) params.set("actor", actor);
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  if (limit != null) params.set("limit", String(limit));
+  if (offset != null) params.set("offset", String(offset));
+  const qs = params.toString();
+  return request("GET", `/api/v1/audit/timeline${qs ? `?${qs}` : ""}`);
+}
+
+export async function exportAuditTimeline(project, changeCategory, actor, from, to, limit) {
+  const url = buildUrl("/api/v1/audit/timeline/export", {
+    project, changeCategory, actor, from, to, limit,
+  });
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
+  return resp.text();
+}
+
+export async function exportRequirements(project, format) {
+  const url = buildUrl("/api/v1/export/requirements", { project, format });
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
+  if (!format || format === "csv") return resp.text();
+  const buf = await resp.arrayBuffer();
+  return Buffer.from(buf).toString("base64");
+}
+
+export async function exportSweepReport(project, format) {
+  const url = buildUrl("/api/v1/export/sweep", { project, format });
+  const resp = await fetch(url, { method: "POST" });
+  if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
+  if (!format || format === "csv") return resp.text();
+  const buf = await resp.arrayBuffer();
+  return Buffer.from(buf).toString("base64");
+}
+
+export async function exportDocument(documentId, format) {
+  const url = buildUrl(`/api/v1/export/document/${encodeURIComponent(documentId)}`, { format });
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
+  // PDF is binary (base64); sdoc, html, reqif are text
+  if (format === "pdf") {
+    const buf = await resp.arrayBuffer();
+    return Buffer.from(buf).toString("base64");
+  }
+  return resp.text();
 }
 
 // ---------------------------------------------------------------------------
@@ -382,15 +473,15 @@ export async function findPaths(source, target, project) {
   });
 }
 
-export async function getGraphVisualization(project) {
+export async function getGraphVisualization(project, entityTypes) {
   return request("GET", "/api/v1/graph/visualization", {
-    params: { project },
+    params: { project, entityTypes: entityTypes ? entityTypes.join(",") : undefined },
   });
 }
 
-export async function extractSubgraph(roots, project) {
+export async function extractSubgraph(roots, project, entityTypes) {
   return request("GET", "/api/v1/graph/subgraph", {
-    params: { roots: roots.join(","), project },
+    params: { roots: roots.join(","), project, entityTypes: entityTypes ? entityTypes.join(",") : undefined },
   });
 }
 
@@ -514,4 +605,128 @@ export async function analyzeSemanticSimilarity(project, threshold) {
   return request("GET", "/api/v1/analysis/semantic-similarity", {
     params: { project, threshold },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Quality Gate API functions
+// ---------------------------------------------------------------------------
+
+export async function createQualityGate(data, project) {
+  return request("POST", "/api/v1/quality-gates", { body: data, params: { project } });
+}
+
+export async function listQualityGates(project) {
+  return request("GET", "/api/v1/quality-gates", { params: { project } });
+}
+
+export async function getQualityGate(id) {
+  return request("GET", `/api/v1/quality-gates/${encodeURIComponent(id)}`);
+}
+
+export async function updateQualityGate(id, data) {
+  return request("PUT", `/api/v1/quality-gates/${encodeURIComponent(id)}`, { body: data });
+}
+
+export async function deleteQualityGate(id) {
+  await request("DELETE", `/api/v1/quality-gates/${encodeURIComponent(id)}`);
+}
+
+export async function evaluateQualityGates(project) {
+  return request("POST", "/api/v1/quality-gates/evaluate", { params: { project } });
+}
+
+// ---------------------------------------------------------------------------
+// Document API functions
+// ---------------------------------------------------------------------------
+
+export async function createDocument(data, project) {
+  return request("POST", "/api/v1/documents", { body: data, params: { project } });
+}
+
+export async function listDocuments(project) {
+  return request("GET", "/api/v1/documents", { params: { project } });
+}
+
+export async function getDocument(id) {
+  return request("GET", `/api/v1/documents/${encodeURIComponent(id)}`);
+}
+
+export async function updateDocument(id, data) {
+  return request("PUT", `/api/v1/documents/${encodeURIComponent(id)}`, { body: data });
+}
+
+export async function deleteDocument(id) {
+  await request("DELETE", `/api/v1/documents/${encodeURIComponent(id)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Section API functions
+// ---------------------------------------------------------------------------
+
+export async function createSection(documentId, data) {
+  return request("POST", `/api/v1/documents/${encodeURIComponent(documentId)}/sections`, { body: data });
+}
+
+export async function listSections(documentId) {
+  return request("GET", `/api/v1/documents/${encodeURIComponent(documentId)}/sections`);
+}
+
+export async function getSectionTree(documentId) {
+  return request("GET", `/api/v1/documents/${encodeURIComponent(documentId)}/sections/tree`);
+}
+
+export async function getSection(id) {
+  return request("GET", `/api/v1/sections/${encodeURIComponent(id)}`);
+}
+
+export async function updateSection(id, data) {
+  return request("PUT", `/api/v1/sections/${encodeURIComponent(id)}`, { body: data });
+}
+
+export async function deleteSection(id) {
+  await request("DELETE", `/api/v1/sections/${encodeURIComponent(id)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Section Content API functions
+// ---------------------------------------------------------------------------
+
+export async function addSectionContent(sectionId, data) {
+  return request("POST", `/api/v1/sections/${encodeURIComponent(sectionId)}/content`, { body: data });
+}
+
+export async function listSectionContent(sectionId) {
+  return request("GET", `/api/v1/sections/${encodeURIComponent(sectionId)}/content`);
+}
+
+export async function updateSectionContent(id, data) {
+  return request("PUT", `/api/v1/sections/content/${encodeURIComponent(id)}`, { body: data });
+}
+
+export async function deleteSectionContent(id) {
+  await request("DELETE", `/api/v1/sections/content/${encodeURIComponent(id)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Document Reading Order API functions
+// ---------------------------------------------------------------------------
+
+export async function getDocumentReadingOrder(documentId) {
+  return request("GET", `/api/v1/documents/${encodeURIComponent(documentId)}/reading-order`);
+}
+
+// ---------------------------------------------------------------------------
+// Document Grammar API functions
+// ---------------------------------------------------------------------------
+
+export async function setDocumentGrammar(documentId, grammar) {
+  return request("PUT", `/api/v1/documents/${encodeURIComponent(documentId)}/grammar`, { body: grammar });
+}
+
+export async function getDocumentGrammar(documentId) {
+  return request("GET", `/api/v1/documents/${encodeURIComponent(documentId)}/grammar`);
+}
+
+export async function deleteDocumentGrammar(documentId) {
+  await request("DELETE", `/api/v1/documents/${encodeURIComponent(documentId)}/grammar`);
 }

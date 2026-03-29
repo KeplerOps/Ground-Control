@@ -1,12 +1,12 @@
 package com.keplerops.groundcontrol.api.requirements;
 
+import com.keplerops.groundcontrol.domain.requirements.service.BulkFailureDetail;
 import com.keplerops.groundcontrol.domain.requirements.service.BulkTransitionResult;
 import java.util.List;
-import java.util.Map;
 
 public record BulkStatusTransitionResponse(
         List<RequirementResponse> succeeded,
-        List<Map<String, Object>> failed,
+        List<BulkFailureDetail> failed,
         int totalRequested,
         int totalSucceeded,
         int totalFailed) {

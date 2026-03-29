@@ -75,6 +75,9 @@ public class Requirement {
 
     private Integer wave;
 
+    @Column(name = "custom_fields", columnDefinition = "TEXT")
+    private String customFields;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -203,6 +206,14 @@ public class Requirement {
 
     public void setWave(Integer wave) {
         this.wave = wave;
+    }
+
+    public String getCustomFields() {
+        return customFields;
+    }
+
+    public void setCustomFields(String customFields) {
+        this.customFields = customFields;
     }
 
     public Instant getCreatedAt() {

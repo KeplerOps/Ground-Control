@@ -5,6 +5,303 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.92.0] - 2026-03-28
+
+### Added
+
+- Export documents to ReqIF 1.2 XML format for tool interoperability via
+  `GET /api/v1/export/document/{id}?format=reqif` (GC-B010)
+- Round-trip tested: export produces valid XML parseable by `ReqifParser`
+- `gc_export_document` MCP tool now supports `reqif` format
+
+## [0.91.0] - 2026-03-28
+
+### Added
+
+- Export documents to PDF format for formal distribution via
+  `GET /api/v1/export/document/{id}?format=pdf` (GC-B009)
+- `gc_export_document` MCP tool now supports `pdf` format (returns base64)
+
+## [0.90.0] - 2026-03-28
+
+### Added
+
+- Export documents to HTML format for web publishing via
+  `GET /api/v1/export/document/{id}?format=html` (GC-B008)
+- Self-contained HTML with inline CSS, print-friendly styles,
+  XSS-safe escaping, and responsive layout
+- `gc_export_document` MCP tool now accepts `format` param (`sdoc` or `html`)
+
+## [0.89.0] - 2026-03-28
+
+### Added
+
+- Export documents to StrictDoc (.sdoc) format via
+  `GET /api/v1/export/document/{documentId}` (GC-B007)
+- Lossless round-trip for sections, requirements, text blocks, and
+  PARENT relations between import and export
+- MCP tool `gc_export_document` for programmatic .sdoc export
+
+## [0.88.0] - 2026-03-28
+
+### Added
+
+- StrictDoc import now creates documents, sections, and text blocks,
+  preserving the source file hierarchy (GC-B006)
+- SdocParser returns structured `SdocDocument` with sections and ordered
+  content items (requirement references and text blocks)
+- Import response includes `documentsCreated`, `sectionsCreated`, and
+  `sectionContentsCreated` counters
+- Idempotent document/section creation — re-importing skips existing
+  documents and sections by title match
+
+## [0.87.2] - 2026-03-26
+
+### Fixed
+
+- Extract duplicate `"bad_request"` string literal to constant in `GlobalExceptionHandler`
+- Extract duplicate `"relations"` string literal to constant in `ImportService`
+- Replace `Stream.collect(Collectors.toList())` with `Stream.toList()` in `AnalysisService`
+- Use `Map.computeIfPresent()` instead of get-and-check pattern in `ReqifParser`
+- Add explicit regex grouping for alternation precedence in `AgeGraphService`
+- Reduce loop break/continue count in `ImportService` by extracting helper methods
+
+## [0.87.1] - 2026-03-26
+
+### Changed
+
+- Refactor `EmbeddingService.embedProject` to reduce cognitive complexity
+  by extracting batch processing and embedding classification helpers
+- Refactor `AnalysisService.getWorkOrder` to reduce cognitive complexity
+  by extracting dependency mapping, blocking status computation,
+  topological sorting, and wave item building into private methods
+- Refactor `GitHubIssueSyncService.syncGitHubIssues` to reduce cognitive
+  complexity by extracting issue upsert and traceability link update phases
+- Refactor `SdocParser.parse` to reduce cognitive complexity by extracting
+  wave range building, block extraction, and field parsing helpers
+
+## [0.87.0] - 2026-03-26
+
+### Added
+
+- Export requirements data to CSV, Excel (.xlsx), and PDF formats via
+  `GET /api/v1/export/requirements?format={csv|xlsx|pdf}`
+- Export sweep analysis results to CSV, Excel, and PDF via
+  `POST /api/v1/export/sweep?format={csv|xlsx|pdf}`
+- MCP tools `gc_export_requirements` and `gc_export_sweep_report` for
+  programmatic export access
+- Shared `CsvUtils` utility centralizing CSV formula-injection protection
+- Apache POI (Excel) and OpenPDF (PDF) dependencies for report generation
+
+## [0.86.0] - 2026-03-26
+
+### Added
+
+- Entity type filtering on graph visualization and subgraph extraction
+  endpoints via `entityTypes` query parameter
+- `entityType` field on graph visualization nodes for client-side
+  type identification
+
+## [0.85.0] - 2026-03-26
+
+### Added
+
+- Requirement-section membership constraint: a requirement can belong to at
+  most one document section, enforced by partial unique index and service
+  validation
+
+### Fixed
+
+- `gc_create_github_issue` MCP tool now uses local `gh` CLI instead of
+  the backend API, fixing "gh not found" errors when the backend Docker
+  container lacks `gh` authentication
+
+## [0.84.0] - 2026-03-26
+
+### Added
+
+- Per-document grammars defining custom fields, allowed requirement types, and
+  allowed relation types as JSONB metadata (`PUT /api/v1/documents/{id}/grammar`,
+  `GET /api/v1/documents/{id}/grammar`, `DELETE /api/v1/documents/{id}/grammar`)
+- `custom_fields` JSONB column on requirements for project-specific field values
+- MCP tools: `gc_set_document_grammar`, `gc_get_document_grammar`,
+  `gc_delete_document_grammar`
+
+## [0.83.0] - 2026-03-26
+
+### Added
+
+- Document reading order view rendering sections, text blocks, and
+  requirements in authored sequence (`GET /api/v1/documents/{id}/reading-order`)
+- MCP tool: `gc_get_document_reading_order`
+- `BaseEntity` `@MappedSuperclass` for shared JPA entity boilerplate
+  (id, createdAt, updatedAt, lifecycle callbacks)
+
+### Fixed
+
+- Remove nullable `Optional` fields from `UpdateQualityGateCommand` to resolve
+  SonarCloud S2789 reliability bugs on dev branch
+
+## [0.82.0] - 2026-03-26
+
+### Added
+
+- Content ordering within sections via SectionContent entity supporting
+  requirement references and text blocks with sort order for deterministic
+  rendering (`POST /api/v1/sections/{id}/content`,
+  `GET /api/v1/sections/{id}/content`)
+- MCP tools: `gc_add_section_content`, `gc_list_section_content`,
+  `gc_update_section_content`, `gc_delete_section_content`
+
+## [0.81.0] - 2026-03-26
+
+### Added
+
+- Hierarchical sections within documents with arbitrary nesting depth,
+  sibling ordering, and nested tree retrieval
+  (`POST /api/v1/documents/{id}/sections`,
+  `GET /api/v1/documents/{id}/sections/tree`)
+- MCP tools: `gc_create_section`, `gc_list_sections`, `gc_get_section_tree`,
+  `gc_get_section`, `gc_update_section`, `gc_delete_section`
+
+## [0.80.0] - 2026-03-25
+
+### Added
+
+- `/ship` skill: consolidated post-implementation workflow (CI monitor, SonarCloud
+  check, code review, security review) in a single command
+- `/implement` clause-by-clause verification step (Step 4.5) requiring explicit
+  requirement-to-code mapping before completion
+- Stop hook with completion verifier agent that blocks session end if CHANGELOG,
+  traceability links, or status transitions are missing
+- PostToolUse hook for automatic Java formatting (spotlessApply) after file edits
+- `.claude/rules/` with implementation quality and review standards rules
+- Required status checks on main and dev branches (build, test, integration,
+  verify, sonarcloud)
+
+### Changed
+
+- SonarCloud CI job is now blocking (removed continue-on-error) and gates
+  Docker image builds
+- Simplified `.claude/settings.local.json` permissions from 90+ one-off entries
+  to ~20 wildcard patterns
+
+## [0.79.0] - 2026-03-25
+
+### Added
+
+- Document entity as top-level container for organized requirement collections
+  with project-scoped title uniqueness (`POST /api/v1/documents`,
+  `GET /api/v1/documents`, `PUT /api/v1/documents/{id}`,
+  `DELETE /api/v1/documents/{id}`)
+- MCP tools: `gc_create_document`, `gc_list_documents`, `gc_get_document`,
+  `gc_update_document`, `gc_delete_document`
+
+## [0.78.0] - 2026-03-24
+
+### Added
+
+- Configurable quality gates for CI/CD integration (`POST /api/v1/quality-gates`,
+  `POST /api/v1/quality-gates/evaluate`) with per-project pass/fail thresholds
+  for coverage, orphan count, and completeness metrics
+- Quality gate evaluation integrated into analysis sweep reports
+- MCP tools: `gc_create_quality_gate`, `gc_list_quality_gates`,
+  `gc_get_quality_gate`, `gc_update_quality_gate`, `gc_delete_quality_gate`,
+  `gc_evaluate_quality_gates`
+
+## [0.77.0] - 2026-03-24
+
+### Added
+
+- Structured requirement version diff API (`GET /api/v1/requirements/{id}/diff`)
+  returning per-field changes, added/removed/modified relations, and
+  added/removed/modified traceability links between two revision numbers
+- MCP tool `gc_get_requirement_diff` for agent-driven change review workflows
+
+## [0.76.0] - 2026-03-24
+
+### Added
+
+- Project-wide audit timeline endpoint (`GET /api/v1/audit/timeline`) aggregating
+  changes across all requirements in a project
+- Actor filtering on requirement and project audit timelines
+- CSV export of audit timeline for compliance reporting
+  (`GET /api/v1/audit/timeline/export`)
+- Optional `reason` field on status transitions, recorded in the audit trail
+  for governance traceability
+- Configurable audit data retention with scheduled cleanup
+  (`GC_AUDIT_RETENTION_DAYS`, disabled by default)
+- MCP tools: `gc_get_project_timeline`, `gc_export_audit_timeline`
+- MCP tools `gc_transition_status` and `gc_bulk_transition_status` now accept
+  optional `reason` parameter
+
+## [0.75.2] - 2026-03-23
+
+### Fixed
+
+- Add `latest` Docker tag for default branch pushes in CI workflow so EC2 deploy
+  can pull `ground-control:latest` from ECR
+- Capture both stdout and stderr from SSM deploy command on failure for proper
+  diagnostics (previously only stderr was shown, hiding docker logs)
+- Increase deploy health check timeout from 60s to 10min, SSM command timeout
+  from 120s to 660s, and CI wait loop to match
+- Fix V014 Flyway migration failing on prod data with case-duplicate UIDs
+  (`OBS-001` / `obs-001`): drop unique constraint before normalizing to
+  uppercase, and deduplicate colliding rows by renaming with `-DUP-N` suffix
+
+## [0.75.1] - 2026-03-22
+
+### Fixed
+
+- Fix `RequirementService.getRelations()` mutating unmodifiable JPA result list
+  by creating a mutable copy before combining outgoing and incoming relations
+  (closes #321)
+
+## [0.75.0] - 2026-03-22
+
+### Changed
+
+- Replace `List<Map<String, Object>>` error fields in API responses with typed records
+  (GC-A012 tech debt, closes #324):
+  - `BulkStatusTransitionResponse.failed` now uses `BulkFailureDetail(id, uid, error)`
+  - `ImportResultResponse.errors` now uses `ImportError(phase, uid, error, parent, target, issueRef)`
+  - `SyncResultResponse.errors` now uses `SyncError(phase, issue, artifactIdentifier, error)`
+- Domain result records `BulkTransitionResult`, `ImportResult`, `SyncResult` updated accordingly
+- Audit JSONB persistence unchanged — `RequirementImport.errors` column remains untyped JSON
+
+## [0.74.4] - 2026-03-23
+
+### Fixed
+
+- Paginate `GitHubCliClient.fetchAllIssues()` using GitHub REST API to fetch all
+  issues instead of silently truncating at 500; filters out pull requests and
+  normalizes state values (closes #317)
+
+## [0.74.3] - 2026-03-23
+
+### Changed
+
+- Replaced N+1 in-memory filtering in `AnalysisService.findOrphans()` and
+  `findCoverageGaps()` with single JPQL `NOT EXISTS` queries in
+  `RequirementRepository` (closes #318)
+
+## [0.74.2] - 2026-03-23
+
+### Fixed
+
+- Added exception handlers for `HttpMessageNotReadableException`,
+  `MethodArgumentTypeMismatchException`, `MissingServletRequestParameterException`,
+  `MissingServletRequestPartException`, and generic `Exception` catch-all to ensure
+  all API errors return the consistent `ErrorResponse` envelope (closes #315)
+
+## [0.74.1] - 2026-03-23
+
+### Added
+
+- JML contract annotations on `TraceabilityLink` domain model: class invariants,
+  constructor pre/postconditions, and setter contracts for `setSyncStatus`,
+  `setArtifactUrl`, and `setArtifactTitle` (closes #327)
+
 ## [0.74.0] - 2026-03-22
 
 ### Added

@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.api.requirements;
 
+import com.keplerops.groundcontrol.domain.audit.ActorHolder;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.service.AuditService;
 import com.keplerops.groundcontrol.domain.requirements.service.CloneRequirementCommand;
@@ -108,13 +109,23 @@ public class RequirementController {
     @PostMapping("/{id}/transition")
     public RequirementResponse transitionStatus(
             @PathVariable UUID id, @Valid @RequestBody StatusTransitionRequest request) {
-        return RequirementResponse.from(requirementService.transitionStatus(id, request.status()));
+        ActorHolder.setReason(request.reason());
+        try {
+            return RequirementResponse.from(requirementService.transitionStatus(id, request.status()));
+        } finally {
+            ActorHolder.setReason(null);
+        }
     }
 
     @PostMapping("/bulk/transition")
     public BulkStatusTransitionResponse bulkTransitionStatus(@Valid @RequestBody BulkStatusTransitionRequest request) {
-        var result = requirementService.bulkTransitionStatus(request.ids(), request.status());
-        return BulkStatusTransitionResponse.from(result, request.ids().size());
+        ActorHolder.setReason(request.reason());
+        try {
+            var result = requirementService.bulkTransitionStatus(request.ids(), request.status());
+            return BulkStatusTransitionResponse.from(result, request.ids().size());
+        } finally {
+            ActorHolder.setReason(null);
+        }
     }
 
     @PostMapping("/{id}/clone")
@@ -135,13 +146,20 @@ public class RequirementController {
     public List<TimelineEntryResponse> getTimeline(
             @PathVariable UUID id,
             @RequestParam(required = false) ChangeCategory changeCategory,
+            @RequestParam(required = false) String actor,
             @RequestParam(required = false) Instant from,
             @RequestParam(required = false) Instant to,
             @RequestParam(defaultValue = "100") int limit,
             @RequestParam(defaultValue = "0") int offset) {
-        return auditService.getRequirementTimeline(id, changeCategory, from, to, limit, offset).stream()
+        return auditService.getRequirementTimeline(id, changeCategory, actor, from, to, limit, offset).stream()
                 .map(TimelineEntryResponse::from)
                 .toList();
+    }
+
+    @GetMapping("/{id}/diff")
+    public RequirementVersionDiffResponse getDiff(
+            @PathVariable UUID id, @RequestParam int fromRevision, @RequestParam int toRevision) {
+        return RequirementVersionDiffResponse.from(auditService.getRequirementDiff(id, fromRevision, toRevision));
     }
 
     @PostMapping("/{id}/archive")

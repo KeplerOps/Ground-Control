@@ -34,6 +34,12 @@ import {
   getRelationHistory,
   getTraceabilityLinkHistory,
   getRequirementTimeline,
+  getRequirementDiff,
+  getProjectTimeline,
+  exportAuditTimeline,
+  exportRequirements,
+  exportSweepReport,
+  exportDocument,
   deleteRelation,
   deleteTraceabilityLink,
   materializeGraph,
@@ -42,7 +48,8 @@ import {
   findPaths,
   getGraphVisualization,
   extractSubgraph,
-  createGitHubIssueViaApi,
+  createGitHubIssue,
+  formatIssueBody,
   runSweep,
   runSweepAll,
   embedRequirement,
@@ -56,12 +63,39 @@ import {
   getBaselineSnapshot,
   compareBaselines,
   deleteBaseline,
+  createQualityGate,
+  listQualityGates,
+  getQualityGate,
+  updateQualityGate,
+  deleteQualityGate,
+  evaluateQualityGates,
+  createDocument,
+  listDocuments,
+  getDocument,
+  updateDocument,
+  deleteDocument,
+  createSection,
+  listSections,
+  getSectionTree,
+  getSection,
+  updateSection,
+  deleteSection,
+  addSectionContent,
+  listSectionContent,
+  updateSectionContent,
+  deleteSectionContent,
+  getDocumentReadingOrder,
+  setDocumentGrammar,
+  getDocumentGrammar,
+  deleteDocumentGrammar,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
   RELATION_TYPES,
   ARTIFACT_TYPES,
   LINK_TYPES,
+  METRIC_TYPES,
+  COMPARISON_OPERATORS,
 } from "./lib.js";
 
 function ok(text) {
@@ -214,10 +248,11 @@ server.tool(
   {
     id: z.string().uuid().describe("Requirement UUID"),
     status: z.enum(STATUSES).describe("Target status"),
+    reason: z.string().optional().describe("Optional reason for the transition (recorded in audit trail)"),
   },
-  async ({ id, status }) => {
+  async ({ id, status, reason }) => {
     try {
-      return ok(JSON.stringify(await transitionStatus(id, status), null, 2));
+      return ok(JSON.stringify(await transitionStatus(id, status, reason), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -246,8 +281,9 @@ server.tool(
     uids: z.array(z.string()).min(1).describe("Requirement UIDs (e.g. ['GC-A001', 'GC-A002'])"),
     status: z.enum(STATUSES).describe("Target status for all requirements"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    reason: z.string().optional().describe("Optional reason for the transition (recorded in audit trail)"),
   },
-  async ({ uids, status, project }) => {
+  async ({ uids, status, project, reason }) => {
     try {
       const ids = [];
       const resolutionFailures = [];
@@ -262,7 +298,7 @@ server.tool(
       if (ids.length === 0) {
         return ok(JSON.stringify({ succeeded: [], failed: resolutionFailures, total_requested: uids.length, total_succeeded: 0, total_failed: resolutionFailures.length }, null, 2));
       }
-      const result = await bulkTransitionStatus(ids, status);
+      const result = await bulkTransitionStatus(ids, status, reason);
       if (resolutionFailures.length > 0) {
         result.failed = [...(result.failed || []), ...resolutionFailures];
         result.total_failed = (result.total_failed || 0) + resolutionFailures.length;
@@ -422,11 +458,28 @@ server.tool(
   },
   async ({ uid, extra_body, labels, repo, project }) => {
     try {
-      const data = { requirement_uid: uid };
-      if (extra_body !== undefined) data.extra_body = extra_body;
-      if (labels !== undefined) data.labels = labels;
-      if (repo !== undefined) data.repo = repo;
-      return ok(JSON.stringify(await createGitHubIssueViaApi(data, project), null, 2));
+      // Fetch requirement to build issue body
+      const req = await getRequirementByUid(uid, project);
+      const title = `${req.uid}: ${req.title}`;
+      const body = formatIssueBody(req, extra_body);
+
+      // Create issue using local gh CLI
+      const { url, number } = await createGitHubIssue({ title, body, labels, repo });
+
+      // Auto-link via traceability
+      try {
+        await createTraceabilityLink(req.id, {
+          artifact_type: "GITHUB_ISSUE",
+          artifact_identifier: String(number),
+          artifact_url: url,
+          artifact_title: title,
+          link_type: "IMPLEMENTS",
+        });
+      } catch (linkErr) {
+        return ok(JSON.stringify({ url, number, warning: `Issue created but traceability link failed: ${linkErr.message}` }, null, 2));
+      }
+
+      return ok(JSON.stringify({ url, number, traceability_linked: true }, null, 2));
     } catch (e) {
       return err(e);
     }
@@ -496,16 +549,130 @@ server.tool(
   {
     id: z.string().uuid().describe("Requirement UUID"),
     change_category: z.enum(["REQUIREMENT", "RELATION", "TRACEABILITY_LINK"]).optional().describe("Filter by change category"),
+    actor: z.string().optional().describe("Filter by actor (exact match)"),
     from: z.string().optional().describe("Start of date range (ISO-8601 instant)"),
     to: z.string().optional().describe("End of date range (ISO-8601 instant)"),
     limit: z.number().int().min(1).max(500).optional().describe("Max entries to return (default 100)"),
     offset: z.number().int().min(0).optional().describe("Number of entries to skip (default 0)"),
   },
-  async ({ id, change_category, from, to, limit, offset }) => {
+  async ({ id, change_category, actor, from, to, limit, offset }) => {
     try {
-      const timeline = await getRequirementTimeline(id, change_category, from, to, limit, offset);
+      const timeline = await getRequirementTimeline(id, change_category, actor, from, to, limit, offset);
       if (Array.isArray(timeline) && timeline.length === 0) return ok("No timeline entries found.");
       return ok(JSON.stringify(timeline, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_requirement_diff",
+  "Get a structured diff between two revisions of a requirement, showing per-field changes, added/removed relations, and added/removed traceability links.",
+  {
+    id: z.string().uuid().describe("Requirement UUID"),
+    from_revision: z.number().int().min(1).describe("Starting revision number (the 'before')"),
+    to_revision: z.number().int().min(1).describe("Ending revision number (the 'after')"),
+  },
+  async ({ id, from_revision, to_revision }) => {
+    try {
+      const diff = await getRequirementDiff(id, from_revision, to_revision);
+      return ok(JSON.stringify(diff, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_project_timeline",
+  "Get a unified audit timeline across all requirements in a project. Merges requirement, relation, and traceability link changes with field-level diffs. Paginated (default 100 entries).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    change_category: z.enum(["REQUIREMENT", "RELATION", "TRACEABILITY_LINK"]).optional().describe("Filter by change category"),
+    actor: z.string().optional().describe("Filter by actor (exact match)"),
+    from: z.string().optional().describe("Start of date range (ISO-8601 instant)"),
+    to: z.string().optional().describe("End of date range (ISO-8601 instant)"),
+    limit: z.number().int().min(1).max(500).optional().describe("Max entries to return (default 100)"),
+    offset: z.number().int().min(0).optional().describe("Number of entries to skip (default 0)"),
+  },
+  async ({ project, change_category, actor, from, to, limit, offset }) => {
+    try {
+      const timeline = await getProjectTimeline(project, change_category, actor, from, to, limit, offset);
+      if (Array.isArray(timeline) && timeline.length === 0) return ok("No timeline entries found.");
+      return ok(JSON.stringify(timeline, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_export_audit_timeline",
+  "Export the project audit timeline as CSV for compliance reporting. Returns CSV text with columns: timestamp, actor, reason, change_category, revision_type, entity_id, changes.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    change_category: z.enum(["REQUIREMENT", "RELATION", "TRACEABILITY_LINK"]).optional().describe("Filter by change category"),
+    actor: z.string().optional().describe("Filter by actor (exact match)"),
+    from: z.string().optional().describe("Start of date range (ISO-8601 instant)"),
+    to: z.string().optional().describe("End of date range (ISO-8601 instant)"),
+    limit: z.number().int().min(1).max(10000).optional().describe("Max entries to export (default 10000)"),
+  },
+  async ({ project, change_category, actor, from, to, limit }) => {
+    try {
+      const csv = await exportAuditTimeline(project, change_category, actor, from, to, limit);
+      return ok(csv);
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_export_requirements",
+  "Export all requirements for a project as CSV, Excel (.xlsx), or PDF. CSV is returned as text; binary formats (xlsx, pdf) are returned as base64-encoded data.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    format: z.enum(["csv", "xlsx", "pdf"]).optional().describe("Export format (default: csv)"),
+  },
+  async ({ project, format }) => {
+    try {
+      const result = await exportRequirements(project, format);
+      return ok(result);
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_export_sweep_report",
+  "Run a comprehensive sweep analysis and export results as CSV, Excel (.xlsx), or PDF. Includes cycles, orphans, coverage gaps, violations, and quality gate results. CSV is returned as text; binary formats are returned as base64-encoded data.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    format: z.enum(["csv", "xlsx", "pdf"]).optional().describe("Export format (default: csv)"),
+  },
+  async ({ project, format }) => {
+    try {
+      const result = await exportSweepReport(project, format);
+      return ok(result);
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_export_document",
+  "Export a document to StrictDoc (.sdoc), HTML, PDF, or ReqIF 1.2 format. Text formats return content directly; PDF returns base64-encoded data.",
+  {
+    document_id: z.string().uuid().describe("Document UUID to export"),
+    format: z.enum(["sdoc", "html", "pdf", "reqif"]).optional().describe("Export format (default: sdoc)"),
+  },
+  async ({ document_id, format }) => {
+    try {
+      const result = await exportDocument(document_id, format);
+      return ok(result);
     } catch (e) {
       return err(e);
     }
@@ -757,13 +924,14 @@ server.tool(
 
 server.tool(
   "gc_get_graph_visualization",
-  "Get the full graph visualization data (all requirement nodes and relation edges with metadata) for a project. Returns data suitable for rendering dependency diagrams.",
+  "Get the full graph visualization data (nodes and relation edges with metadata) for a project. Supports filtering by entity type.",
   {
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    entity_types: z.array(z.string()).optional().describe("Filter by entity types (e.g. ['REQUIREMENT']). Omit to include all types."),
   },
-  async ({ project }) => {
+  async ({ project, entity_types }) => {
     try {
-      const data = await getGraphVisualization(project);
+      const data = await getGraphVisualization(project, entity_types);
       return ok(JSON.stringify(data, null, 2));
     } catch (e) {
       return err(e);
@@ -773,14 +941,15 @@ server.tool(
 
 server.tool(
   "gc_extract_subgraph",
-  "Extract a subgraph starting from one or more root requirements. Returns all transitively reachable requirements and their relations as a self-contained graph.",
+  "Extract a subgraph starting from one or more root nodes. Returns all transitively reachable nodes and their relations. Supports filtering by entity type.",
   {
     roots: z.array(z.string()).describe("Root requirement UIDs to start traversal from (e.g. ['GC-G001', 'GC-G002'])"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    entity_types: z.array(z.string()).optional().describe("Filter by entity types (e.g. ['REQUIREMENT']). Omit to include all types."),
   },
-  async ({ roots, project }) => {
+  async ({ roots, project, entity_types }) => {
     try {
-      const data = await extractSubgraph(roots, project);
+      const data = await extractSubgraph(roots, project, entity_types);
       return ok(JSON.stringify(data, null, 2));
     } catch (e) {
       return err(e);
@@ -896,7 +1065,7 @@ server.tool(
 
 server.tool(
   "gc_import_strictdoc",
-  "Import requirements from a StrictDoc (.sdoc) file. Idempotent: re-importing updates existing requirements by UID.",
+  "Import a StrictDoc (.sdoc) file, creating documents, sections, text blocks, requirements, and relations preserving the source hierarchy. Idempotent: re-importing updates existing requirements by UID and skips existing documents/sections.",
   {
     file_path: z.string().describe("Absolute path to the .sdoc file"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
@@ -1057,6 +1226,500 @@ server.tool(
         );
       }
       return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Quality Gate tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_quality_gate",
+  "Create a quality gate rule for a project. Quality gates define pass/fail thresholds for CI/CD integration (e.g. 'minimum 80% of ACTIVE requirements must have a TESTS link').",
+  {
+    name: z.string().max(100).describe("Quality gate name (e.g. 'Test Coverage Gate')"),
+    description: z.string().optional().describe("Description of what this gate checks"),
+    metric_type: z.enum(METRIC_TYPES).describe("Metric to evaluate: COVERAGE (% with link type), ORPHAN_COUNT, COMPLETENESS (issue count)"),
+    metric_param: z.string().optional().describe("Parameter for the metric. Required for COVERAGE: a LinkType (IMPLEMENTS, TESTS, DOCUMENTS, CONSTRAINS, VERIFIES)"),
+    scope_status: z.enum(STATUSES).optional().describe("Filter requirements by status (e.g. ACTIVE). Omit to check all non-archived requirements"),
+    operator: z.enum(COMPARISON_OPERATORS).describe("Comparison operator: GTE (>=), LTE (<=), EQ (==), GT (>), LT (<)"),
+    threshold: z.number().describe("Threshold value to compare against (e.g. 80 for 80% coverage)"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ name, description, metric_type, metric_param, scope_status, operator, threshold, project }) => {
+    try {
+      const data = { name, metric_type, operator, threshold };
+      if (description !== undefined) data.description = description;
+      if (metric_param !== undefined) data.metric_param = metric_param;
+      if (scope_status !== undefined) data.scope_status = scope_status;
+      return ok(JSON.stringify(await createQualityGate(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_quality_gates",
+  "List all quality gates for a project.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const gates = await listQualityGates(project);
+      if (Array.isArray(gates) && gates.length === 0) return ok("No quality gates found.");
+      return ok(JSON.stringify(gates, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_quality_gate",
+  "Get a quality gate by its UUID.",
+  {
+    id: z.string().uuid().describe("Quality gate UUID"),
+  },
+  async ({ id }) => {
+    try {
+      return ok(JSON.stringify(await getQualityGate(id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_quality_gate",
+  "Update a quality gate. Only specified fields are changed.",
+  {
+    id: z.string().uuid().describe("Quality gate UUID"),
+    name: z.string().max(100).optional().describe("New name"),
+    description: z.string().optional().describe("New description"),
+    metric_type: z.enum(METRIC_TYPES).optional().describe("New metric type"),
+    metric_param: z.string().optional().describe("New metric parameter"),
+    scope_status: z.enum(STATUSES).optional().describe("New scope status filter"),
+    operator: z.enum(COMPARISON_OPERATORS).optional().describe("New comparison operator"),
+    threshold: z.number().optional().describe("New threshold value"),
+    enabled: z.boolean().optional().describe("Enable or disable the gate"),
+  },
+  async ({ id, ...fields }) => {
+    try {
+      const data = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined) data[k] = v;
+      }
+      return ok(JSON.stringify(await updateQualityGate(id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_quality_gate",
+  "Delete a quality gate.",
+  {
+    id: z.string().uuid().describe("Quality gate UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteQualityGate(id);
+      return ok("Quality gate deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_evaluate_quality_gates",
+  "Evaluate all enabled quality gates for a project. Returns overall pass/fail plus per-gate results. Designed for CI/CD integration.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await evaluateQualityGates(project);
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Document tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_document",
+  "Create a document — a top-level container for organizing requirements into coherent specifications.",
+  {
+    title: z.string().max(200).describe("Document title"),
+    version: z.string().max(50).describe("Document version (e.g. '1.0.0')"),
+    description: z.string().optional().describe("Document description"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ title, version, description, project }) => {
+    try {
+      const data = { title, version };
+      if (description !== undefined) data.description = description;
+      return ok(JSON.stringify(await createDocument(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_documents",
+  "List all documents for a project, ordered by creation date (newest first).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const documents = await listDocuments(project);
+      if (Array.isArray(documents) && documents.length === 0) return ok("No documents found.");
+      return ok(JSON.stringify(documents, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_document",
+  "Get a document by its UUID.",
+  {
+    id: z.string().uuid().describe("Document UUID"),
+  },
+  async ({ id }) => {
+    try {
+      return ok(JSON.stringify(await getDocument(id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_document",
+  "Update a document. Only specified fields are changed.",
+  {
+    id: z.string().uuid().describe("Document UUID"),
+    title: z.string().max(200).optional().describe("New title"),
+    version: z.string().max(50).optional().describe("New version"),
+    description: z.string().optional().describe("New description"),
+  },
+  async ({ id, ...fields }) => {
+    try {
+      const data = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined) data[k] = v;
+      }
+      return ok(JSON.stringify(await updateDocument(id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_document",
+  "Delete a document.",
+  {
+    id: z.string().uuid().describe("Document UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteDocument(id);
+      return ok("Document deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Section tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_section",
+  "Create a section within a document. Sections support arbitrary nesting via optional parentId.",
+  {
+    document_id: z.string().uuid().describe("Document UUID"),
+    parent_id: z.string().uuid().optional().describe("Parent section UUID (omit for root section)"),
+    title: z.string().max(200).describe("Section title"),
+    description: z.string().optional().describe("Section description"),
+    sort_order: z.number().int().optional().describe("Sort order among siblings (default 0)"),
+  },
+  async ({ document_id, parent_id, title, description, sort_order }) => {
+    try {
+      const data = { title };
+      if (parent_id !== undefined) data.parent_id = parent_id;
+      if (description !== undefined) data.description = description;
+      if (sort_order !== undefined) data.sort_order = sort_order;
+      return ok(JSON.stringify(await createSection(document_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_sections",
+  "List all sections in a document (flat, ordered by sort order).",
+  {
+    document_id: z.string().uuid().describe("Document UUID"),
+  },
+  async ({ document_id }) => {
+    try {
+      const sections = await listSections(document_id);
+      if (Array.isArray(sections) && sections.length === 0) return ok("No sections found.");
+      return ok(JSON.stringify(sections, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_section_tree",
+  "Get sections as a nested tree structure for a document.",
+  {
+    document_id: z.string().uuid().describe("Document UUID"),
+  },
+  async ({ document_id }) => {
+    try {
+      const tree = await getSectionTree(document_id);
+      if (Array.isArray(tree) && tree.length === 0) return ok("No sections found.");
+      return ok(JSON.stringify(tree, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_section",
+  "Get a section by its UUID.",
+  {
+    id: z.string().uuid().describe("Section UUID"),
+  },
+  async ({ id }) => {
+    try {
+      return ok(JSON.stringify(await getSection(id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_section",
+  "Update a section. Only specified fields are changed.",
+  {
+    id: z.string().uuid().describe("Section UUID"),
+    title: z.string().max(200).optional().describe("New title"),
+    description: z.string().optional().describe("New description"),
+    sort_order: z.number().int().optional().describe("New sort order"),
+  },
+  async ({ id, ...fields }) => {
+    try {
+      const data = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined) data[k] = v;
+      }
+      return ok(JSON.stringify(await updateSection(id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_section",
+  "Delete a section and all its children (cascading).",
+  {
+    id: z.string().uuid().describe("Section UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteSection(id);
+      return ok("Section deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Section Content tools
+// ==========================================================================
+
+server.tool(
+  "gc_add_section_content",
+  "Add a content item to a section — either a requirement reference or a text block. Items are ordered by sort_order for rendering.",
+  {
+    section_id: z.string().uuid().describe("Section UUID"),
+    content_type: z.enum(["REQUIREMENT", "TEXT_BLOCK"]).describe("Content type"),
+    requirement_id: z.string().uuid().optional().describe("Requirement UUID (required for REQUIREMENT type)"),
+    text_content: z.string().optional().describe("Text content (required for TEXT_BLOCK type)"),
+    sort_order: z.number().int().optional().describe("Sort order for rendering sequence (default 0)"),
+  },
+  async ({ section_id, content_type, requirement_id, text_content, sort_order }) => {
+    try {
+      const data = { content_type };
+      if (requirement_id !== undefined) data.requirement_id = requirement_id;
+      if (text_content !== undefined) data.text_content = text_content;
+      if (sort_order !== undefined) data.sort_order = sort_order;
+      return ok(JSON.stringify(await addSectionContent(section_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_section_content",
+  "List content items in a section, ordered by sort_order for rendering in reading order.",
+  {
+    section_id: z.string().uuid().describe("Section UUID"),
+  },
+  async ({ section_id }) => {
+    try {
+      const items = await listSectionContent(section_id);
+      if (Array.isArray(items) && items.length === 0) return ok("No content items found.");
+      return ok(JSON.stringify(items, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_section_content",
+  "Update a section content item. Only text_content (for TEXT_BLOCK) and sort_order can be changed.",
+  {
+    id: z.string().uuid().describe("Section content UUID"),
+    text_content: z.string().optional().describe("New text content (TEXT_BLOCK only)"),
+    sort_order: z.number().int().optional().describe("New sort order"),
+  },
+  async ({ id, ...fields }) => {
+    try {
+      const data = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined) data[k] = v;
+      }
+      return ok(JSON.stringify(await updateSectionContent(id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_section_content",
+  "Delete a content item from a section.",
+  {
+    id: z.string().uuid().describe("Section content UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteSectionContent(id);
+      return ok("Section content deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Document Reading Order tools
+// ==========================================================================
+
+server.tool(
+  "gc_get_document_reading_order",
+  "Get a document rendered in reading order: sections with their content (text blocks and requirement references) nested in authored sequence.",
+  {
+    document_id: z.string().uuid().describe("Document UUID"),
+  },
+  async ({ document_id }) => {
+    try {
+      const result = await getDocumentReadingOrder(document_id);
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Document Grammar tools
+// ==========================================================================
+
+server.tool(
+  "gc_set_document_grammar",
+  "Set or replace the grammar for a document. Defines custom fields, allowed requirement types, and allowed relation types.",
+  {
+    document_id: z.string().uuid().describe("Document UUID"),
+    fields: z.array(z.object({
+      name: z.string().describe("Field name"),
+      type: z.enum(["STRING", "INTEGER", "BOOLEAN", "ENUM"]).describe("Field data type"),
+      required: z.boolean().describe("Whether the field is required"),
+      enum_values: z.array(z.string()).optional().describe("Valid values for ENUM type"),
+    })).optional().describe("Custom field definitions"),
+    allowed_requirement_types: z.array(z.string()).optional().describe("Allowed requirement types (e.g. FUNCTIONAL, NON_FUNCTIONAL)"),
+    allowed_relation_types: z.array(z.string()).optional().describe("Allowed relation types (e.g. PARENT, DEPENDS_ON)"),
+  },
+  async ({ document_id, fields, allowed_requirement_types, allowed_relation_types }) => {
+    try {
+      const grammar = {};
+      if (fields !== undefined) grammar.fields = fields;
+      if (allowed_requirement_types !== undefined) grammar.allowedRequirementTypes = allowed_requirement_types;
+      if (allowed_relation_types !== undefined) grammar.allowedRelationTypes = allowed_relation_types;
+      return ok(JSON.stringify(await setDocumentGrammar(document_id, grammar), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_document_grammar",
+  "Get the grammar for a document.",
+  {
+    document_id: z.string().uuid().describe("Document UUID"),
+  },
+  async ({ document_id }) => {
+    try {
+      const grammar = await getDocumentGrammar(document_id);
+      if (!grammar) return ok("No grammar defined for this document.");
+      return ok(JSON.stringify(grammar, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_document_grammar",
+  "Remove the grammar from a document.",
+  {
+    document_id: z.string().uuid().describe("Document UUID"),
+  },
+  async ({ document_id }) => {
+    try {
+      await deleteDocumentGrammar(document_id);
+      return ok("Document grammar deleted.");
     } catch (e) {
       return err(e);
     }

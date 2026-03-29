@@ -8,7 +8,12 @@ import java.time.Instant;
 import java.util.UUID;
 
 public record TraceabilityLinkHistoryResponse(
-        int revisionNumber, String revisionType, Instant timestamp, String actor, TraceabilityLinkSnapshot snapshot) {
+        int revisionNumber,
+        String revisionType,
+        Instant timestamp,
+        String actor,
+        String reason,
+        TraceabilityLinkSnapshot snapshot) {
 
     public record TraceabilityLinkSnapshot(
             UUID id,
@@ -34,6 +39,11 @@ public record TraceabilityLinkHistoryResponse(
                 entity.getSyncStatus(),
                 entity.getCreatedAt());
         return new TraceabilityLinkHistoryResponse(
-                revision.revisionNumber(), revision.revisionType(), revision.timestamp(), revision.actor(), snapshot);
+                revision.revisionNumber(),
+                revision.revisionType(),
+                revision.timestamp(),
+                revision.actor(),
+                revision.reason(),
+                snapshot);
     }
 }

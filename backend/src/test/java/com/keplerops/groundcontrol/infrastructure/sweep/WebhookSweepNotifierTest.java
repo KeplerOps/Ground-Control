@@ -61,6 +61,7 @@ class WebhookSweepNotifierTest {
                 Map.of(),
                 List.of(),
                 List.of(),
-                new CompletenessResult(1, Map.of("DRAFT", 1), List.of()));
+                new CompletenessResult(1, Map.of("DRAFT", 1), List.of()),
+                null);
     }
 }

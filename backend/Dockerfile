@@ -15,7 +15,8 @@ COPY --from=frontend /app/dist src/main/resources/static/
 RUN ./gradlew bootJar --no-daemon -x test
 
 FROM eclipse-temurin:21-jre-alpine
-RUN addgroup -S gc && adduser -S gc -G gc
+RUN apk add --no-cache github-cli \
+ && addgroup -S gc && adduser -S gc -G gc
 WORKDIR /app
 COPY --from=build /app/build/libs/*.jar app.jar
 USER gc

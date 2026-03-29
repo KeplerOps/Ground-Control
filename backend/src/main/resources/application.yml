@@ -56,6 +56,9 @@ groundcontrol:
     webhook:
       enabled: ${GC_SWEEP_WEBHOOK_ENABLED:false}
       url: ${GC_SWEEP_WEBHOOK_URL:}
+  compliance:
+    audit-retention-days: ${GC_AUDIT_RETENTION_DAYS:-1}
+    audit-retention-cron: ${GC_AUDIT_RETENTION_CRON:0 0 3 * * *}
   embedding:
     provider: ${GC_EMBEDDING_PROVIDER:none}
     api-key: ${GC_EMBEDDING_API_KEY:}

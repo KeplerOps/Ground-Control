@@ -4,7 +4,12 @@ import com.keplerops.groundcontrol.domain.requirements.service.RequirementRevisi
 import java.time.Instant;
 
 public record RequirementHistoryResponse(
-        int revisionNumber, String revisionType, Instant timestamp, String actor, RequirementResponse snapshot) {
+        int revisionNumber,
+        String revisionType,
+        Instant timestamp,
+        String actor,
+        String reason,
+        RequirementResponse snapshot) {
 
     public static RequirementHistoryResponse from(RequirementRevision revision) {
         return new RequirementHistoryResponse(
@@ -12,6 +17,7 @@ public record RequirementHistoryResponse(
                 revision.revisionType(),
                 revision.timestamp(),
                 revision.actor(),
+                revision.reason(),
                 RequirementResponse.from(revision.entity()));
     }
 }

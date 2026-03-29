@@ -7,6 +7,16 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.domain.documents.model.Document;
+import com.keplerops.groundcontrol.domain.documents.model.Section;
+import com.keplerops.groundcontrol.domain.documents.repository.DocumentRepository;
+import com.keplerops.groundcontrol.domain.documents.repository.SectionRepository;
+import com.keplerops.groundcontrol.domain.documents.service.CreateDocumentCommand;
+import com.keplerops.groundcontrol.domain.documents.service.CreateSectionCommand;
+import com.keplerops.groundcontrol.domain.documents.service.CreateSectionContentCommand;
+import com.keplerops.groundcontrol.domain.documents.service.DocumentService;
+import com.keplerops.groundcontrol.domain.documents.service.SectionContentService;
+import com.keplerops.groundcontrol.domain.documents.service.SectionService;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
@@ -58,6 +68,21 @@ class ImportServiceTest {
     @Mock
     private RequirementImportRepository importRepository;
 
+    @Mock
+    private DocumentService documentService;
+
+    @Mock
+    private DocumentRepository documentRepository;
+
+    @Mock
+    private SectionService sectionService;
+
+    @Mock
+    private SectionRepository sectionRepository;
+
+    @Mock
+    private SectionContentService sectionContentService;
+
     private ImportService service;
 
     private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
@@ -83,7 +108,12 @@ class ImportServiceTest {
                 requirementRepository,
                 relationRepository,
                 traceabilityLinkRepository,
-                importRepository);
+                importRepository,
+                documentService,
+                documentRepository,
+                sectionService,
+                sectionRepository,
+                sectionContentService);
     }
 
     private static Requirement makeRequirement(String uid, UUID id) {
@@ -94,12 +124,24 @@ class ImportServiceTest {
 
     private static void setField(Object obj, String fieldName, Object value) {
         try {
-            Field f = obj.getClass().getDeclaredField(fieldName);
+            Field f = findField(obj.getClass(), fieldName);
             f.setAccessible(true);
             f.set(obj, value);
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static Field findField(Class<?> clazz, String fieldName) throws NoSuchFieldException {
+        Class<?> current = clazz;
+        while (current != null) {
+            try {
+                return current.getDeclaredField(fieldName);
+            } catch (NoSuchFieldException e) {
+                current = current.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException(fieldName + " not found in " + clazz.getName() + " hierarchy");
     }
 
     private static String minimalSdoc(String uid) {
@@ -337,7 +379,7 @@ class ImportServiceTest {
 
             assertThat(result.relationsCreated()).isZero();
             assertThat(result.errors()).hasSize(1);
-            assertThat(result.errors().get(0).get("error").toString()).contains("Parent not found");
+            assertThat(result.errors().get(0).error()).contains("Parent not found");
         }
 
         @Test
@@ -369,8 +411,8 @@ class ImportServiceTest {
 
             assertThat(result.relationsCreated()).isZero();
             assertThat(result.errors()).hasSize(1);
-            assertThat(result.errors().get(0).get("phase")).isEqualTo("relations");
-            assertThat(result.errors().get(0).get("error").toString()).contains("Simulated relation failure");
+            assertThat(result.errors().get(0).phase()).isEqualTo("relations");
+            assertThat(result.errors().get(0).error()).contains("Simulated relation failure");
         }
     }
 
@@ -452,8 +494,8 @@ class ImportServiceTest {
 
             assertThat(result.traceabilityLinksCreated()).isZero();
             assertThat(result.errors()).hasSize(1);
-            assertThat(result.errors().get(0).get("phase")).isEqualTo("traceability");
-            assertThat(result.errors().get(0).get("error").toString()).contains("Simulated traceability failure");
+            assertThat(result.errors().get(0).phase()).isEqualTo("traceability");
+            assertThat(result.errors().get(0).error()).contains("Simulated traceability failure");
         }
     }
 
@@ -499,7 +541,7 @@ class ImportServiceTest {
 
             assertThat(result.requirementsCreated()).isEqualTo(1);
             assertThat(result.errors()).hasSize(1);
-            assertThat(result.errors().get(0).get("uid")).isEqualTo("REQ-FAIL");
+            assertThat(result.errors().get(0).uid()).isEqualTo("REQ-FAIL");
         }
     }
 
@@ -911,7 +953,7 @@ class ImportServiceTest {
             assertThat(result.relationsCreated()).isZero();
             // One error from Phase 1 (parent create failed) + one from Phase 2 (parent not found)
             assertThat(result.errors().stream()
-                            .filter(e -> e.get("error").toString().contains("Parent not found"))
+                            .filter(e -> e.error().contains("Parent not found"))
                             .count())
                     .isEqualTo(1);
         }
@@ -945,8 +987,7 @@ class ImportServiceTest {
 
             assertThat(result.relationsCreated()).isZero();
             assertThat(result.errors())
-                    .anyMatch(e -> e.get("phase").equals("relations")
-                            && e.get("error").toString().contains("Simulated relation failure"));
+                    .anyMatch(e -> e.phase().equals("relations") && e.error().contains("Simulated relation failure"));
         }
 
         @Test
@@ -971,7 +1012,7 @@ class ImportServiceTest {
 
             ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
 
-            assertThat(result.errors()).anyMatch(e -> e.get("error").toString().contains("Source not found"));
+            assertThat(result.errors()).anyMatch(e -> e.error().contains("Source not found"));
         }
 
         @Test
@@ -996,7 +1037,7 @@ class ImportServiceTest {
 
             ImportResult result = service.importReqif(PROJECT_ID, "test.reqif", reqif);
 
-            assertThat(result.errors()).anyMatch(e -> e.get("error").toString().contains("Target not found"));
+            assertThat(result.errors()).anyMatch(e -> e.error().contains("Target not found"));
         }
 
         @Test
@@ -1061,8 +1102,8 @@ class ImportServiceTest {
 
             assertThat(result.relationsCreated()).isZero();
             assertThat(result.errors())
-                    .anyMatch(e -> e.get("phase").equals("relations")
-                            && e.get("error").toString().contains("Simulated SpecRelation failure"));
+                    .anyMatch(
+                            e -> e.phase().equals("relations") && e.error().contains("Simulated SpecRelation failure"));
         }
 
         @Test
@@ -1143,7 +1184,7 @@ class ImportServiceTest {
 
             assertThat(result.requirementsCreated()).isEqualTo(1);
             assertThat(result.errors()).hasSize(1);
-            assertThat(result.errors().get(0).get("uid")).isEqualTo("RIF-FAIL");
+            assertThat(result.errors().get(0).uid()).isEqualTo("RIF-FAIL");
         }
     }
 
@@ -1168,6 +1209,124 @@ class ImportServiceTest {
             service.importReqif(PROJECT_ID, "test.reqif", reqif);
 
             verify(importRepository).save(any(RequirementImport.class));
+        }
+    }
+
+    @Nested
+    class DocumentStructure {
+
+        private static String sdocWithSection() {
+            return """
+                    [[SECTION]]
+                    TITLE: Wave 1 — Foundation
+
+                    [TEXT]
+                    Introduction text.
+
+                    [REQUIREMENT]
+                    UID: DOC-001
+                    TITLE: First
+                    STATEMENT: >>>
+                    Statement.
+                    <<<
+
+                    [[/SECTION]]
+                    """;
+        }
+
+        private void stubCommonMocks(UUID reqId) {
+            when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID, "DOC-001"))
+                    .thenReturn(Optional.empty());
+            when(requirementService.create(any(CreateRequirementCommand.class)))
+                    .thenReturn(makeRequirement("DOC-001", reqId));
+            when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
+                var audit = inv.<RequirementImport>getArgument(0);
+                setField(audit, "id", UUID.randomUUID());
+                return audit;
+            });
+        }
+
+        @Test
+        void createsDocumentAndSectionFromSdoc() {
+            UUID reqId = UUID.randomUUID();
+            UUID docId = UUID.randomUUID();
+            UUID sectionId = UUID.randomUUID();
+            stubCommonMocks(reqId);
+
+            var mockDoc = new Document(TEST_PROJECT, "my-doc", "1.0.0", "", "");
+            setField(mockDoc, "id", docId);
+            when(documentRepository.findByProjectIdAndTitle(eq(PROJECT_ID), eq("my-doc")))
+                    .thenReturn(Optional.empty());
+            when(documentService.create(any(CreateDocumentCommand.class))).thenReturn(mockDoc);
+
+            var mockSection = new Section(mockDoc, null, "Wave 1 — Foundation", "", 0);
+            setField(mockSection, "id", sectionId);
+            when(sectionRepository.findFirstByDocumentIdAndParentIdIsNullAndTitle(eq(docId), any()))
+                    .thenReturn(Optional.empty());
+            when(sectionService.create(any(CreateSectionCommand.class))).thenReturn(mockSection);
+
+            ImportResult result = service.importStrictdoc(PROJECT_ID, "my-doc.sdoc", sdocWithSection());
+
+            assertThat(result.documentsCreated()).isEqualTo(1);
+            assertThat(result.sectionsCreated()).isEqualTo(1);
+            // 1 text block + 1 requirement ref = 2 content items
+            assertThat(result.sectionContentsCreated()).isEqualTo(2);
+            verify(documentService).create(any(CreateDocumentCommand.class));
+            verify(sectionService).create(any(CreateSectionCommand.class));
+            verify(sectionContentService, org.mockito.Mockito.times(2)).create(any(CreateSectionContentCommand.class));
+        }
+
+        @Test
+        void skipsExistingDocumentOnReimport() {
+            UUID reqId = UUID.randomUUID();
+            UUID docId = UUID.randomUUID();
+            UUID sectionId = UUID.randomUUID();
+            stubCommonMocks(reqId);
+
+            var mockDoc = new Document(TEST_PROJECT, "my-doc", "1.0.0", "", "");
+            setField(mockDoc, "id", docId);
+            when(documentRepository.findByProjectIdAndTitle(eq(PROJECT_ID), eq("my-doc")))
+                    .thenReturn(Optional.of(mockDoc));
+
+            var mockSection = new Section(mockDoc, null, "Wave 1 — Foundation", "", 0);
+            setField(mockSection, "id", sectionId);
+            when(sectionRepository.findFirstByDocumentIdAndParentIdIsNullAndTitle(eq(docId), any()))
+                    .thenReturn(Optional.of(mockSection));
+
+            ImportResult result = service.importStrictdoc(PROJECT_ID, "my-doc.sdoc", sdocWithSection());
+
+            assertThat(result.documentsCreated()).isEqualTo(0);
+            assertThat(result.sectionsCreated()).isEqualTo(0);
+            assertThat(result.sectionContentsCreated()).isEqualTo(0);
+            verify(documentService, never()).create(any(CreateDocumentCommand.class));
+            verify(sectionContentService, never()).create(any(CreateSectionContentCommand.class));
+        }
+
+        @Test
+        void reportsDocumentCountersInResult() {
+            UUID reqId = UUID.randomUUID();
+            UUID docId = UUID.randomUUID();
+            UUID sectionId = UUID.randomUUID();
+            stubCommonMocks(reqId);
+
+            var mockDoc = new Document(TEST_PROJECT, "my-doc", "1.0.0", "", "");
+            setField(mockDoc, "id", docId);
+            when(documentRepository.findByProjectIdAndTitle(eq(PROJECT_ID), eq("my-doc")))
+                    .thenReturn(Optional.empty());
+            when(documentService.create(any(CreateDocumentCommand.class))).thenReturn(mockDoc);
+
+            var mockSection = new Section(mockDoc, null, "Wave 1 — Foundation", "", 0);
+            setField(mockSection, "id", sectionId);
+            when(sectionRepository.findFirstByDocumentIdAndParentIdIsNullAndTitle(eq(docId), any()))
+                    .thenReturn(Optional.empty());
+            when(sectionService.create(any(CreateSectionCommand.class))).thenReturn(mockSection);
+
+            ImportResult result = service.importStrictdoc(PROJECT_ID, "my-doc.sdoc", sdocWithSection());
+
+            assertThat(result.requirementsCreated()).isEqualTo(1);
+            assertThat(result.documentsCreated()).isEqualTo(1);
+            assertThat(result.sectionsCreated()).isEqualTo(1);
+            assertThat(result.sectionContentsCreated()).isEqualTo(2);
         }
     }
 }
