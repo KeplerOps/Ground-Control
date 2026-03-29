@@ -96,6 +96,11 @@ if (quick) {
     tasks.named("checkstyleMain") { enabled = false }
 }
 
+// Generate META-INF/build-info.properties so logback can read the version dynamically
+springBoot {
+    buildInfo()
+}
+
 tasks.register("rapid") {
     description = "Fast dev loop: format + compile (no tests, no static analysis)"
     group = "development"

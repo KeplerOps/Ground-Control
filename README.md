@@ -35,6 +35,7 @@ MCP-driven AI workflows. The rest of the factory is coming.
 - **MCP server** — 30 tools for Claude Code: manage requirements, baselines, run analysis, embed text, and build traceability without leaving your editor
 - **Baseline management** — Named point-in-time snapshots of the requirement set for release management and specification evolution tracking
 - **Audit trail** — Every change to every entity is versioned via Hibernate Envers
+- **Web UI** — React 19 / TypeScript SPA served by the backend: Dashboard, Requirements Explorer, Requirement Detail with local dependency graph
 
 ## Near-Term Roadmap
 
@@ -46,7 +47,7 @@ MCP-driven AI workflows. The rest of the factory is coming.
 
 ## Getting Started
 
-**Prerequisites:** Java 21, Docker, `gh` CLI (for GitHub features)
+**Prerequisites:** Java 21, Docker, Node.js 20+, `gh` CLI (for GitHub features)
 
 ```bash
 git clone https://github.com/KeplerOps/Ground-Control.git
@@ -59,9 +60,17 @@ make dev      # Spring Boot on http://localhost:8000
 
 Then visit:
 
+- **Web UI** — `http://localhost:8000/` (React SPA — Dashboard, Explorer, Dependency Graph)
 - **API** — `http://localhost:8000/api/v1/requirements`
 - **Swagger UI** — `http://localhost:8000/api/docs`
 - **OpenAPI spec** — `http://localhost:8000/api/openapi.json`
+
+For frontend development with hot reload:
+
+```bash
+make frontend-install   # Install Node dependencies (first time only)
+make frontend-dev       # Vite dev server on http://localhost:5173 (proxies /api to :8000)
+```
 
 ### MCP Server (Claude Code)
 
@@ -87,6 +96,7 @@ Run `make help` to see all targets.
 | | |
 |---|---|
 | **Runtime** | Java 21 / Spring Boot 3.4 / Gradle |
+| **Frontend** | React 19 / TypeScript 5 / Vite 6 / Tailwind 4 |
 | **Database** | PostgreSQL 16 + Apache AGE (optional graph queries) |
 | **Migrations** | Flyway |
 | **Auditing** | Hibernate Envers |
