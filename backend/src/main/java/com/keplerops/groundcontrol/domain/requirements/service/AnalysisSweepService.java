@@ -1,7 +1,10 @@
 package com.keplerops.groundcontrol.domain.requirements.service;
 
+import com.keplerops.groundcontrol.domain.exception.GroundControlException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
+import com.keplerops.groundcontrol.domain.qualitygates.service.QualityGateEvaluationResult;
+import com.keplerops.groundcontrol.domain.qualitygates.service.QualityGateService;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
@@ -23,12 +26,17 @@ public class AnalysisSweepService {
 
     private final AnalysisService analysisService;
     private final ProjectService projectService;
+    private final QualityGateService qualityGateService;
     private final List<SweepNotifier> notifiers;
 
     public AnalysisSweepService(
-            AnalysisService analysisService, ProjectService projectService, List<SweepNotifier> notifiers) {
+            AnalysisService analysisService,
+            ProjectService projectService,
+            QualityGateService qualityGateService,
+            List<SweepNotifier> notifiers) {
         this.analysisService = analysisService;
         this.projectService = projectService;
+        this.qualityGateService = qualityGateService;
         this.notifiers = notifiers;
     }
 
@@ -65,6 +73,15 @@ public class AnalysisSweepService {
 
         var completeness = analysisService.analyzeCompleteness(projectId);
 
+        QualityGateEvaluationResult qualityGateResults = null;
+        try {
+            qualityGateResults = qualityGateService.evaluate(identifier);
+        } catch (GroundControlException e) {
+            log.warn("sweep_quality_gates_failed: project={} error={}", identifier, e.getMessage());
+        } catch (RuntimeException e) {
+            log.error("sweep_quality_gates_unexpected_error: project={} error={}", identifier, e.getMessage(), e);
+        }
+
         var report = new SweepReport(
                 identifier,
                 Instant.now(),
@@ -73,7 +90,8 @@ public class AnalysisSweepService {
                 coverageGaps,
                 crossWaveViolations,
                 consistencyViolations,
-                completeness);
+                completeness,
+                qualityGateResults);
 
         log.info(
                 "sweep_completed: project={} problems={} total={}",

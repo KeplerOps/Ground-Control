@@ -26,7 +26,8 @@ class GitHubIssueSweepNotifierTest {
                 List.of(new SweepReport.CrossWaveViolationSummary("GC-A", 1, "GC-B", 2, "DEPENDS_ON")),
                 List.of(new SweepReport.ConsistencyViolationSummary(
                         "GC-X", "ACTIVE", "GC-Y", "ACTIVE", "ACTIVE_CONFLICT")),
-                new CompletenessResult(5, Map.of("DRAFT", 3), List.of()));
+                new CompletenessResult(5, Map.of("DRAFT", 3), List.of()),
+                null);
 
         var body = GitHubIssueSweepNotifier.formatBody(report);
 
@@ -56,7 +57,8 @@ class GitHubIssueSweepNotifierTest {
                 Map.of(),
                 List.of(),
                 List.of(),
-                new CompletenessResult(1, Map.of("DRAFT", 1), List.of()));
+                new CompletenessResult(1, Map.of("DRAFT", 1), List.of()),
+                null);
 
         var body = GitHubIssueSweepNotifier.formatBody(report);
 

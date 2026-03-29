@@ -52,17 +52,48 @@ public class GraphController {
     }
 
     @GetMapping("/api/v1/graph/visualization")
-    public GraphVisualizationResponse getVisualization(@RequestParam(required = false) String project) {
+    public GraphVisualizationResponse getVisualization(
+            @RequestParam(required = false) String project, @RequestParam(required = false) List<String> entityTypes) {
         var projectId = projectService.resolveProjectId(project);
-        return GraphVisualizationResponse.from(analysisService.getGraphVisualization(projectId));
+        var result = GraphVisualizationResponse.from(analysisService.getGraphVisualization(projectId));
+        return filterByEntityTypes(result, entityTypes);
     }
 
     @GetMapping("/api/v1/graph/subgraph")
     public SubgraphResponse extractSubgraph(
-            @RequestParam List<String> roots, @RequestParam(required = false) String project) {
+            @RequestParam List<String> roots,
+            @RequestParam(required = false) String project,
+            @RequestParam(required = false) List<String> entityTypes) {
         var projectId = projectService.resolveProjectId(project);
         var result = analysisService.extractSubgraph(projectId, roots);
-        return SubgraphResponse.from(result, roots);
+        var response = SubgraphResponse.from(result, roots);
+        if (entityTypes == null || entityTypes.isEmpty()) {
+            return response;
+        }
+        var filteredNodes = response.nodes().stream()
+                .filter(n -> entityTypes.contains(n.entityType()))
+                .toList();
+        return new SubgraphResponse(
+                filteredNodes,
+                response.edges(),
+                filteredNodes.size(),
+                response.edges().size(),
+                roots);
+    }
+
+    private GraphVisualizationResponse filterByEntityTypes(
+            GraphVisualizationResponse response, List<String> entityTypes) {
+        if (entityTypes == null || entityTypes.isEmpty()) {
+            return response;
+        }
+        var filteredNodes = response.nodes().stream()
+                .filter(n -> entityTypes.contains(n.entityType()))
+                .toList();
+        return new GraphVisualizationResponse(
+                filteredNodes,
+                response.edges(),
+                filteredNodes.size(),
+                response.edges().size());
     }
 
     @GetMapping("/api/v1/graph/paths")

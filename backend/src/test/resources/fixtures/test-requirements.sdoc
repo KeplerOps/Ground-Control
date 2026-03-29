@@ -1,6 +1,9 @@
 [[SECTION]]
 TITLE: Wave 1 — Foundation
 
+[TEXT]
+This section describes the foundational requirements for end-to-end testing.
+
 [REQUIREMENT]
 UID: E2E-REQ-001
 TITLE: Foundation requirement
@@ -43,6 +46,9 @@ STATEMENT: >>>
 Standalone integration requirement with one issue reference.
 <<<
 COMMENT: GitHub issues: #14
+
+[TEXT]
+Orphan requirements are intentionally left without relations for testing.
 
 [REQUIREMENT]
 UID: E2E-REQ-005
