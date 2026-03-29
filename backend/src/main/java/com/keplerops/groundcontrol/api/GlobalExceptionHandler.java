@@ -24,6 +24,7 @@ import org.springframework.web.multipart.support.MissingServletRequestPartExcept
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    private static final String BAD_REQUEST = "bad_request";
 
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(NotFoundException ex) {
@@ -65,26 +66,26 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleHttpMessageNotReadable(HttpMessageNotReadableException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(ErrorResponse.of("bad_request", "Malformed request body"));
+                .body(ErrorResponse.of(BAD_REQUEST, "Malformed request body"));
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ErrorResponse> handleMethodArgumentTypeMismatch(MethodArgumentTypeMismatchException ex) {
         String message = "Invalid value for parameter '" + ex.getName() + "'";
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of("bad_request", message));
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(BAD_REQUEST, message));
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)
     public ResponseEntity<ErrorResponse> handleMissingServletRequestParameter(
             MissingServletRequestParameterException ex) {
         String message = "Missing required parameter '" + ex.getParameterName() + "'";
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of("bad_request", message));
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(BAD_REQUEST, message));
     }
 
     @ExceptionHandler(MissingServletRequestPartException.class)
     public ResponseEntity<ErrorResponse> handleMissingServletRequestPart(MissingServletRequestPartException ex) {
         String message = "Missing required part '" + ex.getRequestPartName() + "'";
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of("bad_request", message));
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(BAD_REQUEST, message));
     }
 
     @ExceptionHandler(GroundControlException.class)

@@ -131,7 +131,31 @@ class GraphControllerTest {
                     .andExpect(jsonPath("$.totalNodes", is(2)))
                     .andExpect(jsonPath("$.totalEdges", is(1)))
                     .andExpect(jsonPath("$.nodes[0].uid", is("REQ-A")))
+                    .andExpect(jsonPath("$.nodes[0].entityType", is("REQUIREMENT")))
                     .andExpect(jsonPath("$.edges[0].relationType", is("DEPENDS_ON")));
+        }
+
+        @Test
+        void filtersNodesByEntityType() throws Exception {
+            var projectId = UUID.randomUUID();
+            var project = new Project("test", "Test");
+            var a = new Requirement(project, "REQ-A", "Title A", "Statement A");
+
+            when(projectService.resolveProjectId("test")).thenReturn(projectId);
+            when(analysisService.getGraphVisualization(projectId))
+                    .thenReturn(new GraphVisualizationResult(List.of(a), List.of()));
+
+            mockMvc.perform(get("/api/v1/graph/visualization")
+                            .param("project", "test")
+                            .param("entityTypes", "REQUIREMENT"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.nodes", hasSize(1)));
+
+            mockMvc.perform(get("/api/v1/graph/visualization")
+                            .param("project", "test")
+                            .param("entityTypes", "DOCUMENT"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.nodes", hasSize(0)));
         }
     }
 
@@ -162,6 +186,25 @@ class GraphControllerTest {
                     .andExpect(jsonPath("$.rootUids", hasSize(2)))
                     .andExpect(jsonPath("$.nodes[0].uid", is("REQ-A")))
                     .andExpect(jsonPath("$.edges[0].relationType", is("DEPENDS_ON")));
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void filtersSubgraphByEntityType() throws Exception {
+            var projectId = UUID.randomUUID();
+            var project = new Project("test", "Test");
+            var a = new Requirement(project, "REQ-A", "Title A", "Statement A");
+
+            when(projectService.resolveProjectId("test")).thenReturn(projectId);
+            when(analysisService.extractSubgraph(any(UUID.class), any(List.class)))
+                    .thenReturn(new SubgraphResult(List.of(a), List.of()));
+
+            mockMvc.perform(get("/api/v1/graph/subgraph")
+                            .param("roots", "REQ-A")
+                            .param("project", "test")
+                            .param("entityTypes", "DOCUMENT"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.nodes", hasSize(0)));
         }
     }
 }
