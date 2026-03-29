@@ -111,8 +111,7 @@ public class DocumentExportService {
     }
 
     private static String buildComment(Requirement req) {
-        // Preserve any existing comment/rationale — the .sdoc COMMENT field maps to rationale
-        // in GC, but we return empty if there's nothing meaningful to export
-        return "";
+        String rationale = req.getRationale();
+        return rationale != null ? rationale : "";
     }
 }

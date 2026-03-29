@@ -115,6 +115,14 @@ public class DocumentExportPdfService {
         stmtCell.setBorderWidthTop(0);
         table.addCell(stmtCell);
 
+        // Comment cell (if any)
+        if (req.comment() != null && !req.comment().isEmpty()) {
+            var commentCell = new PdfPCell(new Phrase("Comment: " + req.comment(), RELATION_FONT));
+            commentCell.setPadding(4f);
+            commentCell.setBorderWidthTop(0);
+            table.addCell(commentCell);
+        }
+
         // Relations cell (if any)
         if (!req.parentUids().isEmpty()) {
             var relText = "Parent: " + String.join(", ", req.parentUids());

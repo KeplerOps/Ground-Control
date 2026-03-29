@@ -61,6 +61,36 @@ class DocumentExportReqifServiceTest {
     }
 
     @Test
+    void requirementWithComment_emitsCommentAttribute() {
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "REQ-C01", "With Comment", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var order = new DocumentReadingOrder(UUID.randomUUID(), "Test", "1.0", "", List.of(section));
+        var reqs = Map.of(
+                "REQ-C01",
+                new RequirementExportData(
+                        "REQ-C01", "With Comment", "Statement.", "Safety-critical rationale.", List.of()));
+
+        String reqif = service.toReqif(order, reqs);
+
+        assertThat(reqif).contains("ATTRIBUTE-VALUE-STRING");
+        assertThat(reqif).contains("Safety-critical rationale.");
+        assertThat(reqif).contains("ad-comment");
+    }
+
+    @Test
+    void requirementWithEmptyComment_omitsCommentAttribute() {
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "REQ-C02", "No Comment", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var order = new DocumentReadingOrder(UUID.randomUUID(), "Test", "1.0", "", List.of(section));
+        var reqs =
+                Map.of("REQ-C02", new RequirementExportData("REQ-C02", "No Comment", "Statement.", "", List.of()));
+
+        String reqif = service.toReqif(order, reqs);
+
+        assertThat(reqif).doesNotContain("ATTRIBUTE-VALUE-STRING");
+    }
+
+    @Test
     void xmlSpecialCharacters_areEscaped() {
         var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "REQ-XSS", "Title", null, 0));
         var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());

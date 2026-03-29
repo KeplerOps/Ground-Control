@@ -22,6 +22,7 @@ public class DocumentExportHtmlService {
                          font-family: monospace; font-size: 0.85rem; font-weight: 600; }
             .req-title { font-weight: 600; font-size: 1.1rem; }
             .statement { margin: 0.75rem 0; white-space: pre-wrap; }
+            .comment { margin: 0.75rem 0; font-size: 0.9rem; color: #495057; font-style: italic; }
             .relations { margin-top: 0.5rem; font-size: 0.9rem; color: #495057; }
             .relations span { font-family: monospace; }
             .meta { color: #6c757d; font-size: 0.85rem; margin-top: 1rem; }
@@ -97,6 +98,12 @@ public class DocumentExportHtmlService {
         sb.append("<span class=\"req-title\">").append(escape(req.title())).append("</span>");
         sb.append("</div>\n");
         sb.append("<div class=\"statement\">").append(escape(req.statement())).append("</div>\n");
+
+        if (req.comment() != null && !req.comment().isEmpty()) {
+            sb.append("<div class=\"comment\"><strong>Comment:</strong> ")
+                    .append(escape(req.comment()))
+                    .append("</div>\n");
+        }
 
         if (!req.parentUids().isEmpty()) {
             sb.append("<div class=\"relations\">Parent: ");

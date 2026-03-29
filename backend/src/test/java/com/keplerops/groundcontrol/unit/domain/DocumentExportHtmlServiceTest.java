@@ -70,6 +70,35 @@ class DocumentExportHtmlServiceTest {
     }
 
     @Test
+    void requirementWithComment_rendersCommentDiv() {
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "REQ-C01", "With Comment", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var order = new DocumentReadingOrder(UUID.randomUUID(), "Test", "1.0", "", List.of(section));
+        var reqs = Map.of(
+                "REQ-C01",
+                new RequirementExportData(
+                        "REQ-C01", "With Comment", "Statement.", "Safety-critical rationale.", List.of()));
+
+        String html = service.toHtml(order, reqs);
+
+        assertThat(html).contains("class=\"comment\"");
+        assertThat(html).contains("Safety-critical rationale.");
+    }
+
+    @Test
+    void requirementWithEmptyComment_omitsCommentDiv() {
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "REQ-C02", "No Comment", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var order = new DocumentReadingOrder(UUID.randomUUID(), "Test", "1.0", "", List.of(section));
+        var reqs =
+                Map.of("REQ-C02", new RequirementExportData("REQ-C02", "No Comment", "Statement.", "", List.of()));
+
+        String html = service.toHtml(order, reqs);
+
+        assertThat(html).doesNotContain("class=\"comment\"");
+    }
+
+    @Test
     void parentRelations_renderedInRequirement() {
         var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "CHILD-001", "Child", null, 0));
         var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());

@@ -61,6 +61,50 @@ class DocumentExportSdocServiceTest {
     }
 
     @Test
+    void requirementWithComment_emitsCommentField() {
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "REQ-C01", "With Comment", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var order = new DocumentReadingOrder(UUID.randomUUID(), "Test", "1.0", "", List.of(section));
+        var reqs = Map.of(
+                "REQ-C01",
+                new RequirementExportData(
+                        "REQ-C01", "With Comment", "Statement.", "Safety-critical rationale.", List.of()));
+
+        String sdoc = service.toSdoc(order, reqs);
+
+        assertThat(sdoc).contains("COMMENT: Safety-critical rationale.");
+    }
+
+    @Test
+    void requirementWithEmptyComment_omitsCommentField() {
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "REQ-C02", "No Comment", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var order = new DocumentReadingOrder(UUID.randomUUID(), "Test", "1.0", "", List.of(section));
+        var reqs =
+                Map.of("REQ-C02", new RequirementExportData("REQ-C02", "No Comment", "Statement.", "", List.of()));
+
+        String sdoc = service.toSdoc(order, reqs);
+
+        assertThat(sdoc).doesNotContain("COMMENT:");
+    }
+
+    @Test
+    void roundTrip_commentPreservedThroughExportAndParse() {
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "REQ-RT", "Round Trip", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var order = new DocumentReadingOrder(UUID.randomUUID(), "Test", "1.0", "", List.of(section));
+        var reqs = Map.of(
+                "REQ-RT",
+                new RequirementExportData("REQ-RT", "Round Trip", "Statement.", "Rationale survives export.", List.of()));
+
+        String sdoc = service.toSdoc(order, reqs);
+        SdocDocument parsed = SdocParser.parse(sdoc);
+
+        assertThat(parsed.requirements()).hasSize(1);
+        assertThat(parsed.requirements().get(0).comment()).isEqualTo("Rationale survives export.");
+    }
+
+    @Test
     void textBlock_emitsTextMarker() {
         var content = List.of(new ReadingOrderContentItem("TEXT_BLOCK", null, null, "Some descriptive text.", 0));
         var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());

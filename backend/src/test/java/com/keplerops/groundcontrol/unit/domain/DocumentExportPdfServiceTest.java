@@ -40,6 +40,25 @@ class DocumentExportPdfServiceTest {
     }
 
     @Test
+    void requirementWithComment_producesLargerPdfThanWithout() {
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "REQ-001", "Title", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var order = new DocumentReadingOrder(UUID.randomUUID(), "Test", "1.0", "", List.of(section));
+
+        var reqsNoComment =
+                Map.of("REQ-001", new RequirementExportData("REQ-001", "Title", "Statement.", "", List.of()));
+        byte[] pdfNoComment = service.toPdf(order, reqsNoComment);
+
+        var reqsWithComment = Map.of(
+                "REQ-001",
+                new RequirementExportData(
+                        "REQ-001", "Title", "Statement.", "Safety-critical rationale content.", List.of()));
+        byte[] pdfWithComment = service.toPdf(order, reqsWithComment);
+
+        assertThat(pdfWithComment.length).isGreaterThan(pdfNoComment.length);
+    }
+
+    @Test
     void textBlockAndRelations_produceValidPdf() {
         var textItem = new ReadingOrderContentItem("TEXT_BLOCK", null, null, "Some text content.", 0);
         var reqItem = new ReadingOrderContentItem("REQUIREMENT", "CHILD-001", "Child", null, 1);

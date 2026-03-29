@@ -131,6 +131,51 @@ class DocumentExportServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void exportToSdoc_includesRationaleAsComment() {
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "REQ-RAT", "With Rationale", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var order = new DocumentReadingOrder(DOC_ID, "Test Doc", "1.0", "", List.of(section));
+        when(readingOrderService.getReadingOrder(DOC_ID)).thenReturn(order);
+
+        var req = makeRequirement("REQ-RAT", REQ_ID);
+        req.setRationale("This is important because of safety constraints.");
+        when(requirementRepository.findByUid("REQ-RAT")).thenReturn(Optional.of(req));
+        when(relationRepository.findBySourceId(REQ_ID)).thenReturn(List.of());
+
+        var captor = ArgumentCaptor.forClass(Map.class);
+        when(sdocService.toSdoc(any(), captor.capture())).thenReturn("");
+
+        service.exportToSdoc(DOC_ID);
+
+        Map<String, com.keplerops.groundcontrol.domain.documents.service.RequirementExportData> reqMap =
+                captor.getValue();
+        assertThat(reqMap.get("REQ-RAT").comment()).isEqualTo("This is important because of safety constraints.");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void exportToSdoc_emptyRationale_producesEmptyComment() {
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "REQ-EMPTY", "No Rationale", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var order = new DocumentReadingOrder(DOC_ID, "Test Doc", "1.0", "", List.of(section));
+        when(readingOrderService.getReadingOrder(DOC_ID)).thenReturn(order);
+
+        var req = makeRequirement("REQ-EMPTY", REQ_ID);
+        when(requirementRepository.findByUid("REQ-EMPTY")).thenReturn(Optional.of(req));
+        when(relationRepository.findBySourceId(REQ_ID)).thenReturn(List.of());
+
+        var captor = ArgumentCaptor.forClass(Map.class);
+        when(sdocService.toSdoc(any(), captor.capture())).thenReturn("");
+
+        service.exportToSdoc(DOC_ID);
+
+        Map<String, com.keplerops.groundcontrol.domain.documents.service.RequirementExportData> reqMap =
+                captor.getValue();
+        assertThat(reqMap.get("REQ-EMPTY").comment()).isEmpty();
+    }
+
+    @Test
     void exportToSdoc_skipsTextBlocksInUidCollection() {
         var textContent = new ReadingOrderContentItem("TEXT_BLOCK", null, null, "Some text", 0);
         var reqContent = new ReadingOrderContentItem("REQUIREMENT", "REQ-002", "Title", null, 1);

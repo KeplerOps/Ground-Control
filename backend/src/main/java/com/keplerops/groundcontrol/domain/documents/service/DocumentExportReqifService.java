@@ -87,6 +87,7 @@ public class DocumentExportReqifService {
         xml.writeStartElement("SPEC-ATTRIBUTES");
         writeAttrDefString(xml, "ad-name", "ReqIF.Name", "dt-string");
         writeAttrDefXhtml(xml, "ad-text", "ReqIF.Text", "dt-xhtml");
+        writeAttrDefString(xml, "ad-comment", "ReqIF.Comment", "dt-string");
         xml.writeEndElement(); // SPEC-ATTRIBUTES
         xml.writeEndElement(); // SPEC-OBJECT-TYPE
 
@@ -136,11 +137,23 @@ public class DocumentExportReqifService {
 
             xml.writeStartElement("VALUES");
             writeXhtmlValue(xml, req.statement());
+            if (req.comment() != null && !req.comment().isEmpty()) {
+                writeStringValue(xml, "ad-comment", req.comment());
+            }
             xml.writeEndElement(); // VALUES
 
             xml.writeEndElement(); // SPEC-OBJECT
         }
         xml.writeEndElement(); // SPEC-OBJECTS
+    }
+
+    private void writeStringValue(XMLStreamWriter xml, String attrDefRef, String text) throws XMLStreamException {
+        xml.writeStartElement("ATTRIBUTE-VALUE-STRING");
+        xml.writeAttribute("THE-VALUE", nullSafe(text));
+        xml.writeStartElement("DEFINITION");
+        writeTextElement(xml, "ATTRIBUTE-DEFINITION-STRING-REF", attrDefRef);
+        xml.writeEndElement(); // DEFINITION
+        xml.writeEndElement(); // ATTRIBUTE-VALUE-STRING
     }
 
     private void writeXhtmlValue(XMLStreamWriter xml, String text) throws XMLStreamException {
