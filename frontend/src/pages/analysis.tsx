@@ -9,6 +9,7 @@ import {
   useOrphans,
 } from "@/hooks/use-analysis";
 import type { CompletenessIssueResponse, LinkType } from "@/types/api";
+import { LINK_TYPES } from "@/types/api";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Activity } from "lucide-react";
 import { useState } from "react";
@@ -182,11 +183,11 @@ function CoverageTab() {
           value={linkType}
           onChange={(e) => setLinkType(e.target.value as LinkType)}
         >
-          <option value="IMPLEMENTS">IMPLEMENTS</option>
-          <option value="TESTS">TESTS</option>
-          <option value="DOCUMENTS">DOCUMENTS</option>
-          <option value="TRACES_TO">TRACES TO</option>
-          <option value="DERIVED_FROM">DERIVED FROM</option>
+          {LINK_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
         </select>
       </label>
 

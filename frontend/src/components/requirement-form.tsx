@@ -12,17 +12,8 @@ import type {
   RequirementType,
   UpdateRequirementRequest,
 } from "@/types/api";
+import { REQUIREMENT_TYPES } from "@/types/api";
 import { useState } from "react";
-
-const TYPES: RequirementType[] = [
-  "FUNCTIONAL",
-  "NON_FUNCTIONAL",
-  "CONSTRAINT",
-  "INTERFACE",
-  "PERFORMANCE",
-  "SECURITY",
-  "DATA",
-];
 
 const PRIORITIES: Priority[] = ["MUST", "SHOULD", "COULD", "WONT"];
 
@@ -128,7 +119,7 @@ export function RequirementForm({
               setRequirementType(e.target.value as RequirementType)
             }
           >
-            {TYPES.map((t) => (
+            {REQUIREMENT_TYPES.map((t) => (
               <option key={t} value={t}>
                 {t.replace("_", " ")}
               </option>
