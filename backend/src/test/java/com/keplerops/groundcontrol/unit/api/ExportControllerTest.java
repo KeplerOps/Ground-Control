@@ -16,7 +16,6 @@ import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisSweepService;
 import com.keplerops.groundcontrol.domain.requirements.service.CompletenessResult;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementsExportCsvService;
-import com.keplerops.groundcontrol.domain.requirements.service.RequirementsExportData;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementsExportExcelService;
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementsExportPdfService;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepExportCsvService;
@@ -74,8 +73,8 @@ class ExportControllerTest {
     @Test
     void exportRequirements_csv_returnsCsvResponse() throws Exception {
         when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
-        var data = new RequirementsExportData("test-project", Instant.now(), List.of());
-        when(analysisService.getRequirementsExportData(eq(PROJECT_ID))).thenReturn(data);
+        when(projectService.resolveProjectIdentifier(any())).thenReturn("test-project");
+        when(analysisService.getRequirementsExportData(eq(PROJECT_ID))).thenReturn(List.of());
         when(requirementsCsvService.toCsv(any())).thenReturn("uid,title\n");
 
         mockMvc.perform(get("/api/v1/export/requirements"))
@@ -88,8 +87,8 @@ class ExportControllerTest {
     @Test
     void exportRequirements_xlsx_returnsExcelResponse() throws Exception {
         when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
-        var data = new RequirementsExportData("test-project", Instant.now(), List.of());
-        when(analysisService.getRequirementsExportData(eq(PROJECT_ID))).thenReturn(data);
+        when(projectService.resolveProjectIdentifier(any())).thenReturn("test-project");
+        when(analysisService.getRequirementsExportData(eq(PROJECT_ID))).thenReturn(List.of());
         when(requirementsExcelService.toExcel(any())).thenReturn(new byte[] {0x50, 0x4B});
 
         mockMvc.perform(get("/api/v1/export/requirements").param("format", "xlsx"))
@@ -102,8 +101,8 @@ class ExportControllerTest {
     @Test
     void exportRequirements_pdf_returnsPdfResponse() throws Exception {
         when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
-        var data = new RequirementsExportData("test-project", Instant.now(), List.of());
-        when(analysisService.getRequirementsExportData(eq(PROJECT_ID))).thenReturn(data);
+        when(projectService.resolveProjectIdentifier(any())).thenReturn("test-project");
+        when(analysisService.getRequirementsExportData(eq(PROJECT_ID))).thenReturn(List.of());
         when(requirementsPdfService.toPdf(any())).thenReturn(new byte[] {0x25, 0x50});
 
         mockMvc.perform(get("/api/v1/export/requirements").param("format", "pdf"))
