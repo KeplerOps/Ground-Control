@@ -3,6 +3,7 @@ package com.keplerops.groundcontrol.domain.requirements.service;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
+import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
@@ -115,13 +116,16 @@ public class AnalysisService {
 
         Set<UUID> reachableIds = GraphAlgorithms.findReachable(requirementId, reverseAdj);
 
-        return reachableIds.stream()
-                .map(id -> id.equals(seed.getId())
-                        ? seed
-                        : requirementRepository
-                                .findById(id)
-                                .orElseThrow(() -> new NotFoundException("Requirement not found: " + id)))
-                .collect(Collectors.toSet());
+        List<Requirement> fetched = requirementRepository.findAllById(reachableIds);
+        if (fetched.size() != reachableIds.size()) {
+            Set<UUID> foundIds = fetched.stream().map(Requirement::getId).collect(Collectors.toSet());
+            UUID missingId = reachableIds.stream()
+                    .filter(id -> !foundIds.contains(id))
+                    .findFirst()
+                    .orElseThrow();
+            throw new NotFoundException("Requirement not found: " + missingId);
+        }
+        return new HashSet<>(fetched);
     }
 
     public List<ConsistencyViolation> detectConsistencyViolations(UUID projectId) {
@@ -346,25 +350,39 @@ public class AnalysisService {
                 })
                 .toList();
 
-        // coverageByLinkType — for each LinkType, count covered requirements
+        // coverageByLinkType — one set-based query per LinkType, no per-requirement calls
         int total = allRequirements.size();
+        Set<UUID> reqIds = allRequirements.stream().map(Requirement::getId).collect(Collectors.toSet());
         Map<String, CoverageStats> coverageByLinkType = new LinkedHashMap<>();
         for (LinkType linkType : LinkType.values()) {
             int covered = 0;
-            for (Requirement req : allRequirements) {
-                if (traceabilityLinkRepository.existsByRequirementIdAndLinkType(req.getId(), linkType)) {
-                    covered++;
-                }
+            if (!reqIds.isEmpty()) {
+                covered = traceabilityLinkRepository
+                        .findRequirementIdsWithLinkType(reqIds, linkType)
+                        .size();
             }
             double percentage = total > 0 ? Math.round(covered * 1000.0 / total) / 10.0 : 0.0;
             coverageByLinkType.put(linkType.name(), new CoverageStats(total, covered, percentage));
         }
 
         // recentChanges — delegate to AuditService
-        Set<UUID> reqIds = allRequirements.stream().map(Requirement::getId).collect(Collectors.toSet());
         List<RecentChange> recentChanges = auditService.getRecentRequirementChanges(reqIds, 10);
 
         return new DashboardStats(total, byStatus, byWave, coverageByLinkType, recentChanges);
+    }
+
+    public List<RequirementExportRecord> getRequirementsExportData(UUID projectId) {
+        List<Requirement> requirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
+        if (requirements.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> reqIds = requirements.stream().map(Requirement::getId).collect(Collectors.toSet());
+        List<TraceabilityLink> allLinks = traceabilityLinkRepository.findByRequirementIdIn(reqIds);
+        Map<UUID, List<TraceabilityLink>> linksByReqId = allLinks.stream()
+                .collect(Collectors.groupingBy(link -> link.getRequirement().getId()));
+        return requirements.stream()
+                .map(req -> new RequirementExportRecord(req, linksByReqId.getOrDefault(req.getId(), List.of())))
+                .toList();
     }
 
     public SubgraphResult extractSubgraph(UUID projectId, List<String> rootUids) {
