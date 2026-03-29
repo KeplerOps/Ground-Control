@@ -20,6 +20,7 @@ import com.keplerops.groundcontrol.domain.baselines.service.BaselineService;
 import com.keplerops.groundcontrol.domain.baselines.service.BaselineSnapshot;
 import com.keplerops.groundcontrol.domain.baselines.service.CreateBaselineCommand;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
@@ -191,6 +192,17 @@ class BaselineControllerTest {
 
     @Nested
     class Compare {
+
+        @Test
+        void crossProjectComparison_returns422() throws Exception {
+            when(baselineService.compare(BASELINE_ID, OTHER_BASELINE_ID))
+                    .thenThrow(new DomainValidationException(
+                            "Cannot compare baselines from different projects", "cross_project_comparison", Map.of()));
+
+            mockMvc.perform(get("/api/v1/baselines/" + BASELINE_ID + "/compare/" + OTHER_BASELINE_ID))
+                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(jsonPath("$.error.code", is("cross_project_comparison")));
+        }
 
         @Test
         void returns200() throws Exception {
