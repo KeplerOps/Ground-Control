@@ -11,7 +11,6 @@ import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -473,39 +472,5 @@ public class AnalysisService {
         List<Requirement> requirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
         List<RequirementRelation> relations = relationRepository.findActiveWithSourceAndTargetByProjectId(projectId);
         return new GraphVisualizationResult(requirements, relations);
-    }
-
-    public RequirementsExportData getRequirementsExportData(UUID projectId) {
-        List<Requirement> requirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
-        String projectIdentifier =
-                requirements.isEmpty() ? "" : requirements.get(0).getProject().getIdentifier();
-        List<RequirementsExportData.RequirementSnapshot> snapshots = new ArrayList<>();
-
-        for (Requirement req : requirements) {
-            List<TraceabilityLink> links = traceabilityLinkRepository.findByRequirementId(req.getId());
-            List<RequirementsExportData.TraceabilityLinkSnapshot> linkSnapshots = links.stream()
-                    .map(link -> new RequirementsExportData.TraceabilityLinkSnapshot(
-                            link.getArtifactType().name(),
-                            link.getArtifactIdentifier(),
-                            link.getLinkType().name(),
-                            link.getArtifactUrl(),
-                            link.getArtifactTitle()))
-                    .toList();
-
-            snapshots.add(new RequirementsExportData.RequirementSnapshot(
-                    req.getUid(),
-                    req.getTitle(),
-                    req.getStatement(),
-                    req.getRationale(),
-                    req.getRequirementType().name(),
-                    req.getPriority().name(),
-                    req.getStatus().name(),
-                    req.getWave(),
-                    linkSnapshots,
-                    req.getCreatedAt(),
-                    req.getUpdatedAt()));
-        }
-
-        return new RequirementsExportData(projectIdentifier, Instant.now(), snapshots);
     }
 }

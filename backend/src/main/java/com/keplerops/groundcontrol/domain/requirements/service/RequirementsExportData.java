@@ -26,4 +26,33 @@ public record RequirementsExportData(
             String linkType,
             String artifactUrl,
             String artifactTitle) {}
+
+    public static RequirementsExportData from(String projectIdentifier, List<RequirementExportRecord> records) {
+        var snapshots = records.stream()
+                .map(r -> {
+                    var req = r.requirement();
+                    var linkSnapshots = r.traceabilityLinks().stream()
+                            .map(link -> new TraceabilityLinkSnapshot(
+                                    link.getArtifactType().name(),
+                                    link.getArtifactIdentifier(),
+                                    link.getLinkType().name(),
+                                    link.getArtifactUrl(),
+                                    link.getArtifactTitle()))
+                            .toList();
+                    return new RequirementSnapshot(
+                            req.getUid(),
+                            req.getTitle(),
+                            req.getStatement(),
+                            req.getRationale(),
+                            req.getRequirementType().name(),
+                            req.getPriority().name(),
+                            req.getStatus().name(),
+                            req.getWave(),
+                            linkSnapshots,
+                            req.getCreatedAt(),
+                            req.getUpdatedAt());
+                })
+                .toList();
+        return new RequirementsExportData(projectIdentifier, Instant.now(), snapshots);
+    }
 }
