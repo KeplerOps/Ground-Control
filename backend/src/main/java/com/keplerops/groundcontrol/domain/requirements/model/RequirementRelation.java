@@ -112,17 +112,14 @@ public class RequirementRelation {
         if (this == o) return true;
         if (!(o instanceof RequirementRelation other)) return false;
         return relationType != null
-                && Objects.equals(source != null ? source.getId() : null, other.source != null ? other.source.getId() : null)
-                && Objects.equals(target != null ? target.getId() : null, other.target != null ? other.target.getId() : null)
+                && Objects.equals(source, other.source)
+                && Objects.equals(target, other.target)
                 && relationType.equals(other.relationType);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(
-                source != null ? source.getId() : null,
-                target != null ? target.getId() : null,
-                relationType);
+        return Objects.hash(source, target, relationType);
     }
 
     @Override

@@ -19,6 +19,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -232,16 +233,27 @@ public class Requirement {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof Requirement other)) return false;
-        return uid != null && uid.equals(other.uid);
+        return normalizedUid() != null
+                && projectIdentifier() != null
+                && Objects.equals(projectIdentifier(), other.projectIdentifier())
+                && Objects.equals(normalizedUid(), other.normalizedUid());
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(uid);
+        return Objects.hash(projectIdentifier(), normalizedUid());
     }
 
     @Override
     public String toString() {
         return uid;
+    }
+
+    private String projectIdentifier() {
+        return project != null ? project.getIdentifier() : null;
+    }
+
+    private String normalizedUid() {
+        return uid != null ? uid.toLowerCase(Locale.ROOT) : null;
     }
 }

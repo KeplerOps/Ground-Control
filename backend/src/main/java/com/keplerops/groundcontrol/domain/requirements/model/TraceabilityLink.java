@@ -190,7 +190,7 @@ public class TraceabilityLink {
         return artifactType != null
                 && artifactIdentifier != null
                 && linkType != null
-                && Objects.equals(requirement != null ? requirement.getId() : null, other.requirement != null ? other.requirement.getId() : null)
+                && Objects.equals(requirement, other.requirement)
                 && artifactType.equals(other.artifactType)
                 && artifactIdentifier.equals(other.artifactIdentifier)
                 && linkType.equals(other.linkType);
@@ -198,10 +198,6 @@ public class TraceabilityLink {
 
     @Override
     public int hashCode() {
-        return Objects.hash(
-                requirement != null ? requirement.getId() : null,
-                artifactType,
-                artifactIdentifier,
-                linkType);
+        return Objects.hash(requirement, artifactType, artifactIdentifier, linkType);
     }
 }

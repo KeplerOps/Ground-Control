@@ -18,11 +18,15 @@ class RequirementTest {
     private static final Project TEST_PROJECT = createTestProject();
 
     private static Project createTestProject() {
-        var project = new Project("test-project", "Test Project");
+        return createTestProject("test-project", UUID.fromString("00000000-0000-0000-0000-000000000001"));
+    }
+
+    private static Project createTestProject(String identifier, UUID id) {
+        var project = new Project(identifier, "Test Project");
         try {
             var field = Project.class.getDeclaredField("id");
             field.setAccessible(true);
-            field.set(project, UUID.fromString("00000000-0000-0000-0000-000000000001"));
+            field.set(project, id);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -30,7 +34,11 @@ class RequirementTest {
     }
 
     private static Requirement createRequirement(String uid) {
-        return new Requirement(TEST_PROJECT, uid, "Title for " + uid, "Statement for " + uid);
+        return createRequirement(TEST_PROJECT, uid);
+    }
+
+    private static Requirement createRequirement(Project project, String uid) {
+        return new Requirement(project, uid, "Title for " + uid, "Statement for " + uid);
     }
 
     private static void setId(Requirement req, UUID id) {
@@ -193,18 +201,34 @@ class RequirementTest {
         @Test
         void sameInstanceIsEqual() {
             var req = createRequirement("REQ-001");
-            assertThat(req).isEqualTo(req);
+            assertThat(req.equals(req)).isTrue();
         }
 
         @Test
-        void twoInstancesWithSameUidAreEqual() {
+        void sameProjectAndUidAreEqual() {
             var req1 = createRequirement("REQ-001");
             var req2 = createRequirement("REQ-001");
             assertThat(req1).isEqualTo(req2);
         }
 
         @Test
-        void differentUidsAreNotEqual() {
+        void sameProjectAndUidAreEqualIgnoringCase() {
+            var req1 = createRequirement("REQ-001");
+            var req2 = createRequirement("req-001");
+            assertThat(req1).isEqualTo(req2);
+        }
+
+        @Test
+        void sameUidInDifferentProjectsIsNotEqual() {
+            var otherProject =
+                    createTestProject("other-project", UUID.fromString("00000000-0000-0000-0000-000000000002"));
+            var req1 = createRequirement("REQ-001");
+            var req2 = createRequirement(otherProject, "REQ-001");
+            assertThat(req1).isNotEqualTo(req2);
+        }
+
+        @Test
+        void differentUidsInSameProjectAreNotEqual() {
             var req1 = createRequirement("REQ-001");
             var req2 = createRequirement("REQ-002");
             assertThat(req1).isNotEqualTo(req2);
@@ -213,7 +237,7 @@ class RequirementTest {
         @Test
         void equalRequirementsHaveSameHashCode() {
             var req1 = createRequirement("REQ-001");
-            var req2 = createRequirement("REQ-001");
+            var req2 = createRequirement("req-001");
             assertThat(req1.hashCode()).isEqualTo(req2.hashCode());
         }
 
@@ -230,9 +254,9 @@ class RequirementTest {
         }
 
         @Test
-        void sameUidInSetDeduplicates() {
+        void sameProjectAndUidInSetDeduplicates() {
             var req1 = createRequirement("REQ-001");
-            var req2 = createRequirement("REQ-001");
+            var req2 = createRequirement("req-001");
             var set = new java.util.HashSet<Requirement>();
             set.add(req1);
             set.add(req2);
@@ -274,6 +298,15 @@ class RequirementTest {
             var rel1 = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
             var rel2 = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
             assertThat(rel1.hashCode()).isEqualTo(rel2.hashCode());
+        }
+
+        @Test
+        void transientRequirementsWithDifferentNaturalKeysAreNotEqual() {
+            var rel1 = new RequirementRelation(
+                    createRequirement("REQ-001"), createRequirement("REQ-002"), RelationType.DEPENDS_ON);
+            var rel2 = new RequirementRelation(
+                    createRequirement("REQ-003"), createRequirement("REQ-004"), RelationType.DEPENDS_ON);
+            assertThat(rel1).isNotEqualTo(rel2);
         }
     }
 
