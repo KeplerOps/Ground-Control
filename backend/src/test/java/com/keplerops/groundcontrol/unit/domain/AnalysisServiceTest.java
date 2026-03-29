@@ -318,6 +318,25 @@ class AnalysisServiceTest {
 
             assertThatThrownBy(() -> service.impactAnalysis(missingId)).isInstanceOf(NotFoundException.class);
         }
+
+        @Test
+        void reachableRequirementMissingFromDb_throwsNotFoundException() {
+            UUID seedId = UUID.randomUUID();
+            UUID downstreamId = UUID.randomUUID();
+            var seed = makeRequirement("REQ-SEED", seedId);
+            var downstream = makeRequirement("REQ-DOWN", downstreamId);
+
+            // downstream depends on seed, so downstream is reachable in impact traversal
+            var rel = new RequirementRelation(downstream, seed, RelationType.PARENT);
+
+            when(requirementRepository.findById(seedId)).thenReturn(Optional.of(seed));
+            // findAllById returns only seed — downstream is missing from DB
+            when(requirementRepository.findAllById(anyIterable())).thenReturn(List.of(seed));
+            when(relationRepository.findActiveByProjectAndRelationTypeIn(PROJECT_ID, DAG_TYPES))
+                    .thenReturn(List.of(rel));
+
+            assertThatThrownBy(() -> service.impactAnalysis(seedId)).isInstanceOf(NotFoundException.class);
+        }
     }
 
     @Nested

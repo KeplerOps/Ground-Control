@@ -9,15 +9,18 @@ import static org.mockito.Mockito.when;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
+import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisSweepService;
 import com.keplerops.groundcontrol.domain.requirements.service.CompletenessResult;
+import com.keplerops.groundcontrol.domain.requirements.service.ConsistencyViolation;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepNotifier;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
+import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
@@ -183,6 +186,75 @@ class AnalysisSweepServiceTest {
             // Should not throw
             var report = sweepService.sweep("test-project");
             assertThat(report.hasProblems()).isTrue();
+        }
+
+        @Test
+        void includesCrossWaveViolationsInReport() {
+            when(projectService.resolveProjectId("test-project")).thenReturn(PROJECT_ID);
+            when(projectService.getById(PROJECT_ID)).thenReturn(TEST_PROJECT);
+
+            var early = makeRequirement("GC-EARLY", UUID.randomUUID());
+            early.setWave(1);
+            var late = makeRequirement("GC-LATE", UUID.randomUUID());
+            late.setWave(3);
+            var violation = new RequirementRelation(early, late, RelationType.DEPENDS_ON);
+
+            when(analysisService.detectCycles(PROJECT_ID)).thenReturn(List.of());
+            when(analysisService.findOrphans(PROJECT_ID)).thenReturn(List.of());
+            for (LinkType lt : LinkType.values()) {
+                when(analysisService.findCoverageGaps(PROJECT_ID, lt)).thenReturn(List.of());
+            }
+            when(analysisService.crossWaveValidation(PROJECT_ID)).thenReturn(List.of(violation));
+            when(analysisService.detectConsistencyViolations(PROJECT_ID)).thenReturn(List.of());
+            when(analysisService.analyzeCompleteness(PROJECT_ID))
+                    .thenReturn(new CompletenessResult(2, Map.of(), List.of()));
+
+            var report = sweepService.sweep("test-project");
+
+            assertThat(report.hasProblems()).isTrue();
+            assertThat(report.crossWaveViolations()).hasSize(1);
+            SweepReport.CrossWaveViolationSummary summary =
+                    report.crossWaveViolations().get(0);
+            assertThat(summary.sourceUid()).isEqualTo("GC-EARLY");
+            assertThat(summary.sourceWave()).isEqualTo(1);
+            assertThat(summary.targetUid()).isEqualTo("GC-LATE");
+            assertThat(summary.targetWave()).isEqualTo(3);
+            assertThat(summary.relationType()).isEqualTo(RelationType.DEPENDS_ON.name());
+        }
+
+        @Test
+        void includesConsistencyViolationsInReport() {
+            when(projectService.resolveProjectId("test-project")).thenReturn(PROJECT_ID);
+            when(projectService.getById(PROJECT_ID)).thenReturn(TEST_PROJECT);
+
+            var source = makeRequirement("GC-SRC", UUID.randomUUID());
+            setField(source, "status", Status.ACTIVE);
+            var target = makeRequirement("GC-TGT", UUID.randomUUID());
+            setField(target, "status", Status.ACTIVE);
+            var rel = new RequirementRelation(source, target, RelationType.CONFLICTS_WITH);
+            var violation = new ConsistencyViolation(rel, "ACTIVE_CONFLICT");
+
+            when(analysisService.detectCycles(PROJECT_ID)).thenReturn(List.of());
+            when(analysisService.findOrphans(PROJECT_ID)).thenReturn(List.of());
+            for (LinkType lt : LinkType.values()) {
+                when(analysisService.findCoverageGaps(PROJECT_ID, lt)).thenReturn(List.of());
+            }
+            when(analysisService.crossWaveValidation(PROJECT_ID)).thenReturn(List.of());
+            when(analysisService.detectConsistencyViolations(PROJECT_ID)).thenReturn(List.of(violation));
+            when(analysisService.analyzeCompleteness(PROJECT_ID))
+                    .thenReturn(new CompletenessResult(2, Map.of(), List.of()));
+
+            var report = sweepService.sweep("test-project");
+
+            assertThat(report.hasProblems()).isTrue();
+            assertThat(report.consistencyViolations()).hasSize(1);
+            SweepReport.ConsistencyViolationSummary summary =
+                    report.consistencyViolations().get(0);
+            assertThat(summary.sourceUid()).isEqualTo("GC-SRC");
+            assertThat(summary.sourceStatus()).isEqualTo("ACTIVE");
+            assertThat(summary.targetUid()).isEqualTo("GC-TGT");
+            assertThat(summary.targetStatus()).isEqualTo("ACTIVE");
+            assertThat(summary.violationType()).isEqualTo("ACTIVE_CONFLICT");
         }
     }
 
