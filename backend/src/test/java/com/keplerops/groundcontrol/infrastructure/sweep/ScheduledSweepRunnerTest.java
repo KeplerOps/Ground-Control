@@ -34,7 +34,8 @@ class ScheduledSweepRunnerTest {
                 Map.of(),
                 List.of(),
                 List.of(),
-                new CompletenessResult(0, Map.of(), List.of()));
+                new CompletenessResult(0, Map.of(), List.of()),
+                null);
         when(analysisSweepService.sweepAll()).thenReturn(List.of(report));
 
         runner.runScheduledSweep();

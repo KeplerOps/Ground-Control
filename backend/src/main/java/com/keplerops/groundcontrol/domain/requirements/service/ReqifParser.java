@@ -195,18 +195,15 @@ public final class ReqifParser {
 
             // If this object has a parent in the hierarchy, record the parent relationship
             if (parentIdentifier != null) {
-                ReqifRequirement existing = requirements.get(objRef);
-                if (existing != null) {
+                requirements.computeIfPresent(objRef, (key, existing) -> {
                     List<String> newParents = new ArrayList<>(existing.parentIdentifiers());
                     String parentUid = sanitizeUid(parentIdentifier);
                     if (!newParents.contains(parentUid)) {
                         newParents.add(parentUid);
                     }
-                    requirements.put(
-                            objRef,
-                            new ReqifRequirement(
-                                    existing.identifier(), existing.title(), existing.statement(), newParents));
-                }
+                    return new ReqifRequirement(
+                            existing.identifier(), existing.title(), existing.statement(), newParents);
+                });
             }
 
             // Recurse into nested CHILDREN

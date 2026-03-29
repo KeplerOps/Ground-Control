@@ -8,4 +8,7 @@ class ImportCounters {
     int relationsSkipped;
     int traceabilityLinksCreated;
     int traceabilityLinksSkipped;
+    int documentsCreated;
+    int sectionsCreated;
+    int sectionContentsCreated;
 }

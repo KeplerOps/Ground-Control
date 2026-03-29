@@ -79,55 +79,63 @@ public class EmbeddingService {
 
         var modelId = embeddingProvider.getModelId();
         var requirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
+        var embeddingsByReqId = indexExistingEmbeddings(projectId);
+
+        var toEmbed = new ArrayList<Requirement>();
+        int skipped = 0;
+        for (var req : requirements) {
+            if (force || needsEmbedding(req, embeddingsByReqId, modelId)) {
+                toEmbed.add(req);
+            } else {
+                skipped++;
+            }
+        }
+
+        var batchResult = processBatches(toEmbed, embeddingsByReqId, modelId);
+
+        log.info(
+                "batch_embedding_completed: project_id={} total={} embedded={} skipped={} failed={}",
+                projectId,
+                requirements.size(),
+                batchResult.embedded,
+                skipped,
+                batchResult.failed);
+
+        return new BatchEmbeddingResult(
+                requirements.size(), batchResult.embedded, skipped, batchResult.failed, modelId, batchResult.errors);
+    }
+
+    private java.util.Map<UUID, RequirementEmbedding> indexExistingEmbeddings(UUID projectId) {
         var existingEmbeddings = embeddingRepository.findByRequirementProjectId(projectId);
         var embeddingsByReqId = new java.util.HashMap<UUID, RequirementEmbedding>();
         for (var emb : existingEmbeddings) {
             embeddingsByReqId.put(emb.getRequirement().getId(), emb);
         }
+        return embeddingsByReqId;
+    }
 
-        var toEmbed = new ArrayList<Requirement>();
-        int skipped = 0;
+    private boolean needsEmbedding(
+            Requirement req, java.util.Map<UUID, RequirementEmbedding> embeddingsByReqId, String modelId) {
+        var existing = embeddingsByReqId.get(req.getId());
+        return existing == null
+                || !existing.getContentHash().equals(computeHash(req))
+                || !existing.getModelId().equals(modelId);
+    }
 
-        for (var req : requirements) {
-            if (force) {
-                toEmbed.add(req);
-                continue;
-            }
-            var existing = embeddingsByReqId.get(req.getId());
-            if (existing != null
-                    && existing.getContentHash().equals(computeHash(req))
-                    && existing.getModelId().equals(modelId)) {
-                skipped++;
-            } else {
-                toEmbed.add(req);
-            }
-        }
-
+    private BatchProcessingAccumulator processBatches(
+            List<Requirement> toEmbed, java.util.Map<UUID, RequirementEmbedding> embeddingsByReqId, String modelId) {
         int embedded = 0;
         int failed = 0;
         var errors = new ArrayList<String>();
-
-        // Process in batches
         var batchSize = 50;
+
         for (int i = 0; i < toEmbed.size(); i += batchSize) {
             var batch = toEmbed.subList(i, Math.min(i + batchSize, toEmbed.size()));
             var texts = batch.stream().map(this::buildText).toList();
-
             try {
                 var vectors = embeddingProvider.embedBatch(texts);
                 for (int j = 0; j < batch.size(); j++) {
-                    var req = batch.get(j);
-                    var vector = vectors.get(j);
-                    var contentHash = computeHash(req);
-                    var existing = embeddingsByReqId.get(req.getId());
-
-                    if (existing != null) {
-                        existing.update(contentHash, vector, modelId);
-                        embeddingRepository.save(existing);
-                    } else {
-                        var embedding = new RequirementEmbedding(req, contentHash, vector, modelId);
-                        embeddingRepository.save(embedding);
-                    }
+                    saveEmbedding(batch.get(j), vectors.get(j), embeddingsByReqId, modelId);
                     embedded++;
                 }
             } catch (Exception e) {
@@ -137,16 +145,26 @@ public class EmbeddingService {
             }
         }
 
-        log.info(
-                "batch_embedding_completed: project_id={} total={} embedded={} skipped={} failed={}",
-                projectId,
-                requirements.size(),
-                embedded,
-                skipped,
-                failed);
-
-        return new BatchEmbeddingResult(requirements.size(), embedded, skipped, failed, modelId, errors);
+        return new BatchProcessingAccumulator(embedded, failed, errors);
     }
+
+    private void saveEmbedding(
+            Requirement req,
+            float[] vector,
+            java.util.Map<UUID, RequirementEmbedding> embeddingsByReqId,
+            String modelId) {
+        var contentHash = computeHash(req);
+        var existing = embeddingsByReqId.get(req.getId());
+        if (existing != null) {
+            existing.update(contentHash, vector, modelId);
+            embeddingRepository.save(existing);
+        } else {
+            var embedding = new RequirementEmbedding(req, contentHash, vector, modelId);
+            embeddingRepository.save(embedding);
+        }
+    }
+
+    private record BatchProcessingAccumulator(int embedded, int failed, List<String> errors) {}
 
     @Transactional(readOnly = true)
     public EmbeddingStatus getEmbeddingStatus(UUID requirementId) {
