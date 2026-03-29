@@ -75,8 +75,12 @@ public class AuditService {
                 .toList();
     }
 
-    public List<RelationRevision> getRelationHistory(UUID relationId) {
-        if (!relationRepository.existsById(relationId)) {
+    public List<RelationRevision> getRelationHistory(UUID requirementId, UUID relationId) {
+        var relation = relationRepository
+                .findById(relationId)
+                .orElseThrow(() -> new NotFoundException("Relation not found: " + relationId));
+        if (!requirementId.equals(relation.getSource().getId())
+                && !requirementId.equals(relation.getTarget().getId())) {
             throw new NotFoundException("Relation not found: " + relationId);
         }
 
@@ -138,8 +142,11 @@ public class AuditService {
                 .toList();
     }
 
-    public List<TraceabilityLinkRevision> getTraceabilityLinkHistory(UUID linkId) {
-        if (!traceabilityLinkRepository.existsById(linkId)) {
+    public List<TraceabilityLinkRevision> getTraceabilityLinkHistory(UUID requirementId, UUID linkId) {
+        var link = traceabilityLinkRepository
+                .findById(linkId)
+                .orElseThrow(() -> new NotFoundException("Traceability link not found: " + linkId));
+        if (!requirementId.equals(link.getRequirement().getId())) {
             throw new NotFoundException("Traceability link not found: " + linkId);
         }
 

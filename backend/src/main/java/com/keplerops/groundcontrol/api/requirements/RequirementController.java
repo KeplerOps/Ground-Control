@@ -176,7 +176,7 @@ public class RequirementController {
 
     @GetMapping("/{id}/relations/{relationId}/history")
     public List<RelationHistoryResponse> getRelationHistory(@PathVariable UUID id, @PathVariable UUID relationId) {
-        return auditService.getRelationHistory(relationId).stream()
+        return auditService.getRelationHistory(id, relationId).stream()
                 .map(RelationHistoryResponse::from)
                 .toList();
     }
@@ -210,7 +210,7 @@ public class RequirementController {
     @GetMapping("/{id}/traceability/{linkId}/history")
     public List<TraceabilityLinkHistoryResponse> getTraceabilityLinkHistory(
             @PathVariable UUID id, @PathVariable UUID linkId) {
-        return auditService.getTraceabilityLinkHistory(linkId).stream()
+        return auditService.getTraceabilityLinkHistory(id, linkId).stream()
                 .map(TraceabilityLinkHistoryResponse::from)
                 .toList();
     }
@@ -218,6 +218,6 @@ public class RequirementController {
     @DeleteMapping("/{id}/traceability/{linkId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteTraceabilityLink(@PathVariable UUID id, @PathVariable UUID linkId) {
-        traceabilityService.deleteLink(linkId);
+        traceabilityService.deleteLink(id, linkId);
     }
 }

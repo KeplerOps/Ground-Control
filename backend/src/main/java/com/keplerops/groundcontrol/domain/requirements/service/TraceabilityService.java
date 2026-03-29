@@ -46,10 +46,13 @@ public class TraceabilityService {
         return traceabilityLinkRepository.findByRequirementId(requirementId);
     }
 
-    public void deleteLink(UUID linkId) {
+    public void deleteLink(UUID requirementId, UUID linkId) {
         var link = traceabilityLinkRepository
                 .findById(linkId)
                 .orElseThrow(() -> new NotFoundException("Traceability link not found: " + linkId));
+        if (!requirementId.equals(link.getRequirement().getId())) {
+            throw new NotFoundException("Traceability link not found: " + linkId);
+        }
         traceabilityLinkRepository.delete(link);
     }
 }
