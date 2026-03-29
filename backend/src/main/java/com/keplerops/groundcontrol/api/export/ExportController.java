@@ -114,6 +114,8 @@ public class ExportController {
         return switch (format.toLowerCase(Locale.ROOT)) {
             case "html" -> textResponse(
                     documentExportService.exportToHtml(documentId), MediaType.TEXT_HTML, baseName + ".html");
+            case "pdf" -> binaryResponse(
+                    documentExportService.exportToPdf(documentId), MediaType.APPLICATION_PDF, baseName + ".pdf");
             default -> textResponse(
                     documentExportService.exportToSdoc(documentId), MediaType.TEXT_PLAIN, baseName + ".sdoc");
         };

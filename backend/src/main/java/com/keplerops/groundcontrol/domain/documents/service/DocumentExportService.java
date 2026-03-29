@@ -22,6 +22,7 @@ public class DocumentExportService {
     private final DocumentReadingOrderService readingOrderService;
     private final DocumentExportSdocService sdocService;
     private final DocumentExportHtmlService htmlService;
+    private final DocumentExportPdfService pdfService;
     private final RequirementRepository requirementRepository;
     private final RequirementRelationRepository relationRepository;
 
@@ -29,11 +30,13 @@ public class DocumentExportService {
             DocumentReadingOrderService readingOrderService,
             DocumentExportSdocService sdocService,
             DocumentExportHtmlService htmlService,
+            DocumentExportPdfService pdfService,
             RequirementRepository requirementRepository,
             RequirementRelationRepository relationRepository) {
         this.readingOrderService = readingOrderService;
         this.sdocService = sdocService;
         this.htmlService = htmlService;
+        this.pdfService = pdfService;
         this.requirementRepository = requirementRepository;
         this.relationRepository = relationRepository;
     }
@@ -50,6 +53,13 @@ public class DocumentExportService {
         Set<String> uids = collectRequirementUids(readingOrder.sections());
         Map<String, RequirementExportData> requirementsByUid = buildRequirementMap(uids);
         return htmlService.toHtml(readingOrder, requirementsByUid);
+    }
+
+    public byte[] exportToPdf(UUID documentId) {
+        var readingOrder = readingOrderService.getReadingOrder(documentId);
+        Set<String> uids = collectRequirementUids(readingOrder.sections());
+        Map<String, RequirementExportData> requirementsByUid = buildRequirementMap(uids);
+        return pdfService.toPdf(readingOrder, requirementsByUid);
     }
 
     private Set<String> collectRequirementUids(List<ReadingOrderNode> sections) {

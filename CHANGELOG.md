@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.91.0] - 2026-03-28
+
+### Added
+
+- Export documents to PDF format for formal distribution via
+  `GET /api/v1/export/document/{id}?format=pdf` (GC-B009)
+- `gc_export_document` MCP tool now supports `pdf` format (returns base64)
+
 ## [0.90.0] - 2026-03-28
 
 ### Added

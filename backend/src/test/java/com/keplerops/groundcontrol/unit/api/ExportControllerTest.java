@@ -196,4 +196,15 @@ class ExportControllerTest {
                 .andExpect(content().contentTypeCompatibleWith("text/html"))
                 .andExpect(header().string("Content-Disposition", containsString(".html")));
     }
+
+    @Test
+    void exportDocument_pdf_returnsPdfResponse() throws Exception {
+        UUID docId = UUID.randomUUID();
+        when(documentExportService.exportToPdf(eq(docId))).thenReturn(new byte[] {0x25, 0x50, 0x44, 0x46});
+
+        mockMvc.perform(get("/api/v1/export/document/" + docId).param("format", "pdf"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith("application/pdf"))
+                .andExpect(header().string("Content-Disposition", containsString(".pdf")));
+    }
 }
