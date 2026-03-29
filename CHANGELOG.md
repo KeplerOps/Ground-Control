@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.92.2] - 2026-03-29
+
+### Fixed
+
+- Align frontend enum values with backend single source of truth (#433)
+- Remove hardcoded enum arrays from React components in favor of
+  centralized `api.ts` type definitions
+- Add enum contract test (`enum-contract.test.ts`) to prevent
+  frontend/backend enum drift
+
 ## [0.92.1] - 2026-03-29
 
 ### Fixed

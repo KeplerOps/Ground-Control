@@ -5,10 +5,13 @@ export type RequirementType =
   | "FUNCTIONAL"
   | "NON_FUNCTIONAL"
   | "CONSTRAINT"
-  | "INTERFACE"
-  | "PERFORMANCE"
-  | "SECURITY"
-  | "DATA";
+  | "INTERFACE";
+export const REQUIREMENT_TYPES: RequirementType[] = [
+  "FUNCTIONAL",
+  "NON_FUNCTIONAL",
+  "CONSTRAINT",
+  "INTERFACE",
+];
 export type RelationType =
   | "DEPENDS_ON"
   | "PARENT"
@@ -18,19 +21,38 @@ export type RelationType =
   | "RELATED";
 export type ArtifactType =
   | "GITHUB_ISSUE"
-  | "GITHUB_PR"
-  | "JIRA_ISSUE"
-  | "CONFLUENCE_PAGE"
-  | "TEST_CASE"
-  | "DESIGN_DOC"
   | "CODE_FILE"
-  | "OTHER";
+  | "ADR"
+  | "CONFIG"
+  | "POLICY"
+  | "TEST"
+  | "SPEC"
+  | "PROOF"
+  | "DOCUMENTATION";
+export const ARTIFACT_TYPES: ArtifactType[] = [
+  "GITHUB_ISSUE",
+  "CODE_FILE",
+  "ADR",
+  "CONFIG",
+  "POLICY",
+  "TEST",
+  "SPEC",
+  "PROOF",
+  "DOCUMENTATION",
+];
 export type LinkType =
   | "IMPLEMENTS"
   | "TESTS"
   | "DOCUMENTS"
-  | "TRACES_TO"
-  | "DERIVED_FROM";
+  | "CONSTRAINS"
+  | "VERIFIES";
+export const LINK_TYPES: LinkType[] = [
+  "IMPLEMENTS",
+  "TESTS",
+  "DOCUMENTS",
+  "CONSTRAINS",
+  "VERIFIES",
+];
 export type SyncStatus = "SYNCED" | "NOT_SYNCED" | "ERROR";
 export type RevisionType = "ADD" | "MOD" | "DEL";
 
