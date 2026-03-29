@@ -189,6 +189,8 @@ class RequirementTest {
             assertThat(req.getRationale()).isEqualTo("some rationale");
             req.setWave(3);
             assertThat(req.getWave()).isEqualTo(3);
+            req.setCustomFields("{\"source\":\"import\"}");
+            assertThat(req.getCustomFields()).isEqualTo("{\"source\":\"import\"}");
             assertThat(req.getCreatedAt()).isNull(); // not persisted
             assertThat(req.getUpdatedAt()).isNull();
             assertThat(req.toString()).isEqualTo("REQ-001");
