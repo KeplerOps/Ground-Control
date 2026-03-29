@@ -1,6 +1,9 @@
+import { GraphControls } from "@/components/graph/graph-controls";
+import { GraphFilters } from "@/components/graph/graph-filters";
+import { GraphLegend } from "@/components/graph/graph-legend";
+import { GraphStats } from "@/components/graph/graph-stats";
 import { useProjectContext } from "@/contexts/project-context";
 import { apiFetch } from "@/lib/api-client";
-import type { GraphVisualizationResponse } from "@/types/api";
 import {
   type ColorScheme,
   type LayoutId,
@@ -11,9 +14,9 @@ import {
   getNodeColor,
   getSeries,
 } from "@/lib/graph-constants";
-import { cn } from "@/lib/utils";
+import type { GraphVisualizationResponse } from "@/types/api";
 import type cytoscape from "cytoscape";
-import { Filter, Loader2, Maximize, RotateCcw, X } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 interface RequirementData {
@@ -33,7 +36,6 @@ interface RelationData {
   targetId: string;
   relationType: string;
 }
-
 
 type CytoscapeInstance = cytoscape.Core;
 
@@ -528,239 +530,49 @@ export function Graph() {
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
       {/* Controls */}
-      <div className="flex items-center gap-4 border-b border-border bg-card px-4 py-2">
-        <div className="flex items-center gap-2">
-          <label
-            htmlFor="graph-color-by"
-            className="text-xs text-muted-foreground"
-          >
-            Color by
-          </label>
-          <select
-            id="graph-color-by"
-            value={colorScheme}
-            onChange={(e) => setColorScheme(e.target.value as ColorScheme)}
-            className="rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
-          >
-            <option value="series">Series</option>
-            <option value="priority">Priority</option>
-            <option value="status">Status</option>
-            <option value="wave">Wave</option>
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <label
-            htmlFor="graph-layout"
-            className="text-xs text-muted-foreground"
-          >
-            Layout
-          </label>
-          <select
-            id="graph-layout"
-            value={layoutId}
-            onChange={(e) => setLayoutId(e.target.value as LayoutId)}
-            className="rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
-          >
-            <option value="dagre-lr">DAG (left to right)</option>
-            <option value="dagre-tb">DAG (top to bottom)</option>
-            <option value="dagre-wave-lr">Wave-ordered (L-R)</option>
-            <option value="dagre-wave-tb">Wave-ordered (T-B)</option>
-          </select>
-        </div>
-        <button
-          type="button"
-          onClick={handleFit}
-          className="flex items-center gap-1 rounded border border-input bg-background px-2 py-1 text-xs hover:border-primary"
-          title="Fit to screen"
-        >
-          <Maximize className="h-3 w-3" /> Fit
-        </button>
-        <button
-          type="button"
-          onClick={handleReset}
-          className="flex items-center gap-1 rounded border border-input bg-background px-2 py-1 text-xs hover:border-primary"
-          title="Reset filters"
-        >
-          <RotateCcw className="h-3 w-3" /> Reset
-        </button>
-      </div>
+      <GraphControls
+        colorScheme={colorScheme}
+        setColorScheme={setColorScheme}
+        layoutId={layoutId}
+        setLayoutId={setLayoutId}
+        onFit={handleFit}
+        onReset={handleReset}
+      />
 
       {/* Filters */}
       {!loading && (
-        <div className="flex items-center gap-4 border-b border-border bg-card px-4 py-1.5">
-          <Filter className="h-3.5 w-3.5 text-muted-foreground" />
-          <div className="flex items-center gap-2">
-            <label
-              htmlFor="graph-filter-status"
-              className="text-xs text-muted-foreground"
-            >
-              Status
-            </label>
-            <select
-              id="graph-filter-status"
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
-            >
-              <option value="">All</option>
-              {filterOptions.statuses.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <label
-              htmlFor="graph-filter-priority"
-              className="text-xs text-muted-foreground"
-            >
-              Priority
-            </label>
-            <select
-              id="graph-filter-priority"
-              value={filterPriority}
-              onChange={(e) => setFilterPriority(e.target.value)}
-              className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
-            >
-              <option value="">All</option>
-              {filterOptions.priorities.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <label
-              htmlFor="graph-filter-series"
-              className="text-xs text-muted-foreground"
-            >
-              Series
-            </label>
-            <select
-              id="graph-filter-series"
-              value={filterSeries}
-              onChange={(e) => setFilterSeries(e.target.value)}
-              className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
-            >
-              <option value="">All</option>
-              {filterOptions.series.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <label
-              htmlFor="graph-filter-wave"
-              className="text-xs text-muted-foreground"
-            >
-              Wave
-            </label>
-            <select
-              id="graph-filter-wave"
-              value={filterWave}
-              onChange={(e) => setFilterWave(e.target.value)}
-              className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
-            >
-              <option value="">All</option>
-              {filterOptions.waves.map((w) => (
-                <option key={w} value={String(w)}>
-                  {w}
-                </option>
-              ))}
-            </select>
-          </div>
-          {hasFilters && (
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="flex items-center gap-1 rounded border border-input bg-background px-2 py-0.5 text-xs text-muted-foreground hover:border-primary hover:text-foreground"
-            >
-              <X className="h-3 w-3" /> Clear
-            </button>
-          )}
-        </div>
+        <GraphFilters
+          filterStatus={filterStatus}
+          setFilterStatus={setFilterStatus}
+          filterPriority={filterPriority}
+          setFilterPriority={setFilterPriority}
+          filterSeries={filterSeries}
+          setFilterSeries={setFilterSeries}
+          filterWave={filterWave}
+          setFilterWave={setFilterWave}
+          hasFilters={hasFilters}
+          onClearFilters={clearFilters}
+          filterOptions={filterOptions}
+        />
       )}
 
       {/* Stats */}
       {!loading && (
-        <div className="flex gap-4 border-b border-border bg-card px-4 py-1.5 text-[11px]">
-          <span className="text-muted-foreground">
-            <strong className="text-foreground text-[13px] mr-0.5">
-              {hasFilters
-                ? `${filteredRequirements.length} of ${stats.requirements}`
-                : stats.requirements}
-            </strong>
-            requirements
-          </span>
-          <span className="text-muted-foreground">
-            <strong className="text-foreground text-[13px] mr-0.5">
-              {hasFilters
-                ? `${filteredRelations.length} of ${stats.relations}`
-                : stats.relations}
-            </strong>
-            relations
-          </span>
-          <span className="text-muted-foreground">
-            <strong className="text-foreground text-[13px] mr-0.5">
-              {stats.series}
-            </strong>
-            series
-          </span>
-          <span className="text-muted-foreground">
-            <strong className="text-foreground text-[13px] mr-0.5">
-              {stats.waves}
-            </strong>
-            waves
-          </span>
-          <span className="text-muted-foreground">{stats.waveStr}</span>
-        </div>
+        <GraphStats
+          stats={stats}
+          hasFilters={hasFilters}
+          filteredRequirementsCount={filteredRequirements.length}
+          filteredRelationsCount={filteredRelations.length}
+        />
       )}
 
       {/* Legend */}
       {!loading && (
-        <div className="flex flex-wrap gap-3 border-b border-border bg-card px-4 py-1.5">
-          {legendItems.map((item) => (
-            <button
-              type="button"
-              key={item.key}
-              onClick={() => handleLegendClick(item.key)}
-              className="flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-            >
-              <span
-                className="inline-block h-2.5 w-2.5 rounded-sm"
-                style={{ background: item.color }}
-              />
-              {item.key} ({item.count})
-            </button>
-          ))}
-          {relationLegend.length > 0 && (
-            <>
-              <span className="ml-2 text-[11px] text-muted-foreground">
-                Edges:
-              </span>
-              {relationLegend.map((item) => (
-                <span
-                  key={item.type}
-                  className="flex items-center gap-1 text-[11px] text-muted-foreground"
-                >
-                  <span
-                    className={cn(
-                      "inline-block w-6 border-t-2",
-                      item.style === "dashed" && "border-dashed",
-                      item.style === "dotted" && "border-dotted",
-                    )}
-                    style={{ borderTopColor: item.color }}
-                  />
-                  {item.label} ({item.count})
-                </span>
-              ))}
-            </>
-          )}
-        </div>
+        <GraphLegend
+          legendItems={legendItems}
+          relationLegend={relationLegend}
+          onLegendClick={handleLegendClick}
+        />
       )}
 
       {/* Graph canvas */}
@@ -768,7 +580,9 @@ export function Graph() {
         {loading && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <span className="text-sm text-muted-foreground">Loading graph...</span>
+            <span className="text-sm text-muted-foreground">
+              Loading graph...
+            </span>
           </div>
         )}
         {error && (
