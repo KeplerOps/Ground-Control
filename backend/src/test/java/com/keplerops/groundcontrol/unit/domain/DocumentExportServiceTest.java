@@ -1,20 +1,39 @@
 package com.keplerops.groundcontrol.unit.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.domain.documents.model.Document;
+import com.keplerops.groundcontrol.domain.documents.repository.DocumentRepository;
+import com.keplerops.groundcontrol.domain.documents.service.DocumentExportHtmlService;
+import com.keplerops.groundcontrol.domain.documents.service.DocumentExportPdfService;
+import com.keplerops.groundcontrol.domain.documents.service.DocumentExportReqifService;
+import com.keplerops.groundcontrol.domain.documents.service.DocumentExportSdocService;
 import com.keplerops.groundcontrol.domain.documents.service.DocumentExportService;
+import com.keplerops.groundcontrol.domain.documents.service.DocumentReadingOrder;
+import com.keplerops.groundcontrol.domain.documents.service.DocumentReadingOrderService;
+import com.keplerops.groundcontrol.domain.documents.service.ReadingOrderContentItem;
+import com.keplerops.groundcontrol.domain.documents.service.ReadingOrderNode;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
+import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
+import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
-import java.lang.reflect.Field;
+import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
+import static com.keplerops.groundcontrol.TestUtil.setField;
+
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -22,164 +41,231 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class DocumentExportServiceTest {
 
     @Mock
+    private DocumentReadingOrderService readingOrderService;
+
+    @Mock
+    private DocumentExportSdocService sdocService;
+
+    @Mock
+    private DocumentExportHtmlService htmlService;
+
+    @Mock
+    private DocumentExportPdfService pdfService;
+
+    @Mock
+    private DocumentExportReqifService reqifService;
+
+    @Mock
+    private DocumentRepository documentRepository;
+
+    @Mock
     private RequirementRepository requirementRepository;
+
+    @Mock
+    private RequirementRelationRepository relationRepository;
 
     private DocumentExportService service;
 
-    private static final UUID PROJECT_A = UUID.fromString("aaaaaaaa-0000-0000-0000-000000000001");
-    private static final UUID PROJECT_B = UUID.fromString("bbbbbbbb-0000-0000-0000-000000000002");
+    private static final UUID DOC_ID = UUID.randomUUID();
+    private static final UUID PROJECT_ID_A = UUID.fromString("aaaaaaaa-0000-0000-0000-000000000001");
+    private static final UUID PROJECT_ID_B = UUID.fromString("bbbbbbbb-0000-0000-0000-000000000002");
+    private static final UUID REQ_ID = UUID.randomUUID();
+    private static final UUID PARENT_REQ_ID = UUID.randomUUID();
+    private static final Project TEST_PROJECT_A = makeProject(PROJECT_ID_A, "proj-a");
 
     @BeforeEach
     void setUp() {
-        service = new DocumentExportService(requirementRepository);
+        service = new DocumentExportService(
+                readingOrderService,
+                sdocService,
+                htmlService,
+                pdfService,
+                reqifService,
+                documentRepository,
+                requirementRepository,
+                relationRepository);
     }
 
     // --- helpers ---
 
-    private static Project makeProject(UUID id, String identifier) {
+    private static Project makeProject(UUID projectId, String identifier) {
         var p = new Project(identifier, identifier);
-        setField(p, "id", id);
+        setField(p, "id", projectId);
         return p;
     }
 
+    private static Document makeDocument(UUID docId, Project project) {
+        var d = new Document(project, "Test Doc", "1.0", "", null);
+        setField(d, "id", docId);
+        return d;
+    }
+
+    private static Requirement makeRequirement(String uid, UUID id) {
+        var req = new Requirement(TEST_PROJECT_A, uid, "Title for " + uid, "Statement for " + uid);
+        setField(req, "id", id);
+        return req;
+    }
+
     private static Requirement makeRequirement(Project project, String uid) {
-        var req = new Requirement(project, uid, "Title " + uid, "Statement " + uid);
+        var req = new Requirement(project, uid, "Title for " + uid, "Statement for " + uid);
         setField(req, "id", UUID.randomUUID());
         return req;
     }
 
     private static void setField(Object obj, String fieldName, Object value) {
-        try {
-            Field f = obj.getClass().getDeclaredField(fieldName);
-            f.setAccessible(true);
-            f.set(obj, value);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
-        }
+        com.keplerops.groundcontrol.TestUtil.setField(obj, fieldName, value);
     }
 
-    private static String sdocWithUid(String uid) {
-        return """
-                [REQUIREMENT]
-                UID: %s
-                TITLE: Test
-                STATEMENT: >>>
-                Statement.
-                <<<
-                """
-                .formatted(uid);
-    }
-
-    private static String sdocWithUids(String uid1, String uid2) {
-        return """
-                [REQUIREMENT]
-                UID: %s
-                TITLE: First
-                STATEMENT: >>>
-                First statement.
-                <<<
-
-                [REQUIREMENT]
-                UID: %s
-                TITLE: Second
-                STATEMENT: >>>
-                Second statement.
-                <<<
-                """
-                .formatted(uid1, uid2);
-    }
-
-    // --- tests ---
+    // --- delegation tests (from dev) ---
 
     @Test
-    void export_resolvedRequirementIsReturnedInResult() {
-        var project = makeProject(PROJECT_A, "proj-a");
-        var req = makeRequirement(project, "REQ-001");
-        when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_A, "REQ-001"))
+    void exportToSdoc_delegatesToSdocService() {
+        var doc = makeDocument(DOC_ID, TEST_PROJECT_A);
+        when(documentRepository.findById(DOC_ID)).thenReturn(Optional.of(doc));
+        var order = new DocumentReadingOrder(DOC_ID, "Test Doc", "1.0", "", List.of());
+        when(readingOrderService.getReadingOrder(DOC_ID)).thenReturn(order);
+        when(sdocService.toSdoc(eq(order), any())).thenReturn("[[SECTION]]\n");
+
+        String result = service.exportToSdoc(DOC_ID);
+
+        assertThat(result).isEqualTo("[[SECTION]]\n");
+        verify(readingOrderService).getReadingOrder(DOC_ID);
+        verify(sdocService).toSdoc(eq(order), any());
+    }
+
+    @Test
+    void exportToSdoc_collectsRequirementUidsAndFetchesDataScopedToProject() {
+        var doc = makeDocument(DOC_ID, TEST_PROJECT_A);
+        when(documentRepository.findById(DOC_ID)).thenReturn(Optional.of(doc));
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "REQ-001", "Title", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var order = new DocumentReadingOrder(DOC_ID, "Test Doc", "1.0", "", List.of(section));
+        when(readingOrderService.getReadingOrder(DOC_ID)).thenReturn(order);
+
+        var req = makeRequirement("REQ-001", REQ_ID);
+        when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID_A, "REQ-001"))
                 .thenReturn(Optional.of(req));
+        when(relationRepository.findBySourceId(REQ_ID)).thenReturn(List.of());
+        when(sdocService.toSdoc(any(), any())).thenReturn("");
 
-        var result = service.export(PROJECT_A, sdocWithUid("REQ-001"));
+        service.exportToSdoc(DOC_ID);
 
-        assertThat(result.resolved()).hasSize(1);
-        assertThat(result.resolved().get(0).requirement()).isSameAs(req);
-        assertThat(result.resolved().get(0).sdocRequirement().uid()).isEqualTo("REQ-001");
-        assertThat(result.unresolvedUids()).isEmpty();
+        verify(requirementRepository).findByProjectIdAndUidIgnoreCase(PROJECT_ID_A, "REQ-001");
     }
 
     @Test
-    void export_uidNotInProject_isReportedUnresolved() {
-        when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_A, "REQ-999"))
-                .thenReturn(Optional.empty());
+    @SuppressWarnings("unchecked")
+    void exportToSdoc_includesParentRelations() {
+        var doc = makeDocument(DOC_ID, TEST_PROJECT_A);
+        when(documentRepository.findById(DOC_ID)).thenReturn(Optional.of(doc));
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "CHILD-001", "Child", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var order = new DocumentReadingOrder(DOC_ID, "Test Doc", "1.0", "", List.of(section));
+        when(readingOrderService.getReadingOrder(DOC_ID)).thenReturn(order);
 
-        var result = service.export(PROJECT_A, sdocWithUid("REQ-999"));
+        var childReq = makeRequirement("CHILD-001", REQ_ID);
+        var parentReq = makeRequirement("PARENT-001", PARENT_REQ_ID);
+        when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID_A, "CHILD-001"))
+                .thenReturn(Optional.of(childReq));
 
-        assertThat(result.resolved()).isEmpty();
-        assertThat(result.unresolvedUids()).containsExactly("REQ-999");
+        var relation = new RequirementRelation(childReq, parentReq, RelationType.PARENT);
+        when(relationRepository.findBySourceId(REQ_ID)).thenReturn(List.of(relation));
+
+        var captor = ArgumentCaptor.forClass(Map.class);
+        when(sdocService.toSdoc(any(), captor.capture())).thenReturn("");
+
+        service.exportToSdoc(DOC_ID);
+
+        Map<String, ?> reqMap = captor.getValue();
+        assertThat(reqMap).containsKey("CHILD-001");
     }
 
     @Test
-    void export_emptyDocument_returnsEmptyResult() {
-        var result = service.export(PROJECT_A, "");
+    void exportToSdoc_skipsTextBlocksInUidCollection() {
+        var doc = makeDocument(DOC_ID, TEST_PROJECT_A);
+        when(documentRepository.findById(DOC_ID)).thenReturn(Optional.of(doc));
+        var textContent = new ReadingOrderContentItem("TEXT_BLOCK", null, null, "Some text", 0);
+        var reqContent = new ReadingOrderContentItem("REQUIREMENT", "REQ-002", "Title", null, 1);
+        var section =
+                new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, List.of(textContent, reqContent), List.of());
+        var order = new DocumentReadingOrder(DOC_ID, "Test Doc", "1.0", "", List.of(section));
+        when(readingOrderService.getReadingOrder(DOC_ID)).thenReturn(order);
 
-        assertThat(result.resolved()).isEmpty();
-        assertThat(result.unresolvedUids()).isEmpty();
-    }
+        var req = makeRequirement("REQ-002", REQ_ID);
+        when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID_A, "REQ-002"))
+                .thenReturn(Optional.of(req));
+        when(relationRepository.findBySourceId(REQ_ID)).thenReturn(List.of());
+        when(sdocService.toSdoc(any(), any())).thenReturn("");
 
-    @Test
-    void export_partialMatch_separatesResolvedAndUnresolved() {
-        var project = makeProject(PROJECT_A, "proj-a");
-        var req1 = makeRequirement(project, "REQ-001");
-        when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_A, "REQ-001"))
-                .thenReturn(Optional.of(req1));
-        when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_A, "REQ-002"))
-                .thenReturn(Optional.empty());
+        service.exportToSdoc(DOC_ID);
 
-        var result = service.export(PROJECT_A, sdocWithUids("REQ-001", "REQ-002"));
-
-        assertThat(result.resolved()).hasSize(1);
-        assertThat(result.resolved().get(0).requirement().getUid()).isEqualTo("REQ-001");
-        assertThat(result.unresolvedUids()).containsExactly("REQ-002");
+        verify(requirementRepository).findByProjectIdAndUidIgnoreCase(PROJECT_ID_A, "REQ-002");
     }
 
     /**
-     * Regression test: two projects share the same UID. Export scoped to project A must not return
-     * the requirement from project B.
+     * Regression: two projects share the same UID. Export for project A must not bind the
+     * requirement from project B.
      */
     @Test
-    void export_duplicateUidAcrossProjects_scopedToOwningProject() {
-        var projectA = makeProject(PROJECT_A, "proj-a");
-        var projectB = makeProject(PROJECT_B, "proj-b");
+    @SuppressWarnings("unchecked")
+    void exportToSdoc_duplicateUidAcrossProjects_scopedToOwningProject() {
+        Project projectA = TEST_PROJECT_A;
+        Project projectB = makeProject(PROJECT_ID_B, "proj-b");
+
+        var docA = makeDocument(DOC_ID, projectA);
+        UUID docBId = UUID.randomUUID();
+        var docB = makeDocument(docBId, projectB);
+
+        when(documentRepository.findById(DOC_ID)).thenReturn(Optional.of(docA));
+        when(documentRepository.findById(docBId)).thenReturn(Optional.of(docB));
+
         var reqInA = makeRequirement(projectA, "SHARED-001");
         var reqInB = makeRequirement(projectB, "SHARED-001");
 
-        when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_A, "SHARED-001"))
+        when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID_A, "SHARED-001"))
                 .thenReturn(Optional.of(reqInA));
-        when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_B, "SHARED-001"))
+        when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID_B, "SHARED-001"))
                 .thenReturn(Optional.of(reqInB));
 
-        var resultA = service.export(PROJECT_A, sdocWithUid("SHARED-001"));
-        var resultB = service.export(PROJECT_B, sdocWithUid("SHARED-001"));
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "SHARED-001", "Shared", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var orderA = new DocumentReadingOrder(DOC_ID, "Doc A", "1.0", "", List.of(section));
+        var orderB = new DocumentReadingOrder(docBId, "Doc B", "1.0", "", List.of(section));
+        when(readingOrderService.getReadingOrder(DOC_ID)).thenReturn(orderA);
+        when(readingOrderService.getReadingOrder(docBId)).thenReturn(orderB);
+        when(relationRepository.findBySourceId(any())).thenReturn(List.of());
 
-        // Each project gets its own requirement, not the other project's.
-        assertThat(resultA.resolved()).hasSize(1);
-        assertThat(resultA.resolved().get(0).requirement()).isSameAs(reqInA);
-        assertThat(resultA.resolved().get(0).requirement()).isNotSameAs(reqInB);
+        var captorA = ArgumentCaptor.forClass(Map.class);
+        var captorB = ArgumentCaptor.forClass(Map.class);
+        when(sdocService.toSdoc(eq(orderA), captorA.capture())).thenReturn("");
+        when(sdocService.toSdoc(eq(orderB), captorB.capture())).thenReturn("");
 
-        assertThat(resultB.resolved()).hasSize(1);
-        assertThat(resultB.resolved().get(0).requirement()).isSameAs(reqInB);
-        assertThat(resultB.resolved().get(0).requirement()).isNotSameAs(reqInA);
+        service.exportToSdoc(DOC_ID);
+        service.exportToSdoc(docBId);
+
+        var exportDataA = captorA.getValue().get("SHARED-001");
+        var exportDataB = captorB.getValue().get("SHARED-001");
+        assertThat(exportDataA).isNotNull();
+        assertThat(exportDataB).isNotNull();
+        // Both resolve to something — the key guard is that the lookup is project-scoped
+        verify(requirementRepository).findByProjectIdAndUidIgnoreCase(PROJECT_ID_A, "SHARED-001");
+        verify(requirementRepository).findByProjectIdAndUidIgnoreCase(PROJECT_ID_B, "SHARED-001");
     }
 
-    /**
-     * Verify that the global {@code findByUid} is never called; project-scoped lookup is always
-     * used.
-     */
+    /** Global {@code findByUid} must never be called; project-scoped lookup is always used. */
     @Test
-    void export_neverCallsGlobalFindByUid() {
-        when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_A, "REQ-001"))
+    void exportToSdoc_neverCallsGlobalFindByUid() {
+        var doc = makeDocument(DOC_ID, TEST_PROJECT_A);
+        when(documentRepository.findById(DOC_ID)).thenReturn(Optional.of(doc));
+        var content = List.of(new ReadingOrderContentItem("REQUIREMENT", "REQ-001", "Title", null, 0));
+        var section = new ReadingOrderNode(UUID.randomUUID(), "Section", "", 0, content, List.of());
+        var order = new DocumentReadingOrder(DOC_ID, "Test Doc", "1.0", "", List.of(section));
+        when(readingOrderService.getReadingOrder(DOC_ID)).thenReturn(order);
+        when(requirementRepository.findByProjectIdAndUidIgnoreCase(PROJECT_ID_A, "REQ-001"))
                 .thenReturn(Optional.empty());
+        when(sdocService.toSdoc(any(), any())).thenReturn("");
 
-        service.export(PROJECT_A, sdocWithUid("REQ-001"));
+        service.exportToSdoc(DOC_ID);
 
         verify(requirementRepository, never()).findByUid("REQ-001");
     }

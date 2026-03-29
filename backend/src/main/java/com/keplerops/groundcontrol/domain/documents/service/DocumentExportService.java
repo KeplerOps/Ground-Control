@@ -1,55 +1,141 @@
 package com.keplerops.groundcontrol.domain.documents.service;
 
-import com.keplerops.groundcontrol.domain.documents.service.DocumentExportResult.ResolvedRequirement;
+import com.keplerops.groundcontrol.domain.documents.repository.DocumentRepository;
+import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
+import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
+import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
-import com.keplerops.groundcontrol.domain.requirements.service.SdocParser;
-import com.keplerops.groundcontrol.domain.requirements.service.SdocRequirement;
+import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/**
- * Exports a StrictDoc (.sdoc) document by resolving each requirement UID against the owning
- * project's scope rather than performing a global UID lookup.
- *
- * <p>UID uniqueness is project-scoped throughout the system. A global lookup via {@code
- * findByUid(uid)} would silently bind the wrong requirement when two projects share a UID. This
- * service always delegates to {@link
- * RequirementRepository#findByProjectIdAndUidIgnoreCase(UUID, String)} to prevent that ambiguity.
- */
 @Service
 @Transactional(readOnly = true)
 public class DocumentExportService {
 
+    private final DocumentReadingOrderService readingOrderService;
+    private final DocumentExportSdocService sdocService;
+    private final DocumentExportHtmlService htmlService;
+    private final DocumentExportPdfService pdfService;
+    private final DocumentExportReqifService reqifService;
+    private final DocumentRepository documentRepository;
     private final RequirementRepository requirementRepository;
+    private final RequirementRelationRepository relationRepository;
 
-    public DocumentExportService(RequirementRepository requirementRepository) {
+    public DocumentExportService(
+            DocumentReadingOrderService readingOrderService,
+            DocumentExportSdocService sdocService,
+            DocumentExportHtmlService htmlService,
+            DocumentExportPdfService pdfService,
+            DocumentExportReqifService reqifService,
+            DocumentRepository documentRepository,
+            RequirementRepository requirementRepository,
+            RequirementRelationRepository relationRepository) {
+        this.readingOrderService = readingOrderService;
+        this.sdocService = sdocService;
+        this.htmlService = htmlService;
+        this.pdfService = pdfService;
+        this.reqifService = reqifService;
+        this.documentRepository = documentRepository;
         this.requirementRepository = requirementRepository;
+        this.relationRepository = relationRepository;
     }
 
-    /**
-     * Parse {@code sdocContent} and resolve every requirement UID within {@code projectId}.
-     *
-     * @param projectId the project that owns the document
-     * @param sdocContent raw StrictDoc file content
-     * @return resolved requirements and any UIDs not found in the project
-     */
-    public DocumentExportResult export(UUID projectId, String sdocContent) {
-        List<SdocRequirement> parsed = SdocParser.parse(sdocContent);
+    public String exportToSdoc(UUID documentId) {
+        UUID projectId = getProjectId(documentId);
+        var readingOrder = readingOrderService.getReadingOrder(documentId);
+        Set<String> uids = collectRequirementUids(readingOrder.sections());
+        Map<String, RequirementExportData> requirementsByUid = buildRequirementMap(uids, projectId);
+        return sdocService.toSdoc(readingOrder, requirementsByUid);
+    }
 
-        List<ResolvedRequirement> resolved = new ArrayList<>();
-        List<String> unresolvedUids = new ArrayList<>();
+    public String exportToHtml(UUID documentId) {
+        UUID projectId = getProjectId(documentId);
+        var readingOrder = readingOrderService.getReadingOrder(documentId);
+        Set<String> uids = collectRequirementUids(readingOrder.sections());
+        Map<String, RequirementExportData> requirementsByUid = buildRequirementMap(uids, projectId);
+        return htmlService.toHtml(readingOrder, requirementsByUid);
+    }
 
-        for (SdocRequirement sdocReq : parsed) {
-            requirementRepository
-                    .findByProjectIdAndUidIgnoreCase(projectId, sdocReq.uid())
-                    .ifPresentOrElse(
-                            req -> resolved.add(new ResolvedRequirement(sdocReq, req)),
-                            () -> unresolvedUids.add(sdocReq.uid()));
+    public byte[] exportToPdf(UUID documentId) {
+        UUID projectId = getProjectId(documentId);
+        var readingOrder = readingOrderService.getReadingOrder(documentId);
+        Set<String> uids = collectRequirementUids(readingOrder.sections());
+        Map<String, RequirementExportData> requirementsByUid = buildRequirementMap(uids, projectId);
+        return pdfService.toPdf(readingOrder, requirementsByUid);
+    }
+
+    public String exportToReqif(UUID documentId) {
+        UUID projectId = getProjectId(documentId);
+        var readingOrder = readingOrderService.getReadingOrder(documentId);
+        Set<String> uids = collectRequirementUids(readingOrder.sections());
+        Map<String, RequirementExportData> requirementsByUid = buildRequirementMap(uids, projectId);
+        return reqifService.toReqif(readingOrder, requirementsByUid);
+    }
+
+    private UUID getProjectId(UUID documentId) {
+        return documentRepository
+                .findById(documentId)
+                .orElseThrow(() -> new NotFoundException("Document not found: " + documentId))
+                .getProject()
+                .getId();
+    }
+
+    private Set<String> collectRequirementUids(List<ReadingOrderNode> sections) {
+        Set<String> uids = new LinkedHashSet<>();
+        for (var section : sections) {
+            for (var item : section.content()) {
+                if ("REQUIREMENT".equals(item.contentType()) && item.requirementUid() != null) {
+                    uids.add(item.requirementUid());
+                }
+            }
+            uids.addAll(collectRequirementUids(section.children()));
         }
+        return uids;
+    }
 
-        return new DocumentExportResult(resolved, unresolvedUids);
+    private Map<String, RequirementExportData> buildRequirementMap(Set<String> uids, UUID projectId) {
+        Map<String, RequirementExportData> map = new HashMap<>();
+        for (String uid : uids) {
+            requirementRepository
+                    .findByProjectIdAndUidIgnoreCase(projectId, uid)
+                    .ifPresent(req -> {
+                        List<String> parentUids = findParentUids(req.getId());
+                        map.put(
+                                uid,
+                                new RequirementExportData(
+                                        req.getUid(),
+                                        req.getTitle(),
+                                        req.getStatement(),
+                                        buildComment(req),
+                                        parentUids));
+                    });
+        }
+        return map;
+    }
+
+    private List<String> findParentUids(UUID requirementId) {
+        List<RequirementRelation> relations = relationRepository.findBySourceId(requirementId);
+        List<String> parentUids = new ArrayList<>();
+        for (var rel : relations) {
+            if (rel.getRelationType() == RelationType.PARENT) {
+                parentUids.add(rel.getTarget().getUid());
+            }
+        }
+        return parentUids;
+    }
+
+    private static String buildComment(Requirement req) {
+        // Preserve any existing comment/rationale — the .sdoc COMMENT field maps to rationale
+        // in GC, but we return empty if there's nothing meaningful to export
+        return "";
     }
 }

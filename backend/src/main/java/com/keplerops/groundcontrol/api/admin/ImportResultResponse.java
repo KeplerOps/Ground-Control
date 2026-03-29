@@ -16,6 +16,9 @@ public record ImportResultResponse(
         int relationsSkipped,
         int traceabilityLinksCreated,
         int traceabilityLinksSkipped,
+        int documentsCreated,
+        int sectionsCreated,
+        int sectionContentsCreated,
         List<ImportError> errors) {
 
     public static ImportResultResponse from(ImportResult result) {
@@ -29,6 +32,9 @@ public record ImportResultResponse(
                 result.relationsSkipped(),
                 result.traceabilityLinksCreated(),
                 result.traceabilityLinksSkipped(),
+                result.documentsCreated(),
+                result.sectionsCreated(),
+                result.sectionContentsCreated(),
                 result.errors());
     }
 }
