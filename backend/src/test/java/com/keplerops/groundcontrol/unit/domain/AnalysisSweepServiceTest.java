@@ -8,6 +8,8 @@ import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
+import com.keplerops.groundcontrol.domain.qualitygates.service.QualityGateEvaluationResult;
+import com.keplerops.groundcontrol.domain.qualitygates.service.QualityGateService;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
@@ -43,6 +45,9 @@ class AnalysisSweepServiceTest {
     private ProjectService projectService;
 
     @Mock
+    private QualityGateService qualityGateService;
+
+    @Mock
     private SweepNotifier notifier;
 
     private AnalysisSweepService sweepService;
@@ -64,7 +69,7 @@ class AnalysisSweepServiceTest {
 
     @BeforeEach
     void setUp() {
-        sweepService = new AnalysisSweepService(analysisService, projectService, List.of(notifier));
+        sweepService = new AnalysisSweepService(analysisService, projectService, qualityGateService, List.of(notifier));
     }
 
     private void stubCleanProject() {
@@ -79,6 +84,9 @@ class AnalysisSweepServiceTest {
         when(analysisService.detectConsistencyViolations(PROJECT_ID)).thenReturn(List.of());
         when(analysisService.analyzeCompleteness(PROJECT_ID))
                 .thenReturn(new CompletenessResult(0, Map.of(), List.of()));
+        when(qualityGateService.evaluate("test-project"))
+                .thenReturn(new QualityGateEvaluationResult(
+                        "test-project", java.time.Instant.now(), true, 0, 0, 0, List.of()));
     }
 
     @Nested

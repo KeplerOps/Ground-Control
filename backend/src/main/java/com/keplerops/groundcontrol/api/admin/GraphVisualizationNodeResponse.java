@@ -11,7 +11,8 @@ public record GraphVisualizationNodeResponse(
         String priority,
         String status,
         String requirementType,
-        Integer wave) {
+        Integer wave,
+        String entityType) {
 
     public static GraphVisualizationNodeResponse from(Requirement r) {
         return new GraphVisualizationNodeResponse(
@@ -22,6 +23,7 @@ public record GraphVisualizationNodeResponse(
                 r.getPriority().name(),
                 r.getStatus().name(),
                 r.getRequirementType().name(),
-                r.getWave());
+                r.getWave(),
+                "REQUIREMENT");
     }
 }

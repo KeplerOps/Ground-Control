@@ -89,6 +89,17 @@ public class BaselineService {
         var baseline = getById(baselineId);
         var other = getById(otherBaselineId);
 
+        if (!baseline.getProject().getId().equals(other.getProject().getId())) {
+            throw new com.keplerops.groundcontrol.domain.exception.DomainValidationException(
+                    "Cannot compare baselines from different projects",
+                    "cross_project_comparison",
+                    Map.of(
+                            "baseline_project",
+                            baseline.getProject().getIdentifier(),
+                            "other_project",
+                            other.getProject().getIdentifier()));
+        }
+
         var baseReqs = getRequirementsAtRevision(
                 baseline.getRevisionNumber(), baseline.getProject().getId());
         var otherReqs = getRequirementsAtRevision(

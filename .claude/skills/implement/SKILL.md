@@ -40,6 +40,20 @@ Explore the codebase to determine whether the requirement described in the issue
 - Plans must include updating the changelog, readme, and docs as appropriate.
 - **If the requirement IS already met**: Report that the requirement is satisfied and identify which code satisfies it.
 
+## Step 4.5: Clause-by-Clause Verification
+
+Before declaring implementation complete:
+1. Re-read the requirement statement from Step 1.
+2. Break it into individual clauses and acceptance criteria.
+3. For EACH clause, identify the specific code (file:line) that satisfies it.
+4. If any clause is not satisfied, go back and implement it before proceeding.
+
+Present the mapping as a checklist:
+- [ ] Clause: "..." → Satisfied by: file.java:line
+- [ ] Clause: "..." → Satisfied by: file.java:line
+
+Do not proceed to Step 5 until every clause is checked off.
+
 ## Step 5: Ensure Traceability Links
 
 After implementation is complete (or if already implemented):
@@ -50,3 +64,15 @@ After implementation is complete (or if already implemented):
 - use the `gc_transition_status` MCP tool to transition the requirement to `ACTIVE` if it was `DRAFT`.
 
 Do not update the Changelog if all you did was operate Ground Control tools.
+
+## Step 6: Completion Gate
+
+Implementation is NOT complete until ALL of the following are verified:
+
+1. **`make check` passes** — run it and confirm BUILD SUCCESSFUL.
+2. **CHANGELOG.md updated** — verify it is in `git diff --name-only` if any source files changed.
+3. **Traceability links exist** — re-fetch with `gc_get_traceability` and confirm IMPLEMENTS and TESTS links are present.
+4. **Requirement status is ACTIVE** — re-fetch with `gc_get_requirement` and confirm status.
+5. **Step 4.5 clause mapping was completed** — if you skipped it, go back and do it now.
+
+If any check fails, fix it before reporting completion. Do NOT report the implementation as done until every check passes.

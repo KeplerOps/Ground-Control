@@ -156,6 +156,12 @@ public class RequirementController {
                 .toList();
     }
 
+    @GetMapping("/{id}/diff")
+    public RequirementVersionDiffResponse getDiff(
+            @PathVariable UUID id, @RequestParam int fromRevision, @RequestParam int toRevision) {
+        return RequirementVersionDiffResponse.from(auditService.getRequirementDiff(id, fromRevision, toRevision));
+    }
+
     @PostMapping("/{id}/archive")
     public RequirementResponse archive(@PathVariable UUID id) {
         return RequirementResponse.from(requirementService.archive(id));

@@ -11,6 +11,7 @@ import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -75,7 +76,7 @@ public class AnalysisService {
 
         return cycles.stream()
                 .map(cycle -> {
-                    List<String> members = cycle.stream().map(idToUid::get).collect(Collectors.toList());
+                    List<String> members = cycle.stream().map(idToUid::get).toList();
                     List<CycleEdge> edges = new ArrayList<>();
                     for (int i = 0; i < cycle.size() - 1; i++) {
                         UUID src = cycle.get(i);
@@ -86,7 +87,7 @@ public class AnalysisService {
                     }
                     return new CycleResult(members, edges);
                 })
-                .collect(Collectors.toList());
+                .toList();
     }
 
     public List<Requirement> findOrphans(UUID projectId) {
@@ -188,27 +189,43 @@ public class AnalysisService {
         List<RequirementRelation> relations =
                 relationRepository.findActiveByProjectAndRelationTypeIn(projectId, DAG_TYPES);
 
-        // Index requirements by ID
+        Map<UUID, Requirement> reqById = indexRequirementsById(allRequirements);
+        Map<UUID, List<UUID>> dependsOn = buildDependencyMap(relations, reqById);
+        Map<UUID, BlockingStatus> blockingStatusMap = new HashMap<>();
+        Map<UUID, List<String>> blockedByMap = new HashMap<>();
+        computeBlockingStatuses(allRequirements, dependsOn, reqById, blockingStatusMap, blockedByMap);
+
+        Map<Integer, List<Requirement>> byWave = groupByWave(allRequirements);
+        return buildWorkOrderResult(allRequirements, byWave, dependsOn, reqById, blockingStatusMap, blockedByMap);
+    }
+
+    private Map<UUID, Requirement> indexRequirementsById(List<Requirement> requirements) {
         Map<UUID, Requirement> reqById = new HashMap<>();
-        for (Requirement req : allRequirements) {
+        for (Requirement req : requirements) {
             reqById.put(req.getId(), req);
         }
+        return reqById;
+    }
 
-        // Build dependsOn map: source -> [targets it depends on]
+    private Map<UUID, List<UUID>> buildDependencyMap(
+            List<RequirementRelation> relations, Map<UUID, Requirement> reqById) {
         Map<UUID, List<UUID>> dependsOn = new HashMap<>();
         for (RequirementRelation rel : relations) {
             UUID sourceId = rel.getSource().getId();
             UUID targetId = rel.getTarget().getId();
-            // Only include edges where both endpoints are in our non-archived set
             if (reqById.containsKey(sourceId) && reqById.containsKey(targetId)) {
                 dependsOn.computeIfAbsent(sourceId, k -> new ArrayList<>()).add(targetId);
             }
         }
+        return dependsOn;
+    }
 
-        // Determine blocking status for each requirement
-        Map<UUID, BlockingStatus> blockingStatusMap = new HashMap<>();
-        Map<UUID, List<String>> blockedByMap = new HashMap<>();
-
+    private void computeBlockingStatuses(
+            List<Requirement> allRequirements,
+            Map<UUID, List<UUID>> dependsOn,
+            Map<UUID, Requirement> reqById,
+            Map<UUID, BlockingStatus> blockingStatusMap,
+            Map<UUID, List<String>> blockedByMap) {
         for (Requirement req : allRequirements) {
             UUID id = req.getId();
             List<UUID> deps = dependsOn.getOrDefault(id, List.of());
@@ -216,29 +233,39 @@ public class AnalysisService {
                 blockingStatusMap.put(id, BlockingStatus.UNCONSTRAINED);
                 blockedByMap.put(id, List.of());
             } else {
-                List<String> blockers = new ArrayList<>();
-                for (UUID depId : deps) {
-                    Requirement dep = reqById.get(depId);
-                    if (dep != null && !SATISFIED_STATUSES.contains(dep.getStatus())) {
-                        blockers.add(dep.getUid());
-                    }
-                }
-                if (blockers.isEmpty()) {
-                    blockingStatusMap.put(id, BlockingStatus.UNBLOCKED);
-                } else {
-                    blockingStatusMap.put(id, BlockingStatus.BLOCKED);
-                }
+                List<String> blockers = findBlockers(deps, reqById);
+                blockingStatusMap.put(id, blockers.isEmpty() ? BlockingStatus.UNBLOCKED : BlockingStatus.BLOCKED);
                 blockedByMap.put(id, blockers);
             }
         }
+    }
 
-        // Group by wave (nulls-last)
+    private List<String> findBlockers(List<UUID> deps, Map<UUID, Requirement> reqById) {
+        List<String> blockers = new ArrayList<>();
+        for (UUID depId : deps) {
+            Requirement dep = reqById.get(depId);
+            if (dep != null && !SATISFIED_STATUSES.contains(dep.getStatus())) {
+                blockers.add(dep.getUid());
+            }
+        }
+        return blockers;
+    }
+
+    private Map<Integer, List<Requirement>> groupByWave(List<Requirement> allRequirements) {
         Map<Integer, List<Requirement>> byWave = new TreeMap<>(Comparator.nullsLast(Comparator.naturalOrder()));
         for (Requirement req : allRequirements) {
             byWave.computeIfAbsent(req.getWave(), k -> new ArrayList<>()).add(req);
         }
+        return byWave;
+    }
 
-        // Build work order waves
+    private WorkOrderResult buildWorkOrderResult(
+            List<Requirement> allRequirements,
+            Map<Integer, List<Requirement>> byWave,
+            Map<UUID, List<UUID>> dependsOn,
+            Map<UUID, Requirement> reqById,
+            Map<UUID, BlockingStatus> blockingStatusMap,
+            Map<UUID, List<String>> blockedByMap) {
         int globalOrder = 0;
         int totalUnblocked = 0;
         int totalBlocked = 0;
@@ -248,82 +275,97 @@ public class AnalysisService {
         for (Map.Entry<Integer, List<Requirement>> entry : byWave.entrySet()) {
             Integer wave = entry.getKey();
             List<Requirement> waveReqs = entry.getValue();
-
-            // Build intra-wave dependency subgraph
-            Set<UUID> waveIds = new HashSet<>();
-            for (Requirement req : waveReqs) {
-                waveIds.add(req.getId());
-            }
-            Map<UUID, List<UUID>> waveDeps = new HashMap<>();
-            for (Requirement req : waveReqs) {
-                UUID id = req.getId();
-                List<UUID> deps = dependsOn.getOrDefault(id, List.of());
-                List<UUID> intraWaveDeps = new ArrayList<>();
-                for (UUID dep : deps) {
-                    if (waveIds.contains(dep)) {
-                        intraWaveDeps.add(dep);
-                    }
-                }
-                waveDeps.put(id, intraWaveDeps);
-            }
-
-            // Topo-sort within wave using MoSCoW priority as tie-breaker
-            Map<UUID, Priority> priorityMap = new HashMap<>();
-            for (Requirement req : waveReqs) {
-                priorityMap.put(req.getId(), req.getPriority());
-            }
-            Comparator<UUID> tieBreaker = Comparator.comparingInt(
-                    id -> PRIORITY_ORDER.getOrDefault(priorityMap.getOrDefault(id, Priority.WONT), 3));
-
-            List<UUID> sorted = GraphAlgorithms.topologicalSort(waveDeps, tieBreaker);
-
-            // Append any nodes not in sorted result (cycle participants), sorted by priority
-            Set<UUID> sortedSet = new HashSet<>(sorted);
-            List<UUID> remaining = new ArrayList<>();
-            for (Requirement req : waveReqs) {
-                if (!sortedSet.contains(req.getId())) {
-                    remaining.add(req.getId());
-                }
-            }
-            remaining.sort(tieBreaker);
-            sorted.addAll(remaining);
-
-            // Build items
-            int waveUnblocked = 0;
-            int waveBlocked = 0;
-            int waveUnconstrained = 0;
-            List<WorkOrderItem> items = new ArrayList<>();
-
-            for (UUID id : sorted) {
-                Requirement req = reqById.get(id);
-                BlockingStatus bs = blockingStatusMap.get(id);
-                switch (bs) {
-                    case UNBLOCKED -> waveUnblocked++;
-                    case BLOCKED -> waveBlocked++;
-                    case UNCONSTRAINED -> waveUnconstrained++;
-                    default -> throw new IllegalStateException("Unexpected blocking status: " + bs);
-                }
-                items.add(new WorkOrderItem(
-                        id,
-                        req.getUid(),
-                        req.getTitle(),
-                        req.getStatus().name(),
-                        req.getPriority().name(),
-                        req.getWave(),
-                        globalOrder++,
-                        bs,
-                        blockedByMap.getOrDefault(id, List.of())));
-            }
-
-            totalUnblocked += waveUnblocked;
-            totalBlocked += waveBlocked;
-            totalUnconstrained += waveUnconstrained;
-
-            waves.add(new WorkOrderWave(wave, waveReqs.size(), waveUnblocked, waveBlocked, waveUnconstrained, items));
+            List<UUID> sorted = topoSortWave(waveReqs, dependsOn);
+            WorkOrderWaveAccumulator acc =
+                    buildWaveItems(sorted, reqById, blockingStatusMap, blockedByMap, globalOrder);
+            globalOrder = acc.nextGlobalOrder;
+            totalUnblocked += acc.unblocked;
+            totalBlocked += acc.blocked;
+            totalUnconstrained += acc.unconstrained;
+            waves.add(
+                    new WorkOrderWave(wave, waveReqs.size(), acc.unblocked, acc.blocked, acc.unconstrained, acc.items));
         }
 
         return new WorkOrderResult(allRequirements.size(), totalUnblocked, totalBlocked, totalUnconstrained, waves);
     }
+
+    private List<UUID> topoSortWave(List<Requirement> waveReqs, Map<UUID, List<UUID>> dependsOn) {
+        Set<UUID> waveIds = new HashSet<>();
+        for (Requirement req : waveReqs) {
+            waveIds.add(req.getId());
+        }
+
+        Map<UUID, List<UUID>> waveDeps = new HashMap<>();
+        for (Requirement req : waveReqs) {
+            UUID id = req.getId();
+            List<UUID> deps = dependsOn.getOrDefault(id, List.of());
+            List<UUID> intraWaveDeps = new ArrayList<>();
+            for (UUID dep : deps) {
+                if (waveIds.contains(dep)) {
+                    intraWaveDeps.add(dep);
+                }
+            }
+            waveDeps.put(id, intraWaveDeps);
+        }
+
+        Map<UUID, Priority> priorityMap = new HashMap<>();
+        for (Requirement req : waveReqs) {
+            priorityMap.put(req.getId(), req.getPriority());
+        }
+        Comparator<UUID> tieBreaker = Comparator.comparingInt(
+                id -> PRIORITY_ORDER.getOrDefault(priorityMap.getOrDefault(id, Priority.WONT), 3));
+
+        List<UUID> sorted = GraphAlgorithms.topologicalSort(waveDeps, tieBreaker);
+
+        Set<UUID> sortedSet = new HashSet<>(sorted);
+        List<UUID> remaining = new ArrayList<>();
+        for (Requirement req : waveReqs) {
+            if (!sortedSet.contains(req.getId())) {
+                remaining.add(req.getId());
+            }
+        }
+        remaining.sort(tieBreaker);
+        sorted.addAll(remaining);
+        return sorted;
+    }
+
+    private WorkOrderWaveAccumulator buildWaveItems(
+            List<UUID> sorted,
+            Map<UUID, Requirement> reqById,
+            Map<UUID, BlockingStatus> blockingStatusMap,
+            Map<UUID, List<String>> blockedByMap,
+            int globalOrder) {
+        int waveUnblocked = 0;
+        int waveBlocked = 0;
+        int waveUnconstrained = 0;
+        List<WorkOrderItem> items = new ArrayList<>();
+
+        for (UUID id : sorted) {
+            Requirement req = reqById.get(id);
+            BlockingStatus bs = blockingStatusMap.get(id);
+            switch (bs) {
+                case UNBLOCKED -> waveUnblocked++;
+                case BLOCKED -> waveBlocked++;
+                case UNCONSTRAINED -> waveUnconstrained++;
+                default -> throw new IllegalStateException("Unexpected blocking status: " + bs);
+            }
+            items.add(new WorkOrderItem(
+                    id,
+                    req.getUid(),
+                    req.getTitle(),
+                    req.getStatus().name(),
+                    req.getPriority().name(),
+                    req.getWave(),
+                    globalOrder++,
+                    bs,
+                    blockedByMap.getOrDefault(id, List.of())));
+        }
+
+        return new WorkOrderWaveAccumulator(items, waveUnblocked, waveBlocked, waveUnconstrained, globalOrder);
+    }
+
+    private record WorkOrderWaveAccumulator(
+            List<WorkOrderItem> items, int unblocked, int blocked, int unconstrained, int nextGlobalOrder) {}
 
     public DashboardStats getDashboardStats(UUID projectId) {
         List<Requirement> allRequirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
@@ -431,5 +473,39 @@ public class AnalysisService {
         List<Requirement> requirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
         List<RequirementRelation> relations = relationRepository.findActiveWithSourceAndTargetByProjectId(projectId);
         return new GraphVisualizationResult(requirements, relations);
+    }
+
+    public RequirementsExportData getRequirementsExportData(UUID projectId) {
+        List<Requirement> requirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
+        String projectIdentifier =
+                requirements.isEmpty() ? "" : requirements.get(0).getProject().getIdentifier();
+        List<RequirementsExportData.RequirementSnapshot> snapshots = new ArrayList<>();
+
+        for (Requirement req : requirements) {
+            List<TraceabilityLink> links = traceabilityLinkRepository.findByRequirementId(req.getId());
+            List<RequirementsExportData.TraceabilityLinkSnapshot> linkSnapshots = links.stream()
+                    .map(link -> new RequirementsExportData.TraceabilityLinkSnapshot(
+                            link.getArtifactType().name(),
+                            link.getArtifactIdentifier(),
+                            link.getLinkType().name(),
+                            link.getArtifactUrl(),
+                            link.getArtifactTitle()))
+                    .toList();
+
+            snapshots.add(new RequirementsExportData.RequirementSnapshot(
+                    req.getUid(),
+                    req.getTitle(),
+                    req.getStatement(),
+                    req.getRationale(),
+                    req.getRequirementType().name(),
+                    req.getPriority().name(),
+                    req.getStatus().name(),
+                    req.getWave(),
+                    linkSnapshots,
+                    req.getCreatedAt(),
+                    req.getUpdatedAt()));
+        }
+
+        return new RequirementsExportData(projectIdentifier, Instant.now(), snapshots);
     }
 }

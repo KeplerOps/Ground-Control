@@ -1,6 +1,7 @@
 package com.keplerops.groundcontrol.domain.requirements.service;
 
 import com.keplerops.groundcontrol.domain.audit.GroundControlRevisionEntity;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
@@ -167,6 +168,104 @@ public class AuditService {
                             entity);
                 })
                 .toList();
+    }
+
+    /**
+     * Returns a structured diff between two revisions of a single requirement, including per-field
+     * changes, added/removed/modified relations, and added/removed/modified traceability links.
+     */
+    public RequirementVersionDiff getRequirementDiff(UUID id, int fromRevision, int toRevision) {
+        if (!requirementRepository.existsById(id)) {
+            throw new NotFoundException("Requirement not found: " + id);
+        }
+        if (fromRevision >= toRevision) {
+            throw new DomainValidationException("fromRevision must be less than toRevision");
+        }
+
+        var auditReader = AuditReaderFactory.get(entityManager);
+
+        var fromEntity = auditReader.find(Requirement.class, id, fromRevision);
+        if (fromEntity == null) {
+            throw new DomainValidationException("Requirement does not exist at revision " + fromRevision);
+        }
+        var toEntity = auditReader.find(Requirement.class, id, toRevision);
+        if (toEntity == null) {
+            throw new DomainValidationException("Requirement does not exist at revision " + toRevision);
+        }
+
+        var fieldChanges = SnapshotMapper.computeDiff(
+                SnapshotMapper.fromRequirement(fromEntity), SnapshotMapper.fromRequirement(toEntity));
+
+        var fromRelations = getRelationSnapshotsAtRevision(id, fromRevision);
+        var toRelations = getRelationSnapshotsAtRevision(id, toRevision);
+        var relationChanges = SnapshotMapper.computeRelationChanges(fromRelations, toRelations);
+
+        var fromLinks = getTraceabilityLinkSnapshotsAtRevision(id, fromRevision);
+        var toLinks = getTraceabilityLinkSnapshotsAtRevision(id, toRevision);
+        var linkChanges = SnapshotMapper.computeTraceabilityLinkChanges(fromLinks, toLinks);
+
+        return new RequirementVersionDiff(id, fromRevision, toRevision, fieldChanges, relationChanges, linkChanges);
+    }
+
+    Map<UUID, Map<String, Object>> getRelationSnapshotsAtRevision(UUID requirementId, int revision) {
+        var auditReader = AuditReaderFactory.get(entityManager);
+
+        @SuppressWarnings("unchecked")
+        List<Object[]> results = auditReader
+                .createQuery()
+                .forRevisionsOfEntity(RequirementRelation.class, false, true)
+                .add(AuditEntity.revisionNumber().le(revision))
+                .add(AuditEntity.disjunction()
+                        .add(AuditEntity.relatedId("source").eq(requirementId))
+                        .add(AuditEntity.relatedId("target").eq(requirementId)))
+                .addOrder(AuditEntity.revisionNumber().asc())
+                .getResultList();
+
+        return replayToAliveSnapshots(
+                results,
+                row -> {
+                    var entity = (RequirementRelation) row[0];
+                    return Map.entry(entity.getId(), SnapshotMapper.fromRelation(entity));
+                },
+                row -> ((RevisionType) row[2]));
+    }
+
+    Map<UUID, Map<String, Object>> getTraceabilityLinkSnapshotsAtRevision(UUID requirementId, int revision) {
+        var auditReader = AuditReaderFactory.get(entityManager);
+
+        @SuppressWarnings("unchecked")
+        List<Object[]> results = auditReader
+                .createQuery()
+                .forRevisionsOfEntity(TraceabilityLink.class, false, true)
+                .add(AuditEntity.revisionNumber().le(revision))
+                .add(AuditEntity.relatedId("requirement").eq(requirementId))
+                .addOrder(AuditEntity.revisionNumber().asc())
+                .getResultList();
+
+        return replayToAliveSnapshots(
+                results,
+                row -> {
+                    var entity = (TraceabilityLink) row[0];
+                    return Map.entry(entity.getId(), SnapshotMapper.fromTraceabilityLink(entity));
+                },
+                row -> ((RevisionType) row[2]));
+    }
+
+    Map<UUID, Map<String, Object>> replayToAliveSnapshots(
+            List<Object[]> results,
+            java.util.function.Function<Object[], Map.Entry<UUID, Map<String, Object>>> snapshotExtractor,
+            java.util.function.Function<Object[], RevisionType> revTypeExtractor) {
+        var alive = new HashMap<UUID, Map<String, Object>>();
+        for (Object[] row : results) {
+            var entry = snapshotExtractor.apply(row);
+            var revType = revTypeExtractor.apply(row);
+            if (revType == RevisionType.DEL) {
+                alive.remove(entry.getKey());
+            } else {
+                alive.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return alive;
     }
 
     /**

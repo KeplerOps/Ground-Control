@@ -64,35 +64,44 @@ public class GitHubIssueSyncService {
         Instant fetchedAt = Instant.now();
         List<SyncError> errors = new ArrayList<>();
 
+        int[] issueCounts = upsertIssueSyncRecords(fetched, fetchedAt, errors);
+        int issuesCreated = issueCounts[0];
+        int issuesUpdated = issueCounts[1];
+
+        int linksUpdated = updateTraceabilityLinks(fetchedAt, errors);
+
+        var audit = new RequirementImport(ImportSourceType.GITHUB);
+        audit.setSourceFile(owner + "/" + repo);
+        audit.setStats(Map.of(
+                "issuesFetched", fetched.size(),
+                "issuesCreated", issuesCreated,
+                "issuesUpdated", issuesUpdated,
+                "linksUpdated", linksUpdated));
+        audit.setErrors(toAuditErrors(errors));
+        var savedAudit = importRepository.save(audit);
+
+        return new SyncResult(
+                savedAudit.getId(),
+                savedAudit.getImportedAt(),
+                fetched.size(),
+                issuesCreated,
+                issuesUpdated,
+                linksUpdated,
+                errors);
+    }
+
+    private int[] upsertIssueSyncRecords(List<GitHubIssueData> fetched, Instant fetchedAt, List<SyncError> errors) {
         int issuesCreated = 0;
         int issuesUpdated = 0;
 
-        // Phase 1: Upsert GitHubIssueSync records
         for (GitHubIssueData issue : fetched) {
             try {
                 var existing = issueSyncRepository.findByIssueNumber(issue.number());
-                GitHubIssueSync sync;
                 if (existing.isPresent()) {
-                    sync = existing.get();
-                    sync.setIssueTitle(issue.title());
-                    sync.setIssueState(IssueState.valueOf(issue.state()));
-                    sync.setIssueBody(issue.body() != null ? issue.body() : "");
-                    sync.setIssueLabels(issue.labels());
-                    sync.setPhase(extractPhase(issue.labels()));
-                    sync.setPriorityLabel(extractPriority(issue.labels()));
-                    sync.setCrossReferences(extractCrossReferences(issue.body(), issue.number()));
-                    sync.setLastFetchedAt(fetchedAt);
-                    issueSyncRepository.save(sync);
+                    updateExistingSync(existing.get(), issue, fetchedAt);
                     issuesUpdated++;
                 } else {
-                    sync = new GitHubIssueSync(
-                            issue.number(), issue.title(), IssueState.valueOf(issue.state()), issue.url(), fetchedAt);
-                    sync.setIssueBody(issue.body() != null ? issue.body() : "");
-                    sync.setIssueLabels(issue.labels());
-                    sync.setPhase(extractPhase(issue.labels()));
-                    sync.setPriorityLabel(extractPriority(issue.labels()));
-                    sync.setCrossReferences(extractCrossReferences(issue.body(), issue.number()));
-                    issueSyncRepository.save(sync);
+                    createNewSync(issue, fetchedAt);
                     issuesCreated++;
                 }
             } catch (RuntimeException e) {
@@ -100,8 +109,33 @@ public class GitHubIssueSyncService {
                 errors.add(new SyncError("upsert", issue.number(), null, e.getMessage()));
             }
         }
+        return new int[] {issuesCreated, issuesUpdated};
+    }
 
-        // Phase 2: Update TraceabilityLinks
+    private void updateExistingSync(GitHubIssueSync sync, GitHubIssueData issue, Instant fetchedAt) {
+        sync.setIssueTitle(issue.title());
+        sync.setIssueState(IssueState.valueOf(issue.state()));
+        sync.setIssueBody(issue.body() != null ? issue.body() : "");
+        sync.setIssueLabels(issue.labels());
+        sync.setPhase(extractPhase(issue.labels()));
+        sync.setPriorityLabel(extractPriority(issue.labels()));
+        sync.setCrossReferences(extractCrossReferences(issue.body(), issue.number()));
+        sync.setLastFetchedAt(fetchedAt);
+        issueSyncRepository.save(sync);
+    }
+
+    private void createNewSync(GitHubIssueData issue, Instant fetchedAt) {
+        var sync = new GitHubIssueSync(
+                issue.number(), issue.title(), IssueState.valueOf(issue.state()), issue.url(), fetchedAt);
+        sync.setIssueBody(issue.body() != null ? issue.body() : "");
+        sync.setIssueLabels(issue.labels());
+        sync.setPhase(extractPhase(issue.labels()));
+        sync.setPriorityLabel(extractPriority(issue.labels()));
+        sync.setCrossReferences(extractCrossReferences(issue.body(), issue.number()));
+        issueSyncRepository.save(sync);
+    }
+
+    private int updateTraceabilityLinks(Instant fetchedAt, List<SyncError> errors) {
         int linksUpdated = 0;
         var links = traceabilityLinkRepository.findByArtifactType(ArtifactType.GITHUB_ISSUE);
         for (var link : links) {
@@ -125,26 +159,7 @@ public class GitHubIssueSyncService {
                 errors.add(new SyncError("traceability", null, link.getArtifactIdentifier(), e.getMessage()));
             }
         }
-
-        // Save audit record
-        var audit = new RequirementImport(ImportSourceType.GITHUB);
-        audit.setSourceFile(owner + "/" + repo);
-        audit.setStats(Map.of(
-                "issuesFetched", fetched.size(),
-                "issuesCreated", issuesCreated,
-                "issuesUpdated", issuesUpdated,
-                "linksUpdated", linksUpdated));
-        audit.setErrors(toAuditErrors(errors));
-        var savedAudit = importRepository.save(audit);
-
-        return new SyncResult(
-                savedAudit.getId(),
-                savedAudit.getImportedAt(),
-                fetched.size(),
-                issuesCreated,
-                issuesUpdated,
-                linksUpdated,
-                errors);
+        return linksUpdated;
     }
 
     private static List<Map<String, Object>> toAuditErrors(List<SyncError> errors) {
@@ -177,7 +192,7 @@ public class GitHubIssueSyncService {
         String warning = null;
         try {
             var linkCommand = new CreateTraceabilityLinkCommand(
-                    ArtifactType.GITHUB_ISSUE, "#" + issue.number(), issue.url(), title, LinkType.IMPLEMENTS);
+                    ArtifactType.GITHUB_ISSUE, String.valueOf(issue.number()), issue.url(), title, LinkType.IMPLEMENTS);
             var link = traceabilityService.createLink(requirement.getId(), linkCommand);
             traceabilityLinkId = link.getId();
         } catch (RuntimeException e) {

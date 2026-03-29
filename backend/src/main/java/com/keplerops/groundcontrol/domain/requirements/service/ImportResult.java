@@ -14,6 +14,9 @@ public record ImportResult(
         int relationsSkipped,
         int traceabilityLinksCreated,
         int traceabilityLinksSkipped,
+        int documentsCreated,
+        int sectionsCreated,
+        int sectionContentsCreated,
         List<ImportError> errors) {
 
     public ImportResult {

@@ -8,6 +8,8 @@ See [ADR-014](../../architecture/adrs/014-pluggable-verification-architecture.md
 
 ## Stack
 
+### Backend
+
 | Component | Technology |
 |-----------|-----------|
 | Language | Java 21 (Eclipse Temurin) |
@@ -28,6 +30,24 @@ See [ADR-014](../../architecture/adrs/014-pluggable-verification-architecture.md
 | Registry | GHCR (`ghcr.io/keplerops/ground-control`) |
 
 See [ADR-013](../../architecture/adrs/013-java-spring-boot-rewrite.md) for the Java migration rationale.
+
+### Frontend
+
+| Component | Technology |
+|-----------|-----------|
+| Framework | React 19 |
+| Language | TypeScript 5 |
+| Bundler | Vite 6 |
+| Routing | React Router 7 |
+| Server state | TanStack Query 5 |
+| Styling | Tailwind CSS 4 |
+| Components | shadcn/ui (Radix primitives) |
+| Graph viz | Cytoscape.js + dagre |
+| Linting/Format | Biome |
+| Testing | Vitest |
+| Deployment | Embedded in Spring Boot static resources |
+
+See [ADR-017](../../architecture/adrs/017-interactive-web-application.md) for the frontend decision rationale.
 
 ## Package Structure
 
@@ -81,7 +101,7 @@ Environment variables use the `GC_` prefix (e.g., `GC_DATABASE_URL`, `GC_SERVER_
 
 ## What Exists vs. What Doesn't
 
-### Exists (Phase 1 complete as of v0.28.0)
+### Exists
 
 **Domain entities:** Requirement, RequirementRelation, TraceabilityLink, GitHubIssueSync, RequirementImport — all JPA with Envers auditing.
 
@@ -89,15 +109,17 @@ Environment variables use the `GC_` prefix (e.g., `GC_DATABASE_URL`, `GC_SERVER_
 
 **API:** RequirementController (9 REST endpoints), AnalysisController (5 endpoints), ImportController, SyncController, GraphController. GlobalExceptionHandler maps domain exceptions to HTTP error envelopes.
 
-**Tooling:** Status state machine with JML contracts (verified by OpenJML ESC + Z3), Flyway migrations (V001–V010), Spotless/Error Prone/SpotBugs/Checkstyle/JaCoCo, ArchUnit architecture tests, CI pipeline (build + test + integration + verify), production Dockerfile, GHCR publishing, E2E integration tests (6-step main + 4-step AGE).
+**Frontend:** React 19 / TypeScript SPA served as embedded static resources from the Spring Boot JAR. Views: Dashboard (project health metrics), Requirements Explorer (browse/filter/author), Requirement Detail (fields, relations, traceability, audit), Dependency Graph (Cytoscape.js DAG visualization). See [ADR-017](../../architecture/adrs/017-interactive-web-application.md).
+
+**Tooling:** Status state machine with JML contracts (verified by OpenJML ESC + Z3), Flyway migrations, Spotless/Error Prone/SpotBugs/Checkstyle/JaCoCo, ArchUnit architecture tests, CI pipeline (build + test + integration + verify), production Dockerfile, GHCR publishing, E2E integration tests.
 
 ### Does not exist yet
 
-- Frontend
 - Auth flows
 - Redis integration (Redis is in docker-compose.yml but nothing in the app uses it)
-- Production deployment infrastructure (local Docker Compose only)
+- Production deployment infrastructure (local Docker Compose + EC2 via CDK)
 - Multi-tenancy
 - Search
 - Verification result tracking (VerificationResult entity from ADR-014 not yet implemented)
+- Traceability Matrix view (`/traceability`) and Audit Timeline view (`/audit`) in the frontend
 - Apache AGE is optional — the app gracefully degrades to JPA-only analysis when AGE is unavailable
