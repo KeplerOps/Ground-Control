@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.92.7] - 2026-03-29
+
+### Added
+
+- Parameterized tests verifying all 9 artifact types (CODE_FILE, TEST, ADR,
+  CONFIG, POLICY, SPEC, PROOF, DOCUMENTATION, GITHUB_ISSUE) round-trip
+  correctly through model construction, JPA persistence, and REST API (GC-E001)
+
 ## [0.92.6] - 2026-03-29
 
 ### Fixed
