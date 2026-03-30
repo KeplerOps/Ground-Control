@@ -12,6 +12,8 @@ import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 @SuppressWarnings("java:S2187") // Tests are in @Nested inner classes
 class TraceabilityLinkTest {
@@ -81,6 +83,16 @@ class TraceabilityLinkTest {
             assertThat(link.getArtifactType()).isEqualTo(ArtifactType.ADR);
             assertThat(link.getArtifactIdentifier()).isEqualTo("adr:011");
             assertThat(link.getLinkType()).isEqualTo(LinkType.DOCUMENTS);
+        }
+
+        @ParameterizedTest
+        @EnumSource(ArtifactType.class)
+        void canBeConstructedWithAnyArtifactType(ArtifactType type) {
+            var req = createRequirement();
+            var link = new TraceabilityLink(req, type, "artifact:" + type.name(), LinkType.IMPLEMENTS);
+
+            assertThat(link.getArtifactType()).isEqualTo(type);
+            assertThat(link.getArtifactIdentifier()).isEqualTo("artifact:" + type.name());
         }
     }
 
