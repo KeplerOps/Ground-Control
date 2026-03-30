@@ -38,6 +38,11 @@ Explore the codebase to determine whether the requirement described in the issue
 - **If the requirement is NOT yet met**: Plan the implementation. Identify which files need to be created or modified, what tests to write, and what approach to take. Enter plan mode.
 - Your plans must respect the coding standards and classification levels in ADR-012.
 - Plans must include updating the changelog, readme, and docs as appropriate.
+- If designing code, remember to build off existing cross-cutting concerns, code, and patterns
+- Good code is readable, maintainable, and follows the coding standards
+- Address the concerns a FAANG L6+ engineer would have around security, performance, reliability, and scalability
+- Avoid reinventing the wheel - use existing libraries and frameworks where appropriate
+- Code should be easy to understand, test, and maintain. Simple is better than complex.
 - **If the requirement IS already met**: Report that the requirement is satisfied and identify which code satisfies it.
 
 ## Step 4.5: Clause-by-Clause Verification
