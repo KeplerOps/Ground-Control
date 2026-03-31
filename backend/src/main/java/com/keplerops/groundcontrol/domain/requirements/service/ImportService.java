@@ -283,7 +283,7 @@ public class ImportService {
                     }
                     var cmd = new CreateTraceabilityLinkCommand(
                             ArtifactType.GITHUB_ISSUE, artifactId, null, null, LinkType.IMPLEMENTS);
-                    traceabilityService.createLink(reqId, cmd);
+                    traceabilityService.createLinkUnchecked(reqId, cmd);
                     counters.traceabilityLinksCreated++;
                 } catch (ConflictException | NotFoundException | DomainValidationException e) {
                     log.warn(

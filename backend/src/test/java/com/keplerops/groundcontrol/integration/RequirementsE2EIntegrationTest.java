@@ -307,7 +307,14 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.relationType", is("DEPENDS_ON")));
 
-        // Create traceability link
+        // Transition DRAFT → ACTIVE (required before creating IMPLEMENTS links)
+        mockMvc.perform(post("/api/v1/requirements/" + crudReqId + "/transition")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"ACTIVE\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", is("ACTIVE")));
+
+        // Create traceability link (requires ACTIVE status for IMPLEMENTS)
         var linkBody = Map.of(
                 "artifactType", "GITHUB_ISSUE",
                 "artifactIdentifier", "99",
@@ -316,13 +323,6 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(linkBody)))
                 .andExpect(status().isCreated());
-
-        // Transition DRAFT → ACTIVE
-        mockMvc.perform(post("/api/v1/requirements/" + crudReqId + "/transition")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"status\": \"ACTIVE\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status", is("ACTIVE")));
 
         // Archive
         mockMvc.perform(post("/api/v1/requirements/" + crudReqId + "/archive"))

@@ -54,6 +54,14 @@ class TraceabilityLinkControllerIntegrationTest extends BaseIntegrationTest {
                 .asText();
     }
 
+    private void activateRequirement(String requirementId) throws Exception {
+        var body = Map.of("status", "ACTIVE");
+        mockMvc.perform(post("/api/v1/requirements/" + requirementId + "/transition")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk());
+    }
+
     private String createLinkAndReturnId(String requirementId) throws Exception {
         var body = Map.of(
                 "artifactType", "GITHUB_ISSUE",
@@ -75,6 +83,7 @@ class TraceabilityLinkControllerIntegrationTest extends BaseIntegrationTest {
     @Test
     void createLink_returns201() throws Exception {
         var reqId = createRequirementAndReturnId("REQ-TL-001");
+        activateRequirement(reqId);
 
         var body = Map.of(
                 "artifactType", "GITHUB_ISSUE",
@@ -98,6 +107,7 @@ class TraceabilityLinkControllerIntegrationTest extends BaseIntegrationTest {
     @EnumSource(ArtifactType.class)
     void createLink_allArtifactTypes_returns201(ArtifactType type) throws Exception {
         var reqId = createRequirementAndReturnId("REQ-AT-" + type.name());
+        activateRequirement(reqId);
 
         var body = Map.of(
                 "artifactType", type.name(), "artifactIdentifier", "id:" + type.name(), "linkType", "IMPLEMENTS");
@@ -113,6 +123,7 @@ class TraceabilityLinkControllerIntegrationTest extends BaseIntegrationTest {
     @Test
     void getLinks_returns200() throws Exception {
         var reqId = createRequirementAndReturnId("REQ-TL-002");
+        activateRequirement(reqId);
         createLinkAndReturnId(reqId);
 
         mockMvc.perform(get("/api/v1/requirements/" + reqId + "/traceability"))
@@ -123,6 +134,7 @@ class TraceabilityLinkControllerIntegrationTest extends BaseIntegrationTest {
     @Test
     void deleteLink_returns204() throws Exception {
         var reqId = createRequirementAndReturnId("REQ-TL-003");
+        activateRequirement(reqId);
         var linkId = createLinkAndReturnId(reqId);
 
         mockMvc.perform(delete("/api/v1/requirements/" + reqId + "/traceability/" + linkId))
