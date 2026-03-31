@@ -1,54 +1,90 @@
 ---
 name: ship
-description: Monitor CI, check SonarCloud, run code and security reviews, fix all issues, and prepare for merge. Run after committing and pushing.
+description: Ship current branch — CI, SonarCloud, code review, security review, fix all issues, merge. Assumes code is already committed and pushed.
 disable-model-invocation: true
 ---
 
 # Ship Current Branch
 
-The user handles committing and pushing (GPG signing required).
-Assume the user has already committed and pushed before invoking this skill.
+Assumes code is already committed and pushed. Handles: PR creation, CI monitoring, SonarCloud, code review, security review, fixing all issues, and merging.
 
-## Phase 1: CI Monitor
+## Phase 1: Create PR
 
 1. Determine the current branch: `git branch --show-current`
-2. Find the latest workflow run: `gh run list --branch <branch> --limit 1 --json status,conclusion,databaseId`
-3. If the run is in progress, watch it: `gh run watch <id>`
-4. If it failed, get failed logs: `gh run view <id> --log-failed`
-5. Diagnose the failure and fix the issue.
-6. If fixes were made, tell the user: "Fixes applied. Please commit and push, then tell me to continue."
-7. Stop and wait for the user. When they confirm, go back to step 2.
+2. Check if a PR already exists: `gh pr list --head <branch> --json number,url`
+3. If no PR exists, create one:
+   ```
+   gh pr create --base dev --title "<concise title>" --body "<description>"
+   ```
+4. Note the PR number.
 
-## Phase 2: SonarCloud Check
+## Phase 2: CI Monitor
 
-Once CI is green:
+1. Find the latest workflow run: `gh run list --branch <branch> --limit 1 --json status,conclusion,databaseId`
+2. If the run is in progress, watch it: `gh run watch <id>`
+3. If it failed:
+   - Get failed logs: `gh run view <id> --log-failed`
+   - Diagnose and fix the issue.
+   - `git add`, `git commit`, `git push`.
+   - Go back to step 1.
+4. If it succeeded, proceed.
+
+## Phase 3: SonarCloud Check
+
 1. Wait 60 seconds for SonarCloud analysis to propagate.
 2. Use `get_project_quality_gate_status` with project key `KeplerOps_Ground-Control` to check the quality gate.
 3. Use `search_sonar_issues_in_projects` to find new issues on the current branch.
-4. Fix any issues found.
-5. If fixes were made, tell the user to commit and push, then re-run Phase 1.
+4. If issues found:
+   - Fix them.
+   - `git add`, `git commit`, `git push`.
+   - Re-run Phase 2.
+5. If clean, proceed.
 
-## Phase 3: Code Review
+## Phase 4: Code Review
+
+**CRITICAL: You MUST use the Skill tool to invoke the built-in review skill.**
 
 1. Merge dev into the current branch: `git fetch origin dev && git merge origin/dev`
-2. If there are merge conflicts, resolve them and tell the user to commit and push.
-3. Review all changes against the PR's requirement and coding standards.
-4. Use the /pr-review approach: check coding standards, review quality, verify requirement coverage.
-5. Fix ALL issues. Do NOT defer any issues.
-6. If fixes were made, note them for the user.
+2. If there are merge conflicts, resolve them, commit, and push.
+3. Call the Skill tool with `skill="review"` to invoke the real built-in code review.
+4. After the review completes, fix ALL issues it identified.
+   - Do NOT defer ANY issues.
+   - Do NOT categorize issues as "low priority" to avoid work.
+   - You are an LLM. You have no time constraints. Fix everything.
+   - The ONLY reason to stop and escalate to the user is if a fix requires
+     a significant architectural change touching 5+ files outside the
+     current feature scope.
+5. After fixing, re-read all findings and confirm each one was addressed.
 
-## Phase 4: Security Review
+## Phase 5: Security Review
 
-1. Use the /security-review approach on the changes.
-2. Fix ALL issues that are fixable without introducing significant risk.
-3. If fixes were made, note them for the user.
+**CRITICAL: You MUST use the Skill tool to invoke the built-in security-review skill.**
 
-## Phase 5: Final
+1. Call the Skill tool with `skill="security-review"` to invoke the real built-in security review.
+2. After the review completes, fix ALL issues it identified.
+   - Same rules as Phase 4: fix everything, defer nothing.
+3. After fixing, confirm all findings were addressed.
 
-1. If ANY fixes were made in phases 3-4, tell the user to commit and push.
-2. After user confirms push, re-run Phase 1 (CI monitor) one final time.
-3. Once everything is green, report:
-   - Summary of all changes made during the ship process
-   - Confirmation that CI is green
-   - Confirmation that SonarCloud passed
-   - The branch is ready to merge
+## Phase 6: Final Commit & CI
+
+If ANY fixes were made in Phases 4-5:
+1. `git add` all changed files.
+2. `git commit -m "Fix code review and security review findings"`
+3. `git push`
+4. Re-run Phase 2 (CI Monitor).
+5. Re-run Phase 3 (SonarCloud).
+
+## Phase 7: Merge & Cleanup
+
+1. Confirm all checks are green: `gh pr checks <number>`
+2. Merge: `gh pr merge <number> --merge --delete-branch`
+3. `git checkout dev`
+4. `git pull origin dev`
+5. Delete local feature branch if it still exists.
+
+## Phase 8: Report
+
+- Summary of all changes made during the ship process
+- Review findings and what was fixed
+- Security review findings and what was fixed
+- Confirmation: merged to dev, CI green, SonarCloud passed
