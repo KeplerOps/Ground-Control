@@ -20,3 +20,15 @@ variable "snapshot_retention_count" {
   type        = number
   default     = 7
 }
+
+variable "backup_cron" {
+  description = "Cron expression for automated pg_dump backup (default: daily at 03:00 UTC)"
+  type        = string
+  default     = "0 3 * * *"
+}
+
+variable "local_retention_count" {
+  description = "Number of local pg_dump files to retain on the EC2 instance"
+  type        = number
+  default     = 3
+}

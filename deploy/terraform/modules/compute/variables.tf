@@ -88,6 +88,18 @@ variable "backup_bucket_arn" {
   type        = string
 }
 
+variable "backup_cron" {
+  description = "Cron expression for automated pg_dump backup schedule"
+  type        = string
+  default     = "0 3 * * *"
+}
+
+variable "local_retention_count" {
+  description = "Number of local pg_dump files to retain"
+  type        = number
+  default     = 3
+}
+
 variable "gc_image" {
   description = "Docker image for Ground Control backend"
   type        = string
