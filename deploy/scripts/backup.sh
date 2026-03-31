@@ -4,7 +4,10 @@
 set -euo pipefail
 
 # Source env for DB credentials
-set -a; source /opt/gc/.env; set +a
+set -a
+# shellcheck source=/dev/null
+source /opt/gc/.env
+set +a
 
 BACKUP_DIR=/data/backups
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)

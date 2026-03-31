@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Sync `deploy/scripts/backup.sh` with the embedded user-data version
+- Add argument guards to `restore.sh` for `--from-file` and `--from-s3`
+  flags; show usage on zero arguments
+- Graceful `docker stop` before `docker rm -f` in `test-restore.sh` cleanup
 
 ## [0.92.7] - 2026-03-29
 

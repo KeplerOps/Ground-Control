@@ -57,14 +57,21 @@ do_restore() {
   echo "Restore complete."
 }
 
+# Show usage if no arguments
+[ $# -eq 0 ] && { usage; exit 1; }
+
 # Parse arguments
 MODE=""
 FILE_ARG=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --list) MODE="list"; shift ;;
-    --from-file) MODE="file"; FILE_ARG="$2"; shift 2 ;;
-    --from-s3) MODE="s3"; FILE_ARG="$2"; shift 2 ;;
+    --from-file)
+      [ $# -ge 2 ] || { echo "ERROR: --from-file requires a path"; usage; exit 1; }
+      MODE="file"; FILE_ARG="$2"; shift 2 ;;
+    --from-s3)
+      [ $# -ge 2 ] || { echo "ERROR: --from-s3 requires an S3 key"; usage; exit 1; }
+      MODE="s3"; FILE_ARG="$2"; shift 2 ;;
     --yes) SKIP_CONFIRM="true"; shift ;;
     *) usage; exit 1 ;;
   esac

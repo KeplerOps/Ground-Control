@@ -20,6 +20,7 @@ echo "Testing restore of: ${DUMP_FILE}"
 # Always clean up on exit
 cleanup() {
   echo "Cleaning up test container..."
+  docker stop "${TEST_CONTAINER}" 2>/dev/null || true
   docker rm -f "${TEST_CONTAINER}" 2>/dev/null || true
 }
 trap cleanup EXIT
