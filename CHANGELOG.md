@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.92.8] - 2026-03-29
+
+### Added
+
+- Configurable backup frequency (`backup_cron`) and local retention
+  (`local_retention_count`) via Terraform variables (GC-P009)
+- `restore.sh` script for automated restore from local dump or S3 with
+  safety backup, confirmation prompt, and post-restore verification
+- `test-restore.sh` script for non-destructive restore validation using
+  a temporary PostgreSQL container; runs weekly via cron
+- Comprehensive backup/restore documentation with configuration table,
+  point-in-time restore explanation, and restore testing procedures
+
+### Fixed
+
+- Sync `deploy/scripts/backup.sh` with the embedded user-data version
+
 ## [0.92.7] - 2026-03-29
 
 ### Added

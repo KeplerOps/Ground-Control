@@ -163,6 +163,8 @@ resource "aws_instance" "this" {
     tailscale_hostname    = var.tailscale_hostname
     ecr_registry_url      = var.ecr_registry_url
     backup_bucket         = var.backup_bucket_name
+    backup_cron           = var.backup_cron
+    local_retention_count = var.local_retention_count
     gc_image              = var.gc_image
     gc_database_user      = var.gc_database_user
     gc_database_name      = var.gc_database_name

@@ -25,8 +25,10 @@ module "secrets" {
 # --- Backup (S3 bucket + DLM snapshots) ---
 
 module "backup" {
-  source      = "../../modules/backup"
-  bucket_name = var.backup_bucket_name
+  source                = "../../modules/backup"
+  bucket_name           = var.backup_bucket_name
+  backup_cron           = var.backup_cron
+  local_retention_count = var.local_retention_count
 }
 
 # --- Container Registry (ECR) ---
@@ -76,9 +78,11 @@ module "compute" {
   tailscale_hostname = var.tailscale_hostname
   gc_image           = "${aws_ecr_repository.app.repository_url}:latest"
 
-  backup_bucket_name = module.backup.bucket_name
-  backup_bucket_arn  = module.backup.bucket_arn
-  ecr_registry_url   = split("/", aws_ecr_repository.app.repository_url)[0]
+  backup_bucket_name    = module.backup.bucket_name
+  backup_bucket_arn     = module.backup.bucket_arn
+  backup_cron           = module.backup.backup_cron
+  local_retention_count = module.backup.local_retention_count
+  ecr_registry_url      = split("/", aws_ecr_repository.app.repository_url)[0]
 
   ssm_tailscale_key     = module.secrets.tailscale_auth_key_name
   ssm_db_password       = module.secrets.db_password_name

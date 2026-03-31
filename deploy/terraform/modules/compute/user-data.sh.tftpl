@@ -161,12 +161,181 @@ docker compose -f /opt/gc/docker-compose.yml exec -T db \
 # Upload to S3
 aws s3 cp "$${DUMP_FILE}" "s3://${backup_bucket}/pg-dumps/gc-$${TIMESTAMP}.dump"
 
-# Keep only last 3 local dumps
-ls -t "$${BACKUP_DIR}"/gc-*.dump 2>/dev/null | tail -n +4 | xargs -r rm
+# Rotate: keep only last ${local_retention_count} local dumps
+ls -t "$${BACKUP_DIR}"/gc-*.dump 2>/dev/null | tail -n +${local_retention_count + 1} | xargs -r rm
 
 echo "Backup complete: $${DUMP_FILE}"
 BACKUPEOF
 chmod +x /opt/gc/backup.sh
+
+# --- Restore script ---
+cat > /opt/gc/restore.sh <<'RESTOREEOF'
+#!/bin/bash
+# Ground Control database restore — from local dump or S3
+set -euo pipefail
+
+set -a; source /opt/gc/.env; set +a
+
+BACKUP_DIR=/data/backups
+COMPOSE_FILE=/opt/gc/docker-compose.yml
+BUCKET="$${BACKUP_BUCKET:-BUCKET_PLACEHOLDER}"
+SKIP_CONFIRM="$${SKIP_CONFIRM:-false}"
+
+usage() {
+  echo "Usage: restore.sh [--list | --from-file <path> | --from-s3 <key>] [--yes]"
+  echo ""
+  echo "Options:"
+  echo "  --list            List available backups (local and S3)"
+  echo "  --from-file PATH  Restore from a local pg_dump file"
+  echo "  --from-s3 KEY     Download from S3 and restore (e.g. pg-dumps/gc-20260329-030000.dump)"
+  echo "  --yes             Skip confirmation prompt"
+}
+
+list_backups() {
+  echo "=== Local backups ==="
+  ls -lht "$${BACKUP_DIR}"/gc-*.dump 2>/dev/null || echo "  (none)"
+  echo ""
+  echo "=== S3 backups ==="
+  aws s3 ls "s3://$${BUCKET}/pg-dumps/" 2>/dev/null || echo "  (none)"
+}
+
+verify_restore() {
+  echo "Verifying database health..."
+  docker compose -f "$${COMPOSE_FILE}" exec -T db \
+    pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" > /dev/null
+  TABLE_COUNT=$$(docker compose -f "$${COMPOSE_FILE}" exec -T db \
+    psql -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -t -A \
+    -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';")
+  echo "Verified: $${TABLE_COUNT} public tables present."
+}
+
+do_restore() {
+  local DUMP_FILE="$$1"
+  [ -f "$${DUMP_FILE}" ] || { echo "ERROR: File not found: $${DUMP_FILE}"; exit 1; }
+
+  echo "Creating pre-restore safety backup..."
+  /opt/gc/backup.sh
+
+  if [ "$${SKIP_CONFIRM}" != "true" ]; then
+    read -p "Restore from $${DUMP_FILE}? This will REPLACE the current database. [y/N] " -r
+    [[ $$REPLY =~ ^[Yy]$$ ]] || { echo "Aborted."; exit 1; }
+  fi
+
+  echo "Restoring from $${DUMP_FILE}..."
+  docker compose -f "$${COMPOSE_FILE}" exec -T db \
+    pg_restore -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" --clean --if-exists < "$${DUMP_FILE}"
+
+  verify_restore
+  echo "Restore complete."
+}
+
+# Parse arguments
+MODE=""
+FILE_ARG=""
+while [[ $$# -gt 0 ]]; do
+  case "$$1" in
+    --list) MODE="list"; shift ;;
+    --from-file) MODE="file"; FILE_ARG="$$2"; shift 2 ;;
+    --from-s3) MODE="s3"; FILE_ARG="$$2"; shift 2 ;;
+    --yes) SKIP_CONFIRM="true"; shift ;;
+    *) usage; exit 1 ;;
+  esac
+done
+
+case "$${MODE}" in
+  list) list_backups ;;
+  file) do_restore "$${FILE_ARG}" ;;
+  s3)
+    LOCAL_PATH="$${BACKUP_DIR}/$$(basename "$${FILE_ARG}")"
+    echo "Downloading s3://$${BUCKET}/$${FILE_ARG}..."
+    aws s3 cp "s3://$${BUCKET}/$${FILE_ARG}" "$${LOCAL_PATH}"
+    do_restore "$${LOCAL_PATH}"
+    ;;
+  *) usage; exit 1 ;;
+esac
+RESTOREEOF
+# Patch in the Terraform-baked bucket name
+sed -i "s|BUCKET_PLACEHOLDER|${backup_bucket}|" /opt/gc/restore.sh
+chmod +x /opt/gc/restore.sh
+
+# --- Restore test script ---
+cat > /opt/gc/test-restore.sh <<'TESTRESTOREEOF'
+#!/bin/bash
+# Ground Control restore test — validates backup integrity without production impact
+set -euo pipefail
+
+set -a; source /opt/gc/.env; set +a
+
+BACKUP_DIR=/data/backups
+TEST_CONTAINER="gc-restore-test"
+TEST_PORT=15432
+DB_IMAGE="apache/age:release_PG16_1.6.0"
+
+# Use argument or latest local dump
+DUMP_FILE="$${1:-$$(ls -t "$${BACKUP_DIR}"/gc-*.dump 2>/dev/null | head -1)}"
+[ -n "$${DUMP_FILE}" ] || { echo "ERROR: No backup file found"; exit 1; }
+[ -f "$${DUMP_FILE}" ] || { echo "ERROR: File not found: $${DUMP_FILE}"; exit 1; }
+
+echo "Testing restore of: $${DUMP_FILE}"
+
+# Always clean up on exit
+cleanup() {
+  echo "Cleaning up test container..."
+  docker rm -f "$${TEST_CONTAINER}" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# Remove any leftover test container
+docker rm -f "$${TEST_CONTAINER}" 2>/dev/null || true
+
+echo "Starting temporary PostgreSQL container on port $${TEST_PORT}..."
+docker run -d --name "$${TEST_CONTAINER}" \
+  -e POSTGRES_DB="$${POSTGRES_DB}" \
+  -e POSTGRES_USER="$${POSTGRES_USER}" \
+  -e POSTGRES_PASSWORD="$${POSTGRES_PASSWORD}" \
+  -p "$${TEST_PORT}:5432" \
+  "$${DB_IMAGE}"
+
+echo "Waiting for test database..."
+for i in $$(seq 1 30); do
+  if docker exec "$${TEST_CONTAINER}" pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" > /dev/null 2>&1; then
+    break
+  fi
+  [ "$$i" -eq 30 ] && { echo "FAIL: Test database did not become ready"; exit 1; }
+  sleep 1
+done
+
+echo "Restoring into test container..."
+docker exec -i "$${TEST_CONTAINER}" \
+  pg_restore -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" --clean --if-exists < "$${DUMP_FILE}"
+
+echo "Running verification queries..."
+
+TABLE_COUNT=$$(docker exec "$${TEST_CONTAINER}" \
+  psql -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -t -A \
+  -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';")
+
+if [ "$${TABLE_COUNT}" -gt 0 ]; then
+  echo "PASS: $${TABLE_COUNT} public tables in restored database"
+else
+  echo "FAIL: No tables found after restore"
+  exit 1
+fi
+
+MIGRATION_COUNT=$$(docker exec "$${TEST_CONTAINER}" \
+  psql -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -t -A \
+  -c "SELECT count(*) FROM flyway_schema_history;" 2>/dev/null || echo "0")
+
+if [ "$${MIGRATION_COUNT}" -gt 0 ]; then
+  echo "PASS: $${MIGRATION_COUNT} Flyway migrations recorded"
+else
+  echo "WARN: No Flyway migration history"
+fi
+
+echo ""
+echo "$$(date): Restore test PASSED — $${DUMP_FILE}"
+TESTRESTOREEOF
+chmod +x /opt/gc/test-restore.sh
 
 # --- Watchdog script ---
 cat > /opt/gc/watchdog.sh <<'WATCHEOF'
@@ -205,10 +374,12 @@ DEPLOYEOF
 chmod +x /opt/gc/deploy.sh
 
 # --- Cron jobs ---
-# Backup at 03:00 UTC daily
-echo "0 3 * * * root /opt/gc/backup.sh >> /var/log/gc-backup.log 2>&1" > /etc/cron.d/gc-backup
+# Backup (configurable schedule)
+echo "${backup_cron} root /opt/gc/backup.sh >> /var/log/gc-backup.log 2>&1" > /etc/cron.d/gc-backup
 # Watchdog every 5 minutes
 echo "*/5 * * * * root /opt/gc/watchdog.sh" > /etc/cron.d/gc-watchdog
-chmod 644 /etc/cron.d/gc-backup /etc/cron.d/gc-watchdog
+# Weekly restore test (Sunday 05:00 UTC)
+echo "0 5 * * 0 root /opt/gc/test-restore.sh >> /var/log/gc-restore-test.log 2>&1" > /etc/cron.d/gc-restore-test
+chmod 644 /etc/cron.d/gc-backup /etc/cron.d/gc-watchdog /etc/cron.d/gc-restore-test
 
 echo "=== Ground Control initialization complete ==="
