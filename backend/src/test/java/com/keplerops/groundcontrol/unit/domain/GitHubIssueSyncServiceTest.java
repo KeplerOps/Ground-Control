@@ -358,7 +358,8 @@ class GitHubIssueSyncServiceTest {
 
             var traceLink = new TraceabilityLink(requirement, ArtifactType.GITHUB_ISSUE, "42", LinkType.IMPLEMENTS);
             setField(traceLink, "id", UUID.randomUUID());
-            when(traceabilityService.createLink(any(UUID.class), any())).thenReturn(traceLink);
+            when(traceabilityService.createLinkUnchecked(any(UUID.class), any()))
+                    .thenReturn(traceLink);
 
             var command = new CreateGitHubIssueCommand(PROJECT_ID, "GC-A001", "o/r", null, List.of());
             var result = service.createIssueFromRequirement(command);
@@ -384,14 +385,15 @@ class GitHubIssueSyncServiceTest {
 
             var traceLink = new TraceabilityLink(requirement, ArtifactType.GITHUB_ISSUE, "42", LinkType.IMPLEMENTS);
             setField(traceLink, "id", UUID.randomUUID());
-            when(traceabilityService.createLink(any(UUID.class), any())).thenReturn(traceLink);
+            when(traceabilityService.createLinkUnchecked(any(UUID.class), any()))
+                    .thenReturn(traceLink);
 
             var command = new CreateGitHubIssueCommand(PROJECT_ID, "GC-A001", "o/r", null, List.of());
             service.createIssueFromRequirement(command);
 
             ArgumentCaptor<CreateTraceabilityLinkCommand> captor =
                     ArgumentCaptor.forClass(CreateTraceabilityLinkCommand.class);
-            verify(traceabilityService).createLink(any(UUID.class), captor.capture());
+            verify(traceabilityService).createLinkUnchecked(any(UUID.class), captor.capture());
             assertThat(captor.getValue().artifactIdentifier()).isEqualTo("42");
             assertThat(captor.getValue().artifactIdentifier()).doesNotStartWith("#");
         }

@@ -193,7 +193,7 @@ public class GitHubIssueSyncService {
         try {
             var linkCommand = new CreateTraceabilityLinkCommand(
                     ArtifactType.GITHUB_ISSUE, String.valueOf(issue.number()), issue.url(), title, LinkType.IMPLEMENTS);
-            var link = traceabilityService.createLink(requirement.getId(), linkCommand);
+            var link = traceabilityService.createLinkUnchecked(requirement.getId(), linkCommand);
             traceabilityLinkId = link.getId();
         } catch (RuntimeException e) {
             warning = "Issue created but traceability link failed: " + e.getMessage();

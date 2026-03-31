@@ -26,12 +26,32 @@ public class TraceabilityService {
         this.traceabilityLinkRepository = traceabilityLinkRepository;
     }
 
+    /**
+     * Creates a traceability link, enforcing that IMPLEMENTS links require ACTIVE status.
+     * Used by the REST API (user-initiated link creation).
+     */
     public TraceabilityLink createLink(UUID requirementId, CreateTraceabilityLinkCommand command) {
+        return createLink(requirementId, command, true);
+    }
+
+    /**
+     * Creates a traceability link without enforcing the ACTIVE status check.
+     * For internal operations (import, GitHub issue sync) where the link is part
+     * of a planned data load, not retroactive justification.
+     */
+    public TraceabilityLink createLinkUnchecked(UUID requirementId, CreateTraceabilityLinkCommand command) {
+        return createLink(requirementId, command, false);
+    }
+
+    private TraceabilityLink createLink(
+            UUID requirementId, CreateTraceabilityLinkCommand command, boolean enforceActiveCheck) {
         var requirement = requirementRepository
                 .findById(requirementId)
                 .orElseThrow(() -> new NotFoundException("Requirement not found: " + requirementId));
 
-        if (command.linkType() == LinkType.IMPLEMENTS && requirement.getStatus() != Status.ACTIVE) {
+        if (enforceActiveCheck
+                && command.linkType() == LinkType.IMPLEMENTS
+                && requirement.getStatus() != Status.ACTIVE) {
             throw new DomainValidationException(
                     "IMPLEMENTS links require the requirement to be in ACTIVE status, but it is "
                             + requirement.getStatus(),

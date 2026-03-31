@@ -81,8 +81,9 @@ class CreateIssueIntegrationTest extends BaseIntegrationTest {
     @BeforeEach
     void setUp() {
         testProject = projectRepository.findByIdentifier("ground-control").orElseThrow();
-        testRequirement =
-                requirementRepository.save(new Requirement(testProject, "CI-REQ-001", "Test req", "Test statement"));
+        var req = new Requirement(testProject, "CI-REQ-001", "Test req", "Test statement");
+        req.transitionStatus(com.keplerops.groundcontrol.domain.requirements.state.Status.ACTIVE);
+        testRequirement = requirementRepository.save(req);
     }
 
     @Test

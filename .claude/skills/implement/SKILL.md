@@ -71,7 +71,11 @@ After implementation is complete (or if already implemented):
 
 Do not update the Changelog if all you did was operate Ground Control tools.
 
-## Step 6: Completion Gate
+## Step 6: Quality Assurance
+
+- run `pre-commit run --all-files` to ensure the codebase is in a healthy state.
+
+## Step 7: Completion Gate
 
 Implementation is NOT complete until ALL of the following are verified:
 
