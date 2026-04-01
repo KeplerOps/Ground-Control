@@ -116,7 +116,8 @@ If any check fails, fix it before proceeding. Do NOT move to Phase C until every
 ### Step 9: Commit & Push
 
 1. Craft a concise commit message in imperative mood (per coding standards). Example: "Add risk scoring engine for requirement prioritization"
-2. `git commit -m "<message>"`
+2. NEVER include Co-Authored-By, "Generated with Claude Code", or any Claude/AI attribution in commit messages.
+3. `git commit -m "<message>"`
 3. `git push -u origin <branch>`
 
 ---

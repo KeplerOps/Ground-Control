@@ -27,6 +27,7 @@ export const ARTIFACT_TYPES = [
 export const LINK_TYPES = ["IMPLEMENTS", "TESTS", "DOCUMENTS", "CONSTRAINS", "VERIFIES"];
 export const METRIC_TYPES = ["COVERAGE", "ORPHAN_COUNT", "COMPLETENESS"];
 export const COMPARISON_OPERATORS = ["GTE", "LTE", "EQ", "GT", "LT"];
+export const ADR_STATUSES = ["PROPOSED", "ACCEPTED", "DEPRECATED", "SUPERSEDED"];
 
 // ---------------------------------------------------------------------------
 // Field name mapping (snake_case MCP <-> camelCase API)
@@ -110,6 +111,8 @@ const TO_CAMEL = {
   entity_type: "entityType",
   entity_types: "entityTypes",
   requirement_uid: "requirementUid",
+  decision_date: "decisionDate",
+  superseded_by: "supersededBy",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -729,4 +732,40 @@ export async function getDocumentGrammar(documentId) {
 
 export async function deleteDocumentGrammar(documentId) {
   await request("DELETE", `/api/v1/documents/${encodeURIComponent(documentId)}/grammar`);
+}
+
+// ---------------------------------------------------------------------------
+// Architecture Decision Record API functions
+// ---------------------------------------------------------------------------
+
+export async function createAdr(data, project) {
+  return request("POST", "/api/v1/adrs", { body: data, params: { project } });
+}
+
+export async function listAdrs(project) {
+  return request("GET", "/api/v1/adrs", { params: { project } });
+}
+
+export async function getAdr(id) {
+  return request("GET", `/api/v1/adrs/${encodeURIComponent(id)}`);
+}
+
+export async function getAdrByUid(uid, project) {
+  return request("GET", `/api/v1/adrs/uid/${encodeURIComponent(uid)}`, { params: { project } });
+}
+
+export async function updateAdr(id, data) {
+  return request("PUT", `/api/v1/adrs/${encodeURIComponent(id)}`, { body: data });
+}
+
+export async function deleteAdr(id) {
+  await request("DELETE", `/api/v1/adrs/${encodeURIComponent(id)}`);
+}
+
+export async function transitionAdrStatus(id, status) {
+  return request("PUT", `/api/v1/adrs/${encodeURIComponent(id)}/status`, { body: { status } });
+}
+
+export async function getAdrRequirements(id) {
+  return request("GET", `/api/v1/adrs/${encodeURIComponent(id)}/requirements`);
 }

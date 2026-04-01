@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.93.0] - 2026-03-31
+
+### Added
+
+- Architecture Decision Records as first-class entities with full CRUD,
+  status lifecycle (PROPOSED→ACCEPTED→DEPRECATED/SUPERSEDED), and reverse
+  traceability to linked requirements (GC-J001)
+- REST API endpoints: `/api/v1/adrs` with create, read, update, delete,
+  status transition, and linked requirements lookup
+- MCP tools: `gc_create_adr`, `gc_list_adrs`, `gc_get_adr`, `gc_update_adr`,
+  `gc_delete_adr`, `gc_transition_adr_status`, `gc_get_adr_requirements`
+- Database migration V023 for `architecture_decision_record` table
+
 ## [0.92.9] - 2026-03-30
 
 ### Added
