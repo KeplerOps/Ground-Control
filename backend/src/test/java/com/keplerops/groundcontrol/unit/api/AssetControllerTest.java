@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.keplerops.groundcontrol.api.assets.AssetController;
+import com.keplerops.groundcontrol.domain.assets.model.AssetLink;
 import com.keplerops.groundcontrol.domain.assets.model.AssetRelation;
 import com.keplerops.groundcontrol.domain.assets.model.OperationalAsset;
 import com.keplerops.groundcontrol.domain.assets.service.AssetCycleEdge;
@@ -22,6 +23,8 @@ import com.keplerops.groundcontrol.domain.assets.service.AssetCycleResult;
 import com.keplerops.groundcontrol.domain.assets.service.AssetService;
 import com.keplerops.groundcontrol.domain.assets.service.AssetSubgraphResult;
 import com.keplerops.groundcontrol.domain.assets.service.AssetTopologyService;
+import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
+import com.keplerops.groundcontrol.domain.assets.state.AssetLinkType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
@@ -233,5 +236,75 @@ class AssetControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.assets", hasSize(1)))
                 .andExpect(jsonPath("$.relations", hasSize(0)));
+    }
+
+    // --- Asset Link tests ---
+
+    private AssetLink makeLink() {
+        var asset = makeAsset();
+        var link = new AssetLink(asset, AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS);
+        setField(link, "id", UUID.randomUUID());
+        setField(link, "createdAt", Instant.now());
+        setField(link, "updatedAt", Instant.now());
+        return link;
+    }
+
+    @Test
+    void createLinkReturns201() throws Exception {
+        when(assetService.createLink(eq(ASSET_ID), any())).thenReturn(makeLink());
+
+        mockMvc.perform(
+                        post("/api/v1/assets/{id}/links", ASSET_ID)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                {"targetType":"REQUIREMENT","targetIdentifier":"GC-M010","linkType":"IMPLEMENTS"}
+                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.targetType", is("REQUIREMENT")))
+                .andExpect(jsonPath("$.targetIdentifier", is("GC-M010")))
+                .andExpect(jsonPath("$.linkType", is("IMPLEMENTS")));
+    }
+
+    @Test
+    void getLinksReturnsList() throws Exception {
+        when(assetService.getLinksForAsset(ASSET_ID)).thenReturn(List.of(makeLink()));
+
+        mockMvc.perform(get("/api/v1/assets/{id}/links", ASSET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].targetType", is("REQUIREMENT")));
+    }
+
+    @Test
+    void getLinksWithTargetTypeFilter() throws Exception {
+        when(assetService.getLinksForAssetByTargetType(ASSET_ID, AssetLinkTargetType.REQUIREMENT))
+                .thenReturn(List.of(makeLink()));
+
+        mockMvc.perform(get("/api/v1/assets/{id}/links", ASSET_ID).param("target_type", "REQUIREMENT"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)));
+    }
+
+    @Test
+    void deleteLinkReturns204() throws Exception {
+        var linkId = UUID.randomUUID();
+        mockMvc.perform(delete("/api/v1/assets/{id}/links/{linkId}", ASSET_ID, linkId))
+                .andExpect(status().isNoContent());
+
+        verify(assetService).deleteLink(ASSET_ID, linkId);
+    }
+
+    @Test
+    void getLinksByTargetReturnsList() throws Exception {
+        when(assetService.getLinksByTarget(AssetLinkTargetType.REQUIREMENT, "GC-M010"))
+                .thenReturn(List.of(makeLink()));
+
+        mockMvc.perform(get("/api/v1/assets/links/by-target")
+                        .param("target_type", "REQUIREMENT")
+                        .param("target_identifier", "GC-M010"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].assetUid", is("ASSET-001")));
     }
 }

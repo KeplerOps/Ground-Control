@@ -7,13 +7,18 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.domain.assets.model.AssetLink;
 import com.keplerops.groundcontrol.domain.assets.model.AssetRelation;
 import com.keplerops.groundcontrol.domain.assets.model.OperationalAsset;
+import com.keplerops.groundcontrol.domain.assets.repository.AssetLinkRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.AssetRelationRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.OperationalAssetRepository;
 import com.keplerops.groundcontrol.domain.assets.service.AssetService;
 import com.keplerops.groundcontrol.domain.assets.service.CreateAssetCommand;
+import com.keplerops.groundcontrol.domain.assets.service.CreateAssetLinkCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetCommand;
+import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
+import com.keplerops.groundcontrol.domain.assets.state.AssetLinkType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
@@ -21,6 +26,7 @@ import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -40,6 +46,9 @@ class AssetServiceTest {
 
     @Mock
     private AssetRelationRepository relationRepository;
+
+    @Mock
+    private AssetLinkRepository linkRepository;
 
     @Mock
     private ProjectRepository projectRepository;
@@ -317,6 +326,136 @@ class AssetServiceTest {
             assertThatThrownBy(() -> assetService.deleteRelation(unrelated.getId(), relation.getId()))
                     .isInstanceOf(NotFoundException.class)
                     .hasMessageContaining("does not belong");
+        }
+    }
+
+    @Nested
+    class Links {
+
+        private AssetLink makeLink(OperationalAsset asset) {
+            var link = new AssetLink(asset, AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS);
+            setField(link, "id", UUID.randomUUID());
+            setField(link, "createdAt", Instant.now());
+            setField(link, "updatedAt", Instant.now());
+            return link;
+        }
+
+        @Test
+        void createLinkSucceeds() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(linkRepository.existsByAssetIdAndTargetTypeAndTargetIdentifierAndLinkType(
+                            asset.getId(), AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS))
+                    .thenReturn(false);
+            when(linkRepository.save(any())).thenAnswer(inv -> {
+                var saved = inv.getArgument(0, AssetLink.class);
+                setField(saved, "id", UUID.randomUUID());
+                return saved;
+            });
+
+            var command = new CreateAssetLinkCommand(
+                    AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
+            var result = assetService.createLink(asset.getId(), command);
+
+            assertThat(result.getTargetType()).isEqualTo(AssetLinkTargetType.REQUIREMENT);
+            assertThat(result.getTargetIdentifier()).isEqualTo("GC-M010");
+            assertThat(result.getLinkType()).isEqualTo(AssetLinkType.IMPLEMENTS);
+        }
+
+        @Test
+        void createLinkWithOptionalFields() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(linkRepository.existsByAssetIdAndTargetTypeAndTargetIdentifierAndLinkType(
+                            asset.getId(), AssetLinkTargetType.EXTERNAL, "jira-123", AssetLinkType.DEPENDS_ON))
+                    .thenReturn(false);
+            when(linkRepository.save(any())).thenAnswer(inv -> {
+                var saved = inv.getArgument(0, AssetLink.class);
+                setField(saved, "id", UUID.randomUUID());
+                return saved;
+            });
+
+            var command = new CreateAssetLinkCommand(
+                    AssetLinkTargetType.EXTERNAL,
+                    "jira-123",
+                    AssetLinkType.DEPENDS_ON,
+                    "https://jira.example.com/123",
+                    "External Dependency");
+            var result = assetService.createLink(asset.getId(), command);
+
+            assertThat(result.getTargetUrl()).isEqualTo("https://jira.example.com/123");
+            assertThat(result.getTargetTitle()).isEqualTo("External Dependency");
+        }
+
+        @Test
+        void createLinkDuplicateThrowsConflict() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(linkRepository.existsByAssetIdAndTargetTypeAndTargetIdentifierAndLinkType(
+                            asset.getId(), AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS))
+                    .thenReturn(true);
+
+            var command = new CreateAssetLinkCommand(
+                    AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
+
+            assertThatThrownBy(() -> assetService.createLink(asset.getId(), command))
+                    .isInstanceOf(ConflictException.class);
+        }
+
+        @Test
+        void createLinkAssetNotFoundThrows() {
+            var id = UUID.randomUUID();
+            when(assetRepository.findById(id)).thenReturn(Optional.empty());
+
+            var command = new CreateAssetLinkCommand(
+                    AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
+
+            assertThatThrownBy(() -> assetService.createLink(id, command)).isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void getLinksForAssetReturnsList() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(linkRepository.findByAssetId(asset.getId())).thenReturn(List.of(makeLink(asset)));
+
+            var result = assetService.getLinksForAsset(asset.getId());
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getTargetIdentifier()).isEqualTo("GC-M010");
+        }
+
+        @Test
+        void deleteLinkSucceeds() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var link = makeLink(asset);
+            when(linkRepository.findById(link.getId())).thenReturn(Optional.of(link));
+
+            assetService.deleteLink(asset.getId(), link.getId());
+            verify(linkRepository).delete(link);
+        }
+
+        @Test
+        void deleteLinkNotBelongingThrows() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var other = createAsset("ASSET-002", "Other");
+            var link = makeLink(asset);
+            when(linkRepository.findById(link.getId())).thenReturn(Optional.of(link));
+
+            assertThatThrownBy(() -> assetService.deleteLink(other.getId(), link.getId()))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining("does not belong");
+        }
+
+        @Test
+        void getLinksByTargetReturnsList() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            when(linkRepository.findByTargetTypeAndTargetIdentifier(AssetLinkTargetType.REQUIREMENT, "GC-M010"))
+                    .thenReturn(List.of(makeLink(asset)));
+
+            var result = assetService.getLinksByTarget(AssetLinkTargetType.REQUIREMENT, "GC-M010");
+
+            assertThat(result).hasSize(1);
         }
     }
 }

@@ -31,12 +31,17 @@ export const ADR_STATUSES = ["PROPOSED", "ACCEPTED", "DEPRECATED", "SUPERSEDED"]
 export const ASSET_TYPES = [
   "APPLICATION",
   "SERVICE",
+  "SYSTEM",
   "DATABASE",
   "NETWORK",
   "HOST",
   "CONTAINER",
   "IDENTITY",
   "DATA_STORE",
+  "ENDPOINT",
+  "INTEGRATION",
+  "WORKLOAD",
+  "THIRD_PARTY",
   "BOUNDARY",
   "OTHER",
 ];
@@ -48,6 +53,25 @@ export const ASSET_RELATION_TYPES = [
   "SUPPORTS",
   "ACCESSES",
   "DATA_FLOW",
+];
+export const ASSET_LINK_TARGET_TYPES = [
+  "REQUIREMENT",
+  "CONTROL",
+  "RISK_SCENARIO",
+  "THREAT_MODEL_ENTRY",
+  "FINDING",
+  "EVIDENCE",
+  "AUDIT",
+  "EXTERNAL",
+];
+export const ASSET_LINK_TYPES = [
+  "IMPLEMENTS",
+  "MITIGATES",
+  "SUBJECT_OF",
+  "EVIDENCED_BY",
+  "GOVERNED_BY",
+  "DEPENDS_ON",
+  "ASSOCIATED",
 ];
 
 // ---------------------------------------------------------------------------
@@ -135,9 +159,15 @@ const TO_CAMEL = {
   decision_date: "decisionDate",
   superseded_by: "supersededBy",
   asset_type: "assetType",
+  asset_id: "assetId",
+  asset_uid: "assetUid",
   archived_at: "archivedAt",
   member_uids: "memberUids",
   root_uids: "rootUids",
+  target_type: "targetType",
+  target_identifier: "targetIdentifier",
+  target_url: "targetUrl",
+  target_title: "targetTitle",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -852,4 +882,26 @@ export async function assetImpactAnalysis(assetId) {
 
 export async function extractAssetSubgraph(data, project) {
   return request("POST", "/api/v1/assets/topology/subgraph", { body: data, params: { project } });
+}
+
+// --- Asset Links (cross-entity linking) ---
+
+export async function createAssetLink(assetId, data) {
+  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/links`, { body: data });
+}
+
+export async function getAssetLinks(assetId, targetType) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/links`, {
+    params: { target_type: targetType },
+  });
+}
+
+export async function deleteAssetLink(assetId, linkId) {
+  await request("DELETE", `/api/v1/assets/${encodeURIComponent(assetId)}/links/${encodeURIComponent(linkId)}`);
+}
+
+export async function getAssetLinksByTarget(targetType, targetIdentifier) {
+  return request("GET", "/api/v1/assets/links/by-target", {
+    params: { target_type: targetType, target_identifier: targetIdentifier },
+  });
 }

@@ -3,7 +3,9 @@ package com.keplerops.groundcontrol.api.assets;
 import com.keplerops.groundcontrol.domain.assets.service.AssetService;
 import com.keplerops.groundcontrol.domain.assets.service.AssetTopologyService;
 import com.keplerops.groundcontrol.domain.assets.service.CreateAssetCommand;
+import com.keplerops.groundcontrol.domain.assets.service.CreateAssetLinkCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetCommand;
+import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import jakarta.validation.Valid;
@@ -107,6 +109,51 @@ public class AssetController {
     public void deleteRelation(@PathVariable UUID id, @PathVariable UUID relationId) {
         assetService.deleteRelation(id, relationId);
     }
+
+    // --- Asset Links (cross-entity linking) ---
+
+    @PostMapping("/{id}/links")
+    @ResponseStatus(HttpStatus.CREATED)
+    public AssetLinkResponse createLink(@PathVariable UUID id, @Valid @RequestBody AssetLinkRequest request) {
+        var command = new CreateAssetLinkCommand(
+                request.targetType(),
+                request.targetIdentifier(),
+                request.linkType(),
+                request.targetUrl(),
+                request.targetTitle());
+        return AssetLinkResponse.from(assetService.createLink(id, command));
+    }
+
+    @GetMapping("/{id}/links")
+    public List<AssetLinkResponse> getLinks(
+            @PathVariable UUID id,
+            @RequestParam(name = "target_type", required = false) AssetLinkTargetType targetType) {
+        if (targetType != null) {
+            return assetService.getLinksForAssetByTargetType(id, targetType).stream()
+                    .map(AssetLinkResponse::from)
+                    .toList();
+        }
+        return assetService.getLinksForAsset(id).stream()
+                .map(AssetLinkResponse::from)
+                .toList();
+    }
+
+    @DeleteMapping("/{id}/links/{linkId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteLink(@PathVariable UUID id, @PathVariable UUID linkId) {
+        assetService.deleteLink(id, linkId);
+    }
+
+    @GetMapping("/links/by-target")
+    public List<AssetLinkResponse> getLinksByTarget(
+            @RequestParam("target_type") AssetLinkTargetType targetType,
+            @RequestParam("target_identifier") String targetIdentifier) {
+        return assetService.getLinksByTarget(targetType, targetIdentifier).stream()
+                .map(AssetLinkResponse::from)
+                .toList();
+    }
+
+    // --- Topology ---
 
     @GetMapping("/topology/cycles")
     public List<AssetCycleResponse> detectCycles(@RequestParam(required = false) String project) {

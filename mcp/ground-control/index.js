@@ -109,6 +109,10 @@ import {
   detectAssetCycles,
   assetImpactAnalysis,
   extractAssetSubgraph,
+  createAssetLink,
+  getAssetLinks,
+  deleteAssetLink,
+  getAssetLinksByTarget,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -120,6 +124,8 @@ import {
   ADR_STATUSES,
   ASSET_TYPES,
   ASSET_RELATION_TYPES,
+  ASSET_LINK_TARGET_TYPES,
+  ASSET_LINK_TYPES,
 } from "./lib.js";
 
 function ok(text) {
@@ -2125,6 +2131,82 @@ server.tool(
   async ({ root_uids, project }) => {
     try {
       return ok(JSON.stringify(await extractAssetSubgraph({ root_uids }, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Asset Links (cross-entity linking)
+// ==========================================================================
+
+server.tool(
+  "gc_create_asset_link",
+  `Link an operational asset to a requirement, control, risk scenario, or other entity. Target types: ${ASSET_LINK_TARGET_TYPES.join(", ")}. Link types: ${ASSET_LINK_TYPES.join(", ")}.`,
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    target_type: z.enum(ASSET_LINK_TARGET_TYPES).describe("Type of the target entity"),
+    target_identifier: z.string().max(500).describe("Identifier of the target (e.g. requirement UID, URL)"),
+    link_type: z.enum(ASSET_LINK_TYPES).describe("Nature of the relationship"),
+    target_url: z.string().max(2000).optional().describe("Optional URL for the target"),
+    target_title: z.string().max(255).optional().describe("Optional display title for the target"),
+  },
+  async ({ asset_id, target_type, target_identifier, link_type, target_url, target_title }) => {
+    try {
+      const data = { target_type, target_identifier, link_type };
+      if (target_url !== undefined) data.target_url = target_url;
+      if (target_title !== undefined) data.target_title = target_title;
+      return ok(JSON.stringify(await createAssetLink(asset_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_asset_links",
+  "Get all cross-entity links for an operational asset, optionally filtered by target type.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    target_type: z.enum(ASSET_LINK_TARGET_TYPES).optional().describe("Filter by target type"),
+  },
+  async ({ asset_id, target_type }) => {
+    try {
+      return ok(JSON.stringify(await getAssetLinks(asset_id, target_type), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_asset_link",
+  "Delete a cross-entity link from an operational asset.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    link_id: z.string().uuid().describe("UUID of the link to delete"),
+  },
+  async ({ asset_id, link_id }) => {
+    try {
+      await deleteAssetLink(asset_id, link_id);
+      return ok("Link deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_asset_links_by_target",
+  "Find all assets linked to a specific target (e.g. all assets linked to a requirement).",
+  {
+    target_type: z.enum(ASSET_LINK_TARGET_TYPES).describe("Type of the target entity"),
+    target_identifier: z.string().describe("Identifier of the target"),
+  },
+  async ({ target_type, target_identifier }) => {
+    try {
+      return ok(JSON.stringify(await getAssetLinksByTarget(target_type, target_identifier), null, 2));
     } catch (e) {
       return err(e);
     }
