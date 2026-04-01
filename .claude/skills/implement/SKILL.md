@@ -50,6 +50,9 @@ Explore the codebase to determine whether the requirement described in the issue
 - Address the concerns a FAANG L6+ engineer would have around security, performance, reliability, and scalability
 - Avoid reinventing the wheel - use existing libraries and frameworks where appropriate
 - Code should be easy to understand, test, and maintain. Simple is better than complex.
+- Plans that add database migrations MUST include updating the hardcoded version lists in `MigrationSmokeTest.java` and `RequirementsE2EIntegrationTest.java`.
+- Plans that add `@Audited` JPA entities MUST add `@NotAudited` on any `@ManyToOne` references to non-audited entities (e.g., Project), and MUST include a Flyway migration for the `_audit` table.
+- Plans that add API endpoints MUST include `@WebMvcTest` controller unit tests (not just integration tests). The sonar CI job does not run Testcontainers, so only unit tests contribute to SonarCloud coverage.
 - **If the requirement IS already met**: Report that the requirement is satisfied and identify which code satisfies it.
 
 ### Step 4.5: Clause-by-Clause Verification

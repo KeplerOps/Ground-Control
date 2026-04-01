@@ -10,6 +10,16 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/atomik/src/Ground-Control/.claude/hooks/log-skill-call.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Stop": [
