@@ -236,3 +236,5 @@ override.tf.json
 # Local files
 tickets
 archive/
+
+.codex
