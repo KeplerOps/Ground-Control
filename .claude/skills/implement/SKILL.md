@@ -73,7 +73,7 @@ Do not proceed to Step 5 until every clause is checked off.
 
 After implementation is complete (or if already implemented):
 - use the `gc_create_traceability_link` MCP tool to create any missing links:
-  - `IMPLEMENTS` links from the requirement to the code files that implement it
+  - `IMPLEMENTS` links from the requirement to **every** code file that implements it — entities, enums, repositories, services, controllers, migrations, and MCP tool files. Link all substantive files, not just the top 3. DTOs and command records may be omitted.
   - `TESTS` links from the requirement to the test files that verify it
   - Only create links that don't already exist (check the traceability data from Step 1).
 - use the `gc_transition_status` MCP tool to transition the requirement to `ACTIVE` if it was `DRAFT`.
@@ -158,7 +158,22 @@ If any check fails, fix it before proceeding. Do NOT move to Phase C until every
    - Re-run Step 11 (CI Monitor).
 5. If clean, proceed.
 
-### Step 13: Code Review
+### Step 13: Cross-Model Review (Codex)
+
+Run the OpenAI Codex CLI review against the branch:
+
+```
+codex review --base dev "Carefully review the work on this branch as a staff/principal dev at a FAANG level shop. This is a critical piece of work we need to get not only technically right, but right in terms of design, concepts, and abstractions. The agent that did the coding is prone to conflating near but distinct concepts, please be alive to that. I do not want an expedient implementation. I want a GOOD one that will be maintainable, secure, reliable, and performant. There have been several reviews, things may have been missed or we may be ready. This not a settled question. Prefer fixing issues over deferring."
+```
+
+Read the output carefully. Fix ALL issues Codex identifies. Same rules as all reviews:
+- Do NOT defer ANY issues.
+- You are an LLM. You have no time constraints. Fix everything.
+- The ONLY reason to stop and escalate to the user is if a fix requires
+  a significant architectural change touching 5+ files outside the
+  current feature scope.
+
+### Step 14: Code Review
 
 **CRITICAL: You MUST use the Skill tool to invoke the built-in review skill.**
 
@@ -166,33 +181,28 @@ If any check fails, fix it before proceeding. Do NOT move to Phase C until every
 2. If there are merge conflicts, resolve them, commit, and push.
 3. Call the Skill tool with `skill="review"` to invoke the real built-in code review.
 4. After the review completes, fix ALL issues it identified.
-   - Do NOT defer ANY issues.
-   - Do NOT categorize issues as "low priority" to avoid work.
-   - You are an LLM. You have no time constraints. Fix everything.
-   - The ONLY reason to stop and escalate to the user is if a fix requires
-     a significant architectural change touching 5+ files outside the
-     current feature scope.
+   - Same rules as Step 13: fix everything, defer nothing.
 5. After fixing, re-read all findings and confirm each one was addressed.
 
-### Step 14: Security Review
+### Step 15: Security Review
 
 **CRITICAL: You MUST use the Skill tool to invoke the built-in security-review skill.**
 
 1. Call the Skill tool with `skill="security-review"` to invoke the real built-in security review.
 2. After the review completes, fix ALL issues it identified.
-   - Same rules as Step 13: fix everything, defer nothing.
+   - Same rules as Step 14: fix everything, defer nothing.
 3. After fixing, confirm all findings were addressed.
 
-### Step 15: Final Commit & CI
+### Step 16: Final Commit & CI
 
-If ANY fixes were made in Steps 13-14:
+If ANY fixes were made in Steps 13-15:
 1. `git add` all changed files.
-2. `git commit -m "Fix code review and security review findings"`
+2. `git commit -m "Fix review findings"`
 3. `git push`
 4. Re-run Step 11 (CI Monitor).
 5. Re-run Step 12 (SonarCloud).
 
-### Step 16: Report (DO NOT MERGE)
+### Step 17: Report (DO NOT MERGE)
 
 **You MUST NOT merge the PR. You MUST NOT run `gh pr merge`. The user reviews and merges.**
 
