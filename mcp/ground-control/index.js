@@ -88,6 +88,14 @@ import {
   setDocumentGrammar,
   getDocumentGrammar,
   deleteDocumentGrammar,
+  createAdr,
+  listAdrs,
+  getAdr,
+  getAdrByUid,
+  updateAdr,
+  deleteAdr,
+  transitionAdrStatus,
+  getAdrRequirements,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -96,6 +104,7 @@ import {
   LINK_TYPES,
   METRIC_TYPES,
   COMPARISON_OPERATORS,
+  ADR_STATUSES,
 } from "./lib.js";
 
 function ok(text) {
@@ -1720,6 +1729,152 @@ server.tool(
     try {
       await deleteDocumentGrammar(document_id);
       return ok("Document grammar deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Architecture Decision Records
+// ==========================================================================
+
+server.tool(
+  "gc_create_adr",
+  "Create an architecture decision record (ADR) — a first-class entity for tracking architectural decisions linked to requirements.",
+  {
+    uid: z.string().max(20).describe("ADR UID (e.g. 'ADR-018')"),
+    title: z.string().max(200).describe("ADR title"),
+    decision_date: z.string().describe("Decision date (YYYY-MM-DD)"),
+    context: z.string().optional().describe("Context — what motivated this decision"),
+    decision: z.string().optional().describe("The decision made"),
+    consequences: z.string().optional().describe("Consequences — positive, negative, risks"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ uid, title, decision_date, context, decision, consequences, project }) => {
+    try {
+      const data = { uid, title, decision_date };
+      if (context !== undefined) data.context = context;
+      if (decision !== undefined) data.decision = decision;
+      if (consequences !== undefined) data.consequences = consequences;
+      return ok(JSON.stringify(await createAdr(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_adrs",
+  "List all ADRs for a project, ordered by decision date (newest first).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const adrs = await listAdrs(project);
+      if (Array.isArray(adrs) && adrs.length === 0) return ok("No ADRs found.");
+      return ok(JSON.stringify(adrs, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_adr",
+  "Get an ADR by its UUID or by its UID (e.g. 'ADR-018'). Provide either id or uid.",
+  {
+    id: z.string().uuid().optional().describe("ADR UUID"),
+    uid: z.string().optional().describe("ADR UID (e.g. 'ADR-018')"),
+    project: z.string().optional().describe("Project identifier (required when looking up by uid)"),
+  },
+  async ({ id, uid, project }) => {
+    try {
+      if (id) {
+        return ok(JSON.stringify(await getAdr(id), null, 2));
+      }
+      if (uid) {
+        return ok(JSON.stringify(await getAdrByUid(uid, project), null, 2));
+      }
+      return err(new Error("Provide either 'id' or 'uid'."));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_adr",
+  "Update an ADR. Only specified fields are changed.",
+  {
+    id: z.string().uuid().describe("ADR UUID"),
+    title: z.string().max(200).optional().describe("New title"),
+    decision_date: z.string().optional().describe("New decision date (YYYY-MM-DD)"),
+    context: z.string().optional().describe("Updated context"),
+    decision: z.string().optional().describe("Updated decision"),
+    consequences: z.string().optional().describe("Updated consequences"),
+    superseded_by: z.string().max(20).optional().describe("UID of the superseding ADR"),
+  },
+  async ({ id, title, decision_date, context, decision, consequences, superseded_by }) => {
+    try {
+      const data = {};
+      if (title !== undefined) data.title = title;
+      if (decision_date !== undefined) data.decision_date = decision_date;
+      if (context !== undefined) data.context = context;
+      if (decision !== undefined) data.decision = decision;
+      if (consequences !== undefined) data.consequences = consequences;
+      if (superseded_by !== undefined) data.superseded_by = superseded_by;
+      return ok(JSON.stringify(await updateAdr(id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_adr",
+  "Delete an ADR by its UUID.",
+  {
+    id: z.string().uuid().describe("ADR UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteAdr(id);
+      return ok("ADR deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_transition_adr_status",
+  `Transition an ADR's status. Valid transitions: PROPOSED→ACCEPTED, ACCEPTED→DEPRECATED, ACCEPTED→SUPERSEDED.`,
+  {
+    id: z.string().uuid().describe("ADR UUID"),
+    status: z.enum(ADR_STATUSES).describe("Target status"),
+  },
+  async ({ id, status }) => {
+    try {
+      return ok(JSON.stringify(await transitionAdrStatus(id, status), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_adr_requirements",
+  "Get all requirements linked to an ADR via traceability links (reverse traceability).",
+  {
+    id: z.string().uuid().describe("ADR UUID"),
+  },
+  async ({ id }) => {
+    try {
+      const reqs = await getAdrRequirements(id);
+      if (Array.isArray(reqs) && reqs.length === 0) return ok("No linked requirements found.");
+      return ok(JSON.stringify(reqs, null, 2));
     } catch (e) {
       return err(e);
     }

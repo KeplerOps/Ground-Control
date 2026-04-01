@@ -306,6 +306,34 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
 }
 ```
 
+### Architecture Decision Records
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/adrs?project=` | AdrRequest | 201 | Create ADR |
+| GET | `/adrs?project=` | — | 200 | List ADRs |
+| GET | `/adrs/{id}` | — | 200 | Get ADR by UUID |
+| GET | `/adrs/uid/{uid}?project=` | — | 200 | Get ADR by UID |
+| PUT | `/adrs/{id}` | UpdateAdrRequest | 200 | Update ADR (partial) |
+| DELETE | `/adrs/{id}` | — | 204 | Delete ADR |
+| PUT | `/adrs/{id}/status` | `{ "status": "ACCEPTED" }` | 200 | Transition status |
+| GET | `/adrs/{id}/requirements` | — | 200 | Get linked requirements (reverse traceability) |
+
+**AdrRequest:**
+
+```json
+{
+  "uid": "ADR-018",
+  "title": "AWS EC2 Deployment",
+  "decisionDate": "2026-03-15",
+  "context": "We need a deployment target for the application",
+  "decision": "Deploy to AWS EC2 with Docker",
+  "consequences": "Simple, cost-effective, but single-instance"
+}
+```
+
+**Status transitions:** PROPOSED → ACCEPTED → DEPRECATED | SUPERSEDED
+
 ### Quality Gates
 
 | Method | Path | Body | Status | Purpose |
