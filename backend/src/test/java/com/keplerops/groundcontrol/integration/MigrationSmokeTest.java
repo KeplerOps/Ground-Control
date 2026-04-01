@@ -38,7 +38,8 @@ class MigrationSmokeTest extends BaseIntegrationTest {
         assertThat(versions)
                 .containsExactly(
                         "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012", "013",
-                        "014", "015", "016", "017", "018", "019", "020", "021", "022", "023", "024");
+                        "014", "015", "016", "017", "018", "019", "020", "021", "022", "023", "024", "025", "026",
+                        "027", "028");
     }
 
     @Test
@@ -64,6 +65,16 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                 .getResultList();
         entityManager
                 .createNativeQuery("SELECT 1 FROM traceability_link_audit LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM operational_asset LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM operational_asset_audit LIMIT 1")
+                .getResultList();
+        entityManager.createNativeQuery("SELECT 1 FROM asset_relation LIMIT 1").getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM asset_relation_audit LIMIT 1")
                 .getResultList();
     }
 }

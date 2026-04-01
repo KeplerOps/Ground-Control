@@ -28,6 +28,27 @@ export const LINK_TYPES = ["IMPLEMENTS", "TESTS", "DOCUMENTS", "CONSTRAINS", "VE
 export const METRIC_TYPES = ["COVERAGE", "ORPHAN_COUNT", "COMPLETENESS"];
 export const COMPARISON_OPERATORS = ["GTE", "LTE", "EQ", "GT", "LT"];
 export const ADR_STATUSES = ["PROPOSED", "ACCEPTED", "DEPRECATED", "SUPERSEDED"];
+export const ASSET_TYPES = [
+  "APPLICATION",
+  "SERVICE",
+  "DATABASE",
+  "NETWORK",
+  "HOST",
+  "CONTAINER",
+  "IDENTITY",
+  "DATA_STORE",
+  "BOUNDARY",
+  "OTHER",
+];
+export const ASSET_RELATION_TYPES = [
+  "CONTAINS",
+  "DEPENDS_ON",
+  "COMMUNICATES_WITH",
+  "TRUST_BOUNDARY",
+  "SUPPORTS",
+  "ACCESSES",
+  "DATA_FLOW",
+];
 
 // ---------------------------------------------------------------------------
 // Field name mapping (snake_case MCP <-> camelCase API)
@@ -113,6 +134,10 @@ const TO_CAMEL = {
   requirement_uid: "requirementUid",
   decision_date: "decisionDate",
   superseded_by: "supersededBy",
+  asset_type: "assetType",
+  archived_at: "archivedAt",
+  member_uids: "memberUids",
+  root_uids: "rootUids",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -768,4 +793,63 @@ export async function transitionAdrStatus(id, status) {
 
 export async function getAdrRequirements(id) {
   return request("GET", `/api/v1/adrs/${encodeURIComponent(id)}/requirements`);
+}
+
+// ---------------------------------------------------------------------------
+// Operational Asset API functions
+// ---------------------------------------------------------------------------
+
+export async function createAsset(data, project) {
+  return request("POST", "/api/v1/assets", { body: data, params: { project } });
+}
+
+export async function listAssets({ project, type } = {}) {
+  return request("GET", "/api/v1/assets", { params: { project, type } });
+}
+
+export async function getAsset(id) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(id)}`);
+}
+
+export async function getAssetByUid(uid, project) {
+  return request("GET", `/api/v1/assets/uid/${encodeURIComponent(uid)}`, { params: { project } });
+}
+
+export async function updateAsset(id, data) {
+  return request("PUT", `/api/v1/assets/${encodeURIComponent(id)}`, { body: data });
+}
+
+export async function deleteAsset(id) {
+  await request("DELETE", `/api/v1/assets/${encodeURIComponent(id)}`);
+}
+
+export async function archiveAsset(id) {
+  return request("POST", `/api/v1/assets/${encodeURIComponent(id)}/archive`);
+}
+
+export async function createAssetRelation(assetId, data) {
+  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/relations`, { body: data });
+}
+
+export async function getAssetRelations(assetId) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/relations`);
+}
+
+export async function deleteAssetRelation(assetId, relationId) {
+  await request(
+    "DELETE",
+    `/api/v1/assets/${encodeURIComponent(assetId)}/relations/${encodeURIComponent(relationId)}`,
+  );
+}
+
+export async function detectAssetCycles(project) {
+  return request("GET", "/api/v1/assets/topology/cycles", { params: { project } });
+}
+
+export async function assetImpactAnalysis(assetId) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/topology/impact`);
+}
+
+export async function extractAssetSubgraph(data, project) {
+  return request("POST", "/api/v1/assets/topology/subgraph", { body: data, params: { project } });
 }

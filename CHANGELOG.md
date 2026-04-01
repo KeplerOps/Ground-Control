@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.94.0] - 2026-03-31
+
+### Added
+
+- Operational asset domain with typed topology relationships for multi-hop
+  impact, threat, and control analysis (GC-M013)
+- Seven relationship types: CONTAINS, DEPENDS_ON, COMMUNICATES_WITH,
+  TRUST_BOUNDARY, SUPPORTS, ACCESSES, DATA_FLOW
+- Graph topology analysis: cycle detection, impact analysis, subgraph extraction
+  reusing existing GraphAlgorithms
+- REST API endpoints: `/api/v1/assets` with full CRUD, relations management,
+  and topology analysis
+- MCP tools: `gc_create_asset`, `gc_list_assets`, `gc_get_asset`,
+  `gc_update_asset`, `gc_delete_asset`, `gc_archive_asset`,
+  `gc_create_asset_relation`, `gc_get_asset_relations`,
+  `gc_delete_asset_relation`, `gc_detect_asset_cycles`,
+  `gc_asset_impact_analysis`, `gc_extract_asset_subgraph`
+- Database migrations V025-V028 for operational_asset and asset_relation
+  tables with Envers audit tables
+- ADR-019: Asset Topology Model
+
 ## [0.93.0] - 2026-03-31
 
 ### Added
