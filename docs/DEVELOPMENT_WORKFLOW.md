@@ -91,16 +91,23 @@ All reviewers operate under the same rule: **fix everything, defer nothing.** Th
 ```
 No Co-Authored-By, no "Generated with Claude Code", no AI attribution anywhere.
 
-### Stop Hook (`.claude/hooks/verify-implementation.sh`)
-Blocks Claude from completing if:
+### Stop Hook (`~/.claude/hooks/verify-implementation.sh`) — User Level
+Blocks Claude from completing, but **only when `/implement` was invoked in the current session**. Scoped by process ID (`$PPID`) so concurrent Claude windows on the same branch don't interfere. Uses timestamps to require fresh reviews for each `/implement` loop within a session.
+
+Universal checks (all repos):
 - CHANGELOG not updated (when source files changed)
+- `/review` skill was not invoked after the last `/implement`
+- `/security-review` skill was not invoked after the last `/implement`
+
+Project-specific checks (`.claude/hooks/verify-extra.sh`, sourced if present):
 - API docs not updated (when controllers added)
 - MCP tools not updated (when controllers added)
-- `/review` skill was not invoked during the session
-- `/security-review` skill was not invoked during the session
 
-### Skill Call Logging (`.claude/hooks/log-skill-call.sh`)
-PostToolUse hook on `Skill` — writes JSONL to `/tmp/claude-skill-log/<branch>.jsonl`. The Stop hook reads this log to verify reviews were actually invoked (not just claimed).
+### Skill Call Logging (`~/.claude/hooks/log-skill-call.sh`) — User Level
+PostToolUse hook on `Skill` — writes JSONL to `/tmp/claude-skill-log/<PID>.jsonl` (per-session, not per-branch). The Stop hook reads this log to verify reviews were actually invoked (not just claimed). Stale logs (>24h) are auto-pruned.
+
+### Git Merge Guard (`~/.claude/hooks/git-merge-guard.py`) — User Level
+PreToolUse hook on `Bash` — blocks `git merge`, `git push --force`, `git reset --hard`, and `gh pr merge`. The user handles all merges.
 
 ## Standalone Skills
 

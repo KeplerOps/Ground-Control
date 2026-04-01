@@ -162,16 +162,7 @@ If any check fails, fix it before proceeding. Do NOT move to Phase C until every
 
 Run the OpenAI Codex CLI review against the branch:
 
-```
-codex review --base dev "Carefully review the work on this branch as a staff/principal dev at a FAANG level shop. This is a critical piece of work we need to get not only technically right, but right in terms of design, concepts, and abstractions. The agent that did the coding is prone to conflating near but distinct concepts, please be alive to that. I do not want an expedient implementation. I want a GOOD one that will be maintainable, secure, reliable, and performant. There have been several reviews, things may have been missed or we may be ready. This not a settled question. Prefer fixing issues over deferring."
-```
-
-Read the output carefully. Fix ALL issues Codex identifies. Same rules as all reviews:
-- Do NOT defer ANY issues.
-- You are an LLM. You have no time constraints. Fix everything.
-- The ONLY reason to stop and escalate to the user is if a fix requires
-  a significant architectural change touching 5+ files outside the
-  current feature scope.
+`Bash(codex review --base dev)`
 
 ### Step 14: Code Review
 
