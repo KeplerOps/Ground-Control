@@ -1,9 +1,12 @@
 package com.keplerops.groundcontrol.domain.assets.service;
 
+import com.keplerops.groundcontrol.domain.assets.model.AssetLink;
 import com.keplerops.groundcontrol.domain.assets.model.AssetRelation;
 import com.keplerops.groundcontrol.domain.assets.model.OperationalAsset;
+import com.keplerops.groundcontrol.domain.assets.repository.AssetLinkRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.AssetRelationRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.OperationalAssetRepository;
+import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
@@ -22,14 +25,17 @@ public class AssetService {
 
     private final OperationalAssetRepository assetRepository;
     private final AssetRelationRepository relationRepository;
+    private final AssetLinkRepository linkRepository;
     private final ProjectRepository projectRepository;
 
     public AssetService(
             OperationalAssetRepository assetRepository,
             AssetRelationRepository relationRepository,
+            AssetLinkRepository linkRepository,
             ProjectRepository projectRepository) {
         this.assetRepository = assetRepository;
         this.relationRepository = relationRepository;
+        this.linkRepository = linkRepository;
         this.projectRepository = projectRepository;
     }
 
@@ -139,5 +145,50 @@ public class AssetService {
             throw new NotFoundException("Relation " + relationId + " does not belong to asset " + assetId);
         }
         relationRepository.delete(relation);
+    }
+
+    // --- Asset Links (cross-entity linking) ---
+
+    public AssetLink createLink(UUID assetId, CreateAssetLinkCommand command) {
+        var asset = getById(assetId);
+        if (linkRepository.existsByAssetIdAndTargetTypeAndTargetIdentifierAndLinkType(
+                assetId, command.targetType(), command.targetIdentifier(), command.linkType())) {
+            throw new ConflictException("Link already exists: " + command.linkType() + " -> " + command.targetType()
+                    + ":" + command.targetIdentifier());
+        }
+        var link = new AssetLink(asset, command.targetType(), command.targetIdentifier(), command.linkType());
+        if (command.targetUrl() != null) {
+            link.setTargetUrl(command.targetUrl());
+        }
+        if (command.targetTitle() != null) {
+            link.setTargetTitle(command.targetTitle());
+        }
+        return linkRepository.save(link);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AssetLink> getLinksForAsset(UUID assetId) {
+        getById(assetId);
+        return linkRepository.findByAssetId(assetId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AssetLink> getLinksForAssetByTargetType(UUID assetId, AssetLinkTargetType targetType) {
+        getById(assetId);
+        return linkRepository.findByAssetIdAndTargetType(assetId, targetType);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AssetLink> getLinksByTarget(UUID projectId, AssetLinkTargetType targetType, String targetIdentifier) {
+        return linkRepository.findByTargetTypeAndTargetIdentifierAndProjectId(targetType, targetIdentifier, projectId);
+    }
+
+    public void deleteLink(UUID assetId, UUID linkId) {
+        var link =
+                linkRepository.findById(linkId).orElseThrow(() -> new NotFoundException("Link not found: " + linkId));
+        if (!link.getAsset().getId().equals(assetId)) {
+            throw new NotFoundException("Link " + linkId + " does not belong to asset " + assetId);
+        }
+        linkRepository.delete(link);
     }
 }

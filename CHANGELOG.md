@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.95.0] - 2026-04-01
+
+### Added
+
+- Cross-entity asset linking: operational assets can now be linked to
+  requirements, controls, risk scenarios, threat-model entries, findings,
+  evidence, audits, and external artifacts (GC-M010)
+- Seven link types: IMPLEMENTS, MITIGATES, SUBJECT_OF, EVIDENCED_BY,
+  GOVERNED_BY, DEPENDS_ON, ASSOCIATED
+- Five new asset types: SYSTEM, WORKLOAD, ENDPOINT, INTEGRATION, THIRD_PARTY
+- REST API endpoints: `POST/GET /api/v1/assets/{id}/links`,
+  `DELETE /api/v1/assets/{id}/links/{linkId}`,
+  `GET /api/v1/assets/links/by-target` for reverse lookup
+- MCP tools: `gc_create_asset_link`, `gc_get_asset_links`,
+  `gc_delete_asset_link`, `gc_get_asset_links_by_target`
+- Database migrations V029-V030 for asset_link table with Envers audit
+- ADR-020: Asset Cross-Entity Linking
+
 ## [0.94.0] - 2026-03-31
 
 ### Added
