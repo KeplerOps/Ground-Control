@@ -16,6 +16,7 @@ import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDate;
 import java.util.Map;
 import org.hibernate.envers.Audited;
+import org.hibernate.envers.NotAudited;
 
 @Entity
 @Audited
@@ -24,6 +25,7 @@ import org.hibernate.envers.Audited;
         uniqueConstraints = @UniqueConstraint(columnNames = {"project_id", "uid"}))
 public class ArchitectureDecisionRecord extends BaseEntity {
 
+    @NotAudited
     @ManyToOne(fetch = FetchType.EAGER, optional = false)
     @JoinColumn(name = "project_id", nullable = false)
     private Project project;
