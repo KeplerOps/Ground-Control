@@ -905,3 +905,36 @@ export async function getAssetLinksByTarget(targetType, targetIdentifier, projec
     params: { target_type: targetType, target_identifier: targetIdentifier, project },
   });
 }
+
+// --- External Identifiers (source provenance) ---
+
+export async function createAssetExternalId(assetId, data) {
+  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/external-ids`, { body: data });
+}
+
+export async function getAssetExternalIds(assetId, sourceSystem) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/external-ids`, {
+    params: { source_system: sourceSystem },
+  });
+}
+
+export async function updateAssetExternalId(assetId, extIdId, data) {
+  return request(
+    "PUT",
+    `/api/v1/assets/${encodeURIComponent(assetId)}/external-ids/${encodeURIComponent(extIdId)}`,
+    { body: data },
+  );
+}
+
+export async function deleteAssetExternalId(assetId, extIdId) {
+  await request(
+    "DELETE",
+    `/api/v1/assets/${encodeURIComponent(assetId)}/external-ids/${encodeURIComponent(extIdId)}`,
+  );
+}
+
+export async function findAssetByExternalId(sourceSystem, sourceId, project) {
+  return request("GET", "/api/v1/assets/external-ids/by-source", {
+    params: { source_system: sourceSystem, source_id: sourceId, project },
+  });
+}
