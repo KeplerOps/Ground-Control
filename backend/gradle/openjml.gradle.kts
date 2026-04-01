@@ -10,7 +10,8 @@ val openjmlBinary = openjmlDir.file("openjml")
 //   when verifying String parameters passed to super constructors
 // JML contracts on excluded files are still enforced at L1 (test pairs).
 val escSrcDirs = listOf(
-    "src/main/java/com/keplerops/groundcontrol/domain/requirements/state"
+    "src/main/java/com/keplerops/groundcontrol/domain/requirements/state",
+    "src/main/java/com/keplerops/groundcontrol/domain/adrs/state"
 )
 val racSrcDir = "src/main/java/com/keplerops/groundcontrol/domain"
 

@@ -75,5 +75,5 @@ repos:
         name: openjml ESC (formal verification of JML contracts)
         entry: bash -c 'cd backend && ./gradlew openjmlEsc -q'
         language: system
-        files: ^backend/src/main/java/com/keplerops/groundcontrol/domain/requirements/state/
+        files: ^backend/src/main/java/com/keplerops/groundcontrol/domain/(requirements|adrs)/state/
         pass_filenames: false
