@@ -56,6 +56,9 @@ public class AssetService {
     public OperationalAsset update(UUID id, UpdateAssetCommand command) {
         var asset = getById(id);
         if (command.name() != null) {
+            if (command.name().isBlank()) {
+                throw new DomainValidationException("Asset name must not be blank");
+            }
             asset.setName(command.name());
         }
         if (command.description() != null) {

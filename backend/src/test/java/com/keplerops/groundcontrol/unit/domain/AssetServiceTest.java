@@ -130,6 +130,18 @@ class AssetServiceTest {
         }
 
         @Test
+        void updateBlankNameThrows() {
+            var asset = createAsset("ASSET-001", "Old Name");
+            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+
+            var command = new UpdateAssetCommand("", null, null);
+
+            assertThatThrownBy(() -> assetService.update(asset.getId(), command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("must not be blank");
+        }
+
+        @Test
         void updateAllFields() {
             var asset = createAsset("ASSET-001", "Old");
             when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));

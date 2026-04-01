@@ -8,6 +8,7 @@ import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.requirements.service.GraphAlgorithms;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,7 +33,7 @@ public class AssetTopologyService {
     public List<AssetCycleResult> detectCycles(UUID projectId) {
         List<AssetRelation> relations = relationRepository.findActiveByProjectId(projectId);
 
-        Map<UUID, List<UUID>> adjacencyList = new HashMap<>();
+        Map<UUID, Set<UUID>> adjacencySet = new HashMap<>();
         Map<UUID, String> idToUid = new HashMap<>();
         Map<UUID, Map<UUID, AssetRelation>> edgeMap = new HashMap<>();
 
@@ -41,10 +42,13 @@ public class AssetTopologyService {
             UUID targetId = rel.getTarget().getId();
             idToUid.put(sourceId, rel.getSource().getUid());
             idToUid.put(targetId, rel.getTarget().getUid());
-            adjacencyList.computeIfAbsent(sourceId, k -> new ArrayList<>()).add(targetId);
-            adjacencyList.putIfAbsent(targetId, new ArrayList<>());
-            edgeMap.computeIfAbsent(sourceId, k -> new HashMap<>()).put(targetId, rel);
+            adjacencySet.computeIfAbsent(sourceId, k -> new HashSet<>()).add(targetId);
+            adjacencySet.putIfAbsent(targetId, new HashSet<>());
+            edgeMap.computeIfAbsent(sourceId, k -> new HashMap<>()).putIfAbsent(targetId, rel);
         }
+
+        Map<UUID, List<UUID>> adjacencyList = new HashMap<>();
+        adjacencySet.forEach((k, v) -> adjacencyList.put(k, new ArrayList<>(v)));
 
         List<List<UUID>> cycles = GraphAlgorithms.findCycles(adjacencyList);
 
