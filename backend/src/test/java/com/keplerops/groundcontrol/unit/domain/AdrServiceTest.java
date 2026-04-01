@@ -229,7 +229,8 @@ class AdrServiceTest {
 
             var requirement = new Requirement(project, "GC-R001", "Test Req", "A test requirement");
             var link = new TraceabilityLink(requirement, ArtifactType.ADR, "ADR-001", LinkType.DOCUMENTS);
-            when(traceabilityLinkRepository.findByArtifactTypeAndArtifactIdentifier(ArtifactType.ADR, "ADR-001"))
+            when(traceabilityLinkRepository.findByArtifactTypeAndArtifactIdentifierWithRequirement(
+                            ArtifactType.ADR, "ADR-001"))
                     .thenReturn(List.of(link));
 
             var result = adrService.findLinkedRequirements(adr.getId());
@@ -240,7 +241,8 @@ class AdrServiceTest {
         void findLinkedRequirementsReturnsEmptyWhenNoLinks() {
             var adr = createAdr("ADR-001", "Test");
             when(adrRepository.findById(adr.getId())).thenReturn(Optional.of(adr));
-            when(traceabilityLinkRepository.findByArtifactTypeAndArtifactIdentifier(ArtifactType.ADR, "ADR-001"))
+            when(traceabilityLinkRepository.findByArtifactTypeAndArtifactIdentifierWithRequirement(
+                            ArtifactType.ADR, "ADR-001"))
                     .thenReturn(List.of());
 
             var result = adrService.findLinkedRequirements(adr.getId());

@@ -124,7 +124,8 @@ public class AdrService {
     @Transactional(readOnly = true)
     public List<Requirement> findLinkedRequirements(UUID id) {
         var adr = getById(id);
-        var links = traceabilityLinkRepository.findByArtifactTypeAndArtifactIdentifier(ArtifactType.ADR, adr.getUid());
+        var links = traceabilityLinkRepository.findByArtifactTypeAndArtifactIdentifierWithRequirement(
+                ArtifactType.ADR, adr.getUid());
         return links.stream().map(link -> link.getRequirement()).toList();
     }
 }

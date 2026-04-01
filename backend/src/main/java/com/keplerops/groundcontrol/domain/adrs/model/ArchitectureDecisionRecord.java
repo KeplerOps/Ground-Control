@@ -15,8 +15,10 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDate;
 import java.util.Map;
+import org.hibernate.envers.Audited;
 
 @Entity
+@Audited
 @Table(
         name = "architecture_decision_record",
         uniqueConstraints = @UniqueConstraint(columnNames = {"project_id", "uid"}))
