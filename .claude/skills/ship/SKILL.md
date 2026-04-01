@@ -76,17 +76,12 @@ If ANY fixes were made in Phases 4-5:
 4. Re-run Phase 2 (CI Monitor).
 5. Re-run Phase 3 (SonarCloud).
 
-## Phase 7: Merge & Cleanup
+## Phase 7: Report (DO NOT MERGE)
 
-1. Confirm all checks are green: `gh pr checks <number>`
-2. Merge: `gh pr merge <number> --merge --delete-branch`
-3. `git checkout dev`
-4. `git pull origin dev`
-5. Delete local feature branch if it still exists.
-
-## Phase 8: Report
+**You MUST NOT merge the PR. You MUST NOT run `gh pr merge`. The user reviews and merges.**
 
 - Summary of all changes made during the ship process
 - Review findings and what was fixed
 - Security review findings and what was fixed
-- Confirmation: merged to dev, CI green, SonarCloud passed
+- Confirmation: CI green, SonarCloud passed, PR ready for user review
+- PR URL

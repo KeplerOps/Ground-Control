@@ -189,22 +189,14 @@ If ANY fixes were made in Steps 13-14:
 4. Re-run Step 11 (CI Monitor).
 5. Re-run Step 12 (SonarCloud).
 
-### Step 16: Merge
+### Step 16: Report (DO NOT MERGE)
 
-1. Confirm all checks are green on the PR: `gh pr checks <number>`
-2. Merge the PR: `gh pr merge <number> --merge --delete-branch`
-
-### Step 17: Local Cleanup
-
-1. `git checkout dev`
-2. `git pull origin dev`
-3. Delete the local feature branch if it still exists: `git branch -d <branch>` (use -D if needed)
-
-### Step 18: Report
+**You MUST NOT merge the PR. You MUST NOT run `gh pr merge`. The user reviews and merges.**
 
 Provide a final summary:
 - What was implemented (requirement title and UID)
 - Files created or modified
 - Review findings and fixes (if any)
 - Security review findings and fixes (if any)
-- Confirmation: merged to dev, CI green, SonarCloud passed
+- Confirmation: CI green, SonarCloud passed, PR ready for user review
+- PR URL
