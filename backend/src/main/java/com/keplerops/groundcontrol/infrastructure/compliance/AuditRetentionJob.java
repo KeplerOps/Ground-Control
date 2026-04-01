@@ -23,8 +23,13 @@ public class AuditRetentionJob {
      * All audit tables that reference revinfo.rev. Order does not matter since they are
      * deleted by rev IN (subquery) before revinfo itself is cleaned up.
      */
-    private static final List<String> AUDIT_TABLES =
-            List.of("requirement_audit", "requirement_relation_audit", "traceability_link_audit");
+    private static final List<String> AUDIT_TABLES = List.of(
+            "requirement_audit",
+            "requirement_relation_audit",
+            "traceability_link_audit",
+            "architecture_decision_record_audit",
+            "operational_asset_audit",
+            "asset_relation_audit");
 
     private final AuditRetentionProperties properties;
     private final EntityManager entityManager;

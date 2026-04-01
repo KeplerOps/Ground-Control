@@ -334,6 +334,75 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
 
 **Status transitions:** PROPOSED → ACCEPTED → DEPRECATED | SUPERSEDED
 
+### Operational Assets
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/assets?project=` | AssetRequest | 201 | Create asset |
+| GET | `/assets?project=&type=` | — | 200 | List assets (optional type filter) |
+| GET | `/assets/{id}` | — | 200 | Get asset by UUID |
+| GET | `/assets/uid/{uid}?project=` | — | 200 | Get asset by UID |
+| PUT | `/assets/{id}` | UpdateAssetRequest | 200 | Update asset (partial) |
+| DELETE | `/assets/{id}` | — | 204 | Delete asset (cascade deletes relations) |
+| POST | `/assets/{id}/archive` | — | 200 | Archive (soft-delete) asset |
+
+**AssetRequest:**
+
+```json
+{
+  "uid": "ASSET-001",
+  "name": "Production Database",
+  "description": "Primary PostgreSQL instance",
+  "assetType": "DATABASE"
+}
+```
+
+Asset types: `APPLICATION`, `SERVICE`, `DATABASE`, `NETWORK`, `HOST`, `CONTAINER`, `IDENTITY`, `DATA_STORE`, `BOUNDARY`, `OTHER`
+
+### Asset Relations
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/assets/{id}/relations` | AssetRelationRequest | 201 | Create typed relation |
+| GET | `/assets/{id}/relations` | — | 200 | List relations (incoming + outgoing) |
+| DELETE | `/assets/{id}/relations/{relationId}` | — | 204 | Delete relation |
+
+**AssetRelationRequest:**
+
+```json
+{
+  "targetId": "uuid",
+  "relationType": "DEPENDS_ON"
+}
+```
+
+Relation types: `CONTAINS`, `DEPENDS_ON`, `COMMUNICATES_WITH`, `TRUST_BOUNDARY`, `SUPPORTS`, `ACCESSES`, `DATA_FLOW`
+
+### Asset Topology
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| GET | `/assets/topology/cycles?project=` | — | 200 | Detect cycles in asset graph |
+| GET | `/assets/{id}/topology/impact` | — | 200 | Multi-hop impact analysis |
+| POST | `/assets/topology/subgraph?project=` | SubgraphRequest | 200 | Extract connected subgraph |
+
+**SubgraphRequest:**
+
+```json
+{
+  "rootUids": ["ASSET-001", "ASSET-002"]
+}
+```
+
+**AssetSubgraphResponse:**
+
+```json
+{
+  "assets": [{ "id": "uuid", "uid": "ASSET-001", "name": "...", "..." : "..." }],
+  "relations": [{ "id": "uuid", "sourceUid": "ASSET-001", "targetUid": "ASSET-002", "relationType": "DEPENDS_ON" }]
+}
+```
+
 ### Quality Gates
 
 | Method | Path | Body | Status | Purpose |
