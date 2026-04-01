@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.unit.domain;
 
+import static com.keplerops.groundcontrol.TestUtil.setField;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -22,7 +23,6 @@ import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
-import java.lang.reflect.Field;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -57,34 +57,13 @@ class AdrServiceTest {
     void setUp() {
         project = new Project("ground-control", "Ground Control");
         projectId = UUID.randomUUID();
-        setId(project, projectId);
-    }
-
-    private static void setId(Object entity, UUID id) {
-        try {
-            Field idField = findField(entity.getClass(), "id");
-            idField.setAccessible(true);
-            idField.set(entity, id);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private static Field findField(Class<?> clazz, String name) throws NoSuchFieldException {
-        while (clazz != null) {
-            try {
-                return clazz.getDeclaredField(name);
-            } catch (NoSuchFieldException e) {
-                clazz = clazz.getSuperclass();
-            }
-        }
-        throw new NoSuchFieldException(name);
+        setField(project, "id", projectId);
     }
 
     private ArchitectureDecisionRecord createAdr(String uid, String title) {
         var adr = new ArchitectureDecisionRecord(
                 project, uid, title, LocalDate.of(2026, 3, 31), "context", "decision", "consequences", "test-user");
-        setId(adr, UUID.randomUUID());
+        setField(adr, "id", UUID.randomUUID());
         return adr;
     }
 
@@ -99,7 +78,7 @@ class AdrServiceTest {
             when(adrRepository.existsByProjectIdAndUid(projectId, "ADR-001")).thenReturn(false);
             when(adrRepository.save(any())).thenAnswer(inv -> {
                 var saved = inv.getArgument(0, ArchitectureDecisionRecord.class);
-                setId(saved, UUID.randomUUID());
+                setField(saved, "id", UUID.randomUUID());
                 return saved;
             });
 
