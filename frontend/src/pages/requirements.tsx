@@ -23,6 +23,7 @@ import type {
   Status,
   UpdateRequirementRequest,
 } from "@/types/api";
+import { REQUIREMENT_TYPES } from "@/types/api";
 import * as Checkbox from "@radix-ui/react-checkbox";
 import { Check, FileText, Plus } from "lucide-react";
 import { useCallback, useState } from "react";
@@ -205,15 +206,7 @@ export function Requirements() {
             setPage(0);
           }}
           placeholder="Type"
-          options={[
-            "FUNCTIONAL",
-            "NON_FUNCTIONAL",
-            "CONSTRAINT",
-            "INTERFACE",
-            "PERFORMANCE",
-            "SECURITY",
-            "DATA",
-          ]}
+          options={REQUIREMENT_TYPES}
         />
         <FilterSelect
           value={priorityFilter}

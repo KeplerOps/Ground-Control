@@ -9,9 +9,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
@@ -51,6 +54,14 @@ class TraceabilityLinkControllerIntegrationTest extends BaseIntegrationTest {
                 .asText();
     }
 
+    private void activateRequirement(String requirementId) throws Exception {
+        var body = Map.of("status", "ACTIVE");
+        mockMvc.perform(post("/api/v1/requirements/" + requirementId + "/transition")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk());
+    }
+
     private String createLinkAndReturnId(String requirementId) throws Exception {
         var body = Map.of(
                 "artifactType", "GITHUB_ISSUE",
@@ -72,6 +83,7 @@ class TraceabilityLinkControllerIntegrationTest extends BaseIntegrationTest {
     @Test
     void createLink_returns201() throws Exception {
         var reqId = createRequirementAndReturnId("REQ-TL-001");
+        activateRequirement(reqId);
 
         var body = Map.of(
                 "artifactType", "GITHUB_ISSUE",
@@ -91,9 +103,27 @@ class TraceabilityLinkControllerIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.syncStatus", is("SYNCED")));
     }
 
+    @ParameterizedTest
+    @EnumSource(ArtifactType.class)
+    void createLink_allArtifactTypes_returns201(ArtifactType type) throws Exception {
+        var reqId = createRequirementAndReturnId("REQ-AT-" + type.name());
+        activateRequirement(reqId);
+
+        var body = Map.of(
+                "artifactType", type.name(), "artifactIdentifier", "id:" + type.name(), "linkType", "IMPLEMENTS");
+
+        mockMvc.perform(post("/api/v1/requirements/" + reqId + "/traceability")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.artifactType", is(type.name())))
+                .andExpect(jsonPath("$.artifactIdentifier", is("id:" + type.name())));
+    }
+
     @Test
     void getLinks_returns200() throws Exception {
         var reqId = createRequirementAndReturnId("REQ-TL-002");
+        activateRequirement(reqId);
         createLinkAndReturnId(reqId);
 
         mockMvc.perform(get("/api/v1/requirements/" + reqId + "/traceability"))
@@ -104,6 +134,7 @@ class TraceabilityLinkControllerIntegrationTest extends BaseIntegrationTest {
     @Test
     void deleteLink_returns204() throws Exception {
         var reqId = createRequirementAndReturnId("REQ-TL-003");
+        activateRequirement(reqId);
         var linkId = createLinkAndReturnId(reqId);
 
         mockMvc.perform(delete("/api/v1/requirements/" + reqId + "/traceability/" + linkId))

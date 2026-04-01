@@ -69,7 +69,10 @@ public class ExportController {
     public ResponseEntity<byte[]> exportRequirements(
             @RequestParam(required = false) String project, @RequestParam(defaultValue = "csv") String format) {
         var projectId = projectService.resolveProjectId(project);
-        var data = analysisService.getRequirementsExportData(projectId);
+        var projectIdentifier = projectService.resolveProjectIdentifier(project);
+        var records = analysisService.getRequirementsExportData(projectId);
+        var data = com.keplerops.groundcontrol.domain.requirements.service.RequirementsExportData.from(
+                projectIdentifier, records);
         String baseName = sanitizeFilename(data.projectIdentifier() + "-requirements-" + LocalDate.now());
 
         return switch (format.toLowerCase(Locale.ROOT)) {

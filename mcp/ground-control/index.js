@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-
+// Ground Control MCP Server
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -88,6 +88,27 @@ import {
   setDocumentGrammar,
   getDocumentGrammar,
   deleteDocumentGrammar,
+  createAdr,
+  listAdrs,
+  getAdr,
+  getAdrByUid,
+  updateAdr,
+  deleteAdr,
+  transitionAdrStatus,
+  getAdrRequirements,
+  createAsset,
+  listAssets,
+  getAsset,
+  getAssetByUid,
+  updateAsset,
+  deleteAsset,
+  archiveAsset,
+  createAssetRelation,
+  getAssetRelations,
+  deleteAssetRelation,
+  detectAssetCycles,
+  assetImpactAnalysis,
+  extractAssetSubgraph,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -96,6 +117,9 @@ import {
   LINK_TYPES,
   METRIC_TYPES,
   COMPARISON_OPERATORS,
+  ADR_STATUSES,
+  ASSET_TYPES,
+  ASSET_RELATION_TYPES,
 } from "./lib.js";
 
 function ok(text) {
@@ -1720,6 +1744,387 @@ server.tool(
     try {
       await deleteDocumentGrammar(document_id);
       return ok("Document grammar deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Architecture Decision Records
+// ==========================================================================
+
+server.tool(
+  "gc_create_adr",
+  "Create an architecture decision record (ADR) — a first-class entity for tracking architectural decisions linked to requirements.",
+  {
+    uid: z.string().max(20).describe("ADR UID (e.g. 'ADR-018')"),
+    title: z.string().max(200).describe("ADR title"),
+    decision_date: z.string().describe("Decision date (YYYY-MM-DD)"),
+    context: z.string().optional().describe("Context — what motivated this decision"),
+    decision: z.string().optional().describe("The decision made"),
+    consequences: z.string().optional().describe("Consequences — positive, negative, risks"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ uid, title, decision_date, context, decision, consequences, project }) => {
+    try {
+      const data = { uid, title, decision_date };
+      if (context !== undefined) data.context = context;
+      if (decision !== undefined) data.decision = decision;
+      if (consequences !== undefined) data.consequences = consequences;
+      return ok(JSON.stringify(await createAdr(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_adrs",
+  "List all ADRs for a project, ordered by decision date (newest first).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const adrs = await listAdrs(project);
+      if (Array.isArray(adrs) && adrs.length === 0) return ok("No ADRs found.");
+      return ok(JSON.stringify(adrs, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_adr",
+  "Get an ADR by its UUID or by its UID (e.g. 'ADR-018'). Provide either id or uid.",
+  {
+    id: z.string().uuid().optional().describe("ADR UUID"),
+    uid: z.string().optional().describe("ADR UID (e.g. 'ADR-018')"),
+    project: z.string().optional().describe("Project identifier (required when looking up by uid)"),
+  },
+  async ({ id, uid, project }) => {
+    try {
+      if (id) {
+        return ok(JSON.stringify(await getAdr(id), null, 2));
+      }
+      if (uid) {
+        return ok(JSON.stringify(await getAdrByUid(uid, project), null, 2));
+      }
+      return err(new Error("Provide either 'id' or 'uid'."));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_adr",
+  "Update an ADR. Only specified fields are changed.",
+  {
+    id: z.string().uuid().describe("ADR UUID"),
+    title: z.string().max(200).optional().describe("New title"),
+    decision_date: z.string().optional().describe("New decision date (YYYY-MM-DD)"),
+    context: z.string().optional().describe("Updated context"),
+    decision: z.string().optional().describe("Updated decision"),
+    consequences: z.string().optional().describe("Updated consequences"),
+    superseded_by: z.string().max(20).optional().describe("UID of the superseding ADR"),
+  },
+  async ({ id, title, decision_date, context, decision, consequences, superseded_by }) => {
+    try {
+      const data = {};
+      if (title !== undefined) data.title = title;
+      if (decision_date !== undefined) data.decision_date = decision_date;
+      if (context !== undefined) data.context = context;
+      if (decision !== undefined) data.decision = decision;
+      if (consequences !== undefined) data.consequences = consequences;
+      if (superseded_by !== undefined) data.superseded_by = superseded_by;
+      return ok(JSON.stringify(await updateAdr(id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_adr",
+  "Delete an ADR by its UUID.",
+  {
+    id: z.string().uuid().describe("ADR UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteAdr(id);
+      return ok("ADR deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_transition_adr_status",
+  `Transition an ADR's status. Valid transitions: PROPOSED→ACCEPTED, ACCEPTED→DEPRECATED, ACCEPTED→SUPERSEDED.`,
+  {
+    id: z.string().uuid().describe("ADR UUID"),
+    status: z.enum(ADR_STATUSES).describe("Target status"),
+  },
+  async ({ id, status }) => {
+    try {
+      return ok(JSON.stringify(await transitionAdrStatus(id, status), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_adr_requirements",
+  "Get all requirements linked to an ADR via traceability links (reverse traceability).",
+  {
+    id: z.string().uuid().describe("ADR UUID"),
+  },
+  async ({ id }) => {
+    try {
+      const reqs = await getAdrRequirements(id);
+      if (Array.isArray(reqs) && reqs.length === 0) return ok("No linked requirements found.");
+      return ok(JSON.stringify(reqs, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Operational Asset tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_asset",
+  "Create an operational asset in a project.",
+  {
+    uid: z.string().max(50).describe("Unique asset identifier (e.g. 'ASSET-001')"),
+    name: z.string().max(200).describe("Asset name"),
+    description: z.string().optional().describe("Asset description"),
+    asset_type: z.enum(ASSET_TYPES).optional().describe("Asset type (default: OTHER)"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ uid, name, description, asset_type, project }) => {
+    try {
+      const data = { uid, name };
+      if (description !== undefined) data.description = description;
+      if (asset_type !== undefined) data.asset_type = asset_type;
+      return ok(JSON.stringify(await createAsset(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_assets",
+  "List operational assets in a project, optionally filtered by type.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    type: z.enum(ASSET_TYPES).optional().describe("Filter by asset type"),
+  },
+  async ({ project, type }) => {
+    try {
+      const assets = await listAssets({ project, type });
+      if (Array.isArray(assets) && assets.length === 0) return ok("No assets found.");
+      return ok(JSON.stringify(assets, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_asset",
+  "Get an operational asset by its UUID.",
+  {
+    id: z.string().uuid().describe("Asset UUID"),
+  },
+  async ({ id }) => {
+    try {
+      return ok(JSON.stringify(await getAsset(id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_asset_by_uid",
+  "Get an operational asset by its human-readable UID (e.g. 'ASSET-001').",
+  {
+    uid: z.string().describe("Asset UID"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ uid, project }) => {
+    try {
+      return ok(JSON.stringify(await getAssetByUid(uid, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_asset",
+  "Update an operational asset.",
+  {
+    id: z.string().uuid().describe("Asset UUID"),
+    name: z.string().max(200).optional().describe("New name"),
+    description: z.string().optional().describe("New description"),
+    asset_type: z.enum(ASSET_TYPES).optional().describe("New asset type"),
+  },
+  async ({ id, name, description, asset_type }) => {
+    try {
+      const data = {};
+      if (name !== undefined) data.name = name;
+      if (description !== undefined) data.description = description;
+      if (asset_type !== undefined) data.asset_type = asset_type;
+      return ok(JSON.stringify(await updateAsset(id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_asset",
+  "Delete an operational asset by its UUID. Cascade-deletes all its relations.",
+  {
+    id: z.string().uuid().describe("Asset UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteAsset(id);
+      return ok("Asset deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_archive_asset",
+  "Archive (soft-delete) an operational asset.",
+  {
+    id: z.string().uuid().describe("Asset UUID"),
+  },
+  async ({ id }) => {
+    try {
+      return ok(JSON.stringify(await archiveAsset(id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_create_asset_relation",
+  `Create a typed relationship between two operational assets. Relation types: ${ASSET_RELATION_TYPES.join(", ")}.`,
+  {
+    source_id: z.string().uuid().describe("Source asset UUID"),
+    target_id: z.string().uuid().describe("Target asset UUID"),
+    relation_type: z.enum(ASSET_RELATION_TYPES).describe("Relationship type"),
+  },
+  async ({ source_id, target_id, relation_type }) => {
+    try {
+      return ok(
+        JSON.stringify(
+          await createAssetRelation(source_id, { target_id, relation_type }),
+          null,
+          2,
+        ),
+      );
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_asset_relations",
+  "Get all incoming and outgoing relations for an operational asset.",
+  {
+    id: z.string().uuid().describe("Asset UUID"),
+  },
+  async ({ id }) => {
+    try {
+      const rels = await getAssetRelations(id);
+      if (Array.isArray(rels) && rels.length === 0) return ok("No relations found.");
+      return ok(JSON.stringify(rels, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_asset_relation",
+  "Delete a relation from an operational asset.",
+  {
+    asset_id: z.string().uuid().describe("Asset UUID (source or target of the relation)"),
+    relation_id: z.string().uuid().describe("Relation UUID"),
+  },
+  async ({ asset_id, relation_id }) => {
+    try {
+      await deleteAssetRelation(asset_id, relation_id);
+      return ok("Asset relation deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_detect_asset_cycles",
+  "Detect cycles in the asset topology graph for a project.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const cycles = await detectAssetCycles(project);
+      if (Array.isArray(cycles) && cycles.length === 0) return ok("No cycles detected.");
+      return ok(JSON.stringify(cycles, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_asset_impact_analysis",
+  "Multi-hop impact analysis: find all assets transitively affected by a given asset.",
+  {
+    id: z.string().uuid().describe("Asset UUID to analyze impact from"),
+  },
+  async ({ id }) => {
+    try {
+      const result = await assetImpactAnalysis(id);
+      if (Array.isArray(result) && result.length === 0) return ok("No impacted assets found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_extract_asset_subgraph",
+  "Extract a connected subgraph of assets starting from one or more root UIDs.",
+  {
+    root_uids: z.array(z.string()).min(1).describe("List of root asset UIDs to start from"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ root_uids, project }) => {
+    try {
+      return ok(JSON.stringify(await extractAssetSubgraph({ root_uids }, project), null, 2));
     } catch (e) {
       return err(e);
     }

@@ -10,26 +10,8 @@ import type {
   LinkType,
   TraceabilityLinkRequest,
 } from "@/types/api";
+import { ARTIFACT_TYPES, LINK_TYPES } from "@/types/api";
 import { useState } from "react";
-
-const ARTIFACT_TYPES: ArtifactType[] = [
-  "GITHUB_ISSUE",
-  "GITHUB_PR",
-  "JIRA_ISSUE",
-  "CONFLUENCE_PAGE",
-  "TEST_CASE",
-  "DESIGN_DOC",
-  "CODE_FILE",
-  "OTHER",
-];
-
-const LINK_TYPES: LinkType[] = [
-  "IMPLEMENTS",
-  "TESTS",
-  "DOCUMENTS",
-  "TRACES_TO",
-  "DERIVED_FROM",
-];
 
 interface TraceabilityFormProps {
   onSubmit: (data: TraceabilityLinkRequest) => void;

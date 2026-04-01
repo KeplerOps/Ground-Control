@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
@@ -16,6 +17,7 @@ import com.keplerops.groundcontrol.domain.requirements.service.CreateTraceabilit
 import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityService;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
+import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Optional;
@@ -63,6 +65,12 @@ class TraceabilityServiceTest {
         return req;
     }
 
+    private static Requirement makeActiveRequirement(String uid) {
+        var req = makeRequirement(uid);
+        setField(req, "status", Status.ACTIVE);
+        return req;
+    }
+
     private static TraceabilityLink makeLink(Requirement req) {
         var link = new TraceabilityLink(req, ArtifactType.GITHUB_ISSUE, "GH-123", LinkType.IMPLEMENTS);
         setField(link, "id", UUID.randomUUID());
@@ -85,7 +93,7 @@ class TraceabilityServiceTest {
         @Test
         void createsLinkSuccessfully() {
             var reqId = UUID.randomUUID();
-            var req = makeRequirement("REQ-001");
+            var req = makeActiveRequirement("REQ-001");
             when(requirementRepository.findById(reqId)).thenReturn(Optional.of(req));
             when(traceabilityLinkRepository.save(any(TraceabilityLink.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -114,6 +122,49 @@ class TraceabilityServiceTest {
                     ArtifactType.GITHUB_ISSUE, "GH-123", null, null, LinkType.IMPLEMENTS);
 
             assertThatThrownBy(() -> service.createLink(reqId, cmd)).isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void rejectsImplementsLinkWhenRequirementIsDraft() {
+            var reqId = UUID.randomUUID();
+            var req = makeRequirement("REQ-DRAFT");
+            when(requirementRepository.findById(reqId)).thenReturn(Optional.of(req));
+
+            var cmd = new CreateTraceabilityLinkCommand(
+                    ArtifactType.CODE_FILE, "src/Main.java", null, null, LinkType.IMPLEMENTS);
+
+            assertThatThrownBy(() -> service.createLink(reqId, cmd))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("ACTIVE");
+        }
+
+        @Test
+        void rejectsImplementsLinkWhenRequirementIsDeprecated() {
+            var reqId = UUID.randomUUID();
+            var req = makeRequirement("REQ-DEP");
+            setField(req, "status", Status.DEPRECATED);
+            when(requirementRepository.findById(reqId)).thenReturn(Optional.of(req));
+
+            var cmd = new CreateTraceabilityLinkCommand(
+                    ArtifactType.CODE_FILE, "src/Main.java", null, null, LinkType.IMPLEMENTS);
+
+            assertThatThrownBy(() -> service.createLink(reqId, cmd))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("ACTIVE");
+        }
+
+        @Test
+        void allowsNonImplementsLinkWhenRequirementIsDraft() {
+            var reqId = UUID.randomUUID();
+            var req = makeRequirement("REQ-DRAFT");
+            when(requirementRepository.findById(reqId)).thenReturn(Optional.of(req));
+            when(traceabilityLinkRepository.save(any(TraceabilityLink.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            var cmd = new CreateTraceabilityLinkCommand(
+                    ArtifactType.TEST, "src/test/MainTest.java", null, null, LinkType.TESTS);
+
+            var result = service.createLink(reqId, cmd);
+            assertThat(result.getLinkType()).isEqualTo(LinkType.TESTS);
         }
     }
 

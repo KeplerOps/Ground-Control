@@ -255,7 +255,8 @@ class BaselineServiceTest {
             when(baselineRepository.findById(OTHER_BASELINE_ID)).thenReturn(Optional.of(other));
 
             assertThatThrownBy(() -> service.compare(BASELINE_ID, OTHER_BASELINE_ID))
-                    .isInstanceOf(DomainValidationException.class);
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("different projects");
         }
 
         @Test

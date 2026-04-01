@@ -24,6 +24,8 @@ import java.util.Map;
 import org.hibernate.envers.AuditReaderFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.transaction.TestTransaction;
 import org.springframework.transaction.annotation.Transactional;
@@ -82,6 +84,24 @@ class TraceabilityLinkIntegrationTest extends BaseIntegrationTest {
         assertThat(retrieved.getArtifactTitle()).isEqualTo("Main.java");
         assertThat(retrieved.getCreatedAt()).isNotNull();
         assertThat(retrieved.getUpdatedAt()).isNotNull();
+    }
+
+    @ParameterizedTest
+    @EnumSource(ArtifactType.class)
+    void persistAndRetrieveAllArtifactTypes(ArtifactType type) {
+        var req = new Requirement(testProject, "REQ-TYPE-" + type.name(), "Req for " + type, "Statement");
+        requirementRepository.save(req);
+
+        var link = new TraceabilityLink(req, type, "id:" + type.name(), LinkType.IMPLEMENTS);
+        traceabilityLinkRepository.save(link);
+
+        entityManager.flush();
+        entityManager.clear();
+
+        var found = traceabilityLinkRepository.findByRequirementId(req.getId());
+        assertThat(found).hasSize(1);
+        assertThat(found.get(0).getArtifactType()).isEqualTo(type);
+        assertThat(found.get(0).getArtifactIdentifier()).isEqualTo("id:" + type.name());
     }
 
     @Test

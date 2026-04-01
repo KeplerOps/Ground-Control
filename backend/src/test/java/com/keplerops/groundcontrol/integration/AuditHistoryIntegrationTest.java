@@ -192,6 +192,12 @@ class AuditHistoryIntegrationTest extends BaseIntegrationTest {
     @Test
     @Order(5)
     void createTraceabilityLink_thenHistoryRecordsRevision() throws Exception {
+        // Transition requirement to ACTIVE (required for IMPLEMENTS links)
+        mockMvc.perform(post("/api/v1/requirements/" + requirementId + "/transition")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("status", "ACTIVE"))))
+                .andExpect(status().isOk());
+
         // Create traceability link
         var linkBody = Map.of(
                 "artifactType", "CODE_FILE",
@@ -241,13 +247,14 @@ class AuditHistoryIntegrationTest extends BaseIntegrationTest {
     @Test
     @Order(7)
     void timeline_filterByChangeCategory() throws Exception {
-        // Filter to only REQUIREMENT changes — should get 2 (ADD + MOD)
+        // Filter to only REQUIREMENT changes — should get 3 (ADD + title MOD + status transition MOD)
         mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/timeline")
                         .param("changeCategory", "REQUIREMENT"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$", hasSize(3)))
                 .andExpect(jsonPath("$[0].changeCategory", is("REQUIREMENT")))
-                .andExpect(jsonPath("$[1].changeCategory", is("REQUIREMENT")));
+                .andExpect(jsonPath("$[1].changeCategory", is("REQUIREMENT")))
+                .andExpect(jsonPath("$[2].changeCategory", is("REQUIREMENT")));
 
         // Filter to only RELATION changes
         mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/timeline")
@@ -268,12 +275,13 @@ class AuditHistoryIntegrationTest extends BaseIntegrationTest {
     @Order(8)
     void timeline_computesFieldDiffs() throws Exception {
         // MOD revision should have changes computed (title was updated in step 1)
+        // $[0] is the status transition (newest), $[1] is the title update
         mockMvc.perform(get("/api/v1/requirements/" + requirementId + "/timeline")
                         .param("changeCategory", "REQUIREMENT"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].revisionType", is("MOD")))
-                .andExpect(jsonPath("$[0].changes.title.oldValue", is("Audit test requirement")))
-                .andExpect(jsonPath("$[0].changes.title.newValue", is("Updated audit title")));
+                .andExpect(jsonPath("$[1].revisionType", is("MOD")))
+                .andExpect(jsonPath("$[1].changes.title.oldValue", is("Audit test requirement")))
+                .andExpect(jsonPath("$[1].changes.title.newValue", is("Updated audit title")));
     }
 
     @Test

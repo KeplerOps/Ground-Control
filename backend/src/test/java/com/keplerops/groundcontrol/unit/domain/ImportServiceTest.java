@@ -431,7 +431,7 @@ class ImportServiceTest {
             when(traceabilityLinkRepository.existsByRequirementIdAndArtifactTypeAndArtifactIdentifierAndLinkType(
                             reqId, ArtifactType.GITHUB_ISSUE, "42", LinkType.IMPLEMENTS))
                     .thenReturn(false);
-            when(traceabilityService.createLink(eq(reqId), any(CreateTraceabilityLinkCommand.class)))
+            when(traceabilityService.createLinkUnchecked(eq(reqId), any(CreateTraceabilityLinkCommand.class)))
                     .thenReturn(new TraceabilityLink(req, ArtifactType.GITHUB_ISSUE, "42", LinkType.IMPLEMENTS));
             when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
                 var audit = inv.<RequirementImport>getArgument(0);
@@ -442,7 +442,7 @@ class ImportServiceTest {
             var result = service.importStrictdoc(PROJECT_ID, "test.sdoc", sdoc);
 
             assertThat(result.traceabilityLinksCreated()).isEqualTo(1);
-            verify(traceabilityService).createLink(eq(reqId), any(CreateTraceabilityLinkCommand.class));
+            verify(traceabilityService).createLinkUnchecked(eq(reqId), any(CreateTraceabilityLinkCommand.class));
         }
 
         @Test
@@ -467,7 +467,7 @@ class ImportServiceTest {
 
             assertThat(result.traceabilityLinksSkipped()).isEqualTo(1);
             assertThat(result.traceabilityLinksCreated()).isZero();
-            verify(traceabilityService, never()).createLink(any(), any());
+            verify(traceabilityService, never()).createLinkUnchecked(any(), any());
         }
 
         @Test
@@ -482,7 +482,7 @@ class ImportServiceTest {
             when(traceabilityLinkRepository.existsByRequirementIdAndArtifactTypeAndArtifactIdentifierAndLinkType(
                             reqId, ArtifactType.GITHUB_ISSUE, "42", LinkType.IMPLEMENTS))
                     .thenReturn(false);
-            when(traceabilityService.createLink(eq(reqId), any(CreateTraceabilityLinkCommand.class)))
+            when(traceabilityService.createLinkUnchecked(eq(reqId), any(CreateTraceabilityLinkCommand.class)))
                     .thenThrow(new DomainValidationException("Simulated traceability failure"));
             when(importRepository.save(any(RequirementImport.class))).thenAnswer(inv -> {
                 var audit = inv.<RequirementImport>getArgument(0);

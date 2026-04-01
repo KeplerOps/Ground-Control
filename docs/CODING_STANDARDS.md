@@ -297,6 +297,17 @@ All error responses use this envelope. Do not invent new formats.
 - `message`: human-readable description
 - `detail`: optional `Map<String, Object>` with structured context (e.g., `{"current_status": "DRAFT", "target_status": "ARCHIVED"}`)
 
+## TypeScript / Frontend Style
+
+The frontend (`frontend/`) is a React 19 / TypeScript 5 SPA. It follows these rules:
+
+- Formatting and linting: Biome. Run `cd frontend && npm run format` and `npm run lint`.
+- No `any` types. Use `unknown` and narrow.
+- All API calls go through TanStack Query hooks — no manual `fetch` + `useState` patterns.
+- Component files: `PascalCase.tsx`. Utility/hook files: `camelCase.ts`.
+- Avoid framework lock-in for UI components — prefer shadcn/ui (copy-paste Radix primitives).
+- Never `console.log()` in committed code.
+
 ## Git & CI
 
 - All code goes through PR targeting `dev`. No direct push to `main` or `dev`.

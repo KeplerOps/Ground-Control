@@ -40,6 +40,18 @@ variable "backup_bucket_name" {
   default     = "groundcontrol-backups-catalyst-dev"
 }
 
+variable "backup_cron" {
+  description = "Cron expression for automated pg_dump backup schedule"
+  type        = string
+  default     = "0 3 * * *"
+}
+
+variable "local_retention_count" {
+  description = "Number of local pg_dump files to retain on the EC2 instance"
+  type        = number
+  default     = 3
+}
+
 variable "gc_embedding_provider" {
   description = "Embedding provider name (openai or none)"
   type        = string

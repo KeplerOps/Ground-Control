@@ -5,15 +5,126 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.94.0] - 2026-03-29
+## [0.94.0] - 2026-03-31
+
+### Added
+
+- Operational asset domain with typed topology relationships for multi-hop
+  impact, threat, and control analysis (GC-M013)
+- Seven relationship types: CONTAINS, DEPENDS_ON, COMMUNICATES_WITH,
+  TRUST_BOUNDARY, SUPPORTS, ACCESSES, DATA_FLOW
+- Graph topology analysis: cycle detection, impact analysis, subgraph extraction
+  reusing existing GraphAlgorithms
+- REST API endpoints: `/api/v1/assets` with full CRUD, relations management,
+  and topology analysis
+- MCP tools: `gc_create_asset`, `gc_list_assets`, `gc_get_asset`,
+  `gc_update_asset`, `gc_delete_asset`, `gc_archive_asset`,
+  `gc_create_asset_relation`, `gc_get_asset_relations`,
+  `gc_delete_asset_relation`, `gc_detect_asset_cycles`,
+  `gc_asset_impact_analysis`, `gc_extract_asset_subgraph`
+- Database migrations V025-V028 for operational_asset and asset_relation
+  tables with Envers audit tables
+- ADR-019: Asset Topology Model
+
+## [0.93.0] - 2026-03-31
+
+### Added
+
+- Architecture Decision Records as first-class entities with full CRUD,
+  status lifecycle (PROPOSED→ACCEPTED→DEPRECATED/SUPERSEDED), and reverse
+  traceability to linked requirements (GC-J001)
+- REST API endpoints: `/api/v1/adrs` with create, read, update, delete,
+  status transition, and linked requirements lookup
+- MCP tools: `gc_create_adr`, `gc_list_adrs`, `gc_get_adr`, `gc_update_adr`,
+  `gc_delete_adr`, `gc_transition_adr_status`, `gc_get_adr_requirements`
+- Database migration V023 for `architecture_decision_record` table
+
+## [0.92.9] - 2026-03-30
+
+### Added
+
+- Enforce requirement-before-code policy: IMPLEMENTS traceability links
+  can only be created against requirements in ACTIVE status (GC-O005)
+
+## [0.92.8] - 2026-03-29
+
+### Added
+
+- Configurable backup frequency (`backup_cron`) and local retention
+  (`local_retention_count`) via Terraform variables (GC-P009)
+- `restore.sh` script for automated restore from local dump or S3 with
+  safety backup, confirmation prompt, and post-restore verification
+- `test-restore.sh` script for non-destructive restore validation using
+  a temporary PostgreSQL container; runs weekly via cron
+- Comprehensive backup/restore documentation with configuration table,
+  point-in-time restore explanation, and restore testing procedures
 
 ### Fixed
 
-- Reject cross-project baseline comparisons; `BaselineService.compare()` now
-  throws `DomainValidationException` (`cross_project_comparison`, HTTP 422)
-  when the two baselines belong to different projects
+- Sync `deploy/scripts/backup.sh` with the embedded user-data version
+- Add argument guards to `restore.sh` for `--from-file` and `--from-s3`
+  flags; show usage on zero arguments
+- Graceful `docker stop` before `docker rm -f` in `test-restore.sh` cleanup
 
-## [0.93.0] - 2026-03-28
+## [0.92.7] - 2026-03-29
+
+### Added
+
+- Parameterized tests verifying all 9 artifact types (CODE_FILE, TEST, ADR,
+  CONFIG, POLICY, SPEC, PROOF, DOCUMENTATION, GITHUB_ISSUE) round-trip
+  correctly through model construction, JPA persistence, and REST API (GC-E001)
+
+## [0.92.6] - 2026-03-29
+
+### Fixed
+
+- Scope document export requirement lookup by project instead of global UID; prevents
+  silently binding the wrong requirement when two projects share a UID (closes #435)
+
+## [0.92.5] - 2026-03-29
+
+### Fixed
+
+- Remove N+1 query amplification from dashboard stats, impact analysis,
+  and requirements export (#437)
+- Batch traceability link coverage queries via new
+  `countByLinkTypeGroupedByRequirementId` repository method
+- Improve test coverage on changed code to >98%
+
+## [0.92.4] - 2026-03-29
+
+### Fixed
+
+- Sync architecture docs, version metadata, and coding standards with
+  running system (#439)
+- Remove stale `architecture/CODING_STANDARDS.md` from Django/Pydantic era
+  (superseded by `docs/CODING_STANDARDS.md`)
+
+## [0.92.3] - 2026-03-29
+
+### Fixed
+
+- Normalize GitHub issue traceability identifiers to raw integer strings
+  so created links sync correctly with `GitHubIssueSyncService` (#434)
+
+## [0.92.2] - 2026-03-29
+
+### Fixed
+
+- Align frontend enum values with backend single source of truth (#433)
+- Remove hardcoded enum arrays from React components in favor of
+  centralized `api.ts` type definitions
+- Add enum contract test (`enum-contract.test.ts`) to prevent
+  frontend/backend enum drift
+
+## [0.92.1] - 2026-03-29
+
+### Fixed
+
+- Reject baseline comparisons across different projects with a clear
+  `cross_project_comparison` domain validation error
+
+## [0.92.0] - 2026-03-28
 
 ### Added
 

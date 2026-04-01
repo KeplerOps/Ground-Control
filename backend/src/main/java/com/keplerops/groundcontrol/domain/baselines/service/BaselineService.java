@@ -92,14 +92,13 @@ public class BaselineService {
 
         if (!baseline.getProject().getId().equals(other.getProject().getId())) {
             throw new DomainValidationException(
-                    "Cannot compare baselines from different projects: "
-                            + baseline.getProject().getId()
-                            + " vs "
-                            + other.getProject().getId(),
+                    "Cannot compare baselines from different projects",
                     "cross_project_comparison",
                     Map.of(
-                            "baselineProjectId", baseline.getProject().getId().toString(),
-                            "otherProjectId", other.getProject().getId().toString()));
+                            "baseline_project",
+                            baseline.getProject().getIdentifier(),
+                            "other_project",
+                            other.getProject().getIdentifier()));
         }
 
         var baseReqs = getRequirementsAtRevision(

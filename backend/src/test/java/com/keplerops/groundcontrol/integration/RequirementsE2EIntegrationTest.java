@@ -307,7 +307,14 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.relationType", is("DEPENDS_ON")));
 
-        // Create traceability link
+        // Transition DRAFT → ACTIVE (required before creating IMPLEMENTS links)
+        mockMvc.perform(post("/api/v1/requirements/" + crudReqId + "/transition")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"ACTIVE\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", is("ACTIVE")));
+
+        // Create traceability link (requires ACTIVE status for IMPLEMENTS)
         var linkBody = Map.of(
                 "artifactType", "GITHUB_ISSUE",
                 "artifactIdentifier", "99",
@@ -316,13 +323,6 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(linkBody)))
                 .andExpect(status().isCreated());
-
-        // Transition DRAFT → ACTIVE
-        mockMvc.perform(post("/api/v1/requirements/" + crudReqId + "/transition")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"status\": \"ACTIVE\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status", is("ACTIVE")));
 
         // Archive
         mockMvc.perform(post("/api/v1/requirements/" + crudReqId + "/archive"))
@@ -387,6 +387,7 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
         assertThat(versions)
                 .containsExactly(
                         "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012", "013",
-                        "014", "015", "016", "017", "018", "019", "020", "021", "022");
+                        "014", "015", "016", "017", "018", "019", "020", "021", "022", "023", "024", "025", "026",
+                        "027", "028");
     }
 }
