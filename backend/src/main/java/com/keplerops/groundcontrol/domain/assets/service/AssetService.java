@@ -15,6 +15,7 @@ import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -224,28 +225,13 @@ public class AssetService {
                     + command.sourceId() + " for asset " + assetId);
         }
         var extId = new AssetExternalId(asset, command.sourceSystem(), command.sourceId());
-        if (command.collectedAt() != null) {
-            extId.setCollectedAt(command.collectedAt());
-        }
-        if (command.confidence() != null) {
-            extId.setConfidence(command.confidence());
-        }
+        applyProvenanceFields(extId, command.collectedAt(), command.confidence());
         return externalIdRepository.save(extId);
     }
 
     public AssetExternalId updateExternalId(UUID assetId, UUID extIdId, UpdateAssetExternalIdCommand command) {
-        var extId = externalIdRepository
-                .findById(extIdId)
-                .orElseThrow(() -> new NotFoundException("External ID not found: " + extIdId));
-        if (!extId.getAsset().getId().equals(assetId)) {
-            throw new NotFoundException("External ID " + extIdId + " does not belong to asset " + assetId);
-        }
-        if (command.collectedAt() != null) {
-            extId.setCollectedAt(command.collectedAt());
-        }
-        if (command.confidence() != null) {
-            extId.setConfidence(command.confidence());
-        }
+        var extId = getExternalIdBelongingTo(assetId, extIdId);
+        applyProvenanceFields(extId, command.collectedAt(), command.confidence());
         return externalIdRepository.save(extId);
     }
 
@@ -267,12 +253,25 @@ public class AssetService {
     }
 
     public void deleteExternalId(UUID assetId, UUID extIdId) {
+        externalIdRepository.delete(getExternalIdBelongingTo(assetId, extIdId));
+    }
+
+    private AssetExternalId getExternalIdBelongingTo(UUID assetId, UUID extIdId) {
         var extId = externalIdRepository
                 .findById(extIdId)
                 .orElseThrow(() -> new NotFoundException("External ID not found: " + extIdId));
         if (!extId.getAsset().getId().equals(assetId)) {
             throw new NotFoundException("External ID " + extIdId + " does not belong to asset " + assetId);
         }
-        externalIdRepository.delete(extId);
+        return extId;
+    }
+
+    private void applyProvenanceFields(AssetExternalId extId, Instant collectedAt, String confidence) {
+        if (collectedAt != null) {
+            extId.setCollectedAt(collectedAt);
+        }
+        if (confidence != null) {
+            extId.setConfidence(confidence);
+        }
     }
 }
