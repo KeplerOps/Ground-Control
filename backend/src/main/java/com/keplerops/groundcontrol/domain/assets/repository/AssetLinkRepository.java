@@ -11,15 +11,21 @@ import org.springframework.data.repository.query.Param;
 
 public interface AssetLinkRepository extends JpaRepository<AssetLink, UUID> {
 
-    List<AssetLink> findByAssetId(UUID assetId);
+    @Query("SELECT l FROM AssetLink l JOIN FETCH l.asset WHERE l.asset.id = :assetId")
+    List<AssetLink> findByAssetId(@Param("assetId") UUID assetId);
 
-    List<AssetLink> findByAssetIdAndTargetType(UUID assetId, AssetLinkTargetType targetType);
+    @Query("SELECT l FROM AssetLink l JOIN FETCH l.asset WHERE l.asset.id = :assetId"
+            + " AND l.targetType = :targetType")
+    List<AssetLink> findByAssetIdAndTargetType(
+            @Param("assetId") UUID assetId, @Param("targetType") AssetLinkTargetType targetType);
 
     boolean existsByAssetIdAndTargetTypeAndTargetIdentifierAndLinkType(
             UUID assetId, AssetLinkTargetType targetType, String targetIdentifier, AssetLinkType linkType);
 
     @Query("SELECT l FROM AssetLink l JOIN FETCH l.asset WHERE l.targetType = :targetType"
-            + " AND l.targetIdentifier = :targetIdentifier")
-    List<AssetLink> findByTargetTypeAndTargetIdentifier(
-            @Param("targetType") AssetLinkTargetType targetType, @Param("targetIdentifier") String targetIdentifier);
+            + " AND l.targetIdentifier = :targetIdentifier AND l.asset.project.id = :projectId")
+    List<AssetLink> findByTargetTypeAndTargetIdentifierAndProjectId(
+            @Param("targetType") AssetLinkTargetType targetType,
+            @Param("targetIdentifier") String targetIdentifier,
+            @Param("projectId") UUID projectId);
 }

@@ -357,7 +357,7 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
 }
 ```
 
-Asset types: `APPLICATION`, `SERVICE`, `DATABASE`, `NETWORK`, `HOST`, `CONTAINER`, `IDENTITY`, `DATA_STORE`, `BOUNDARY`, `OTHER`
+Asset types: `APPLICATION`, `SERVICE`, `SYSTEM`, `DATABASE`, `NETWORK`, `HOST`, `CONTAINER`, `IDENTITY`, `DATA_STORE`, `ENDPOINT`, `INTEGRATION`, `WORKLOAD`, `THIRD_PARTY`, `BOUNDARY`, `OTHER`
 
 ### Asset Relations
 
@@ -377,6 +377,31 @@ Asset types: `APPLICATION`, `SERVICE`, `DATABASE`, `NETWORK`, `HOST`, `CONTAINER
 ```
 
 Relation types: `CONTAINS`, `DEPENDS_ON`, `COMMUNICATES_WITH`, `TRUST_BOUNDARY`, `SUPPORTS`, `ACCESSES`, `DATA_FLOW`
+
+### Asset Links (Cross-Entity Linking)
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/assets/{id}/links` | AssetLinkRequest | 201 | Link asset to a requirement, control, or other entity |
+| GET | `/assets/{id}/links?target_type=` | — | 200 | List links (optional target type filter) |
+| DELETE | `/assets/{id}/links/{linkId}` | — | 204 | Delete link |
+| GET | `/assets/links/by-target?target_type=&target_identifier=&project=` | — | 200 | Reverse lookup: find assets linked to a target |
+
+**AssetLinkRequest:**
+
+```json
+{
+  "targetType": "REQUIREMENT",
+  "targetIdentifier": "GC-M010",
+  "linkType": "IMPLEMENTS",
+  "targetUrl": "https://example.com/req/GC-M010",
+  "targetTitle": "Operational Asset Entity"
+}
+```
+
+Target types: `REQUIREMENT`, `CONTROL`, `RISK_SCENARIO`, `THREAT_MODEL_ENTRY`, `FINDING`, `EVIDENCE`, `AUDIT`, `EXTERNAL`
+
+Link types: `IMPLEMENTS`, `MITIGATES`, `SUBJECT_OF`, `EVIDENCED_BY`, `GOVERNED_BY`, `DEPENDS_ON`, `ASSOCIATED`
 
 ### Asset Topology
 

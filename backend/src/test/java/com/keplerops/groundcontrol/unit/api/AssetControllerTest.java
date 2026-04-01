@@ -297,12 +297,14 @@ class AssetControllerTest {
 
     @Test
     void getLinksByTargetReturnsList() throws Exception {
-        when(assetService.getLinksByTarget(AssetLinkTargetType.REQUIREMENT, "GC-M010"))
+        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(assetService.getLinksByTarget(PROJECT_ID, AssetLinkTargetType.REQUIREMENT, "GC-M010"))
                 .thenReturn(List.of(makeLink()));
 
         mockMvc.perform(get("/api/v1/assets/links/by-target")
                         .param("target_type", "REQUIREMENT")
-                        .param("target_identifier", "GC-M010"))
+                        .param("target_identifier", "GC-M010")
+                        .param("project", "ground-control"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].assetUid", is("ASSET-001")));

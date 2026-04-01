@@ -179,8 +179,8 @@ public class AssetService {
     }
 
     @Transactional(readOnly = true)
-    public List<AssetLink> getLinksByTarget(AssetLinkTargetType targetType, String targetIdentifier) {
-        return linkRepository.findByTargetTypeAndTargetIdentifier(targetType, targetIdentifier);
+    public List<AssetLink> getLinksByTarget(UUID projectId, AssetLinkTargetType targetType, String targetIdentifier) {
+        return linkRepository.findByTargetTypeAndTargetIdentifierAndProjectId(targetType, targetIdentifier, projectId);
     }
 
     public void deleteLink(UUID assetId, UUID linkId) {

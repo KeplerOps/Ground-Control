@@ -29,7 +29,8 @@ public class AuditRetentionJob {
             "traceability_link_audit",
             "architecture_decision_record_audit",
             "operational_asset_audit",
-            "asset_relation_audit");
+            "asset_relation_audit",
+            "asset_link_audit");
 
     private final AuditRetentionProperties properties;
     private final EntityManager entityManager;

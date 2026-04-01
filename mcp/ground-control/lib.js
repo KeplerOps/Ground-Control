@@ -900,8 +900,8 @@ export async function deleteAssetLink(assetId, linkId) {
   await request("DELETE", `/api/v1/assets/${encodeURIComponent(assetId)}/links/${encodeURIComponent(linkId)}`);
 }
 
-export async function getAssetLinksByTarget(targetType, targetIdentifier) {
+export async function getAssetLinksByTarget(targetType, targetIdentifier, project) {
   return request("GET", "/api/v1/assets/links/by-target", {
-    params: { target_type: targetType, target_identifier: targetIdentifier },
+    params: { target_type: targetType, target_identifier: targetIdentifier, project },
   });
 }

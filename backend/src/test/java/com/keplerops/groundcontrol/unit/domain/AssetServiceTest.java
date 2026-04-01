@@ -450,10 +450,11 @@ class AssetServiceTest {
         @Test
         void getLinksByTargetReturnsList() {
             var asset = createAsset("ASSET-001", "Web Server");
-            when(linkRepository.findByTargetTypeAndTargetIdentifier(AssetLinkTargetType.REQUIREMENT, "GC-M010"))
+            when(linkRepository.findByTargetTypeAndTargetIdentifierAndProjectId(
+                            AssetLinkTargetType.REQUIREMENT, "GC-M010", projectId))
                     .thenReturn(List.of(makeLink(asset)));
 
-            var result = assetService.getLinksByTarget(AssetLinkTargetType.REQUIREMENT, "GC-M010");
+            var result = assetService.getLinksByTarget(projectId, AssetLinkTargetType.REQUIREMENT, "GC-M010");
 
             assertThat(result).hasSize(1);
         }

@@ -2203,10 +2203,11 @@ server.tool(
   {
     target_type: z.enum(ASSET_LINK_TARGET_TYPES).describe("Type of the target entity"),
     target_identifier: z.string().describe("Identifier of the target"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ target_type, target_identifier }) => {
+  async ({ target_type, target_identifier, project }) => {
     try {
-      return ok(JSON.stringify(await getAssetLinksByTarget(target_type, target_identifier), null, 2));
+      return ok(JSON.stringify(await getAssetLinksByTarget(target_type, target_identifier, project), null, 2));
     } catch (e) {
       return err(e);
     }

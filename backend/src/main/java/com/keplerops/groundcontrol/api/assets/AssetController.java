@@ -147,8 +147,10 @@ public class AssetController {
     @GetMapping("/links/by-target")
     public List<AssetLinkResponse> getLinksByTarget(
             @RequestParam("target_type") AssetLinkTargetType targetType,
-            @RequestParam("target_identifier") String targetIdentifier) {
-        return assetService.getLinksByTarget(targetType, targetIdentifier).stream()
+            @RequestParam("target_identifier") String targetIdentifier,
+            @RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return assetService.getLinksByTarget(projectId, targetType, targetIdentifier).stream()
                 .map(AssetLinkResponse::from)
                 .toList();
     }
