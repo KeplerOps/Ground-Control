@@ -113,6 +113,11 @@ import {
   getAssetLinks,
   deleteAssetLink,
   getAssetLinksByTarget,
+  createAssetExternalId,
+  getAssetExternalIds,
+  updateAssetExternalId,
+  deleteAssetExternalId,
+  findAssetByExternalId,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -2032,17 +2037,26 @@ server.tool(
 
 server.tool(
   "gc_create_asset_relation",
-  `Create a typed relationship between two operational assets. Relation types: ${ASSET_RELATION_TYPES.join(", ")}.`,
+  `Create a typed relationship between two operational assets. Relation types: ${ASSET_RELATION_TYPES.join(", ")}. Optional provenance: source_system, external_source_id, collected_at (ISO-8601), confidence.`,
   {
     source_id: z.string().uuid().describe("Source asset UUID"),
     target_id: z.string().uuid().describe("Target asset UUID"),
     relation_type: z.enum(ASSET_RELATION_TYPES).describe("Relationship type"),
+    source_system: z.string().max(100).optional().describe("Source system that asserted this fact (e.g. AWS_CONFIG)"),
+    external_source_id: z.string().max(500).optional().describe("Identifier for this fact in the source system"),
+    collected_at: z.string().optional().describe("ISO-8601 timestamp when fact was collected/asserted"),
+    confidence: z.string().max(50).optional().describe("Confidence or quality metadata"),
   },
-  async ({ source_id, target_id, relation_type }) => {
+  async ({ source_id, target_id, relation_type, source_system, external_source_id, collected_at, confidence }) => {
     try {
+      const data = { target_id, relation_type };
+      if (source_system !== undefined) data.source_system = source_system;
+      if (external_source_id !== undefined) data.external_source_id = external_source_id;
+      if (collected_at !== undefined) data.collected_at = collected_at;
+      if (confidence !== undefined) data.confidence = confidence;
       return ok(
         JSON.stringify(
-          await createAssetRelation(source_id, { target_id, relation_type }),
+          await createAssetRelation(source_id, data),
           null,
           2,
         ),
@@ -2208,6 +2222,107 @@ server.tool(
   async ({ target_type, target_identifier, project }) => {
     try {
       return ok(JSON.stringify(await getAssetLinksByTarget(target_type, target_identifier, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// External Identifiers (source provenance)
+// ==========================================================================
+
+server.tool(
+  "gc_create_asset_external_id",
+  "Register an external identifier for an operational asset, mapping it to a source system (e.g. AWS ARN, Terraform resource ID, ServiceNow CI). Supports multiple overlapping sources per asset.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    source_system: z.string().max(100).describe("Name of the source system (e.g. AWS, TERRAFORM, SERVICENOW)"),
+    source_id: z.string().max(500).describe("Identifier in the source system (e.g. ARN, resource ID)"),
+    collected_at: z.string().optional().describe("ISO-8601 timestamp when this identifier was collected/asserted"),
+    confidence: z.string().max(50).optional().describe("Confidence or quality metadata (e.g. HIGH, 0.95)"),
+  },
+  async ({ asset_id, source_system, source_id, collected_at, confidence }) => {
+    try {
+      const data = { source_system, source_id };
+      if (collected_at !== undefined) data.collected_at = collected_at;
+      if (confidence !== undefined) data.confidence = confidence;
+      return ok(JSON.stringify(await createAssetExternalId(asset_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_asset_external_ids",
+  "List all external identifiers for an operational asset, optionally filtered by source system.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    source_system: z.string().optional().describe("Filter by source system name"),
+  },
+  async ({ asset_id, source_system }) => {
+    try {
+      const result = await getAssetExternalIds(asset_id, source_system);
+      if (Array.isArray(result) && result.length === 0) return ok("No external identifiers found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_asset_external_id",
+  "Update the collection timestamp or confidence metadata of an external identifier. Source system and source ID are immutable.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    external_id_id: z.string().uuid().describe("UUID of the external identifier to update"),
+    collected_at: z.string().optional().describe("ISO-8601 timestamp when this identifier was collected/asserted"),
+    confidence: z.string().max(50).optional().describe("Confidence or quality metadata"),
+  },
+  async ({ asset_id, external_id_id, collected_at, confidence }) => {
+    try {
+      const data = {};
+      if (collected_at !== undefined) data.collected_at = collected_at;
+      if (confidence !== undefined) data.confidence = confidence;
+      return ok(JSON.stringify(await updateAssetExternalId(asset_id, external_id_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_asset_external_id",
+  "Delete an external identifier from an operational asset.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    external_id_id: z.string().uuid().describe("UUID of the external identifier to delete"),
+  },
+  async ({ asset_id, external_id_id }) => {
+    try {
+      await deleteAssetExternalId(asset_id, external_id_id);
+      return ok("External identifier deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_find_asset_by_external_id",
+  "Find operational assets by their external identifier in a specific source system. Reverse lookup from source system + source ID to Ground Control assets.",
+  {
+    source_system: z.string().describe("Source system name (e.g. AWS, TERRAFORM)"),
+    source_id: z.string().describe("Identifier in the source system"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ source_system, source_id, project }) => {
+    try {
+      const result = await findAssetByExternalId(source_system, source_id, project);
+      if (Array.isArray(result) && result.length === 0) return ok("No assets found with that external identifier.");
+      return ok(JSON.stringify(result, null, 2));
     } catch (e) {
       return err(e);
     }

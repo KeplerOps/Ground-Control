@@ -12,6 +12,10 @@ public record AssetRelationResponse(
         UUID targetId,
         String targetUid,
         AssetRelationType relationType,
+        String sourceSystem,
+        String externalSourceId,
+        Instant collectedAt,
+        String confidence,
         Instant createdAt) {
 
     public static AssetRelationResponse from(AssetRelation r) {
@@ -22,6 +26,10 @@ public record AssetRelationResponse(
                 r.getTarget().getId(),
                 r.getTarget().getUid(),
                 r.getRelationType(),
+                r.getSourceSystem(),
+                r.getExternalSourceId(),
+                r.getCollectedAt(),
+                r.getConfidence(),
                 r.getCreatedAt());
     }
 }

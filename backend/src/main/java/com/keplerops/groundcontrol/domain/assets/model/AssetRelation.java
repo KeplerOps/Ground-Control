@@ -50,6 +50,18 @@ public class AssetRelation {
     @Column(columnDefinition = "TEXT")
     private String description = "";
 
+    @Column(name = "source_system", length = 100)
+    private String sourceSystem;
+
+    @Column(name = "external_source_id", length = 500)
+    private String externalSourceId;
+
+    @Column(name = "collected_at")
+    private Instant collectedAt;
+
+    @Column(length = 50)
+    private String confidence;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -98,6 +110,38 @@ public class AssetRelation {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public String getSourceSystem() {
+        return sourceSystem;
+    }
+
+    public void setSourceSystem(String sourceSystem) {
+        this.sourceSystem = sourceSystem;
+    }
+
+    public String getExternalSourceId() {
+        return externalSourceId;
+    }
+
+    public void setExternalSourceId(String externalSourceId) {
+        this.externalSourceId = externalSourceId;
+    }
+
+    public Instant getCollectedAt() {
+        return collectedAt;
+    }
+
+    public void setCollectedAt(Instant collectedAt) {
+        this.collectedAt = collectedAt;
+    }
+
+    public String getConfidence() {
+        return confidence;
+    }
+
+    public void setConfidence(String confidence) {
+        this.confidence = confidence;
     }
 
     public Instant getCreatedAt() {

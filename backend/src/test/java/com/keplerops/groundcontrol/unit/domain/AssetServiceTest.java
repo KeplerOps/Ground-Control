@@ -7,16 +7,21 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.domain.assets.model.AssetExternalId;
 import com.keplerops.groundcontrol.domain.assets.model.AssetLink;
 import com.keplerops.groundcontrol.domain.assets.model.AssetRelation;
 import com.keplerops.groundcontrol.domain.assets.model.OperationalAsset;
+import com.keplerops.groundcontrol.domain.assets.repository.AssetExternalIdRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.AssetLinkRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.AssetRelationRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.OperationalAssetRepository;
 import com.keplerops.groundcontrol.domain.assets.service.AssetService;
 import com.keplerops.groundcontrol.domain.assets.service.CreateAssetCommand;
+import com.keplerops.groundcontrol.domain.assets.service.CreateAssetExternalIdCommand;
 import com.keplerops.groundcontrol.domain.assets.service.CreateAssetLinkCommand;
+import com.keplerops.groundcontrol.domain.assets.service.CreateAssetRelationCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetCommand;
+import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetExternalIdCommand;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
@@ -49,6 +54,9 @@ class AssetServiceTest {
 
     @Mock
     private AssetLinkRepository linkRepository;
+
+    @Mock
+    private AssetExternalIdRepository externalIdRepository;
 
     @Mock
     private ProjectRepository projectRepository;
@@ -457,6 +465,136 @@ class AssetServiceTest {
             var result = assetService.getLinksByTarget(projectId, AssetLinkTargetType.REQUIREMENT, "GC-M010");
 
             assertThat(result).hasSize(1);
+        }
+    }
+
+    @Nested
+    class ExternalIds {
+
+        @Test
+        void createExternalIdSucceeds() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(externalIdRepository.existsByAssetIdAndSourceSystemAndSourceId(
+                            asset.getId(), "AWS", "arn:aws:ec2:us-east-1:123:instance/i-abc"))
+                    .thenReturn(false);
+            when(externalIdRepository.save(any())).thenAnswer(inv -> {
+                var saved = inv.getArgument(0, AssetExternalId.class);
+                setField(saved, "id", UUID.randomUUID());
+                return saved;
+            });
+
+            var command = new CreateAssetExternalIdCommand(
+                    "AWS", "arn:aws:ec2:us-east-1:123:instance/i-abc", Instant.now(), "HIGH");
+            var result = assetService.createExternalId(asset.getId(), command);
+
+            assertThat(result.getSourceSystem()).isEqualTo("AWS");
+            assertThat(result.getSourceId()).isEqualTo("arn:aws:ec2:us-east-1:123:instance/i-abc");
+            assertThat(result.getConfidence()).isEqualTo("HIGH");
+        }
+
+        @Test
+        void createExternalIdDuplicateThrowsConflict() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(externalIdRepository.existsByAssetIdAndSourceSystemAndSourceId(
+                            asset.getId(), "AWS", "arn:aws:ec2:us-east-1:123:instance/i-abc"))
+                    .thenReturn(true);
+
+            var command =
+                    new CreateAssetExternalIdCommand("AWS", "arn:aws:ec2:us-east-1:123:instance/i-abc", null, null);
+
+            assertThatThrownBy(() -> assetService.createExternalId(asset.getId(), command))
+                    .isInstanceOf(ConflictException.class);
+        }
+
+        @Test
+        void updateExternalIdSucceeds() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var extId = new AssetExternalId(asset, "AWS", "arn:aws:ec2:us-east-1:123:instance/i-abc");
+            setField(extId, "id", UUID.randomUUID());
+
+            when(externalIdRepository.findByIdWithAsset(extId.getId())).thenReturn(Optional.of(extId));
+            when(externalIdRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var now = Instant.now();
+            var command = new UpdateAssetExternalIdCommand(now, "MEDIUM");
+            var result = assetService.updateExternalId(asset.getId(), extId.getId(), command);
+
+            assertThat(result.getCollectedAt()).isEqualTo(now);
+            assertThat(result.getConfidence()).isEqualTo("MEDIUM");
+        }
+
+        @Test
+        void deleteExternalIdNotBelongingThrows() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var other = createAsset("ASSET-002", "Other");
+            var extId = new AssetExternalId(asset, "AWS", "arn:aws:ec2:us-east-1:123:instance/i-abc");
+            setField(extId, "id", UUID.randomUUID());
+
+            when(externalIdRepository.findByIdWithAsset(extId.getId())).thenReturn(Optional.of(extId));
+
+            assertThatThrownBy(() -> assetService.deleteExternalId(other.getId(), extId.getId()))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining("does not belong");
+        }
+
+        @Test
+        void getExternalIdsReturnsList() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var extId = new AssetExternalId(asset, "AWS", "arn:aws:ec2:us-east-1:123:instance/i-abc");
+            setField(extId, "id", UUID.randomUUID());
+
+            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(externalIdRepository.findByAssetId(asset.getId())).thenReturn(List.of(extId));
+
+            var result = assetService.getExternalIds(asset.getId());
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getSourceSystem()).isEqualTo("AWS");
+        }
+
+        @Test
+        void deleteExternalIdSucceeds() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var extId = new AssetExternalId(asset, "AWS", "arn:aws:ec2:us-east-1:123:instance/i-abc");
+            setField(extId, "id", UUID.randomUUID());
+
+            when(externalIdRepository.findByIdWithAsset(extId.getId())).thenReturn(Optional.of(extId));
+
+            assetService.deleteExternalId(asset.getId(), extId.getId());
+            verify(externalIdRepository).delete(extId);
+        }
+    }
+
+    @Nested
+    class RelationProvenance {
+
+        @Test
+        void createRelationWithProvenanceSucceeds() {
+            var source = createAsset("ASSET-001", "Source");
+            var target = createAsset("ASSET-002", "Target");
+            when(assetRepository.findById(source.getId())).thenReturn(Optional.of(source));
+            when(assetRepository.findById(target.getId())).thenReturn(Optional.of(target));
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(
+                            source.getId(), target.getId(), AssetRelationType.DEPENDS_ON))
+                    .thenReturn(false);
+            when(relationRepository.save(any())).thenAnswer(inv -> {
+                var saved = inv.getArgument(0, AssetRelation.class);
+                setField(saved, "id", UUID.randomUUID());
+                return saved;
+            });
+
+            var now = Instant.now();
+            var command = new CreateAssetRelationCommand(
+                    target.getId(), AssetRelationType.DEPENDS_ON, "AWS_CONFIG", "config-rule-123", now, "0.95");
+            var result = assetService.createRelation(command, source.getId());
+
+            assertThat(result.getRelationType()).isEqualTo(AssetRelationType.DEPENDS_ON);
+            assertThat(result.getSourceSystem()).isEqualTo("AWS_CONFIG");
+            assertThat(result.getExternalSourceId()).isEqualTo("config-rule-123");
+            assertThat(result.getCollectedAt()).isEqualTo(now);
+            assertThat(result.getConfidence()).isEqualTo("0.95");
         }
     }
 }

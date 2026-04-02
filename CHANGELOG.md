@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.96.0] - 2026-04-01
+
+### Added
+
+- External identifiers and source provenance for operational assets:
+  assets can now be mapped to their representations in external source
+  systems (AWS ARN, Terraform resource ID, ServiceNow CI, etc.) with
+  collection timestamps and confidence metadata (GC-M014)
+- Source provenance on asset relations: topology facts now carry optional
+  source system, external source identifier, collection timestamp, and
+  confidence metadata
+- Multiple overlapping sources per asset without assuming a single
+  perfect inventory
+- REST API endpoints: `POST/GET /api/v1/assets/{id}/external-ids`,
+  `PUT/DELETE /api/v1/assets/{id}/external-ids/{extIdId}`,
+  `GET /api/v1/assets/external-ids/by-source` for reverse lookup
+- MCP tools: `gc_create_asset_external_id`, `gc_list_asset_external_ids`,
+  `gc_update_asset_external_id`, `gc_delete_asset_external_id`,
+  `gc_find_asset_by_external_id`
+- Updated `gc_create_asset_relation` and `gc_get_asset_relations` with
+  provenance fields
+- Database migrations V031-V034 for asset_external_id table with Envers
+  audit and provenance columns on asset_relation
+
 ## [0.95.0] - 2026-04-01
 
 ### Added
