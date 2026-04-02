@@ -2,11 +2,15 @@ package com.keplerops.groundcontrol.domain.assets.repository;
 
 import com.keplerops.groundcontrol.domain.assets.model.AssetExternalId;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
 public interface AssetExternalIdRepository extends JpaRepository<AssetExternalId, UUID> {
+
+    @Query("SELECT e FROM AssetExternalId e JOIN FETCH e.asset WHERE e.id = :id")
+    Optional<AssetExternalId> findByIdWithAsset(UUID id);
 
     @Query("SELECT e FROM AssetExternalId e JOIN FETCH e.asset WHERE e.asset.id = :assetId")
     List<AssetExternalId> findByAssetId(UUID assetId);

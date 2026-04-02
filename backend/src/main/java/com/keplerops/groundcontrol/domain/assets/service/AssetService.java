@@ -258,7 +258,7 @@ public class AssetService {
 
     private AssetExternalId getExternalIdBelongingTo(UUID assetId, UUID extIdId) {
         var extId = externalIdRepository
-                .findById(extIdId)
+                .findByIdWithAsset(extIdId)
                 .orElseThrow(() -> new NotFoundException("External ID not found: " + extIdId));
         if (!extId.getAsset().getId().equals(assetId)) {
             throw new NotFoundException("External ID " + extIdId + " does not belong to asset " + assetId);

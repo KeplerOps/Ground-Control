@@ -514,7 +514,7 @@ class AssetServiceTest {
             var extId = new AssetExternalId(asset, "AWS", "arn:aws:ec2:us-east-1:123:instance/i-abc");
             setField(extId, "id", UUID.randomUUID());
 
-            when(externalIdRepository.findById(extId.getId())).thenReturn(Optional.of(extId));
+            when(externalIdRepository.findByIdWithAsset(extId.getId())).thenReturn(Optional.of(extId));
             when(externalIdRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
             var now = Instant.now();
@@ -532,7 +532,7 @@ class AssetServiceTest {
             var extId = new AssetExternalId(asset, "AWS", "arn:aws:ec2:us-east-1:123:instance/i-abc");
             setField(extId, "id", UUID.randomUUID());
 
-            when(externalIdRepository.findById(extId.getId())).thenReturn(Optional.of(extId));
+            when(externalIdRepository.findByIdWithAsset(extId.getId())).thenReturn(Optional.of(extId));
 
             assertThatThrownBy(() -> assetService.deleteExternalId(other.getId(), extId.getId()))
                     .isInstanceOf(NotFoundException.class)
@@ -560,7 +560,7 @@ class AssetServiceTest {
             var extId = new AssetExternalId(asset, "AWS", "arn:aws:ec2:us-east-1:123:instance/i-abc");
             setField(extId, "id", UUID.randomUUID());
 
-            when(externalIdRepository.findById(extId.getId())).thenReturn(Optional.of(extId));
+            when(externalIdRepository.findByIdWithAsset(extId.getId())).thenReturn(Optional.of(extId));
 
             assetService.deleteExternalId(asset.getId(), extId.getId());
             verify(externalIdRepository).delete(extId);

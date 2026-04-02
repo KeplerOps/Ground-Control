@@ -168,6 +168,11 @@ const TO_CAMEL = {
   target_identifier: "targetIdentifier",
   target_url: "targetUrl",
   target_title: "targetTitle",
+  source_system: "sourceSystem",
+  source_id: "sourceId",
+  collected_at: "collectedAt",
+  external_source_id: "externalSourceId",
+  external_id_id: "externalIdId",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
