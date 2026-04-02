@@ -7,6 +7,7 @@ import java.util.UUID;
 public record CreateAssetRelationCommand(
         UUID targetId,
         AssetRelationType relationType,
+        String description,
         String sourceSystem,
         String externalSourceId,
         Instant collectedAt,

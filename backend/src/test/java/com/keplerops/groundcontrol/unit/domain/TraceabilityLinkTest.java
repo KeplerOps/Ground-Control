@@ -2,6 +2,7 @@ package com.keplerops.groundcontrol.unit.domain;
 
 import static org.assertj.core.api.Assertions.*;
 
+import com.keplerops.groundcontrol.TestUtil;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
@@ -22,13 +23,7 @@ class TraceabilityLinkTest {
 
     private static Project createTestProject() {
         var project = new Project("test-project", "Test Project");
-        try {
-            var field = Project.class.getDeclaredField("id");
-            field.setAccessible(true);
-            field.set(project, UUID.fromString("00000000-0000-0000-0000-000000000001"));
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(project, "id", UUID.fromString("00000000-0000-0000-0000-000000000001"));
         return project;
     }
 

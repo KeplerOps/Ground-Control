@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97.0] - 2026-04-01
+
+### Added
+
+- First-class Observation entity for recording time-bounded state facts
+  about operational assets, such as configuration values, exposure status,
+  identity assignments, deployment attributes, patch state, or discovered
+  relationships (GC-M015)
+- Observations are distinct from asset definitions and record source,
+  observed-at time, freshness/validity window (expires-at), confidence,
+  and supporting evidence references
+- Seven observation categories: CONFIGURATION, EXPOSURE, IDENTITY,
+  DEPLOYMENT, PATCH_STATE, RELATIONSHIP, OTHER
+- REST API endpoints: `POST/GET /api/v1/assets/{id}/observations`,
+  `GET/PUT/DELETE /api/v1/assets/{id}/observations/{obsId}`,
+  `GET /api/v1/assets/{id}/observations/latest` for current-state snapshots
+- MCP tools: `gc_create_observation`, `gc_list_observations`,
+  `gc_get_observation`, `gc_update_observation`, `gc_delete_observation`,
+  `gc_list_latest_observations`
+- Database migrations V035-V036 for observation table with Envers audit
+
 ## [0.96.0] - 2026-04-01
 
 ### Added

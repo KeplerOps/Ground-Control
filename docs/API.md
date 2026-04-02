@@ -364,6 +364,7 @@ Asset types: `APPLICATION`, `SERVICE`, `SYSTEM`, `DATABASE`, `NETWORK`, `HOST`, 
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
 | POST | `/assets/{id}/relations` | AssetRelationRequest | 201 | Create typed relation |
+| PUT | `/assets/{id}/relations/{relationId}` | UpdateAssetRelationRequest | 200 | Update relation metadata |
 | GET | `/assets/{id}/relations` | — | 200 | List relations (incoming + outgoing) |
 | DELETE | `/assets/{id}/relations/{relationId}` | — | 204 | Delete relation |
 
@@ -372,9 +373,28 @@ Asset types: `APPLICATION`, `SERVICE`, `SYSTEM`, `DATABASE`, `NETWORK`, `HOST`, 
 ```json
 {
   "targetId": "uuid",
-  "relationType": "DEPENDS_ON"
+  "relationType": "DEPENDS_ON",
+  "description": "Observed runtime dependency",
+  "sourceSystem": "AWS_CONFIG",
+  "externalSourceId": "cfg-123",
+  "collectedAt": "2026-04-01T12:00:00Z",
+  "confidence": "0.80"
 }
 ```
+
+**UpdateAssetRelationRequest:**
+
+```json
+{
+  "description": "Refined runtime dependency",
+  "sourceSystem": "CMDB",
+  "externalSourceId": "cmdb-789",
+  "collectedAt": "2026-04-02T12:00:00Z",
+  "confidence": "0.95"
+}
+```
+
+**AssetRelationResponse fields:** `id`, `sourceId`, `sourceUid`, `targetId`, `targetUid`, `relationType`, `description`, `sourceSystem`, `externalSourceId`, `collectedAt`, `confidence`, `createdAt`, `updatedAt`
 
 Relation types: `CONTAINS`, `DEPENDS_ON`, `COMMUNICATES_WITH`, `TRUST_BOUNDARY`, `SUPPORTS`, `ACCESSES`, `DATA_FLOW`
 

@@ -22,7 +22,6 @@ import com.keplerops.groundcontrol.domain.requirements.service.RecentChange;
 import com.keplerops.groundcontrol.domain.requirements.service.WaveStats;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
-import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -57,13 +56,7 @@ class AnalysisControllerTest {
 
     private static Project createTestProject() {
         var project = new Project("test-project", "Test Project");
-        try {
-            var field = Project.class.getDeclaredField("id");
-            field.setAccessible(true);
-            field.set(project, PROJECT_ID);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        com.keplerops.groundcontrol.TestUtil.setField(project, "id", PROJECT_ID);
         return project;
     }
 
@@ -79,13 +72,7 @@ class AnalysisControllerTest {
     }
 
     private static void setField(Object obj, String fieldName, Object value) {
-        try {
-            Field f = obj.getClass().getDeclaredField(fieldName);
-            f.setAccessible(true);
-            f.set(obj, value);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
-        }
+        com.keplerops.groundcontrol.TestUtil.setField(obj, fieldName, value);
     }
 
     @Nested

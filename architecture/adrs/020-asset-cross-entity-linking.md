@@ -14,7 +14,7 @@ GC-M010 requires operational assets to be linkable to requirements, controls, ri
 
 The existing linking mechanisms are:
 
-- **AssetRelation**: Links assets to other assets (typed, directed). Handles intra-asset topology.
+- **AssetRelation**: Links assets to other assets (typed, directed) and carries first-class lifecycle/provenance metadata for intra-asset topology.
 - **TraceabilityLink**: Links requirements to external artifacts (code files, tests, ADRs, GitHub issues). Requirement-centric with sync status and GitHub integration concerns.
 
 Neither mechanism supports linking an asset to a requirement, control, finding, or other entity type. Many of the target entity types (controls, risk scenarios, findings, evidence) do not yet exist as first-class entities in the system.

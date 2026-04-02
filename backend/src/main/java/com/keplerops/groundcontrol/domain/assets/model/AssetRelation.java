@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.domain.assets.model;
 
+import com.keplerops.groundcontrol.domain.BaseEntity;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import jakarta.persistence.Column;
@@ -7,16 +8,11 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
-import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
-import java.util.UUID;
 import org.hibernate.envers.Audited;
 
 /**
@@ -28,12 +24,7 @@ import org.hibernate.envers.Audited;
         name = "asset_relation",
         uniqueConstraints = @UniqueConstraint(columnNames = {"source_id", "target_id", "relation_type"}))
 @SuppressWarnings("java:S125") // JML contract annotations are intentional, not dead code
-public class AssetRelation {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    @Column(updatable = false, nullable = false)
-    private UUID id;
+public class AssetRelation extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "source_id", nullable = false)
@@ -62,9 +53,6 @@ public class AssetRelation {
     @Column(length = 50)
     private String confidence;
 
-    @Column(nullable = false, updatable = false)
-    private Instant createdAt;
-
     protected AssetRelation() {
         // JPA
     }
@@ -81,15 +69,6 @@ public class AssetRelation {
         this.source = source;
         this.target = target;
         this.relationType = relationType;
-    }
-
-    @PrePersist
-    void onCreate() {
-        this.createdAt = Instant.now();
-    }
-
-    public UUID getId() {
-        return id;
     }
 
     public OperationalAsset getSource() {
@@ -142,10 +121,6 @@ public class AssetRelation {
 
     public void setConfidence(String confidence) {
         this.confidence = confidence;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
     }
 
     @Override

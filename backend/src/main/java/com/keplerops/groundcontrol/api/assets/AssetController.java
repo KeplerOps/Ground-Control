@@ -8,6 +8,7 @@ import com.keplerops.groundcontrol.domain.assets.service.CreateAssetLinkCommand;
 import com.keplerops.groundcontrol.domain.assets.service.CreateAssetRelationCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetExternalIdCommand;
+import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetRelationCommand;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
@@ -100,11 +101,26 @@ public class AssetController {
         var command = new CreateAssetRelationCommand(
                 request.targetId(),
                 request.relationType(),
+                request.description(),
                 request.sourceSystem(),
                 request.externalSourceId(),
                 request.collectedAt(),
                 request.confidence());
         return AssetRelationResponse.from(assetService.createRelation(command, id));
+    }
+
+    @PutMapping("/{id}/relations/{relationId}")
+    public AssetRelationResponse updateRelation(
+            @PathVariable UUID id,
+            @PathVariable UUID relationId,
+            @Valid @RequestBody UpdateAssetRelationRequest request) {
+        var command = new UpdateAssetRelationCommand(
+                request.description(),
+                request.sourceSystem(),
+                request.externalSourceId(),
+                request.collectedAt(),
+                request.confidence());
+        return AssetRelationResponse.from(assetService.updateRelation(id, relationId, command));
     }
 
     @GetMapping("/{id}/relations")

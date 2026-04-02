@@ -73,6 +73,15 @@ export const ASSET_LINK_TYPES = [
   "DEPENDS_ON",
   "ASSOCIATED",
 ];
+export const OBSERVATION_CATEGORIES = [
+  "CONFIGURATION",
+  "EXPOSURE",
+  "IDENTITY",
+  "DEPLOYMENT",
+  "PATCH_STATE",
+  "RELATIONSHIP",
+  "OTHER",
+];
 
 // ---------------------------------------------------------------------------
 // Field name mapping (snake_case MCP <-> camelCase API)
@@ -173,6 +182,12 @@ const TO_CAMEL = {
   collected_at: "collectedAt",
   external_source_id: "externalSourceId",
   external_id_id: "externalIdId",
+  observation_key: "observationKey",
+  observation_value: "observationValue",
+  observed_at: "observedAt",
+  expires_at: "expiresAt",
+  evidence_ref: "evidenceRef",
+  observation_id: "observationId",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -942,4 +957,44 @@ export async function findAssetByExternalId(sourceSystem, sourceId, project) {
   return request("GET", "/api/v1/assets/external-ids/by-source", {
     params: { source_system: sourceSystem, source_id: sourceId, project },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Observation API functions
+// ---------------------------------------------------------------------------
+
+export async function createObservation(assetId, data) {
+  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/observations`, { body: data });
+}
+
+export async function listObservations(assetId, { category, key } = {}) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/observations`, {
+    params: { category, key },
+  });
+}
+
+export async function getObservation(assetId, observationId) {
+  return request(
+    "GET",
+    `/api/v1/assets/${encodeURIComponent(assetId)}/observations/${encodeURIComponent(observationId)}`,
+  );
+}
+
+export async function updateObservation(assetId, observationId, data) {
+  return request(
+    "PUT",
+    `/api/v1/assets/${encodeURIComponent(assetId)}/observations/${encodeURIComponent(observationId)}`,
+    { body: data },
+  );
+}
+
+export async function deleteObservation(assetId, observationId) {
+  await request(
+    "DELETE",
+    `/api/v1/assets/${encodeURIComponent(assetId)}/observations/${encodeURIComponent(observationId)}`,
+  );
+}
+
+export async function listLatestObservations(assetId) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/observations/latest`);
 }

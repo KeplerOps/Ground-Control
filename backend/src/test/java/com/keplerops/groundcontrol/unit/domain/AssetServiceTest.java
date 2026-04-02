@@ -22,6 +22,7 @@ import com.keplerops.groundcontrol.domain.assets.service.CreateAssetLinkCommand;
 import com.keplerops.groundcontrol.domain.assets.service.CreateAssetRelationCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetExternalIdCommand;
+import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetRelationCommand;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
@@ -265,6 +266,30 @@ class AssetServiceTest {
         }
 
         @Test
+        void updateRelationSucceeds() {
+            var source = createAsset("ASSET-001", "Source");
+            var target = createAsset("ASSET-002", "Target");
+            var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
+            setField(relation, "id", UUID.randomUUID());
+
+            when(relationRepository.findByIdWithEntities(relation.getId())).thenReturn(Optional.of(relation));
+            when(relationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var now = Instant.now();
+            var command = new UpdateAssetRelationCommand("Updated description", "CMDB", "cmdb-123", now, "0.95");
+            var result = assetService.updateRelation(source.getId(), relation.getId(), command);
+
+            assertThat(result.getDescription()).isEqualTo("Updated description");
+            assertThat(result.getSourceSystem()).isEqualTo("CMDB");
+            assertThat(result.getExternalSourceId()).isEqualTo("cmdb-123");
+            assertThat(result.getCollectedAt()).isEqualTo(now);
+            assertThat(result.getConfidence()).isEqualTo("0.95");
+            assertThat(result.getRelationType()).isEqualTo(AssetRelationType.DEPENDS_ON);
+            assertThat(result.getSource()).isSameAs(source);
+            assertThat(result.getTarget()).isSameAs(target);
+        }
+
+        @Test
         void createRelationSelfReferenceThrows() {
             var id = UUID.randomUUID();
 
@@ -315,7 +340,7 @@ class AssetServiceTest {
             var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
             setField(relation, "id", UUID.randomUUID());
 
-            when(relationRepository.findById(relation.getId())).thenReturn(Optional.of(relation));
+            when(relationRepository.findByIdWithEntities(relation.getId())).thenReturn(Optional.of(relation));
 
             assetService.deleteRelation(source.getId(), relation.getId());
             verify(relationRepository).delete(relation);
@@ -329,9 +354,27 @@ class AssetServiceTest {
             var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
             setField(relation, "id", UUID.randomUUID());
 
-            when(relationRepository.findById(relation.getId())).thenReturn(Optional.of(relation));
+            when(relationRepository.findByIdWithEntities(relation.getId())).thenReturn(Optional.of(relation));
 
             assertThatThrownBy(() -> assetService.deleteRelation(unrelated.getId(), relation.getId()))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining("does not belong");
+        }
+
+        @Test
+        void updateRelationNotBelongingThrows() {
+            var source = createAsset("ASSET-001", "Source");
+            var target = createAsset("ASSET-002", "Target");
+            var unrelated = createAsset("ASSET-003", "Unrelated");
+            var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
+            setField(relation, "id", UUID.randomUUID());
+
+            when(relationRepository.findByIdWithEntities(relation.getId())).thenReturn(Optional.of(relation));
+
+            assertThatThrownBy(() -> assetService.updateRelation(
+                            unrelated.getId(),
+                            relation.getId(),
+                            new UpdateAssetRelationCommand("desc", null, null, null, null)))
                     .isInstanceOf(NotFoundException.class)
                     .hasMessageContaining("does not belong");
         }
@@ -587,10 +630,17 @@ class AssetServiceTest {
 
             var now = Instant.now();
             var command = new CreateAssetRelationCommand(
-                    target.getId(), AssetRelationType.DEPENDS_ON, "AWS_CONFIG", "config-rule-123", now, "0.95");
+                    target.getId(),
+                    AssetRelationType.DEPENDS_ON,
+                    "Observed dependency",
+                    "AWS_CONFIG",
+                    "config-rule-123",
+                    now,
+                    "0.95");
             var result = assetService.createRelation(command, source.getId());
 
             assertThat(result.getRelationType()).isEqualTo(AssetRelationType.DEPENDS_ON);
+            assertThat(result.getDescription()).isEqualTo("Observed dependency");
             assertThat(result.getSourceSystem()).isEqualTo("AWS_CONFIG");
             assertThat(result.getExternalSourceId()).isEqualTo("config-rule-123");
             assertThat(result.getCollectedAt()).isEqualTo(now);

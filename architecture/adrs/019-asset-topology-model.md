@@ -43,9 +43,9 @@ domain/assets/
 
 Extends `BaseEntity` (UUID PK, createdAt, updatedAt). Includes project scoping with `@NotAudited` on the Project ManyToOne reference. Supports soft-delete via `archivedAt`. Asset types: APPLICATION, SERVICE, DATABASE, NETWORK, HOST, CONTAINER, IDENTITY, DATA_STORE, BOUNDARY, OTHER.
 
-### 3. AssetRelation Junction Entity
+### 3. AssetRelation Association Entity
 
-Follows the `RequirementRelation` pattern exactly: standalone entity (not extending BaseEntity), directed edge with source/target ManyToOne to OperationalAsset, typed via `AssetRelationType` enum, unique constraint on `(source_id, target_id, relation_type)`, JML contract preventing self-relations. CASCADE delete removes relations when assets are deleted.
+`AssetRelation` is a first-class association entity extending `BaseEntity` rather than a bare junction row. It models a directed edge from `source` to `target`, typed via `AssetRelationType`, with a unique constraint on `(source_id, target_id, relation_type)`. In addition to the edge identity, it carries mutable metadata such as `description`, `sourceSystem`, `externalSourceId`, `collectedAt`, and `confidence`, plus standard lifecycle timestamps (`createdAt`, `updatedAt`). JML contracts still prevent self-relations. CASCADE delete removes relations when assets are deleted.
 
 ### 4. Seven Relationship Types
 
@@ -76,7 +76,7 @@ Unlike requirement relations (which enforce DAG structure for certain types), as
 **Positive:**
 - Enables multi-hop impact, threat, and control analysis across the asset model
 - Reuses proven graph algorithms without code duplication
-- Follows established junction-entity and domain-layer patterns
+- Provides stable identity and lifecycle metadata for topology relationships from external inventories and sync jobs
 - Full audit trail via Hibernate Envers
 
 **Negative:**
