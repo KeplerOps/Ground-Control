@@ -48,7 +48,7 @@ public class ObservationController {
     public List<ObservationResponse> list(
             @PathVariable UUID assetId,
             @RequestParam(required = false) ObservationCategory category,
-            @RequestParam(required = false) String key) {
+            @RequestParam(required = false) @jakarta.validation.constraints.Size(max = 200) String key) {
         return observationService.listByAsset(assetId, category, key).stream()
                 .map(ObservationResponse::from)
                 .toList();

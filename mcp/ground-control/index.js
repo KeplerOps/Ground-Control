@@ -2446,7 +2446,7 @@ server.tool(
 
 server.tool(
   "gc_list_latest_observations",
-  "Get the most recent observation for each unique key on an operational asset. Useful for building a current-state snapshot.",
+  "Get the most recent non-expired observation for each unique (category, key) pair on an operational asset. Useful for building a current-state snapshot. Expired observations (past their expiresAt timestamp) are excluded.",
   {
     asset_id: z.string().uuid().describe("UUID of the operational asset"),
   },

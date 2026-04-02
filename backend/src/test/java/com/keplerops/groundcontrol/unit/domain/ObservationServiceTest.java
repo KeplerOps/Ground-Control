@@ -16,6 +16,7 @@ import com.keplerops.groundcontrol.domain.assets.service.ObservationService;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateObservationCommand;
 import com.keplerops.groundcontrol.domain.assets.state.ObservationCategory;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import java.time.Instant;
@@ -123,6 +124,28 @@ class ObservationServiceTest {
 
             assertThatThrownBy(() -> observationService.create(assetId, command))
                     .isInstanceOf(ConflictException.class);
+        }
+
+        @Test
+        void throwsWhenExpiresAtBeforeObservedAt() {
+            when(assetRepository.findById(assetId)).thenReturn(Optional.of(asset));
+            when(observationRepository.existsByAssetIdAndCategoryAndObservationKeyAndObservedAt(
+                            any(), any(), any(), any()))
+                    .thenReturn(false);
+
+            var command = new CreateObservationCommand(
+                    ObservationCategory.CONFIGURATION,
+                    "os_version",
+                    "Ubuntu 22.04",
+                    "scanner",
+                    NOW,
+                    NOW.minusSeconds(3600),
+                    null,
+                    null);
+
+            assertThatThrownBy(() -> observationService.create(assetId, command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("expiresAt must be after observedAt");
         }
 
         @Test
@@ -263,7 +286,7 @@ class ObservationServiceTest {
         @Test
         void returnsLatest() {
             when(assetRepository.existsById(assetId)).thenReturn(true);
-            when(observationRepository.findLatestByAssetId(assetId)).thenReturn(List.of(makeObservation()));
+            when(observationRepository.findLatestByAssetId(any(), any())).thenReturn(List.of(makeObservation()));
 
             var result = observationService.listLatest(assetId);
 

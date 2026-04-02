@@ -9,7 +9,7 @@ import java.time.Instant;
 public record ObservationRequest(
         @NotNull ObservationCategory category,
         @NotBlank @Size(max = 200) String observationKey,
-        @NotBlank String observationValue,
+        @NotBlank @Size(max = 65535) String observationValue,
         @NotBlank @Size(max = 200) String source,
         @NotNull Instant observedAt,
         Instant expiresAt,

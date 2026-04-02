@@ -5,7 +5,9 @@ import com.keplerops.groundcontrol.domain.assets.repository.ObservationRepositor
 import com.keplerops.groundcontrol.domain.assets.repository.OperationalAssetRepository;
 import com.keplerops.groundcontrol.domain.assets.state.ObservationCategory;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -31,6 +33,9 @@ public class ObservationService {
                 assetId, command.category(), command.observationKey(), command.observedAt())) {
             throw new ConflictException("Observation already exists: " + command.category() + ":"
                     + command.observationKey() + " at " + command.observedAt());
+        }
+        if (command.expiresAt() != null && command.expiresAt().isBefore(command.observedAt())) {
+            throw new DomainValidationException("expiresAt must be after observedAt");
         }
         var observation = new Observation(
                 asset,
@@ -91,7 +96,7 @@ public class ObservationService {
     @Transactional(readOnly = true)
     public List<Observation> listLatest(UUID assetId) {
         verifyAssetExists(assetId);
-        return observationRepository.findLatestByAssetId(assetId);
+        return observationRepository.findLatestByAssetId(assetId, Instant.now());
     }
 
     public void delete(UUID assetId, UUID observationId) {
