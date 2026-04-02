@@ -2529,7 +2529,7 @@ server.tool(
   "gc_get_risk_scenario",
   "Get a risk scenario by UUID or UID.",
   {
-    id: z.string().optional().describe("Risk scenario UUID"),
+    id: z.string().uuid().optional().describe("Risk scenario UUID"),
     uid: z.string().optional().describe("Risk scenario UID (e.g. 'RS-001')"),
     project: z.string().optional().describe("Project identifier (required when looking up by UID with multiple projects)"),
   },
