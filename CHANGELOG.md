@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.98.0] - 2026-04-01
+
+### Added
+
+- First-class Risk Scenario entity representing scoped statements of
+  potential future loss tied to operational assets within a defined
+  time horizon, supporting FAIR, NIST SP 800-30, and ISO-style risk
+  methods (GC-T009)
+- Risk scenario fields: threat source/actor, threat event/method,
+  affected object, vulnerability/exposure/resistance condition,
+  consequence, time horizon, observation references, topology context
+- Six-state lifecycle: DRAFT, IDENTIFIED, ASSESSED, TREATED, ACCEPTED,
+  CLOSED with early-close shortcuts from IDENTIFIED/ASSESSED/TREATED
+- Risk Scenario Link entity for outbound linking to threat models,
+  vulnerabilities, controls, findings, evidence, audit records, risk
+  registers, observations, assets, requirements, and external artifacts
+- Nine link relationship types: MITIGATED_BY, EXPLOITS, AFFECTS,
+  EVIDENCED_BY, GOVERNED_BY, ASSESSED_IN, REGISTERED_IN, OBSERVED_IN,
+  ASSOCIATED
+- REST API endpoints: `POST/GET /api/v1/risk-scenarios`,
+  `GET/PUT/DELETE /api/v1/risk-scenarios/{id}`,
+  `GET /api/v1/risk-scenarios/uid/{uid}`,
+  `PUT /api/v1/risk-scenarios/{id}/status`,
+  `POST/GET /api/v1/risk-scenarios/{id}/links`,
+  `DELETE /api/v1/risk-scenarios/{id}/links/{linkId}`
+- MCP tools: `gc_create_risk_scenario`, `gc_list_risk_scenarios`,
+  `gc_get_risk_scenario`, `gc_update_risk_scenario`,
+  `gc_delete_risk_scenario`, `gc_transition_risk_scenario_status`,
+  `gc_create_risk_scenario_link`, `gc_list_risk_scenario_links`,
+  `gc_delete_risk_scenario_link`
+- Database migrations V039-V042 for risk scenario and risk scenario
+  link tables with Envers audit
+- RISK_SCENARIO added to ArtifactType for traceability linking
+
 ## [0.97.0] - 2026-04-01
 
 ### Added
