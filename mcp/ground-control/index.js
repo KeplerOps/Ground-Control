@@ -118,6 +118,12 @@ import {
   updateAssetExternalId,
   deleteAssetExternalId,
   findAssetByExternalId,
+  createObservation,
+  listObservations,
+  getObservation,
+  updateObservation,
+  deleteObservation,
+  listLatestObservations,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -131,6 +137,7 @@ import {
   ASSET_RELATION_TYPES,
   ASSET_LINK_TARGET_TYPES,
   ASSET_LINK_TYPES,
+  OBSERVATION_CATEGORIES,
 } from "./lib.js";
 
 function ok(text) {
@@ -2322,6 +2329,131 @@ server.tool(
     try {
       const result = await findAssetByExternalId(source_system, source_id, project);
       if (Array.isArray(result) && result.length === 0) return ok("No assets found with that external identifier.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Observations (time-bounded state facts)
+// ==========================================================================
+
+server.tool(
+  "gc_create_observation",
+  "Record a time-bounded state fact (observation) about an operational asset, such as a configuration value, exposure status, identity assignment, deployment attribute, patch state, or discovered relationship.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    category: z.enum(OBSERVATION_CATEGORIES).describe("Category of observation"),
+    observation_key: z.string().max(200).describe("What is being observed (e.g. 'os_version', 'cve_exposure', 'ip_address')"),
+    observation_value: z.string().describe("The observed value"),
+    source: z.string().max(200).describe("Who or what produced this observation (e.g. 'nessus-scanner', 'aws-config')"),
+    observed_at: z.string().describe("ISO-8601 timestamp when the fact was observed"),
+    expires_at: z.string().optional().describe("ISO-8601 timestamp when this observation becomes stale/invalid"),
+    confidence: z.string().max(50).optional().describe("Confidence level (e.g. HIGH, MEDIUM, 0.95)"),
+    evidence_ref: z.string().max(2000).optional().describe("URL or reference to supporting evidence"),
+  },
+  async ({ asset_id, category, observation_key, observation_value, source, observed_at, expires_at, confidence, evidence_ref }) => {
+    try {
+      const data = { category, observation_key, observation_value, source, observed_at };
+      if (expires_at !== undefined) data.expires_at = expires_at;
+      if (confidence !== undefined) data.confidence = confidence;
+      if (evidence_ref !== undefined) data.evidence_ref = evidence_ref;
+      return ok(JSON.stringify(await createObservation(asset_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_observations",
+  "List observations for an operational asset, optionally filtered by category and/or key.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    category: z.enum(OBSERVATION_CATEGORIES).optional().describe("Filter by observation category"),
+    key: z.string().optional().describe("Filter by observation key"),
+  },
+  async ({ asset_id, category, key }) => {
+    try {
+      const result = await listObservations(asset_id, { category, key });
+      if (Array.isArray(result) && result.length === 0) return ok("No observations found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_observation",
+  "Get a specific observation by ID.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    observation_id: z.string().uuid().describe("UUID of the observation"),
+  },
+  async ({ asset_id, observation_id }) => {
+    try {
+      return ok(JSON.stringify(await getObservation(asset_id, observation_id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_observation",
+  "Update a mutable field of an observation (value, expiry, confidence, or evidence reference). Category, key, source, and observed-at are immutable.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    observation_id: z.string().uuid().describe("UUID of the observation to update"),
+    observation_value: z.string().optional().describe("Updated observed value"),
+    expires_at: z.string().optional().describe("Updated expiry timestamp"),
+    confidence: z.string().max(50).optional().describe("Updated confidence level"),
+    evidence_ref: z.string().max(2000).optional().describe("Updated evidence reference"),
+  },
+  async ({ asset_id, observation_id, observation_value, expires_at, confidence, evidence_ref }) => {
+    try {
+      const data = {};
+      if (observation_value !== undefined) data.observation_value = observation_value;
+      if (expires_at !== undefined) data.expires_at = expires_at;
+      if (confidence !== undefined) data.confidence = confidence;
+      if (evidence_ref !== undefined) data.evidence_ref = evidence_ref;
+      return ok(JSON.stringify(await updateObservation(asset_id, observation_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_observation",
+  "Delete an observation from an operational asset.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    observation_id: z.string().uuid().describe("UUID of the observation to delete"),
+  },
+  async ({ asset_id, observation_id }) => {
+    try {
+      await deleteObservation(asset_id, observation_id);
+      return ok("Observation deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_latest_observations",
+  "Get the most recent observation for each unique key on an operational asset. Useful for building a current-state snapshot.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+  },
+  async ({ asset_id }) => {
+    try {
+      const result = await listLatestObservations(asset_id);
+      if (Array.isArray(result) && result.length === 0) return ok("No observations found.");
       return ok(JSON.stringify(result, null, 2));
     } catch (e) {
       return err(e);
