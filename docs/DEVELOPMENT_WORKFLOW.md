@@ -124,3 +124,4 @@ PreToolUse hook on `Bash` — blocks `git merge`, `git push --force`, `git reset
 - **Update `MigrationSmokeTest` and `RequirementsE2EIntegrationTest`** version lists when adding migrations.
 - **Add `@NotAudited` to `@ManyToOne` references** to non-audited entities when using `@Audited`.
 - **Add `_audit` table migration** when adding `@Audited` entities.
+- **Default durable mutable entities to `BaseEntity`**. Only keep standalone lifecycle fields for intentionally append-only, snapshot, cache, or import/audit records.

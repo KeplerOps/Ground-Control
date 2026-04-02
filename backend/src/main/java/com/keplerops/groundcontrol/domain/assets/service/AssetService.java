@@ -116,7 +116,8 @@ public class AssetService {
     }
 
     public AssetRelation createRelation(UUID sourceId, UUID targetId, AssetRelationType relationType) {
-        return createRelation(new CreateAssetRelationCommand(targetId, relationType, null, null, null, null), sourceId);
+        return createRelation(
+                new CreateAssetRelationCommand(targetId, relationType, null, null, null, null, null), sourceId);
     }
 
     public AssetRelation createRelation(CreateAssetRelationCommand command, UUID sourceId) {
@@ -134,18 +135,25 @@ public class AssetService {
             throw new DomainValidationException("Cannot create relation between assets in different projects");
         }
         var relation = new AssetRelation(source, target, command.relationType());
-        if (command.sourceSystem() != null) {
-            relation.setSourceSystem(command.sourceSystem());
-        }
-        if (command.externalSourceId() != null) {
-            relation.setExternalSourceId(command.externalSourceId());
-        }
-        if (command.collectedAt() != null) {
-            relation.setCollectedAt(command.collectedAt());
-        }
-        if (command.confidence() != null) {
-            relation.setConfidence(command.confidence());
-        }
+        applyRelationMetadata(
+                relation,
+                command.description(),
+                command.sourceSystem(),
+                command.externalSourceId(),
+                command.collectedAt(),
+                command.confidence());
+        return relationRepository.save(relation);
+    }
+
+    public AssetRelation updateRelation(UUID assetId, UUID relationId, UpdateAssetRelationCommand command) {
+        var relation = getRelationBelongingTo(assetId, relationId);
+        applyRelationMetadata(
+                relation,
+                command.description(),
+                command.sourceSystem(),
+                command.externalSourceId(),
+                command.collectedAt(),
+                command.confidence());
         return relationRepository.save(relation);
     }
 
@@ -160,14 +168,7 @@ public class AssetService {
     }
 
     public void deleteRelation(UUID assetId, UUID relationId) {
-        var relation = relationRepository
-                .findById(relationId)
-                .orElseThrow(() -> new NotFoundException("Relation not found: " + relationId));
-        if (!relation.getSource().getId().equals(assetId)
-                && !relation.getTarget().getId().equals(assetId)) {
-            throw new NotFoundException("Relation " + relationId + " does not belong to asset " + assetId);
-        }
-        relationRepository.delete(relation);
+        relationRepository.delete(getRelationBelongingTo(assetId, relationId));
     }
 
     // --- Asset Links (cross-entity linking) ---
@@ -266,12 +267,47 @@ public class AssetService {
         return extId;
     }
 
+    private AssetRelation getRelationBelongingTo(UUID assetId, UUID relationId) {
+        var relation = relationRepository
+                .findByIdWithEntities(relationId)
+                .orElseThrow(() -> new NotFoundException("Relation not found: " + relationId));
+        if (!relation.getSource().getId().equals(assetId)
+                && !relation.getTarget().getId().equals(assetId)) {
+            throw new NotFoundException("Relation " + relationId + " does not belong to asset " + assetId);
+        }
+        return relation;
+    }
+
     private void applyProvenanceFields(AssetExternalId extId, Instant collectedAt, String confidence) {
         if (collectedAt != null) {
             extId.setCollectedAt(collectedAt);
         }
         if (confidence != null) {
             extId.setConfidence(confidence);
+        }
+    }
+
+    private void applyRelationMetadata(
+            AssetRelation relation,
+            String description,
+            String sourceSystem,
+            String externalSourceId,
+            Instant collectedAt,
+            String confidence) {
+        if (description != null) {
+            relation.setDescription(description);
+        }
+        if (sourceSystem != null) {
+            relation.setSourceSystem(sourceSystem);
+        }
+        if (externalSourceId != null) {
+            relation.setExternalSourceId(externalSourceId);
+        }
+        if (collectedAt != null) {
+            relation.setCollectedAt(collectedAt);
+        }
+        if (confidence != null) {
+            relation.setConfidence(confidence);
         }
     }
 }

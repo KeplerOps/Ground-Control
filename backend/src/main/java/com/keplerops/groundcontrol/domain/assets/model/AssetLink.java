@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.domain.assets.model;
 
+import com.keplerops.groundcontrol.domain.BaseEntity;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkType;
 import jakarta.persistence.Column;
@@ -7,17 +8,10 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
-import java.time.Instant;
-import java.util.UUID;
 import org.hibernate.envers.Audited;
 
 /**
@@ -30,12 +24,7 @@ import org.hibernate.envers.Audited;
         name = "asset_link",
         uniqueConstraints =
                 @UniqueConstraint(columnNames = {"asset_id", "target_type", "target_identifier", "link_type"}))
-public class AssetLink {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    @Column(updatable = false, nullable = false)
-    private UUID id;
+public class AssetLink extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "asset_id", nullable = false)
@@ -58,12 +47,6 @@ public class AssetLink {
     @Column(name = "target_title", length = 255)
     private String targetTitle = "";
 
-    @Column(nullable = false, updatable = false)
-    private Instant createdAt;
-
-    @Column(nullable = false)
-    private Instant updatedAt;
-
     protected AssetLink() {
         // JPA
     }
@@ -74,22 +57,6 @@ public class AssetLink {
         this.targetType = targetType;
         this.targetIdentifier = targetIdentifier;
         this.linkType = linkType;
-    }
-
-    @PrePersist
-    void onCreate() {
-        var now = Instant.now();
-        this.createdAt = now;
-        this.updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        this.updatedAt = Instant.now();
-    }
-
-    public UUID getId() {
-        return id;
     }
 
     public OperationalAsset getAsset() {
@@ -122,13 +89,5 @@ public class AssetLink {
 
     public void setTargetTitle(String targetTitle) {
         this.targetTitle = targetTitle;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
     }
 }

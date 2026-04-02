@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.TestUtil;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
@@ -46,13 +47,7 @@ class AgeGraphServiceTest {
 
     private static Project createTestProject() {
         var project = new Project("test-project", "Test Project");
-        try {
-            var field = Project.class.getDeclaredField("id");
-            field.setAccessible(true);
-            field.set(project, PROJECT_ID);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(project, "id", PROJECT_ID);
         return project;
     }
 

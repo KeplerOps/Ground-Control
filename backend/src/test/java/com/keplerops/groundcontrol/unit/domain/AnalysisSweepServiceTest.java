@@ -6,6 +6,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.TestUtil;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.qualitygates.service.QualityGateEvaluationResult;
@@ -23,7 +24,6 @@ import com.keplerops.groundcontrol.domain.requirements.service.SweepReport;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
-import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -57,13 +57,7 @@ class AnalysisSweepServiceTest {
 
     private static Project createTestProject() {
         var project = new Project("test-project", "Test Project");
-        try {
-            var field = Project.class.getDeclaredField("id");
-            field.setAccessible(true);
-            field.set(project, PROJECT_ID);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(project, "id", PROJECT_ID);
         return project;
     }
 
@@ -317,12 +311,6 @@ class AnalysisSweepServiceTest {
     }
 
     private static void setField(Object obj, String fieldName, Object value) {
-        try {
-            Field f = obj.getClass().getDeclaredField(fieldName);
-            f.setAccessible(true);
-            f.set(obj, value);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(obj, fieldName, value);
     }
 }

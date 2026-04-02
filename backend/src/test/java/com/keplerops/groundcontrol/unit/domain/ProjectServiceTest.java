@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.TestUtil;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
@@ -13,7 +14,6 @@ import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.projects.service.CreateProjectCommand;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.projects.service.UpdateProjectCommand;
-import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -41,25 +41,13 @@ class ProjectServiceTest {
 
     private Project makeProject(String identifier, String name) {
         var project = new Project(identifier, name);
-        try {
-            Field field = Project.class.getDeclaredField("id");
-            field.setAccessible(true);
-            field.set(project, UUID.randomUUID());
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(project, "id", UUID.randomUUID());
         return project;
     }
 
     private Project makeProjectWithId(UUID id, String identifier, String name) {
         var project = new Project(identifier, name);
-        try {
-            Field field = Project.class.getDeclaredField("id");
-            field.setAccessible(true);
-            field.set(project, id);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(project, "id", id);
         return project;
     }
 

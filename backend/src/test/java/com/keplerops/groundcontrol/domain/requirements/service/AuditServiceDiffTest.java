@@ -14,7 +14,6 @@ import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRel
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import jakarta.persistence.EntityManager;
-import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -53,13 +52,7 @@ class AuditServiceDiffTest {
     private AuditService service;
 
     private static void setField(Object obj, String fieldName, Object value) {
-        try {
-            Field f = obj.getClass().getDeclaredField(fieldName);
-            f.setAccessible(true);
-            f.set(obj, value);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
-        }
+        com.keplerops.groundcontrol.TestUtil.setField(obj, fieldName, value);
     }
 
     private static Requirement makeRequirement(String uid, String title) {

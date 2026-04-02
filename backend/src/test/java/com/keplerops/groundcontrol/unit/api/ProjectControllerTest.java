@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.keplerops.groundcontrol.TestUtil;
 import com.keplerops.groundcontrol.api.projects.ProjectController;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
@@ -18,7 +19,6 @@ import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.CreateProjectCommand;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.projects.service.UpdateProjectCommand;
-import java.lang.reflect.Field;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Nested;
@@ -40,13 +40,7 @@ class ProjectControllerTest {
 
     private Project makeProject(String identifier, String name) {
         var project = new Project(identifier, name);
-        try {
-            Field idField = Project.class.getDeclaredField("id");
-            idField.setAccessible(true);
-            idField.set(project, UUID.randomUUID());
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(project, "id", UUID.randomUUID());
         return project;
     }
 

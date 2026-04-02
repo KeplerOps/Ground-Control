@@ -164,6 +164,8 @@ class AssetControllerTest {
         var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
         setField(relation, "id", UUID.randomUUID());
         setField(relation, "createdAt", Instant.now());
+        setField(relation, "updatedAt", Instant.now());
+        relation.setDescription("Observed dependency");
 
         when(assetService.createRelation(
                         any(com.keplerops.groundcontrol.domain.assets.service.CreateAssetRelationCommand.class),
@@ -172,12 +174,15 @@ class AssetControllerTest {
 
         mockMvc.perform(post("/api/v1/assets/{id}/relations", ASSET_ID)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                {"targetId":"%s","relationType":"DEPENDS_ON"}
+                        .content(
+                                """
+                {"targetId":"%s","relationType":"DEPENDS_ON","description":"Observed dependency"}
                 """
-                                .formatted(target.getId())))
+                                        .formatted(target.getId())))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.relationType", is("DEPENDS_ON")));
+                .andExpect(jsonPath("$.relationType", is("DEPENDS_ON")))
+                .andExpect(jsonPath("$.description", is("Observed dependency")))
+                .andExpect(jsonPath("$.updatedAt").isNotEmpty());
     }
 
     @Test
@@ -189,13 +194,51 @@ class AssetControllerTest {
         var relation = new AssetRelation(source, target, AssetRelationType.COMMUNICATES_WITH);
         setField(relation, "id", UUID.randomUUID());
         setField(relation, "createdAt", Instant.now());
+        setField(relation, "updatedAt", Instant.now());
+        relation.setDescription("Service communication");
 
         when(assetService.getRelations(ASSET_ID)).thenReturn(List.of(relation));
 
         mockMvc.perform(get("/api/v1/assets/{id}/relations", ASSET_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].relationType", is("COMMUNICATES_WITH")));
+                .andExpect(jsonPath("$[0].relationType", is("COMMUNICATES_WITH")))
+                .andExpect(jsonPath("$[0].description", is("Service communication")))
+                .andExpect(jsonPath("$[0].updatedAt").isNotEmpty());
+    }
+
+    @Test
+    void updateRelationReturns200() throws Exception {
+        var source = makeAsset();
+        var target = makeAsset();
+        setField(target, "id", UUID.randomUUID());
+
+        var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
+        setField(relation, "id", UUID.randomUUID());
+        setField(relation, "createdAt", Instant.now());
+        setField(relation, "updatedAt", Instant.now());
+        relation.setDescription("Refined dependency");
+        relation.setSourceSystem("CMDB");
+        relation.setConfidence("0.95");
+
+        when(assetService.updateRelation(
+                        eq(ASSET_ID),
+                        eq(relation.getId()),
+                        any(com.keplerops.groundcontrol.domain.assets.service.UpdateAssetRelationCommand.class)))
+                .thenReturn(relation);
+
+        mockMvc.perform(
+                        put("/api/v1/assets/{id}/relations/{relationId}", ASSET_ID, relation.getId())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                {"description":"Refined dependency","sourceSystem":"CMDB","confidence":"0.95"}
+                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.description", is("Refined dependency")))
+                .andExpect(jsonPath("$.sourceSystem", is("CMDB")))
+                .andExpect(jsonPath("$.confidence", is("0.95")))
+                .andExpect(jsonPath("$.updatedAt").isNotEmpty());
     }
 
     @Test
@@ -413,6 +456,8 @@ class AssetControllerTest {
         var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
         setField(relation, "id", UUID.randomUUID());
         setField(relation, "createdAt", Instant.now());
+        setField(relation, "updatedAt", Instant.now());
+        relation.setDescription("Observed dependency");
         relation.setSourceSystem("AWS_CONFIG");
         relation.setConfidence("0.95");
 
@@ -425,11 +470,12 @@ class AssetControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(
                                 """
-                {"targetId":"%s","relationType":"DEPENDS_ON","sourceSystem":"AWS_CONFIG","confidence":"0.95"}
+                {"targetId":"%s","relationType":"DEPENDS_ON","description":"Observed dependency","sourceSystem":"AWS_CONFIG","confidence":"0.95"}
                 """
                                         .formatted(target.getId())))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.relationType", is("DEPENDS_ON")))
+                .andExpect(jsonPath("$.description", is("Observed dependency")))
                 .andExpect(jsonPath("$.sourceSystem", is("AWS_CONFIG")))
                 .andExpect(jsonPath("$.confidence", is("0.95")));
     }

@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.domain.requirements.model;
 
+import com.keplerops.groundcontrol.domain.BaseEntity;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.SyncStatus;
@@ -8,17 +9,11 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
-import java.util.UUID;
 import org.hibernate.envers.Audited;
 
 /**
@@ -32,7 +27,7 @@ import org.hibernate.envers.Audited;
                 @UniqueConstraint(
                         columnNames = {"requirement_id", "artifact_type", "artifact_identifier", "link_type"}))
 @SuppressWarnings("java:S125") // JML contract annotations are intentional, not dead code
-public class TraceabilityLink {
+public class TraceabilityLink extends BaseEntity {
 
     /*@ public invariant requirement != null;
     @ public invariant artifactType != null;
@@ -41,11 +36,6 @@ public class TraceabilityLink {
     @ public invariant syncStatus != null;
     @ public invariant artifactUrl != null;
     @ public invariant artifactTitle != null; @*/
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    @Column(updatable = false, nullable = false)
-    private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "requirement_id", nullable = false)
@@ -75,12 +65,6 @@ public class TraceabilityLink {
     @Column(name = "last_synced_at")
     private Instant lastSyncedAt;
 
-    @Column(nullable = false, updatable = false)
-    private Instant createdAt;
-
-    @Column(nullable = false)
-    private Instant updatedAt;
-
     protected TraceabilityLink() {
         // JPA
     }
@@ -102,23 +86,7 @@ public class TraceabilityLink {
         this.linkType = linkType;
     }
 
-    @PrePersist
-    void onCreate() {
-        var now = Instant.now();
-        this.createdAt = now;
-        this.updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        this.updatedAt = Instant.now();
-    }
-
     // --- Accessors ---
-
-    public UUID getId() {
-        return id;
-    }
 
     public Requirement getRequirement() {
         return requirement;
@@ -172,13 +140,5 @@ public class TraceabilityLink {
 
     public void setLastSyncedAt(Instant lastSyncedAt) {
         this.lastSyncedAt = lastSyncedAt;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
     }
 }
