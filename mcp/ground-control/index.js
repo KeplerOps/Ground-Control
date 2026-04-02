@@ -124,6 +124,17 @@ import {
   updateObservation,
   deleteObservation,
   listLatestObservations,
+  createRiskScenario,
+  listRiskScenarios,
+  getRiskScenario,
+  getRiskScenarioByUid,
+  updateRiskScenario,
+  deleteRiskScenario,
+  transitionRiskScenarioStatus,
+  getRiskScenarioRequirements,
+  createRiskScenarioLink,
+  listRiskScenarioLinks,
+  deleteRiskScenarioLink,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -138,6 +149,9 @@ import {
   ASSET_LINK_TARGET_TYPES,
   ASSET_LINK_TYPES,
   OBSERVATION_CATEGORIES,
+  RISK_SCENARIO_STATUSES,
+  RISK_SCENARIO_LINK_TARGET_TYPES,
+  RISK_SCENARIO_LINK_TYPES,
 } from "./lib.js";
 
 function ok(text) {
@@ -2455,6 +2469,203 @@ server.tool(
       const result = await listLatestObservations(asset_id);
       if (Array.isArray(result) && result.length === 0) return ok("No observations found.");
       return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Risk Scenario tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_risk_scenario",
+  "Create a risk scenario — a scoped statement of potential future loss tied to operational assets within a defined time horizon.",
+  {
+    uid: z.string().max(20).describe("Risk scenario UID (e.g. 'RS-001')"),
+    title: z.string().max(200).describe("Risk scenario title"),
+    threat_source: z.string().describe("Threat source or actor"),
+    threat_event: z.string().describe("Threat event or method"),
+    affected_object: z.string().describe("Affected object, asset, boundary, process, system, objective, or third party"),
+    vulnerability: z.string().optional().describe("Vulnerability, exposure, or resistance condition (when applicable)"),
+    consequence: z.string().describe("Effect or consequence description"),
+    time_horizon: z.string().max(100).describe("Defined time horizon (e.g. '12 months', 'Q2 2026')"),
+    observation_refs: z.string().optional().describe("Supporting observations or evidence references"),
+    topology_context: z.string().optional().describe("Links to related topology context"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ uid, title, threat_source, threat_event, affected_object, vulnerability, consequence, time_horizon, observation_refs, topology_context, project }) => {
+    try {
+      const data = { uid, title, threat_source, threat_event, affected_object, consequence, time_horizon };
+      if (vulnerability !== undefined) data.vulnerability = vulnerability;
+      if (observation_refs !== undefined) data.observation_refs = observation_refs;
+      if (topology_context !== undefined) data.topology_context = topology_context;
+      return ok(JSON.stringify(await createRiskScenario(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_risk_scenarios",
+  "List all risk scenarios for a project, ordered by creation date (newest first).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const scenarios = await listRiskScenarios(project);
+      if (Array.isArray(scenarios) && scenarios.length === 0) return ok("No risk scenarios found.");
+      return ok(JSON.stringify(scenarios, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_risk_scenario",
+  "Get a risk scenario by UUID or UID.",
+  {
+    id: z.string().optional().describe("Risk scenario UUID"),
+    uid: z.string().optional().describe("Risk scenario UID (e.g. 'RS-001')"),
+    project: z.string().optional().describe("Project identifier (required when looking up by UID with multiple projects)"),
+  },
+  async ({ id, uid, project }) => {
+    try {
+      if (id) {
+        return ok(JSON.stringify(await getRiskScenario(id), null, 2));
+      }
+      if (uid) {
+        return ok(JSON.stringify(await getRiskScenarioByUid(uid, project), null, 2));
+      }
+      return err(new Error("Provide either 'id' (UUID) or 'uid'"));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_risk_scenario",
+  "Update mutable fields of a risk scenario. Only provided fields are updated.",
+  {
+    id: z.string().uuid().describe("Risk scenario UUID"),
+    title: z.string().max(200).optional().describe("Updated title"),
+    threat_source: z.string().optional().describe("Updated threat source"),
+    threat_event: z.string().optional().describe("Updated threat event"),
+    affected_object: z.string().optional().describe("Updated affected object"),
+    vulnerability: z.string().optional().describe("Updated vulnerability"),
+    consequence: z.string().optional().describe("Updated consequence"),
+    time_horizon: z.string().max(100).optional().describe("Updated time horizon"),
+    observation_refs: z.string().optional().describe("Updated observation references"),
+    topology_context: z.string().optional().describe("Updated topology context"),
+  },
+  async ({ id, title, threat_source, threat_event, affected_object, vulnerability, consequence, time_horizon, observation_refs, topology_context }) => {
+    try {
+      const data = {};
+      if (title !== undefined) data.title = title;
+      if (threat_source !== undefined) data.threat_source = threat_source;
+      if (threat_event !== undefined) data.threat_event = threat_event;
+      if (affected_object !== undefined) data.affected_object = affected_object;
+      if (vulnerability !== undefined) data.vulnerability = vulnerability;
+      if (consequence !== undefined) data.consequence = consequence;
+      if (time_horizon !== undefined) data.time_horizon = time_horizon;
+      if (observation_refs !== undefined) data.observation_refs = observation_refs;
+      if (topology_context !== undefined) data.topology_context = topology_context;
+      return ok(JSON.stringify(await updateRiskScenario(id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_risk_scenario",
+  "Delete a risk scenario.",
+  {
+    id: z.string().uuid().describe("Risk scenario UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteRiskScenario(id);
+      return ok("Risk scenario deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_transition_risk_scenario_status",
+  "Transition a risk scenario to a new status. Valid transitions: DRAFT→IDENTIFIED, IDENTIFIED→ASSESSED|CLOSED, ASSESSED→TREATED|CLOSED, TREATED→ACCEPTED|CLOSED, ACCEPTED→CLOSED.",
+  {
+    id: z.string().uuid().describe("Risk scenario UUID"),
+    status: z.enum(RISK_SCENARIO_STATUSES).describe("Target status"),
+  },
+  async ({ id, status }) => {
+    try {
+      return ok(JSON.stringify(await transitionRiskScenarioStatus(id, status), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_create_risk_scenario_link",
+  "Link a risk scenario to a threat model, vulnerability, control, finding, evidence, audit record, risk register entry, observation, asset, requirement, or external artifact.",
+  {
+    risk_scenario_id: z.string().uuid().describe("Risk scenario UUID"),
+    target_type: z.enum(RISK_SCENARIO_LINK_TARGET_TYPES).describe("Type of the linked artifact"),
+    target_identifier: z.string().max(500).describe("Identifier of the linked artifact (UID, URL, or external ID)"),
+    link_type: z.enum(RISK_SCENARIO_LINK_TYPES).describe("Nature of the relationship"),
+    target_url: z.string().max(2000).optional().describe("URL of the linked artifact"),
+    target_title: z.string().max(255).optional().describe("Human-readable title of the linked artifact"),
+  },
+  async ({ risk_scenario_id, target_type, target_identifier, link_type, target_url, target_title }) => {
+    try {
+      const data = { target_type, target_identifier, link_type };
+      if (target_url !== undefined) data.target_url = target_url;
+      if (target_title !== undefined) data.target_title = target_title;
+      return ok(JSON.stringify(await createRiskScenarioLink(risk_scenario_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_risk_scenario_links",
+  "List all links from a risk scenario, optionally filtered by target type.",
+  {
+    risk_scenario_id: z.string().uuid().describe("Risk scenario UUID"),
+    target_type: z.enum(RISK_SCENARIO_LINK_TARGET_TYPES).optional().describe("Filter by target type"),
+  },
+  async ({ risk_scenario_id, target_type }) => {
+    try {
+      const result = await listRiskScenarioLinks(risk_scenario_id, { targetType: target_type });
+      if (Array.isArray(result) && result.length === 0) return ok("No links found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_risk_scenario_link",
+  "Delete a link from a risk scenario.",
+  {
+    risk_scenario_id: z.string().uuid().describe("Risk scenario UUID"),
+    link_id: z.string().uuid().describe("Link UUID"),
+  },
+  async ({ risk_scenario_id, link_id }) => {
+    try {
+      await deleteRiskScenarioLink(risk_scenario_id, link_id);
+      return ok("Risk scenario link deleted.");
     } catch (e) {
       return err(e);
     }

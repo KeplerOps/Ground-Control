@@ -23,6 +23,7 @@ export const ARTIFACT_TYPES = [
   "SPEC",
   "PROOF",
   "DOCUMENTATION",
+  "RISK_SCENARIO",
 ];
 export const LINK_TYPES = ["IMPLEMENTS", "TESTS", "DOCUMENTS", "CONSTRAINS", "VERIFIES"];
 export const METRIC_TYPES = ["COVERAGE", "ORPHAN_COUNT", "COMPLETENESS"];
@@ -81,6 +82,38 @@ export const OBSERVATION_CATEGORIES = [
   "PATCH_STATE",
   "RELATIONSHIP",
   "OTHER",
+];
+export const RISK_SCENARIO_STATUSES = [
+  "DRAFT",
+  "IDENTIFIED",
+  "ASSESSED",
+  "TREATED",
+  "ACCEPTED",
+  "CLOSED",
+];
+export const RISK_SCENARIO_LINK_TARGET_TYPES = [
+  "THREAT_MODEL",
+  "VULNERABILITY",
+  "CONTROL",
+  "FINDING",
+  "EVIDENCE",
+  "AUDIT_RECORD",
+  "RISK_REGISTER",
+  "OBSERVATION",
+  "ASSET",
+  "REQUIREMENT",
+  "EXTERNAL",
+];
+export const RISK_SCENARIO_LINK_TYPES = [
+  "MITIGATED_BY",
+  "EXPLOITS",
+  "AFFECTS",
+  "EVIDENCED_BY",
+  "GOVERNED_BY",
+  "ASSESSED_IN",
+  "REGISTERED_IN",
+  "OBSERVED_IN",
+  "ASSOCIATED",
 ];
 
 // ---------------------------------------------------------------------------
@@ -188,6 +221,13 @@ const TO_CAMEL = {
   expires_at: "expiresAt",
   evidence_ref: "evidenceRef",
   observation_id: "observationId",
+  threat_source: "threatSource",
+  threat_event: "threatEvent",
+  affected_object: "affectedObject",
+  time_horizon: "timeHorizon",
+  observation_refs: "observationRefs",
+  topology_context: "topologyContext",
+  risk_scenario_id: "riskScenarioId",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -997,4 +1037,61 @@ export async function deleteObservation(assetId, observationId) {
 
 export async function listLatestObservations(assetId) {
   return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/observations/latest`);
+}
+
+// ---------------------------------------------------------------------------
+// Risk Scenario API functions
+// ---------------------------------------------------------------------------
+
+export async function createRiskScenario(data, project) {
+  return request("POST", "/api/v1/risk-scenarios", { body: data, params: { project } });
+}
+
+export async function listRiskScenarios(project) {
+  return request("GET", "/api/v1/risk-scenarios", { params: { project } });
+}
+
+export async function getRiskScenario(id) {
+  return request("GET", `/api/v1/risk-scenarios/${encodeURIComponent(id)}`);
+}
+
+export async function getRiskScenarioByUid(uid, project) {
+  return request("GET", `/api/v1/risk-scenarios/uid/${encodeURIComponent(uid)}`, { params: { project } });
+}
+
+export async function updateRiskScenario(id, data) {
+  return request("PUT", `/api/v1/risk-scenarios/${encodeURIComponent(id)}`, { body: data });
+}
+
+export async function deleteRiskScenario(id) {
+  await request("DELETE", `/api/v1/risk-scenarios/${encodeURIComponent(id)}`);
+}
+
+export async function transitionRiskScenarioStatus(id, status) {
+  return request("PUT", `/api/v1/risk-scenarios/${encodeURIComponent(id)}/status`, { body: { status } });
+}
+
+export async function getRiskScenarioRequirements(id) {
+  return request("GET", `/api/v1/risk-scenarios/${encodeURIComponent(id)}/requirements`);
+}
+
+// ---------------------------------------------------------------------------
+// Risk Scenario Link API functions
+// ---------------------------------------------------------------------------
+
+export async function createRiskScenarioLink(riskScenarioId, data) {
+  return request("POST", `/api/v1/risk-scenarios/${encodeURIComponent(riskScenarioId)}/links`, { body: data });
+}
+
+export async function listRiskScenarioLinks(riskScenarioId, { targetType } = {}) {
+  return request("GET", `/api/v1/risk-scenarios/${encodeURIComponent(riskScenarioId)}/links`, {
+    params: { target_type: targetType },
+  });
+}
+
+export async function deleteRiskScenarioLink(riskScenarioId, linkId) {
+  await request(
+    "DELETE",
+    `/api/v1/risk-scenarios/${encodeURIComponent(riskScenarioId)}/links/${encodeURIComponent(linkId)}`,
+  );
 }
