@@ -66,9 +66,9 @@ class RiskScenarioServiceTest {
                 "External threat actor",
                 "Credential stuffing attack",
                 "Customer authentication portal",
-                "Data breach and unauthorized access",
-                "12 months",
-                "system");
+                "Data breach and unauthorized access");
+        rs.setTimeHorizon("12 months");
+        rs.setCreatedBy("system");
         rs.setVulnerability("Weak password policy");
         rs.setObservationRefs("OBS-001, OBS-002");
         rs.setTopologyContext("DMZ web tier");
@@ -184,9 +184,10 @@ class RiskScenarioServiceTest {
         @Test
         void throwsOnInvalidTransition() {
             var rs = makeScenario();
-            when(riskScenarioRepository.findById(rs.getId())).thenReturn(Optional.of(rs));
+            var rsId = rs.getId();
+            when(riskScenarioRepository.findById(rsId)).thenReturn(Optional.of(rs));
 
-            assertThatThrownBy(() -> riskScenarioService.transitionStatus(rs.getId(), RiskScenarioStatus.CLOSED))
+            assertThatThrownBy(() -> riskScenarioService.transitionStatus(rsId, RiskScenarioStatus.CLOSED))
                     .isInstanceOf(DomainValidationException.class);
         }
     }

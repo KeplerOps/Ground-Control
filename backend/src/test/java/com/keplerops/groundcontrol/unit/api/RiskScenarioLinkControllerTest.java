@@ -47,8 +47,8 @@ class RiskScenarioLinkControllerTest {
     private RiskScenarioLink makeLink() {
         var project = new Project("ground-control", "Ground Control");
         setField(project, "id", PROJECT_ID);
-        var scenario = new RiskScenario(
-                project, "RS-001", "Test scenario", "Source", "Event", "Object", "Consequence", "12 months", "system");
+        var scenario = new RiskScenario(project, "RS-001", "Test scenario", "Source", "Event", "Object", "Consequence");
+        scenario.setTimeHorizon("12 months");
         setField(scenario, "id", RS_ID);
         var link = new RiskScenarioLink(
                 scenario, RiskScenarioLinkTargetType.CONTROL, "CTRL-001", RiskScenarioLinkType.MITIGATED_BY);

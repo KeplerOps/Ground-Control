@@ -82,9 +82,7 @@ public class RiskScenario extends BaseEntity {
             String threatSource,
             String threatEvent,
             String affectedObject,
-            String consequence,
-            String timeHorizon,
-            String createdBy) {
+            String consequence) {
         this.project = project;
         this.uid = uid;
         this.title = title;
@@ -92,8 +90,6 @@ public class RiskScenario extends BaseEntity {
         this.threatEvent = threatEvent;
         this.affectedObject = affectedObject;
         this.consequence = consequence;
-        this.timeHorizon = timeHorizon;
-        this.createdBy = createdBy;
     }
 
     public void transitionStatus(RiskScenarioStatus newStatus) {
@@ -201,6 +197,10 @@ public class RiskScenario extends BaseEntity {
 
     public String getCreatedBy() {
         return createdBy;
+    }
+
+    public void setCreatedBy(String createdBy) {
+        this.createdBy = createdBy;
     }
 
     @Override

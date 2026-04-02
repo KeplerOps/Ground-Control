@@ -51,9 +51,9 @@ public class RiskScenarioService {
                 command.threatSource(),
                 command.threatEvent(),
                 command.affectedObject(),
-                command.consequence(),
-                command.timeHorizon(),
-                ActorHolder.get());
+                command.consequence());
+        scenario.setTimeHorizon(command.timeHorizon());
+        scenario.setCreatedBy(ActorHolder.get());
         if (command.vulnerability() != null) {
             scenario.setVulnerability(command.vulnerability());
         }
@@ -75,7 +75,7 @@ public class RiskScenarioService {
     }
 
     public RiskScenario update(UUID id, UpdateRiskScenarioCommand command) {
-        var scenario = getById(id);
+        var scenario = findByIdOrThrow(id);
 
         if (command.title() != null) {
             scenario.setTitle(command.title());
@@ -112,9 +112,7 @@ public class RiskScenarioService {
 
     @Transactional(readOnly = true)
     public RiskScenario getById(UUID id) {
-        return riskScenarioRepository
-                .findById(id)
-                .orElseThrow(() -> new NotFoundException("Risk scenario not found: " + id));
+        return findByIdOrThrow(id);
     }
 
     @Transactional(readOnly = true)
@@ -130,7 +128,7 @@ public class RiskScenarioService {
     }
 
     public RiskScenario transitionStatus(UUID id, RiskScenarioStatus newStatus) {
-        var scenario = getById(id);
+        var scenario = findByIdOrThrow(id);
         scenario.transitionStatus(newStatus);
         var saved = riskScenarioRepository.save(scenario);
         log.info(
@@ -142,16 +140,22 @@ public class RiskScenarioService {
     }
 
     public void delete(UUID id) {
-        var scenario = getById(id);
+        var scenario = findByIdOrThrow(id);
         riskScenarioRepository.delete(scenario);
         log.info("risk_scenario_deleted: id={} uid={}", scenario.getId(), scenario.getUid());
     }
 
     @Transactional(readOnly = true)
     public List<Requirement> findLinkedRequirements(UUID id) {
-        var scenario = getById(id);
+        var scenario = findByIdOrThrow(id);
         var links = traceabilityLinkRepository.findByArtifactTypeAndArtifactIdentifierWithRequirement(
                 ArtifactType.RISK_SCENARIO, scenario.getUid());
         return links.stream().map(link -> link.getRequirement()).toList();
+    }
+
+    private RiskScenario findByIdOrThrow(UUID id) {
+        return riskScenarioRepository
+                .findById(id)
+                .orElseThrow(() -> new NotFoundException("Risk scenario not found: " + id));
     }
 }

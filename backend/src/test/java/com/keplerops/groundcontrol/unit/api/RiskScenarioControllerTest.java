@@ -56,9 +56,9 @@ class RiskScenarioControllerTest {
                 "External threat actor",
                 "Credential stuffing attack",
                 "Customer authentication portal",
-                "Data breach and unauthorized access",
-                "12 months",
-                "system");
+                "Data breach and unauthorized access");
+        rs.setTimeHorizon("12 months");
+        rs.setCreatedBy("system");
         rs.setVulnerability("Weak password policy");
         rs.setObservationRefs("OBS-001");
         rs.setTopologyContext("DMZ web tier");

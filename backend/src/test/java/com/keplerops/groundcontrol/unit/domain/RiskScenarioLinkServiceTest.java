@@ -49,8 +49,8 @@ class RiskScenarioLinkServiceTest {
     void setUp() {
         var project = new Project("ground-control", "Ground Control");
         setField(project, "id", UUID.randomUUID());
-        scenario = new RiskScenario(
-                project, "RS-001", "Test scenario", "Source", "Event", "Object", "Consequence", "12 months", "system");
+        scenario = new RiskScenario(project, "RS-001", "Test scenario", "Source", "Event", "Object", "Consequence");
+        scenario.setTimeHorizon("12 months");
         scenarioId = UUID.randomUUID();
         setField(scenario, "id", scenarioId);
     }
@@ -182,10 +182,11 @@ class RiskScenarioLinkServiceTest {
         @Test
         void throwsWhenLinkBelongsToDifferentScenario() {
             var link = makeLink();
+            var linkId = link.getId();
             var otherScenarioId = UUID.randomUUID();
-            when(linkRepository.findById(link.getId())).thenReturn(Optional.of(link));
+            when(linkRepository.findById(linkId)).thenReturn(Optional.of(link));
 
-            assertThatThrownBy(() -> linkService.delete(otherScenarioId, link.getId()))
+            assertThatThrownBy(() -> linkService.delete(otherScenarioId, linkId))
                     .isInstanceOf(NotFoundException.class);
         }
     }
