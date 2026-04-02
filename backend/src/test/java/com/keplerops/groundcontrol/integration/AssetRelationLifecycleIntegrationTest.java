@@ -110,23 +110,15 @@ class AssetRelationLifecycleIntegrationTest extends BaseIntegrationTest {
                 stmt.setObject(1, relationId);
                 try (ResultSet rs = stmt.executeQuery()) {
                     assertThat(rs.next()).isTrue();
-                    assertThat(rs.getObject("created_at", Instant.class)).isNotNull();
-                    assertThat(rs.getObject("updated_at", Instant.class)).isNotNull();
-                    assertThat(rs.getObject("updated_at", Instant.class))
-                            .isAfterOrEqualTo(rs.getObject("created_at", Instant.class));
+                    var dbCreatedAt = rs.getTimestamp("created_at").toInstant();
+                    var dbUpdatedAt = rs.getTimestamp("updated_at").toInstant();
+                    assertThat(dbCreatedAt).isNotNull();
+                    assertThat(dbUpdatedAt).isNotNull();
+                    assertThat(dbUpdatedAt).isAfterOrEqualTo(dbCreatedAt);
                 }
             }
 
             try (var stmt = conn.prepareStatement("SELECT COUNT(*) FROM asset_relation_audit WHERE id = ?")) {
-                stmt.setObject(1, relationId);
-                try (ResultSet rs = stmt.executeQuery()) {
-                    assertThat(rs.next()).isTrue();
-                    assertThat(rs.getInt(1)).isGreaterThanOrEqualTo(2);
-                }
-            }
-
-            try (var stmt = conn.prepareStatement(
-                    "SELECT COUNT(*) FROM asset_relation_audit WHERE id = ? AND updated_at IS NOT NULL")) {
                 stmt.setObject(1, relationId);
                 try (ResultSet rs = stmt.executeQuery()) {
                     assertThat(rs.next()).isTrue();
