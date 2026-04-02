@@ -30,7 +30,8 @@ public class AuditRetentionJob {
             "architecture_decision_record_audit",
             "operational_asset_audit",
             "asset_relation_audit",
-            "asset_link_audit");
+            "asset_link_audit",
+            "asset_external_id_audit");
 
     private final AuditRetentionProperties properties;
     private final EntityManager entityManager;
