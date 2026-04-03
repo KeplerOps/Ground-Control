@@ -39,7 +39,8 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                 .containsExactly(
                         "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012", "013",
                         "014", "015", "016", "017", "018", "019", "020", "021", "022", "023", "024", "025", "026",
-                        "027", "028");
+                        "027", "028", "029", "030", "031", "032", "033", "034", "035", "036", "037", "038", "039",
+                        "040", "041", "042");
     }
 
     @Test
@@ -75,6 +76,36 @@ class MigrationSmokeTest extends BaseIntegrationTest {
         entityManager.createNativeQuery("SELECT 1 FROM asset_relation LIMIT 1").getResultList();
         entityManager
                 .createNativeQuery("SELECT 1 FROM asset_relation_audit LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT updated_at FROM asset_relation LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT updated_at FROM asset_relation_audit LIMIT 1")
+                .getResultList();
+        entityManager.createNativeQuery("SELECT 1 FROM asset_link LIMIT 1").getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM asset_link_audit LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM asset_external_id LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM asset_external_id_audit LIMIT 1")
+                .getResultList();
+        entityManager.createNativeQuery("SELECT 1 FROM observation LIMIT 1").getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM observation_audit LIMIT 1")
+                .getResultList();
+        entityManager.createNativeQuery("SELECT 1 FROM risk_scenario LIMIT 1").getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM risk_scenario_audit LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM risk_scenario_link LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM risk_scenario_link_audit LIMIT 1")
                 .getResultList();
     }
 }

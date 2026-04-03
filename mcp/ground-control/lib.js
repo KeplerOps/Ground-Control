@@ -23,6 +23,7 @@ export const ARTIFACT_TYPES = [
   "SPEC",
   "PROOF",
   "DOCUMENTATION",
+  "RISK_SCENARIO",
 ];
 export const LINK_TYPES = ["IMPLEMENTS", "TESTS", "DOCUMENTS", "CONSTRAINS", "VERIFIES"];
 export const METRIC_TYPES = ["COVERAGE", "ORPHAN_COUNT", "COMPLETENESS"];
@@ -31,12 +32,17 @@ export const ADR_STATUSES = ["PROPOSED", "ACCEPTED", "DEPRECATED", "SUPERSEDED"]
 export const ASSET_TYPES = [
   "APPLICATION",
   "SERVICE",
+  "SYSTEM",
   "DATABASE",
   "NETWORK",
   "HOST",
   "CONTAINER",
   "IDENTITY",
   "DATA_STORE",
+  "ENDPOINT",
+  "INTEGRATION",
+  "WORKLOAD",
+  "THIRD_PARTY",
   "BOUNDARY",
   "OTHER",
 ];
@@ -48,6 +54,66 @@ export const ASSET_RELATION_TYPES = [
   "SUPPORTS",
   "ACCESSES",
   "DATA_FLOW",
+];
+export const ASSET_LINK_TARGET_TYPES = [
+  "REQUIREMENT",
+  "CONTROL",
+  "RISK_SCENARIO",
+  "THREAT_MODEL_ENTRY",
+  "FINDING",
+  "EVIDENCE",
+  "AUDIT",
+  "EXTERNAL",
+];
+export const ASSET_LINK_TYPES = [
+  "IMPLEMENTS",
+  "MITIGATES",
+  "SUBJECT_OF",
+  "EVIDENCED_BY",
+  "GOVERNED_BY",
+  "DEPENDS_ON",
+  "ASSOCIATED",
+];
+export const OBSERVATION_CATEGORIES = [
+  "CONFIGURATION",
+  "EXPOSURE",
+  "IDENTITY",
+  "DEPLOYMENT",
+  "PATCH_STATE",
+  "RELATIONSHIP",
+  "OTHER",
+];
+export const RISK_SCENARIO_STATUSES = [
+  "DRAFT",
+  "IDENTIFIED",
+  "ASSESSED",
+  "TREATED",
+  "ACCEPTED",
+  "CLOSED",
+];
+export const RISK_SCENARIO_LINK_TARGET_TYPES = [
+  "THREAT_MODEL",
+  "VULNERABILITY",
+  "CONTROL",
+  "FINDING",
+  "EVIDENCE",
+  "AUDIT_RECORD",
+  "RISK_REGISTER",
+  "OBSERVATION",
+  "ASSET",
+  "REQUIREMENT",
+  "EXTERNAL",
+];
+export const RISK_SCENARIO_LINK_TYPES = [
+  "MITIGATED_BY",
+  "EXPLOITS",
+  "AFFECTS",
+  "EVIDENCED_BY",
+  "GOVERNED_BY",
+  "ASSESSED_IN",
+  "REGISTERED_IN",
+  "OBSERVED_IN",
+  "ASSOCIATED",
 ];
 
 // ---------------------------------------------------------------------------
@@ -135,9 +201,33 @@ const TO_CAMEL = {
   decision_date: "decisionDate",
   superseded_by: "supersededBy",
   asset_type: "assetType",
+  asset_id: "assetId",
+  asset_uid: "assetUid",
   archived_at: "archivedAt",
   member_uids: "memberUids",
   root_uids: "rootUids",
+  target_type: "targetType",
+  target_identifier: "targetIdentifier",
+  target_url: "targetUrl",
+  target_title: "targetTitle",
+  source_system: "sourceSystem",
+  source_id: "sourceId",
+  collected_at: "collectedAt",
+  external_source_id: "externalSourceId",
+  external_id_id: "externalIdId",
+  observation_key: "observationKey",
+  observation_value: "observationValue",
+  observed_at: "observedAt",
+  expires_at: "expiresAt",
+  evidence_ref: "evidenceRef",
+  observation_id: "observationId",
+  threat_source: "threatSource",
+  threat_event: "threatEvent",
+  affected_object: "affectedObject",
+  time_horizon: "timeHorizon",
+  observation_refs: "observationRefs",
+  topology_context: "topologyContext",
+  risk_scenario_id: "riskScenarioId",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -852,4 +942,156 @@ export async function assetImpactAnalysis(assetId) {
 
 export async function extractAssetSubgraph(data, project) {
   return request("POST", "/api/v1/assets/topology/subgraph", { body: data, params: { project } });
+}
+
+// --- Asset Links (cross-entity linking) ---
+
+export async function createAssetLink(assetId, data) {
+  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/links`, { body: data });
+}
+
+export async function getAssetLinks(assetId, targetType) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/links`, {
+    params: { target_type: targetType },
+  });
+}
+
+export async function deleteAssetLink(assetId, linkId) {
+  await request("DELETE", `/api/v1/assets/${encodeURIComponent(assetId)}/links/${encodeURIComponent(linkId)}`);
+}
+
+export async function getAssetLinksByTarget(targetType, targetIdentifier, project) {
+  return request("GET", "/api/v1/assets/links/by-target", {
+    params: { target_type: targetType, target_identifier: targetIdentifier, project },
+  });
+}
+
+// --- External Identifiers (source provenance) ---
+
+export async function createAssetExternalId(assetId, data) {
+  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/external-ids`, { body: data });
+}
+
+export async function getAssetExternalIds(assetId, sourceSystem) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/external-ids`, {
+    params: { source_system: sourceSystem },
+  });
+}
+
+export async function updateAssetExternalId(assetId, extIdId, data) {
+  return request(
+    "PUT",
+    `/api/v1/assets/${encodeURIComponent(assetId)}/external-ids/${encodeURIComponent(extIdId)}`,
+    { body: data },
+  );
+}
+
+export async function deleteAssetExternalId(assetId, extIdId) {
+  await request(
+    "DELETE",
+    `/api/v1/assets/${encodeURIComponent(assetId)}/external-ids/${encodeURIComponent(extIdId)}`,
+  );
+}
+
+export async function findAssetByExternalId(sourceSystem, sourceId, project) {
+  return request("GET", "/api/v1/assets/external-ids/by-source", {
+    params: { source_system: sourceSystem, source_id: sourceId, project },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Observation API functions
+// ---------------------------------------------------------------------------
+
+export async function createObservation(assetId, data) {
+  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/observations`, { body: data });
+}
+
+export async function listObservations(assetId, { category, key } = {}) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/observations`, {
+    params: { category, key },
+  });
+}
+
+export async function getObservation(assetId, observationId) {
+  return request(
+    "GET",
+    `/api/v1/assets/${encodeURIComponent(assetId)}/observations/${encodeURIComponent(observationId)}`,
+  );
+}
+
+export async function updateObservation(assetId, observationId, data) {
+  return request(
+    "PUT",
+    `/api/v1/assets/${encodeURIComponent(assetId)}/observations/${encodeURIComponent(observationId)}`,
+    { body: data },
+  );
+}
+
+export async function deleteObservation(assetId, observationId) {
+  await request(
+    "DELETE",
+    `/api/v1/assets/${encodeURIComponent(assetId)}/observations/${encodeURIComponent(observationId)}`,
+  );
+}
+
+export async function listLatestObservations(assetId) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/observations/latest`);
+}
+
+// ---------------------------------------------------------------------------
+// Risk Scenario API functions
+// ---------------------------------------------------------------------------
+
+export async function createRiskScenario(data, project) {
+  return request("POST", "/api/v1/risk-scenarios", { body: data, params: { project } });
+}
+
+export async function listRiskScenarios(project) {
+  return request("GET", "/api/v1/risk-scenarios", { params: { project } });
+}
+
+export async function getRiskScenario(id) {
+  return request("GET", `/api/v1/risk-scenarios/${encodeURIComponent(id)}`);
+}
+
+export async function getRiskScenarioByUid(uid, project) {
+  return request("GET", `/api/v1/risk-scenarios/uid/${encodeURIComponent(uid)}`, { params: { project } });
+}
+
+export async function updateRiskScenario(id, data) {
+  return request("PUT", `/api/v1/risk-scenarios/${encodeURIComponent(id)}`, { body: data });
+}
+
+export async function deleteRiskScenario(id) {
+  await request("DELETE", `/api/v1/risk-scenarios/${encodeURIComponent(id)}`);
+}
+
+export async function transitionRiskScenarioStatus(id, status) {
+  return request("PUT", `/api/v1/risk-scenarios/${encodeURIComponent(id)}/status`, { body: { status } });
+}
+
+export async function getRiskScenarioRequirements(id) {
+  return request("GET", `/api/v1/risk-scenarios/${encodeURIComponent(id)}/requirements`);
+}
+
+// ---------------------------------------------------------------------------
+// Risk Scenario Link API functions
+// ---------------------------------------------------------------------------
+
+export async function createRiskScenarioLink(riskScenarioId, data) {
+  return request("POST", `/api/v1/risk-scenarios/${encodeURIComponent(riskScenarioId)}/links`, { body: data });
+}
+
+export async function listRiskScenarioLinks(riskScenarioId, { targetType } = {}) {
+  return request("GET", `/api/v1/risk-scenarios/${encodeURIComponent(riskScenarioId)}/links`, {
+    params: { target_type: targetType },
+  });
+}
+
+export async function deleteRiskScenarioLink(riskScenarioId, linkId) {
+  await request(
+    "DELETE",
+    `/api/v1/risk-scenarios/${encodeURIComponent(riskScenarioId)}/links/${encodeURIComponent(linkId)}`,
+  );
 }

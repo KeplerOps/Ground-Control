@@ -1,15 +1,21 @@
 package com.keplerops.groundcontrol.domain.assets.service;
 
+import com.keplerops.groundcontrol.domain.assets.model.AssetExternalId;
+import com.keplerops.groundcontrol.domain.assets.model.AssetLink;
 import com.keplerops.groundcontrol.domain.assets.model.AssetRelation;
 import com.keplerops.groundcontrol.domain.assets.model.OperationalAsset;
+import com.keplerops.groundcontrol.domain.assets.repository.AssetExternalIdRepository;
+import com.keplerops.groundcontrol.domain.assets.repository.AssetLinkRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.AssetRelationRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.OperationalAssetRepository;
+import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -22,14 +28,20 @@ public class AssetService {
 
     private final OperationalAssetRepository assetRepository;
     private final AssetRelationRepository relationRepository;
+    private final AssetLinkRepository linkRepository;
+    private final AssetExternalIdRepository externalIdRepository;
     private final ProjectRepository projectRepository;
 
     public AssetService(
             OperationalAssetRepository assetRepository,
             AssetRelationRepository relationRepository,
+            AssetLinkRepository linkRepository,
+            AssetExternalIdRepository externalIdRepository,
             ProjectRepository projectRepository) {
         this.assetRepository = assetRepository;
         this.relationRepository = relationRepository;
+        this.linkRepository = linkRepository;
+        this.externalIdRepository = externalIdRepository;
         this.projectRepository = projectRepository;
     }
 
@@ -104,19 +116,44 @@ public class AssetService {
     }
 
     public AssetRelation createRelation(UUID sourceId, UUID targetId, AssetRelationType relationType) {
-        if (sourceId.equals(targetId)) {
+        return createRelation(
+                new CreateAssetRelationCommand(targetId, relationType, null, null, null, null, null), sourceId);
+    }
+
+    public AssetRelation createRelation(CreateAssetRelationCommand command, UUID sourceId) {
+        if (sourceId.equals(command.targetId())) {
             throw new DomainValidationException("An asset cannot relate to itself");
         }
-        if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(sourceId, targetId, relationType)) {
-            throw new ConflictException(
-                    "Relation " + relationType + " already exists between " + sourceId + " and " + targetId);
+        if (relationRepository.existsBySourceIdAndTargetIdAndRelationType(
+                sourceId, command.targetId(), command.relationType())) {
+            throw new ConflictException("Relation " + command.relationType() + " already exists between " + sourceId
+                    + " and " + command.targetId());
         }
         var source = getById(sourceId);
-        var target = getById(targetId);
+        var target = getById(command.targetId());
         if (!source.getProject().getId().equals(target.getProject().getId())) {
             throw new DomainValidationException("Cannot create relation between assets in different projects");
         }
-        var relation = new AssetRelation(source, target, relationType);
+        var relation = new AssetRelation(source, target, command.relationType());
+        applyRelationMetadata(
+                relation,
+                command.description(),
+                command.sourceSystem(),
+                command.externalSourceId(),
+                command.collectedAt(),
+                command.confidence());
+        return relationRepository.save(relation);
+    }
+
+    public AssetRelation updateRelation(UUID assetId, UUID relationId, UpdateAssetRelationCommand command) {
+        var relation = getRelationBelongingTo(assetId, relationId);
+        applyRelationMetadata(
+                relation,
+                command.description(),
+                command.sourceSystem(),
+                command.externalSourceId(),
+                command.collectedAt(),
+                command.confidence());
         return relationRepository.save(relation);
     }
 
@@ -131,13 +168,146 @@ public class AssetService {
     }
 
     public void deleteRelation(UUID assetId, UUID relationId) {
+        relationRepository.delete(getRelationBelongingTo(assetId, relationId));
+    }
+
+    // --- Asset Links (cross-entity linking) ---
+
+    public AssetLink createLink(UUID assetId, CreateAssetLinkCommand command) {
+        var asset = getById(assetId);
+        if (linkRepository.existsByAssetIdAndTargetTypeAndTargetIdentifierAndLinkType(
+                assetId, command.targetType(), command.targetIdentifier(), command.linkType())) {
+            throw new ConflictException("Link already exists: " + command.linkType() + " -> " + command.targetType()
+                    + ":" + command.targetIdentifier());
+        }
+        var link = new AssetLink(asset, command.targetType(), command.targetIdentifier(), command.linkType());
+        if (command.targetUrl() != null) {
+            link.setTargetUrl(command.targetUrl());
+        }
+        if (command.targetTitle() != null) {
+            link.setTargetTitle(command.targetTitle());
+        }
+        return linkRepository.save(link);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AssetLink> getLinksForAsset(UUID assetId) {
+        getById(assetId);
+        return linkRepository.findByAssetId(assetId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AssetLink> getLinksForAssetByTargetType(UUID assetId, AssetLinkTargetType targetType) {
+        getById(assetId);
+        return linkRepository.findByAssetIdAndTargetType(assetId, targetType);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AssetLink> getLinksByTarget(UUID projectId, AssetLinkTargetType targetType, String targetIdentifier) {
+        return linkRepository.findByTargetTypeAndTargetIdentifierAndProjectId(targetType, targetIdentifier, projectId);
+    }
+
+    public void deleteLink(UUID assetId, UUID linkId) {
+        var link =
+                linkRepository.findById(linkId).orElseThrow(() -> new NotFoundException("Link not found: " + linkId));
+        if (!link.getAsset().getId().equals(assetId)) {
+            throw new NotFoundException("Link " + linkId + " does not belong to asset " + assetId);
+        }
+        linkRepository.delete(link);
+    }
+
+    // --- External Identifiers (source provenance) ---
+
+    public AssetExternalId createExternalId(UUID assetId, CreateAssetExternalIdCommand command) {
+        var asset = getById(assetId);
+        if (externalIdRepository.existsByAssetIdAndSourceSystemAndSourceId(
+                assetId, command.sourceSystem(), command.sourceId())) {
+            throw new ConflictException("External ID already exists: " + command.sourceSystem() + ":"
+                    + command.sourceId() + " for asset " + assetId);
+        }
+        var extId = new AssetExternalId(asset, command.sourceSystem(), command.sourceId());
+        applyProvenanceFields(extId, command.collectedAt(), command.confidence());
+        return externalIdRepository.save(extId);
+    }
+
+    public AssetExternalId updateExternalId(UUID assetId, UUID extIdId, UpdateAssetExternalIdCommand command) {
+        var extId = getExternalIdBelongingTo(assetId, extIdId);
+        applyProvenanceFields(extId, command.collectedAt(), command.confidence());
+        return externalIdRepository.save(extId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AssetExternalId> getExternalIds(UUID assetId) {
+        getById(assetId);
+        return externalIdRepository.findByAssetId(assetId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AssetExternalId> getExternalIdsBySource(UUID assetId, String sourceSystem) {
+        getById(assetId);
+        return externalIdRepository.findByAssetIdAndSourceSystem(assetId, sourceSystem);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AssetExternalId> findByExternalId(UUID projectId, String sourceSystem, String sourceId) {
+        return externalIdRepository.findBySourceSystemAndSourceIdAndProjectId(sourceSystem, sourceId, projectId);
+    }
+
+    public void deleteExternalId(UUID assetId, UUID extIdId) {
+        externalIdRepository.delete(getExternalIdBelongingTo(assetId, extIdId));
+    }
+
+    private AssetExternalId getExternalIdBelongingTo(UUID assetId, UUID extIdId) {
+        var extId = externalIdRepository
+                .findByIdWithAsset(extIdId)
+                .orElseThrow(() -> new NotFoundException("External ID not found: " + extIdId));
+        if (!extId.getAsset().getId().equals(assetId)) {
+            throw new NotFoundException("External ID " + extIdId + " does not belong to asset " + assetId);
+        }
+        return extId;
+    }
+
+    private AssetRelation getRelationBelongingTo(UUID assetId, UUID relationId) {
         var relation = relationRepository
-                .findById(relationId)
+                .findByIdWithEntities(relationId)
                 .orElseThrow(() -> new NotFoundException("Relation not found: " + relationId));
         if (!relation.getSource().getId().equals(assetId)
                 && !relation.getTarget().getId().equals(assetId)) {
             throw new NotFoundException("Relation " + relationId + " does not belong to asset " + assetId);
         }
-        relationRepository.delete(relation);
+        return relation;
+    }
+
+    private void applyProvenanceFields(AssetExternalId extId, Instant collectedAt, String confidence) {
+        if (collectedAt != null) {
+            extId.setCollectedAt(collectedAt);
+        }
+        if (confidence != null) {
+            extId.setConfidence(confidence);
+        }
+    }
+
+    private void applyRelationMetadata(
+            AssetRelation relation,
+            String description,
+            String sourceSystem,
+            String externalSourceId,
+            Instant collectedAt,
+            String confidence) {
+        if (description != null) {
+            relation.setDescription(description);
+        }
+        if (sourceSystem != null) {
+            relation.setSourceSystem(sourceSystem);
+        }
+        if (externalSourceId != null) {
+            relation.setExternalSourceId(externalSourceId);
+        }
+        if (collectedAt != null) {
+            relation.setCollectedAt(collectedAt);
+        }
+        if (confidence != null) {
+            relation.setConfidence(confidence);
+        }
     }
 }

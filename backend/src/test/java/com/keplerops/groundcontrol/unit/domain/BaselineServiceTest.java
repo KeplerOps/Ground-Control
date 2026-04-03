@@ -10,6 +10,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.TestUtil;
 import com.keplerops.groundcontrol.domain.baselines.model.Baseline;
 import com.keplerops.groundcontrol.domain.baselines.repository.BaselineRepository;
 import com.keplerops.groundcontrol.domain.baselines.service.BaselineService;
@@ -22,7 +23,6 @@ import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
-import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -91,13 +91,7 @@ class BaselineServiceTest {
     }
 
     private static void setField(Object target, String fieldName, Object value) {
-        try {
-            Field field = target.getClass().getDeclaredField(fieldName);
-            field.setAccessible(true);
-            field.set(target, value);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(target, fieldName, value);
     }
 
     @Nested

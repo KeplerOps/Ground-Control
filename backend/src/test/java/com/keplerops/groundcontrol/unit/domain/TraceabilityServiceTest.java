@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.TestUtil;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
@@ -18,7 +19,6 @@ import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityServi
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
-import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -42,13 +42,7 @@ class TraceabilityServiceTest {
 
     private static Project createTestProject() {
         var project = new Project("test-project", "Test Project");
-        try {
-            var field = Project.class.getDeclaredField("id");
-            field.setAccessible(true);
-            field.set(project, UUID.fromString("00000000-0000-0000-0000-000000000001"));
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(project, "id", UUID.fromString("00000000-0000-0000-0000-000000000001"));
         return project;
     }
 
@@ -78,13 +72,7 @@ class TraceabilityServiceTest {
     }
 
     private static void setField(Object obj, String fieldName, Object value) {
-        try {
-            Field f = obj.getClass().getDeclaredField(fieldName);
-            f.setAccessible(true);
-            f.set(obj, value);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(obj, fieldName, value);
     }
 
     @Nested

@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyIterable;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.TestUtil;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
@@ -34,7 +35,6 @@ import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
-import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -73,13 +73,7 @@ class AnalysisServiceTest {
 
     private static Project createTestProject() {
         var project = new Project("test-project", "Test Project");
-        try {
-            var field = Project.class.getDeclaredField("id");
-            field.setAccessible(true);
-            field.set(project, PROJECT_ID);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(project, "id", PROJECT_ID);
         return project;
     }
 
@@ -102,13 +96,7 @@ class AnalysisServiceTest {
     }
 
     private static void setField(Object obj, String fieldName, Object value) {
-        try {
-            Field f = obj.getClass().getDeclaredField(fieldName);
-            f.setAccessible(true);
-            f.set(obj, value);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(obj, fieldName, value);
     }
 
     @Nested

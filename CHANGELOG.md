@@ -5,6 +5,103 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.98.0] - 2026-04-01
+
+### Added
+
+- First-class Risk Scenario entity representing scoped statements of
+  potential future loss tied to operational assets within a defined
+  time horizon, supporting FAIR, NIST SP 800-30, and ISO-style risk
+  methods (GC-T009)
+- Risk scenario fields: threat source/actor, threat event/method,
+  affected object, vulnerability/exposure/resistance condition,
+  consequence, time horizon, observation references, topology context
+- Six-state lifecycle: DRAFT, IDENTIFIED, ASSESSED, TREATED, ACCEPTED,
+  CLOSED with early-close shortcuts from IDENTIFIED/ASSESSED/TREATED
+- Risk Scenario Link entity for outbound linking to threat models,
+  vulnerabilities, controls, findings, evidence, audit records, risk
+  registers, observations, assets, requirements, and external artifacts
+- Nine link relationship types: MITIGATED_BY, EXPLOITS, AFFECTS,
+  EVIDENCED_BY, GOVERNED_BY, ASSESSED_IN, REGISTERED_IN, OBSERVED_IN,
+  ASSOCIATED
+- REST API endpoints: `POST/GET /api/v1/risk-scenarios`,
+  `GET/PUT/DELETE /api/v1/risk-scenarios/{id}`,
+  `GET /api/v1/risk-scenarios/uid/{uid}`,
+  `PUT /api/v1/risk-scenarios/{id}/status`,
+  `POST/GET /api/v1/risk-scenarios/{id}/links`,
+  `DELETE /api/v1/risk-scenarios/{id}/links/{linkId}`
+- MCP tools: `gc_create_risk_scenario`, `gc_list_risk_scenarios`,
+  `gc_get_risk_scenario`, `gc_update_risk_scenario`,
+  `gc_delete_risk_scenario`, `gc_transition_risk_scenario_status`,
+  `gc_create_risk_scenario_link`, `gc_list_risk_scenario_links`,
+  `gc_delete_risk_scenario_link`
+- Database migrations V039-V042 for risk scenario and risk scenario
+  link tables with Envers audit
+- RISK_SCENARIO added to ArtifactType for traceability linking
+
+## [0.97.0] - 2026-04-01
+
+### Added
+
+- First-class Observation entity for recording time-bounded state facts
+  about operational assets, such as configuration values, exposure status,
+  identity assignments, deployment attributes, patch state, or discovered
+  relationships (GC-M015)
+- Observations are distinct from asset definitions and record source,
+  observed-at time, freshness/validity window (expires-at), confidence,
+  and supporting evidence references
+- Seven observation categories: CONFIGURATION, EXPOSURE, IDENTITY,
+  DEPLOYMENT, PATCH_STATE, RELATIONSHIP, OTHER
+- REST API endpoints: `POST/GET /api/v1/assets/{id}/observations`,
+  `GET/PUT/DELETE /api/v1/assets/{id}/observations/{obsId}`,
+  `GET /api/v1/assets/{id}/observations/latest` for current-state snapshots
+- MCP tools: `gc_create_observation`, `gc_list_observations`,
+  `gc_get_observation`, `gc_update_observation`, `gc_delete_observation`,
+  `gc_list_latest_observations`
+- Database migrations V035-V036 for observation table with Envers audit
+
+## [0.96.0] - 2026-04-01
+
+### Added
+
+- External identifiers and source provenance for operational assets:
+  assets can now be mapped to their representations in external source
+  systems (AWS ARN, Terraform resource ID, ServiceNow CI, etc.) with
+  collection timestamps and confidence metadata (GC-M014)
+- Source provenance on asset relations: topology facts now carry optional
+  source system, external source identifier, collection timestamp, and
+  confidence metadata
+- Multiple overlapping sources per asset without assuming a single
+  perfect inventory
+- REST API endpoints: `POST/GET /api/v1/assets/{id}/external-ids`,
+  `PUT/DELETE /api/v1/assets/{id}/external-ids/{extIdId}`,
+  `GET /api/v1/assets/external-ids/by-source` for reverse lookup
+- MCP tools: `gc_create_asset_external_id`, `gc_list_asset_external_ids`,
+  `gc_update_asset_external_id`, `gc_delete_asset_external_id`,
+  `gc_find_asset_by_external_id`
+- Updated `gc_create_asset_relation` and `gc_get_asset_relations` with
+  provenance fields
+- Database migrations V031-V034 for asset_external_id table with Envers
+  audit and provenance columns on asset_relation
+
+## [0.95.0] - 2026-04-01
+
+### Added
+
+- Cross-entity asset linking: operational assets can now be linked to
+  requirements, controls, risk scenarios, threat-model entries, findings,
+  evidence, audits, and external artifacts (GC-M010)
+- Seven link types: IMPLEMENTS, MITIGATES, SUBJECT_OF, EVIDENCED_BY,
+  GOVERNED_BY, DEPENDS_ON, ASSOCIATED
+- Five new asset types: SYSTEM, WORKLOAD, ENDPOINT, INTEGRATION, THIRD_PARTY
+- REST API endpoints: `POST/GET /api/v1/assets/{id}/links`,
+  `DELETE /api/v1/assets/{id}/links/{linkId}`,
+  `GET /api/v1/assets/links/by-target` for reverse lookup
+- MCP tools: `gc_create_asset_link`, `gc_get_asset_links`,
+  `gc_delete_asset_link`, `gc_get_asset_links_by_target`
+- Database migrations V029-V030 for asset_link table with Envers audit
+- ADR-020: Asset Cross-Entity Linking
+
 ## [0.94.0] - 2026-03-31
 
 ### Added

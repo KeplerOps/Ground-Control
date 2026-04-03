@@ -15,6 +15,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.keplerops.groundcontrol.api.assets.AssetController;
+import com.keplerops.groundcontrol.domain.assets.model.AssetExternalId;
+import com.keplerops.groundcontrol.domain.assets.model.AssetLink;
 import com.keplerops.groundcontrol.domain.assets.model.AssetRelation;
 import com.keplerops.groundcontrol.domain.assets.model.OperationalAsset;
 import com.keplerops.groundcontrol.domain.assets.service.AssetCycleEdge;
@@ -22,6 +24,8 @@ import com.keplerops.groundcontrol.domain.assets.service.AssetCycleResult;
 import com.keplerops.groundcontrol.domain.assets.service.AssetService;
 import com.keplerops.groundcontrol.domain.assets.service.AssetSubgraphResult;
 import com.keplerops.groundcontrol.domain.assets.service.AssetTopologyService;
+import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
+import com.keplerops.groundcontrol.domain.assets.state.AssetLinkType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
@@ -160,18 +164,25 @@ class AssetControllerTest {
         var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
         setField(relation, "id", UUID.randomUUID());
         setField(relation, "createdAt", Instant.now());
+        setField(relation, "updatedAt", Instant.now());
+        relation.setDescription("Observed dependency");
 
-        when(assetService.createRelation(eq(ASSET_ID), any(), eq(AssetRelationType.DEPENDS_ON)))
+        when(assetService.createRelation(
+                        any(com.keplerops.groundcontrol.domain.assets.service.CreateAssetRelationCommand.class),
+                        eq(ASSET_ID)))
                 .thenReturn(relation);
 
         mockMvc.perform(post("/api/v1/assets/{id}/relations", ASSET_ID)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                {"targetId":"%s","relationType":"DEPENDS_ON"}
+                        .content(
+                                """
+                {"targetId":"%s","relationType":"DEPENDS_ON","description":"Observed dependency"}
                 """
-                                .formatted(target.getId())))
+                                        .formatted(target.getId())))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.relationType", is("DEPENDS_ON")));
+                .andExpect(jsonPath("$.relationType", is("DEPENDS_ON")))
+                .andExpect(jsonPath("$.description", is("Observed dependency")))
+                .andExpect(jsonPath("$.updatedAt").isNotEmpty());
     }
 
     @Test
@@ -183,13 +194,51 @@ class AssetControllerTest {
         var relation = new AssetRelation(source, target, AssetRelationType.COMMUNICATES_WITH);
         setField(relation, "id", UUID.randomUUID());
         setField(relation, "createdAt", Instant.now());
+        setField(relation, "updatedAt", Instant.now());
+        relation.setDescription("Service communication");
 
         when(assetService.getRelations(ASSET_ID)).thenReturn(List.of(relation));
 
         mockMvc.perform(get("/api/v1/assets/{id}/relations", ASSET_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].relationType", is("COMMUNICATES_WITH")));
+                .andExpect(jsonPath("$[0].relationType", is("COMMUNICATES_WITH")))
+                .andExpect(jsonPath("$[0].description", is("Service communication")))
+                .andExpect(jsonPath("$[0].updatedAt").isNotEmpty());
+    }
+
+    @Test
+    void updateRelationReturns200() throws Exception {
+        var source = makeAsset();
+        var target = makeAsset();
+        setField(target, "id", UUID.randomUUID());
+
+        var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
+        setField(relation, "id", UUID.randomUUID());
+        setField(relation, "createdAt", Instant.now());
+        setField(relation, "updatedAt", Instant.now());
+        relation.setDescription("Refined dependency");
+        relation.setSourceSystem("CMDB");
+        relation.setConfidence("0.95");
+
+        when(assetService.updateRelation(
+                        eq(ASSET_ID),
+                        eq(relation.getId()),
+                        any(com.keplerops.groundcontrol.domain.assets.service.UpdateAssetRelationCommand.class)))
+                .thenReturn(relation);
+
+        mockMvc.perform(
+                        put("/api/v1/assets/{id}/relations/{relationId}", ASSET_ID, relation.getId())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                {"description":"Refined dependency","sourceSystem":"CMDB","confidence":"0.95"}
+                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.description", is("Refined dependency")))
+                .andExpect(jsonPath("$.sourceSystem", is("CMDB")))
+                .andExpect(jsonPath("$.confidence", is("0.95")))
+                .andExpect(jsonPath("$.updatedAt").isNotEmpty());
     }
 
     @Test
@@ -233,5 +282,201 @@ class AssetControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.assets", hasSize(1)))
                 .andExpect(jsonPath("$.relations", hasSize(0)));
+    }
+
+    // --- Asset Link tests ---
+
+    private AssetLink makeLink() {
+        var asset = makeAsset();
+        var link = new AssetLink(asset, AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS);
+        setField(link, "id", UUID.randomUUID());
+        setField(link, "createdAt", Instant.now());
+        setField(link, "updatedAt", Instant.now());
+        return link;
+    }
+
+    @Test
+    void createLinkReturns201() throws Exception {
+        when(assetService.createLink(eq(ASSET_ID), any())).thenReturn(makeLink());
+
+        mockMvc.perform(
+                        post("/api/v1/assets/{id}/links", ASSET_ID)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                {"targetType":"REQUIREMENT","targetIdentifier":"GC-M010","linkType":"IMPLEMENTS"}
+                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.targetType", is("REQUIREMENT")))
+                .andExpect(jsonPath("$.targetIdentifier", is("GC-M010")))
+                .andExpect(jsonPath("$.linkType", is("IMPLEMENTS")));
+    }
+
+    @Test
+    void getLinksReturnsList() throws Exception {
+        when(assetService.getLinksForAsset(ASSET_ID)).thenReturn(List.of(makeLink()));
+
+        mockMvc.perform(get("/api/v1/assets/{id}/links", ASSET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].targetType", is("REQUIREMENT")));
+    }
+
+    @Test
+    void getLinksWithTargetTypeFilter() throws Exception {
+        when(assetService.getLinksForAssetByTargetType(ASSET_ID, AssetLinkTargetType.REQUIREMENT))
+                .thenReturn(List.of(makeLink()));
+
+        mockMvc.perform(get("/api/v1/assets/{id}/links", ASSET_ID).param("target_type", "REQUIREMENT"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)));
+    }
+
+    @Test
+    void deleteLinkReturns204() throws Exception {
+        var linkId = UUID.randomUUID();
+        mockMvc.perform(delete("/api/v1/assets/{id}/links/{linkId}", ASSET_ID, linkId))
+                .andExpect(status().isNoContent());
+
+        verify(assetService).deleteLink(ASSET_ID, linkId);
+    }
+
+    @Test
+    void getLinksByTargetReturnsList() throws Exception {
+        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(assetService.getLinksByTarget(PROJECT_ID, AssetLinkTargetType.REQUIREMENT, "GC-M010"))
+                .thenReturn(List.of(makeLink()));
+
+        mockMvc.perform(get("/api/v1/assets/links/by-target")
+                        .param("target_type", "REQUIREMENT")
+                        .param("target_identifier", "GC-M010")
+                        .param("project", "ground-control"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].assetUid", is("ASSET-001")));
+    }
+
+    // --- External ID tests ---
+
+    private AssetExternalId makeExternalId() {
+        var asset = makeAsset();
+        var extId = new AssetExternalId(asset, "AWS", "arn:aws:ec2:us-east-1:123:instance/i-abc");
+        extId.setConfidence("HIGH");
+        extId.setCollectedAt(Instant.parse("2026-03-30T12:00:00Z"));
+        setField(extId, "id", UUID.randomUUID());
+        setField(extId, "createdAt", Instant.now());
+        setField(extId, "updatedAt", Instant.now());
+        return extId;
+    }
+
+    @Test
+    void createExternalIdReturns201() throws Exception {
+        when(assetService.createExternalId(eq(ASSET_ID), any())).thenReturn(makeExternalId());
+
+        mockMvc.perform(
+                        post("/api/v1/assets/{id}/external-ids", ASSET_ID)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                {"sourceSystem":"AWS","sourceId":"arn:aws:ec2:us-east-1:123:instance/i-abc","confidence":"HIGH"}
+                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.sourceSystem", is("AWS")))
+                .andExpect(jsonPath("$.sourceId", is("arn:aws:ec2:us-east-1:123:instance/i-abc")))
+                .andExpect(jsonPath("$.confidence", is("HIGH")));
+    }
+
+    @Test
+    void getExternalIdsReturnsList() throws Exception {
+        when(assetService.getExternalIds(ASSET_ID)).thenReturn(List.of(makeExternalId()));
+
+        mockMvc.perform(get("/api/v1/assets/{id}/external-ids", ASSET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].sourceSystem", is("AWS")));
+    }
+
+    @Test
+    void getExternalIdsBySourceFilter() throws Exception {
+        when(assetService.getExternalIdsBySource(ASSET_ID, "AWS")).thenReturn(List.of(makeExternalId()));
+
+        mockMvc.perform(get("/api/v1/assets/{id}/external-ids", ASSET_ID).param("source_system", "AWS"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].sourceSystem", is("AWS")));
+    }
+
+    @Test
+    void updateExternalIdReturnsUpdated() throws Exception {
+        var updated = makeExternalId();
+        updated.setConfidence("MEDIUM");
+        when(assetService.updateExternalId(eq(ASSET_ID), any(), any())).thenReturn(updated);
+
+        var extIdId = UUID.randomUUID();
+        mockMvc.perform(put("/api/v1/assets/{id}/external-ids/{extIdId}", ASSET_ID, extIdId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                {"confidence":"MEDIUM"}
+                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.confidence", is("MEDIUM")));
+    }
+
+    @Test
+    void deleteExternalIdReturns204() throws Exception {
+        var extIdId = UUID.randomUUID();
+        mockMvc.perform(delete("/api/v1/assets/{id}/external-ids/{extIdId}", ASSET_ID, extIdId))
+                .andExpect(status().isNoContent());
+
+        verify(assetService).deleteExternalId(ASSET_ID, extIdId);
+    }
+
+    @Test
+    void findByExternalIdReturnsList() throws Exception {
+        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(assetService.findByExternalId(PROJECT_ID, "AWS", "arn:aws:ec2:us-east-1:123:instance/i-abc"))
+                .thenReturn(List.of(makeExternalId()));
+
+        mockMvc.perform(get("/api/v1/assets/external-ids/by-source")
+                        .param("source_system", "AWS")
+                        .param("source_id", "arn:aws:ec2:us-east-1:123:instance/i-abc")
+                        .param("project", "ground-control"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].assetUid", is("ASSET-001")));
+    }
+
+    @Test
+    void createRelationWithProvenanceReturns201() throws Exception {
+        var source = makeAsset();
+        var target = makeAsset();
+        setField(target, "id", UUID.randomUUID());
+        target.setName("Database");
+
+        var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
+        setField(relation, "id", UUID.randomUUID());
+        setField(relation, "createdAt", Instant.now());
+        setField(relation, "updatedAt", Instant.now());
+        relation.setDescription("Observed dependency");
+        relation.setSourceSystem("AWS_CONFIG");
+        relation.setConfidence("0.95");
+
+        when(assetService.createRelation(
+                        any(com.keplerops.groundcontrol.domain.assets.service.CreateAssetRelationCommand.class),
+                        eq(ASSET_ID)))
+                .thenReturn(relation);
+
+        mockMvc.perform(post("/api/v1/assets/{id}/relations", ASSET_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(
+                                """
+                {"targetId":"%s","relationType":"DEPENDS_ON","description":"Observed dependency","sourceSystem":"AWS_CONFIG","confidence":"0.95"}
+                """
+                                        .formatted(target.getId())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.relationType", is("DEPENDS_ON")))
+                .andExpect(jsonPath("$.description", is("Observed dependency")))
+                .andExpect(jsonPath("$.sourceSystem", is("AWS_CONFIG")))
+                .andExpect(jsonPath("$.confidence", is("0.95")));
     }
 }

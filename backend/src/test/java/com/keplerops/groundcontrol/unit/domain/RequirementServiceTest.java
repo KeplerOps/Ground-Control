@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.TestUtil;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
@@ -23,7 +24,6 @@ import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
-import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -47,13 +47,7 @@ class RequirementServiceTest {
 
     private static Project createTestProject() {
         var project = new Project("test-project", "Test Project");
-        try {
-            var field = Project.class.getDeclaredField("id");
-            field.setAccessible(true);
-            field.set(project, PROJECT_ID);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(project, "id", PROJECT_ID);
         return project;
     }
 
@@ -81,13 +75,7 @@ class RequirementServiceTest {
     }
 
     private static void setId(Requirement req, UUID id) {
-        try {
-            Field f = Requirement.class.getDeclaredField("id");
-            f.setAccessible(true);
-            f.set(req, id);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(req, "id", id);
     }
 
     @Nested
@@ -426,13 +414,7 @@ class RequirementServiceTest {
         @Test
         void throwsDomainValidationForCrossProjectRelation() {
             var otherProject = new Project("other-project", "Other");
-            try {
-                var field = Project.class.getDeclaredField("id");
-                field.setAccessible(true);
-                field.set(otherProject, UUID.fromString("00000000-0000-0000-0000-000000000099"));
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
+            TestUtil.setField(otherProject, "id", UUID.fromString("00000000-0000-0000-0000-000000000099"));
 
             var sourceId = UUID.randomUUID();
             var targetId = UUID.randomUUID();
@@ -508,13 +490,7 @@ class RequirementServiceTest {
     }
 
     private static void setRelationId(RequirementRelation rel, UUID id) {
-        try {
-            Field f = RequirementRelation.class.getDeclaredField("id");
-            f.setAccessible(true);
-            f.set(rel, id);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(rel, "id", id);
     }
 
     @Nested

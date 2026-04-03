@@ -3,7 +3,13 @@ package com.keplerops.groundcontrol.api.assets;
 import com.keplerops.groundcontrol.domain.assets.service.AssetService;
 import com.keplerops.groundcontrol.domain.assets.service.AssetTopologyService;
 import com.keplerops.groundcontrol.domain.assets.service.CreateAssetCommand;
+import com.keplerops.groundcontrol.domain.assets.service.CreateAssetExternalIdCommand;
+import com.keplerops.groundcontrol.domain.assets.service.CreateAssetLinkCommand;
+import com.keplerops.groundcontrol.domain.assets.service.CreateAssetRelationCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetCommand;
+import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetExternalIdCommand;
+import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetRelationCommand;
+import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import jakarta.validation.Valid;
@@ -92,7 +98,29 @@ public class AssetController {
     @ResponseStatus(HttpStatus.CREATED)
     public AssetRelationResponse createRelation(
             @PathVariable UUID id, @Valid @RequestBody AssetRelationRequest request) {
-        return AssetRelationResponse.from(assetService.createRelation(id, request.targetId(), request.relationType()));
+        var command = new CreateAssetRelationCommand(
+                request.targetId(),
+                request.relationType(),
+                request.description(),
+                request.sourceSystem(),
+                request.externalSourceId(),
+                request.collectedAt(),
+                request.confidence());
+        return AssetRelationResponse.from(assetService.createRelation(command, id));
+    }
+
+    @PutMapping("/{id}/relations/{relationId}")
+    public AssetRelationResponse updateRelation(
+            @PathVariable UUID id,
+            @PathVariable UUID relationId,
+            @Valid @RequestBody UpdateAssetRelationRequest request) {
+        var command = new UpdateAssetRelationCommand(
+                request.description(),
+                request.sourceSystem(),
+                request.externalSourceId(),
+                request.collectedAt(),
+                request.confidence());
+        return AssetRelationResponse.from(assetService.updateRelation(id, relationId, command));
     }
 
     @GetMapping("/{id}/relations")
@@ -107,6 +135,103 @@ public class AssetController {
     public void deleteRelation(@PathVariable UUID id, @PathVariable UUID relationId) {
         assetService.deleteRelation(id, relationId);
     }
+
+    // --- Asset Links (cross-entity linking) ---
+
+    @PostMapping("/{id}/links")
+    @ResponseStatus(HttpStatus.CREATED)
+    public AssetLinkResponse createLink(@PathVariable UUID id, @Valid @RequestBody AssetLinkRequest request) {
+        var command = new CreateAssetLinkCommand(
+                request.targetType(),
+                request.targetIdentifier(),
+                request.linkType(),
+                request.targetUrl(),
+                request.targetTitle());
+        return AssetLinkResponse.from(assetService.createLink(id, command));
+    }
+
+    @GetMapping("/{id}/links")
+    public List<AssetLinkResponse> getLinks(
+            @PathVariable UUID id,
+            @RequestParam(name = "target_type", required = false) AssetLinkTargetType targetType) {
+        if (targetType != null) {
+            return assetService.getLinksForAssetByTargetType(id, targetType).stream()
+                    .map(AssetLinkResponse::from)
+                    .toList();
+        }
+        return assetService.getLinksForAsset(id).stream()
+                .map(AssetLinkResponse::from)
+                .toList();
+    }
+
+    @DeleteMapping("/{id}/links/{linkId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteLink(@PathVariable UUID id, @PathVariable UUID linkId) {
+        assetService.deleteLink(id, linkId);
+    }
+
+    @GetMapping("/links/by-target")
+    public List<AssetLinkResponse> getLinksByTarget(
+            @RequestParam("target_type") AssetLinkTargetType targetType,
+            @RequestParam("target_identifier") String targetIdentifier,
+            @RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return assetService.getLinksByTarget(projectId, targetType, targetIdentifier).stream()
+                .map(AssetLinkResponse::from)
+                .toList();
+    }
+
+    // --- External Identifiers (source provenance) ---
+
+    @PostMapping("/{id}/external-ids")
+    @ResponseStatus(HttpStatus.CREATED)
+    public AssetExternalIdResponse createExternalId(
+            @PathVariable UUID id, @Valid @RequestBody AssetExternalIdRequest request) {
+        var command = new CreateAssetExternalIdCommand(
+                request.sourceSystem(), request.sourceId(), request.collectedAt(), request.confidence());
+        return AssetExternalIdResponse.from(assetService.createExternalId(id, command));
+    }
+
+    @GetMapping("/{id}/external-ids")
+    public List<AssetExternalIdResponse> getExternalIds(
+            @PathVariable UUID id, @RequestParam(name = "source_system", required = false) String sourceSystem) {
+        if (sourceSystem != null) {
+            return assetService.getExternalIdsBySource(id, sourceSystem).stream()
+                    .map(AssetExternalIdResponse::from)
+                    .toList();
+        }
+        return assetService.getExternalIds(id).stream()
+                .map(AssetExternalIdResponse::from)
+                .toList();
+    }
+
+    @PutMapping("/{id}/external-ids/{extIdId}")
+    public AssetExternalIdResponse updateExternalId(
+            @PathVariable UUID id,
+            @PathVariable UUID extIdId,
+            @Valid @RequestBody UpdateAssetExternalIdRequest request) {
+        var command = new UpdateAssetExternalIdCommand(request.collectedAt(), request.confidence());
+        return AssetExternalIdResponse.from(assetService.updateExternalId(id, extIdId, command));
+    }
+
+    @DeleteMapping("/{id}/external-ids/{extIdId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteExternalId(@PathVariable UUID id, @PathVariable UUID extIdId) {
+        assetService.deleteExternalId(id, extIdId);
+    }
+
+    @GetMapping("/external-ids/by-source")
+    public List<AssetExternalIdResponse> findByExternalId(
+            @RequestParam("source_system") String sourceSystem,
+            @RequestParam("source_id") String sourceId,
+            @RequestParam(required = false) String project) {
+        var projectId = projectService.resolveProjectId(project);
+        return assetService.findByExternalId(projectId, sourceSystem, sourceId).stream()
+                .map(AssetExternalIdResponse::from)
+                .toList();
+    }
+
+    // --- Topology ---
 
     @GetMapping("/topology/cycles")
     public List<AssetCycleResponse> detectCycles(@RequestParam(required = false) String project) {

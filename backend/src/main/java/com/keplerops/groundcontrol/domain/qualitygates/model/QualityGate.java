@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.domain.qualitygates.model;
 
+import com.keplerops.groundcontrol.domain.BaseEntity;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.qualitygates.state.ComparisonOperator;
 import com.keplerops.groundcontrol.domain.qualitygates.state.MetricType;
@@ -9,25 +10,13 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
-import java.time.Instant;
-import java.util.UUID;
 
 @Entity
 @Table(name = "quality_gate")
-public class QualityGate {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    @Column(updatable = false, nullable = false)
-    private UUID id;
+public class QualityGate extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.EAGER, optional = false)
     @JoinColumn(name = "project_id", nullable = false)
@@ -60,12 +49,6 @@ public class QualityGate {
     @Column(nullable = false)
     private boolean enabled = true;
 
-    @Column(nullable = false, updatable = false)
-    private Instant createdAt;
-
-    @Column(nullable = false)
-    private Instant updatedAt;
-
     protected QualityGate() {
         // JPA
     }
@@ -87,22 +70,6 @@ public class QualityGate {
         this.scopeStatus = scopeStatus;
         this.operator = operator;
         this.threshold = threshold;
-    }
-
-    @PrePersist
-    void onCreate() {
-        var now = Instant.now();
-        this.createdAt = now;
-        this.updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        this.updatedAt = Instant.now();
-    }
-
-    public UUID getId() {
-        return id;
     }
 
     public Project getProject() {
@@ -171,14 +138,6 @@ public class QualityGate {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
     }
 
     @Override

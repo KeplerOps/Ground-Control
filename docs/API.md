@@ -357,13 +357,14 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
 }
 ```
 
-Asset types: `APPLICATION`, `SERVICE`, `DATABASE`, `NETWORK`, `HOST`, `CONTAINER`, `IDENTITY`, `DATA_STORE`, `BOUNDARY`, `OTHER`
+Asset types: `APPLICATION`, `SERVICE`, `SYSTEM`, `DATABASE`, `NETWORK`, `HOST`, `CONTAINER`, `IDENTITY`, `DATA_STORE`, `ENDPOINT`, `INTEGRATION`, `WORKLOAD`, `THIRD_PARTY`, `BOUNDARY`, `OTHER`
 
 ### Asset Relations
 
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
 | POST | `/assets/{id}/relations` | AssetRelationRequest | 201 | Create typed relation |
+| PUT | `/assets/{id}/relations/{relationId}` | UpdateAssetRelationRequest | 200 | Update relation metadata |
 | GET | `/assets/{id}/relations` | — | 200 | List relations (incoming + outgoing) |
 | DELETE | `/assets/{id}/relations/{relationId}` | — | 204 | Delete relation |
 
@@ -372,11 +373,55 @@ Asset types: `APPLICATION`, `SERVICE`, `DATABASE`, `NETWORK`, `HOST`, `CONTAINER
 ```json
 {
   "targetId": "uuid",
-  "relationType": "DEPENDS_ON"
+  "relationType": "DEPENDS_ON",
+  "description": "Observed runtime dependency",
+  "sourceSystem": "AWS_CONFIG",
+  "externalSourceId": "cfg-123",
+  "collectedAt": "2026-04-01T12:00:00Z",
+  "confidence": "0.80"
 }
 ```
 
+**UpdateAssetRelationRequest:**
+
+```json
+{
+  "description": "Refined runtime dependency",
+  "sourceSystem": "CMDB",
+  "externalSourceId": "cmdb-789",
+  "collectedAt": "2026-04-02T12:00:00Z",
+  "confidence": "0.95"
+}
+```
+
+**AssetRelationResponse fields:** `id`, `sourceId`, `sourceUid`, `targetId`, `targetUid`, `relationType`, `description`, `sourceSystem`, `externalSourceId`, `collectedAt`, `confidence`, `createdAt`, `updatedAt`
+
 Relation types: `CONTAINS`, `DEPENDS_ON`, `COMMUNICATES_WITH`, `TRUST_BOUNDARY`, `SUPPORTS`, `ACCESSES`, `DATA_FLOW`
+
+### Asset Links (Cross-Entity Linking)
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/assets/{id}/links` | AssetLinkRequest | 201 | Link asset to a requirement, control, or other entity |
+| GET | `/assets/{id}/links?target_type=` | — | 200 | List links (optional target type filter) |
+| DELETE | `/assets/{id}/links/{linkId}` | — | 204 | Delete link |
+| GET | `/assets/links/by-target?target_type=&target_identifier=&project=` | — | 200 | Reverse lookup: find assets linked to a target |
+
+**AssetLinkRequest:**
+
+```json
+{
+  "targetType": "REQUIREMENT",
+  "targetIdentifier": "GC-M010",
+  "linkType": "IMPLEMENTS",
+  "targetUrl": "https://example.com/req/GC-M010",
+  "targetTitle": "Operational Asset Entity"
+}
+```
+
+Target types: `REQUIREMENT`, `CONTROL`, `RISK_SCENARIO`, `THREAT_MODEL_ENTRY`, `FINDING`, `EVIDENCE`, `AUDIT`, `EXTERNAL`
+
+Link types: `IMPLEMENTS`, `MITIGATES`, `SUBJECT_OF`, `EVIDENCED_BY`, `GOVERNED_BY`, `DEPENDS_ON`, `ASSOCIATED`
 
 ### Asset Topology
 

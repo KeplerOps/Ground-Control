@@ -4,13 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.TestUtil;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementEmbedding;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementEmbeddingRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.SimilarityService;
-import java.lang.reflect.Field;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,13 +56,7 @@ class SimilarityServiceTest {
     }
 
     private static void setField(Object obj, String fieldName, Object value) {
-        try {
-            Field f = obj.getClass().getDeclaredField(fieldName);
-            f.setAccessible(true);
-            f.set(obj, value);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
-        }
+        TestUtil.setField(obj, fieldName, value);
     }
 
     @Nested

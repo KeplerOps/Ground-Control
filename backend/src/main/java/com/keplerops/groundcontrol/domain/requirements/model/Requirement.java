@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.domain.requirements.model;
 
+import com.keplerops.groundcontrol.domain.BaseEntity;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.state.Priority;
@@ -10,17 +11,11 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.Map;
-import java.util.UUID;
 import org.hibernate.envers.Audited;
 import org.hibernate.envers.NotAudited;
 
@@ -34,14 +29,9 @@ import org.hibernate.envers.NotAudited;
 @Audited
 @Table(name = "requirement")
 @SuppressWarnings("java:S125") // JML contract annotations are intentional, not dead code
-public class Requirement {
+public class Requirement extends BaseEntity {
 
     /*@ public invariant archivedAt == null || status == Status.ARCHIVED; @*/
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    @Column(updatable = false, nullable = false)
-    private UUID id;
 
     @NotAudited
     @ManyToOne(fetch = FetchType.EAGER, optional = false)
@@ -77,12 +67,6 @@ public class Requirement {
     @Column(name = "custom_fields", columnDefinition = "TEXT")
     private String customFields;
 
-    @Column(nullable = false, updatable = false)
-    private Instant createdAt;
-
-    @Column(nullable = false)
-    private Instant updatedAt;
-
     private Instant archivedAt;
 
     protected Requirement() {
@@ -94,18 +78,6 @@ public class Requirement {
         this.uid = uid;
         this.title = title;
         this.statement = statement;
-    }
-
-    @PrePersist
-    void onCreate() {
-        var now = Instant.now();
-        this.createdAt = now;
-        this.updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        this.updatedAt = Instant.now();
     }
 
     /**
@@ -142,11 +114,6 @@ public class Requirement {
     }
 
     // --- Accessors ---
-
-    public UUID getId() {
-        return id;
-    }
-
     public Project getProject() {
         return project;
     }
@@ -213,14 +180,6 @@ public class Requirement {
 
     public void setCustomFields(String customFields) {
         this.customFields = customFields;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
     }
 
     public Instant getArchivedAt() {

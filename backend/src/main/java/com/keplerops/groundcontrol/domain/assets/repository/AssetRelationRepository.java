@@ -10,6 +10,9 @@ import org.springframework.data.repository.query.Param;
 
 public interface AssetRelationRepository extends JpaRepository<AssetRelation, UUID> {
 
+    @Query("SELECT r FROM AssetRelation r JOIN FETCH r.source JOIN FETCH r.target WHERE r.id = :id")
+    java.util.Optional<AssetRelation> findByIdWithEntities(@Param("id") UUID id);
+
     @Query("SELECT r FROM AssetRelation r JOIN FETCH r.source JOIN FETCH r.target" + " WHERE r.source.id = :sourceId")
     List<AssetRelation> findBySourceIdWithEntities(@Param("sourceId") UUID sourceId);
 

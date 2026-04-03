@@ -109,6 +109,32 @@ import {
   detectAssetCycles,
   assetImpactAnalysis,
   extractAssetSubgraph,
+  createAssetLink,
+  getAssetLinks,
+  deleteAssetLink,
+  getAssetLinksByTarget,
+  createAssetExternalId,
+  getAssetExternalIds,
+  updateAssetExternalId,
+  deleteAssetExternalId,
+  findAssetByExternalId,
+  createObservation,
+  listObservations,
+  getObservation,
+  updateObservation,
+  deleteObservation,
+  listLatestObservations,
+  createRiskScenario,
+  listRiskScenarios,
+  getRiskScenario,
+  getRiskScenarioByUid,
+  updateRiskScenario,
+  deleteRiskScenario,
+  transitionRiskScenarioStatus,
+  getRiskScenarioRequirements,
+  createRiskScenarioLink,
+  listRiskScenarioLinks,
+  deleteRiskScenarioLink,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -120,6 +146,12 @@ import {
   ADR_STATUSES,
   ASSET_TYPES,
   ASSET_RELATION_TYPES,
+  ASSET_LINK_TARGET_TYPES,
+  ASSET_LINK_TYPES,
+  OBSERVATION_CATEGORIES,
+  RISK_SCENARIO_STATUSES,
+  RISK_SCENARIO_LINK_TARGET_TYPES,
+  RISK_SCENARIO_LINK_TYPES,
 } from "./lib.js";
 
 function ok(text) {
@@ -2026,17 +2058,26 @@ server.tool(
 
 server.tool(
   "gc_create_asset_relation",
-  `Create a typed relationship between two operational assets. Relation types: ${ASSET_RELATION_TYPES.join(", ")}.`,
+  `Create a typed relationship between two operational assets. Relation types: ${ASSET_RELATION_TYPES.join(", ")}. Optional provenance: source_system, external_source_id, collected_at (ISO-8601), confidence.`,
   {
     source_id: z.string().uuid().describe("Source asset UUID"),
     target_id: z.string().uuid().describe("Target asset UUID"),
     relation_type: z.enum(ASSET_RELATION_TYPES).describe("Relationship type"),
+    source_system: z.string().max(100).optional().describe("Source system that asserted this fact (e.g. AWS_CONFIG)"),
+    external_source_id: z.string().max(500).optional().describe("Identifier for this fact in the source system"),
+    collected_at: z.string().optional().describe("ISO-8601 timestamp when fact was collected/asserted"),
+    confidence: z.string().max(50).optional().describe("Confidence or quality metadata"),
   },
-  async ({ source_id, target_id, relation_type }) => {
+  async ({ source_id, target_id, relation_type, source_system, external_source_id, collected_at, confidence }) => {
     try {
+      const data = { target_id, relation_type };
+      if (source_system !== undefined) data.source_system = source_system;
+      if (external_source_id !== undefined) data.external_source_id = external_source_id;
+      if (collected_at !== undefined) data.collected_at = collected_at;
+      if (confidence !== undefined) data.confidence = confidence;
       return ok(
         JSON.stringify(
-          await createAssetRelation(source_id, { target_id, relation_type }),
+          await createAssetRelation(source_id, data),
           null,
           2,
         ),
@@ -2125,6 +2166,506 @@ server.tool(
   async ({ root_uids, project }) => {
     try {
       return ok(JSON.stringify(await extractAssetSubgraph({ root_uids }, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Asset Links (cross-entity linking)
+// ==========================================================================
+
+server.tool(
+  "gc_create_asset_link",
+  `Link an operational asset to a requirement, control, risk scenario, or other entity. Target types: ${ASSET_LINK_TARGET_TYPES.join(", ")}. Link types: ${ASSET_LINK_TYPES.join(", ")}.`,
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    target_type: z.enum(ASSET_LINK_TARGET_TYPES).describe("Type of the target entity"),
+    target_identifier: z.string().max(500).describe("Identifier of the target (e.g. requirement UID, URL)"),
+    link_type: z.enum(ASSET_LINK_TYPES).describe("Nature of the relationship"),
+    target_url: z.string().max(2000).optional().describe("Optional URL for the target"),
+    target_title: z.string().max(255).optional().describe("Optional display title for the target"),
+  },
+  async ({ asset_id, target_type, target_identifier, link_type, target_url, target_title }) => {
+    try {
+      const data = { target_type, target_identifier, link_type };
+      if (target_url !== undefined) data.target_url = target_url;
+      if (target_title !== undefined) data.target_title = target_title;
+      return ok(JSON.stringify(await createAssetLink(asset_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_asset_links",
+  "Get all cross-entity links for an operational asset, optionally filtered by target type.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    target_type: z.enum(ASSET_LINK_TARGET_TYPES).optional().describe("Filter by target type"),
+  },
+  async ({ asset_id, target_type }) => {
+    try {
+      return ok(JSON.stringify(await getAssetLinks(asset_id, target_type), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_asset_link",
+  "Delete a cross-entity link from an operational asset.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    link_id: z.string().uuid().describe("UUID of the link to delete"),
+  },
+  async ({ asset_id, link_id }) => {
+    try {
+      await deleteAssetLink(asset_id, link_id);
+      return ok("Link deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_asset_links_by_target",
+  "Find all assets linked to a specific target (e.g. all assets linked to a requirement).",
+  {
+    target_type: z.enum(ASSET_LINK_TARGET_TYPES).describe("Type of the target entity"),
+    target_identifier: z.string().describe("Identifier of the target"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ target_type, target_identifier, project }) => {
+    try {
+      return ok(JSON.stringify(await getAssetLinksByTarget(target_type, target_identifier, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// External Identifiers (source provenance)
+// ==========================================================================
+
+server.tool(
+  "gc_create_asset_external_id",
+  "Register an external identifier for an operational asset, mapping it to a source system (e.g. AWS ARN, Terraform resource ID, ServiceNow CI). Supports multiple overlapping sources per asset.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    source_system: z.string().max(100).describe("Name of the source system (e.g. AWS, TERRAFORM, SERVICENOW)"),
+    source_id: z.string().max(500).describe("Identifier in the source system (e.g. ARN, resource ID)"),
+    collected_at: z.string().optional().describe("ISO-8601 timestamp when this identifier was collected/asserted"),
+    confidence: z.string().max(50).optional().describe("Confidence or quality metadata (e.g. HIGH, 0.95)"),
+  },
+  async ({ asset_id, source_system, source_id, collected_at, confidence }) => {
+    try {
+      const data = { source_system, source_id };
+      if (collected_at !== undefined) data.collected_at = collected_at;
+      if (confidence !== undefined) data.confidence = confidence;
+      return ok(JSON.stringify(await createAssetExternalId(asset_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_asset_external_ids",
+  "List all external identifiers for an operational asset, optionally filtered by source system.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    source_system: z.string().optional().describe("Filter by source system name"),
+  },
+  async ({ asset_id, source_system }) => {
+    try {
+      const result = await getAssetExternalIds(asset_id, source_system);
+      if (Array.isArray(result) && result.length === 0) return ok("No external identifiers found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_asset_external_id",
+  "Update the collection timestamp or confidence metadata of an external identifier. Source system and source ID are immutable.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    external_id_id: z.string().uuid().describe("UUID of the external identifier to update"),
+    collected_at: z.string().optional().describe("ISO-8601 timestamp when this identifier was collected/asserted"),
+    confidence: z.string().max(50).optional().describe("Confidence or quality metadata"),
+  },
+  async ({ asset_id, external_id_id, collected_at, confidence }) => {
+    try {
+      const data = {};
+      if (collected_at !== undefined) data.collected_at = collected_at;
+      if (confidence !== undefined) data.confidence = confidence;
+      return ok(JSON.stringify(await updateAssetExternalId(asset_id, external_id_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_asset_external_id",
+  "Delete an external identifier from an operational asset.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    external_id_id: z.string().uuid().describe("UUID of the external identifier to delete"),
+  },
+  async ({ asset_id, external_id_id }) => {
+    try {
+      await deleteAssetExternalId(asset_id, external_id_id);
+      return ok("External identifier deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_find_asset_by_external_id",
+  "Find operational assets by their external identifier in a specific source system. Reverse lookup from source system + source ID to Ground Control assets.",
+  {
+    source_system: z.string().describe("Source system name (e.g. AWS, TERRAFORM)"),
+    source_id: z.string().describe("Identifier in the source system"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ source_system, source_id, project }) => {
+    try {
+      const result = await findAssetByExternalId(source_system, source_id, project);
+      if (Array.isArray(result) && result.length === 0) return ok("No assets found with that external identifier.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Observations (time-bounded state facts)
+// ==========================================================================
+
+server.tool(
+  "gc_create_observation",
+  "Record a time-bounded state fact (observation) about an operational asset, such as a configuration value, exposure status, identity assignment, deployment attribute, patch state, or discovered relationship.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    category: z.enum(OBSERVATION_CATEGORIES).describe("Category of observation"),
+    observation_key: z.string().max(200).describe("What is being observed (e.g. 'os_version', 'cve_exposure', 'ip_address')"),
+    observation_value: z.string().describe("The observed value"),
+    source: z.string().max(200).describe("Who or what produced this observation (e.g. 'nessus-scanner', 'aws-config')"),
+    observed_at: z.string().describe("ISO-8601 timestamp when the fact was observed"),
+    expires_at: z.string().optional().describe("ISO-8601 timestamp when this observation becomes stale/invalid"),
+    confidence: z.string().max(50).optional().describe("Confidence level (e.g. HIGH, MEDIUM, 0.95)"),
+    evidence_ref: z.string().max(2000).optional().describe("URL or reference to supporting evidence"),
+  },
+  async ({ asset_id, category, observation_key, observation_value, source, observed_at, expires_at, confidence, evidence_ref }) => {
+    try {
+      const data = { category, observation_key, observation_value, source, observed_at };
+      if (expires_at !== undefined) data.expires_at = expires_at;
+      if (confidence !== undefined) data.confidence = confidence;
+      if (evidence_ref !== undefined) data.evidence_ref = evidence_ref;
+      return ok(JSON.stringify(await createObservation(asset_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_observations",
+  "List observations for an operational asset, optionally filtered by category and/or key.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    category: z.enum(OBSERVATION_CATEGORIES).optional().describe("Filter by observation category"),
+    key: z.string().optional().describe("Filter by observation key"),
+  },
+  async ({ asset_id, category, key }) => {
+    try {
+      const result = await listObservations(asset_id, { category, key });
+      if (Array.isArray(result) && result.length === 0) return ok("No observations found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_observation",
+  "Get a specific observation by ID.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    observation_id: z.string().uuid().describe("UUID of the observation"),
+  },
+  async ({ asset_id, observation_id }) => {
+    try {
+      return ok(JSON.stringify(await getObservation(asset_id, observation_id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_observation",
+  "Update a mutable field of an observation (value, expiry, confidence, or evidence reference). Category, key, source, and observed-at are immutable.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    observation_id: z.string().uuid().describe("UUID of the observation to update"),
+    observation_value: z.string().optional().describe("Updated observed value"),
+    expires_at: z.string().optional().describe("Updated expiry timestamp"),
+    confidence: z.string().max(50).optional().describe("Updated confidence level"),
+    evidence_ref: z.string().max(2000).optional().describe("Updated evidence reference"),
+  },
+  async ({ asset_id, observation_id, observation_value, expires_at, confidence, evidence_ref }) => {
+    try {
+      const data = {};
+      if (observation_value !== undefined) data.observation_value = observation_value;
+      if (expires_at !== undefined) data.expires_at = expires_at;
+      if (confidence !== undefined) data.confidence = confidence;
+      if (evidence_ref !== undefined) data.evidence_ref = evidence_ref;
+      return ok(JSON.stringify(await updateObservation(asset_id, observation_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_observation",
+  "Delete an observation from an operational asset.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    observation_id: z.string().uuid().describe("UUID of the observation to delete"),
+  },
+  async ({ asset_id, observation_id }) => {
+    try {
+      await deleteObservation(asset_id, observation_id);
+      return ok("Observation deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_latest_observations",
+  "Get the most recent non-expired observation for each unique (category, key) pair on an operational asset. Useful for building a current-state snapshot. Expired observations (past their expiresAt timestamp) are excluded.",
+  {
+    asset_id: z.string().uuid().describe("UUID of the operational asset"),
+  },
+  async ({ asset_id }) => {
+    try {
+      const result = await listLatestObservations(asset_id);
+      if (Array.isArray(result) && result.length === 0) return ok("No observations found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Risk Scenario tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_risk_scenario",
+  "Create a risk scenario — a scoped statement of potential future loss tied to operational assets within a defined time horizon.",
+  {
+    uid: z.string().max(20).describe("Risk scenario UID (e.g. 'RS-001')"),
+    title: z.string().max(200).describe("Risk scenario title"),
+    threat_source: z.string().describe("Threat source or actor"),
+    threat_event: z.string().describe("Threat event or method"),
+    affected_object: z.string().describe("Affected object, asset, boundary, process, system, objective, or third party"),
+    vulnerability: z.string().optional().describe("Vulnerability, exposure, or resistance condition (when applicable)"),
+    consequence: z.string().describe("Effect or consequence description"),
+    time_horizon: z.string().max(100).describe("Defined time horizon (e.g. '12 months', 'Q2 2026')"),
+    observation_refs: z.string().optional().describe("Supporting observations or evidence references"),
+    topology_context: z.string().optional().describe("Links to related topology context"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ uid, title, threat_source, threat_event, affected_object, vulnerability, consequence, time_horizon, observation_refs, topology_context, project }) => {
+    try {
+      const data = { uid, title, threat_source, threat_event, affected_object, consequence, time_horizon };
+      if (vulnerability !== undefined) data.vulnerability = vulnerability;
+      if (observation_refs !== undefined) data.observation_refs = observation_refs;
+      if (topology_context !== undefined) data.topology_context = topology_context;
+      return ok(JSON.stringify(await createRiskScenario(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_risk_scenarios",
+  "List all risk scenarios for a project, ordered by creation date (newest first).",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ project }) => {
+    try {
+      const scenarios = await listRiskScenarios(project);
+      if (Array.isArray(scenarios) && scenarios.length === 0) return ok("No risk scenarios found.");
+      return ok(JSON.stringify(scenarios, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_risk_scenario",
+  "Get a risk scenario by UUID or UID.",
+  {
+    id: z.string().uuid().optional().describe("Risk scenario UUID"),
+    uid: z.string().optional().describe("Risk scenario UID (e.g. 'RS-001')"),
+    project: z.string().optional().describe("Project identifier (required when looking up by UID with multiple projects)"),
+  },
+  async ({ id, uid, project }) => {
+    try {
+      if (id) {
+        return ok(JSON.stringify(await getRiskScenario(id), null, 2));
+      }
+      if (uid) {
+        return ok(JSON.stringify(await getRiskScenarioByUid(uid, project), null, 2));
+      }
+      return err(new Error("Provide either 'id' (UUID) or 'uid'"));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_risk_scenario",
+  "Update mutable fields of a risk scenario. Only provided fields are updated.",
+  {
+    id: z.string().uuid().describe("Risk scenario UUID"),
+    title: z.string().max(200).optional().describe("Updated title"),
+    threat_source: z.string().optional().describe("Updated threat source"),
+    threat_event: z.string().optional().describe("Updated threat event"),
+    affected_object: z.string().optional().describe("Updated affected object"),
+    vulnerability: z.string().optional().describe("Updated vulnerability"),
+    consequence: z.string().optional().describe("Updated consequence"),
+    time_horizon: z.string().max(100).optional().describe("Updated time horizon"),
+    observation_refs: z.string().optional().describe("Updated observation references"),
+    topology_context: z.string().optional().describe("Updated topology context"),
+  },
+  async ({ id, title, threat_source, threat_event, affected_object, vulnerability, consequence, time_horizon, observation_refs, topology_context }) => {
+    try {
+      const data = {};
+      if (title !== undefined) data.title = title;
+      if (threat_source !== undefined) data.threat_source = threat_source;
+      if (threat_event !== undefined) data.threat_event = threat_event;
+      if (affected_object !== undefined) data.affected_object = affected_object;
+      if (vulnerability !== undefined) data.vulnerability = vulnerability;
+      if (consequence !== undefined) data.consequence = consequence;
+      if (time_horizon !== undefined) data.time_horizon = time_horizon;
+      if (observation_refs !== undefined) data.observation_refs = observation_refs;
+      if (topology_context !== undefined) data.topology_context = topology_context;
+      return ok(JSON.stringify(await updateRiskScenario(id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_risk_scenario",
+  "Delete a risk scenario.",
+  {
+    id: z.string().uuid().describe("Risk scenario UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteRiskScenario(id);
+      return ok("Risk scenario deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_transition_risk_scenario_status",
+  "Transition a risk scenario to a new status. Valid transitions: DRAFT→IDENTIFIED, IDENTIFIED→ASSESSED|CLOSED, ASSESSED→TREATED|CLOSED, TREATED→ACCEPTED|CLOSED, ACCEPTED→CLOSED.",
+  {
+    id: z.string().uuid().describe("Risk scenario UUID"),
+    status: z.enum(RISK_SCENARIO_STATUSES).describe("Target status"),
+  },
+  async ({ id, status }) => {
+    try {
+      return ok(JSON.stringify(await transitionRiskScenarioStatus(id, status), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_create_risk_scenario_link",
+  "Link a risk scenario to a threat model, vulnerability, control, finding, evidence, audit record, risk register entry, observation, asset, requirement, or external artifact.",
+  {
+    risk_scenario_id: z.string().uuid().describe("Risk scenario UUID"),
+    target_type: z.enum(RISK_SCENARIO_LINK_TARGET_TYPES).describe("Type of the linked artifact"),
+    target_identifier: z.string().max(500).describe("Identifier of the linked artifact (UID, URL, or external ID)"),
+    link_type: z.enum(RISK_SCENARIO_LINK_TYPES).describe("Nature of the relationship"),
+    target_url: z.string().max(2000).optional().describe("URL of the linked artifact"),
+    target_title: z.string().max(255).optional().describe("Human-readable title of the linked artifact"),
+  },
+  async ({ risk_scenario_id, target_type, target_identifier, link_type, target_url, target_title }) => {
+    try {
+      const data = { target_type, target_identifier, link_type };
+      if (target_url !== undefined) data.target_url = target_url;
+      if (target_title !== undefined) data.target_title = target_title;
+      return ok(JSON.stringify(await createRiskScenarioLink(risk_scenario_id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_risk_scenario_links",
+  "List all links from a risk scenario, optionally filtered by target type.",
+  {
+    risk_scenario_id: z.string().uuid().describe("Risk scenario UUID"),
+    target_type: z.enum(RISK_SCENARIO_LINK_TARGET_TYPES).optional().describe("Filter by target type"),
+  },
+  async ({ risk_scenario_id, target_type }) => {
+    try {
+      const result = await listRiskScenarioLinks(risk_scenario_id, { targetType: target_type });
+      if (Array.isArray(result) && result.length === 0) return ok("No links found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_risk_scenario_link",
+  "Delete a link from a risk scenario.",
+  {
+    risk_scenario_id: z.string().uuid().describe("Risk scenario UUID"),
+    link_id: z.string().uuid().describe("Link UUID"),
+  },
+  async ({ risk_scenario_id, link_id }) => {
+    try {
+      await deleteRiskScenarioLink(risk_scenario_id, link_id);
+      return ok("Risk scenario link deleted.");
     } catch (e) {
       return err(e);
     }
