@@ -97,12 +97,33 @@ public class ProjectService {
     }
 
     @Transactional(readOnly = true)
+    public Project requireProject(String projectIdentifier) {
+        if (projectIdentifier == null || projectIdentifier.isBlank()) {
+            throw new DomainValidationException(
+                    "A 'project' parameter is required for this route.",
+                    "project_required",
+                    Map.of("parameter", "project"));
+        }
+        return getByIdentifier(projectIdentifier);
+    }
+
+    @Transactional(readOnly = true)
     public UUID resolveProjectId(String projectIdentifier) {
         return resolveProject(projectIdentifier).getId();
     }
 
     @Transactional(readOnly = true)
+    public UUID requireProjectId(String projectIdentifier) {
+        return requireProject(projectIdentifier).getId();
+    }
+
+    @Transactional(readOnly = true)
     public String resolveProjectIdentifier(String projectIdentifier) {
         return resolveProject(projectIdentifier).getIdentifier();
+    }
+
+    @Transactional(readOnly = true)
+    public String requireProjectIdentifier(String projectIdentifier) {
+        return requireProject(projectIdentifier).getIdentifier();
     }
 }

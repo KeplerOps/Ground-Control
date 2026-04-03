@@ -59,6 +59,10 @@ export const ASSET_LINK_TARGET_TYPES = [
   "REQUIREMENT",
   "CONTROL",
   "RISK_SCENARIO",
+  "RISK_REGISTER_RECORD",
+  "RISK_ASSESSMENT_RESULT",
+  "TREATMENT_PLAN",
+  "METHODOLOGY_PROFILE",
   "THREAT_MODEL_ENTRY",
   "FINDING",
   "EVIDENCE",
@@ -83,14 +87,21 @@ export const OBSERVATION_CATEGORIES = [
   "RELATIONSHIP",
   "OTHER",
 ];
-export const RISK_SCENARIO_STATUSES = [
-  "DRAFT",
+export const RISK_SCENARIO_STATUSES = ["DRAFT", "ACTIVE", "ARCHIVED"];
+export const METHODOLOGY_FAMILIES = ["FAIR", "NIST_SP800_30_R1", "ISO_27005", "CUSTOM"];
+export const METHODOLOGY_PROFILE_STATUSES = ["ACTIVE", "DEPRECATED"];
+export const RISK_REGISTER_STATUSES = [
   "IDENTIFIED",
+  "ANALYZING",
   "ASSESSED",
-  "TREATED",
+  "TREATING",
+  "MONITORING",
   "ACCEPTED",
   "CLOSED",
 ];
+export const RISK_ASSESSMENT_APPROVAL_STATUSES = ["DRAFT", "SUBMITTED", "APPROVED", "REJECTED"];
+export const TREATMENT_PLAN_STATUSES = ["PLANNED", "IN_PROGRESS", "BLOCKED", "COMPLETED", "CANCELED"];
+export const TREATMENT_STRATEGIES = ["MITIGATE", "ACCEPT", "TRANSFER", "SHARE", "AVOID", "OTHER"];
 export const RISK_SCENARIO_LINK_TARGET_TYPES = [
   "THREAT_MODEL",
   "VULNERABILITY",
@@ -98,7 +109,10 @@ export const RISK_SCENARIO_LINK_TARGET_TYPES = [
   "FINDING",
   "EVIDENCE",
   "AUDIT_RECORD",
-  "RISK_REGISTER",
+  "RISK_REGISTER_RECORD",
+  "RISK_ASSESSMENT_RESULT",
+  "TREATMENT_PLAN",
+  "METHODOLOGY_PROFILE",
   "OBSERVATION",
   "ASSET",
   "REQUIREMENT",
@@ -197,6 +211,9 @@ const TO_CAMEL = {
   text_content: "textContent",
   entity_type: "entityType",
   entity_types: "entityTypes",
+  edge_type: "edgeType",
+  domain_id: "domainId",
+  graph_node_id: "graphNodeId",
   requirement_uid: "requirementUid",
   decision_date: "decisionDate",
   superseded_by: "supersededBy",
@@ -207,6 +224,7 @@ const TO_CAMEL = {
   member_uids: "memberUids",
   root_uids: "rootUids",
   target_type: "targetType",
+  target_entity_id: "targetEntityId",
   target_identifier: "targetIdentifier",
   target_url: "targetUrl",
   target_title: "targetTitle",
@@ -228,6 +246,33 @@ const TO_CAMEL = {
   observation_refs: "observationRefs",
   topology_context: "topologyContext",
   risk_scenario_id: "riskScenarioId",
+  risk_register_record_id: "riskRegisterRecordId",
+  methodology_profile_id: "methodologyProfileId",
+  profile_key: "profileKey",
+  input_schema: "inputSchema",
+  output_schema: "outputSchema",
+  review_cadence: "reviewCadence",
+  next_review_at: "nextReviewAt",
+  category_tags: "categoryTags",
+  decision_metadata: "decisionMetadata",
+  asset_scope_summary: "assetScopeSummary",
+  risk_scenario_ids: "riskScenarioIds",
+  analyst_identity: "analystIdentity",
+  input_factors: "inputFactors",
+  observation_date: "observationDate",
+  assessment_at: "assessmentAt",
+  uncertainty_metadata: "uncertaintyMetadata",
+  computed_outputs: "computedOutputs",
+  evidence_refs: "evidenceRefs",
+  observation_ids: "observationIds",
+  approval_state: "approvalState",
+  due_date: "dueDate",
+  action_items: "actionItems",
+  reassessment_triggers: "reassessmentTriggers",
+  root_node_ids: "rootNodeIds",
+  max_depth: "maxDepth",
+  source_node_id: "sourceNodeId",
+  target_node_id: "targetNodeId",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -574,19 +619,19 @@ export async function materializeGraph() {
 }
 
 export async function getAncestors(uid, depth, project) {
-  return request("GET", `/api/v1/graph/ancestors/${encodeURIComponent(uid)}`, {
+  return request("GET", `/api/v1/requirements/graph/ancestors/${encodeURIComponent(uid)}`, {
     params: { depth, project },
   });
 }
 
 export async function getDescendants(uid, depth, project) {
-  return request("GET", `/api/v1/graph/descendants/${encodeURIComponent(uid)}`, {
+  return request("GET", `/api/v1/requirements/graph/descendants/${encodeURIComponent(uid)}`, {
     params: { depth, project },
   });
 }
 
 export async function findPaths(source, target, project) {
-  return request("GET", "/api/v1/graph/paths", {
+  return request("GET", "/api/v1/requirements/graph/paths", {
     params: { source, target, project },
   });
 }
@@ -597,9 +642,29 @@ export async function getGraphVisualization(project, entityTypes) {
   });
 }
 
-export async function extractSubgraph(roots, project, entityTypes) {
-  return request("GET", "/api/v1/graph/subgraph", {
-    params: { roots: roots.join(","), project, entityTypes: entityTypes ? entityTypes.join(",") : undefined },
+export async function extractSubgraph(rootNodeIds, project, entityTypes, maxDepth) {
+  return request("POST", "/api/v1/graph/subgraph/query", {
+    params: { project },
+    body: { root_node_ids: rootNodeIds, entity_types: entityTypes, max_depth: maxDepth },
+  });
+}
+
+export async function traverseGraph(rootNodeIds, project, entityTypes, maxDepth) {
+  return request("POST", "/api/v1/graph/traversal/query", {
+    params: { project },
+    body: { root_node_ids: rootNodeIds, entity_types: entityTypes, max_depth: maxDepth },
+  });
+}
+
+export async function findGraphPaths(sourceNodeId, targetNodeId, project, entityTypes, maxDepth) {
+  return request("POST", "/api/v1/graph/paths/query", {
+    params: { project },
+    body: {
+      source_node_id: sourceNodeId,
+      target_node_id: targetNodeId,
+      entity_types: entityTypes,
+      max_depth: maxDepth,
+    },
   });
 }
 
@@ -897,38 +962,42 @@ export async function listAssets({ project, type } = {}) {
   return request("GET", "/api/v1/assets", { params: { project, type } });
 }
 
-export async function getAsset(id) {
-  return request("GET", `/api/v1/assets/${encodeURIComponent(id)}`);
+export async function getAsset(id, project) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(id)}`, { params: { project } });
 }
 
 export async function getAssetByUid(uid, project) {
   return request("GET", `/api/v1/assets/uid/${encodeURIComponent(uid)}`, { params: { project } });
 }
 
-export async function updateAsset(id, data) {
-  return request("PUT", `/api/v1/assets/${encodeURIComponent(id)}`, { body: data });
+export async function updateAsset(id, data, project) {
+  return request("PUT", `/api/v1/assets/${encodeURIComponent(id)}`, { body: data, params: { project } });
 }
 
-export async function deleteAsset(id) {
-  await request("DELETE", `/api/v1/assets/${encodeURIComponent(id)}`);
+export async function deleteAsset(id, project) {
+  await request("DELETE", `/api/v1/assets/${encodeURIComponent(id)}`, { params: { project } });
 }
 
-export async function archiveAsset(id) {
-  return request("POST", `/api/v1/assets/${encodeURIComponent(id)}/archive`);
+export async function archiveAsset(id, project) {
+  return request("POST", `/api/v1/assets/${encodeURIComponent(id)}/archive`, { params: { project } });
 }
 
-export async function createAssetRelation(assetId, data) {
-  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/relations`, { body: data });
+export async function createAssetRelation(assetId, data, project) {
+  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/relations`, {
+    body: data,
+    params: { project },
+  });
 }
 
-export async function getAssetRelations(assetId) {
-  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/relations`);
+export async function getAssetRelations(assetId, project) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/relations`, { params: { project } });
 }
 
-export async function deleteAssetRelation(assetId, relationId) {
+export async function deleteAssetRelation(assetId, relationId, project) {
   await request(
     "DELETE",
     `/api/v1/assets/${encodeURIComponent(assetId)}/relations/${encodeURIComponent(relationId)}`,
+    { params: { project } },
   );
 }
 
@@ -936,8 +1005,8 @@ export async function detectAssetCycles(project) {
   return request("GET", "/api/v1/assets/topology/cycles", { params: { project } });
 }
 
-export async function assetImpactAnalysis(assetId) {
-  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/topology/impact`);
+export async function assetImpactAnalysis(assetId, project) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/topology/impact`, { params: { project } });
 }
 
 export async function extractAssetSubgraph(data, project) {
@@ -946,50 +1015,59 @@ export async function extractAssetSubgraph(data, project) {
 
 // --- Asset Links (cross-entity linking) ---
 
-export async function createAssetLink(assetId, data) {
-  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/links`, { body: data });
-}
-
-export async function getAssetLinks(assetId, targetType) {
-  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/links`, {
-    params: { target_type: targetType },
+export async function createAssetLink(assetId, data, project) {
+  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/links`, {
+    body: data,
+    params: { project },
   });
 }
 
-export async function deleteAssetLink(assetId, linkId) {
-  await request("DELETE", `/api/v1/assets/${encodeURIComponent(assetId)}/links/${encodeURIComponent(linkId)}`);
+export async function getAssetLinks(assetId, targetType, project) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/links`, {
+    params: { target_type: targetType, project },
+  });
 }
 
-export async function getAssetLinksByTarget(targetType, targetIdentifier, project) {
+export async function deleteAssetLink(assetId, linkId, project) {
+  await request("DELETE", `/api/v1/assets/${encodeURIComponent(assetId)}/links/${encodeURIComponent(linkId)}`, {
+    params: { project },
+  });
+}
+
+export async function getAssetLinksByTarget(targetType, targetEntityId, targetIdentifier, project) {
   return request("GET", "/api/v1/assets/links/by-target", {
-    params: { target_type: targetType, target_identifier: targetIdentifier, project },
+    params: { target_type: targetType, target_entity_id: targetEntityId, target_identifier: targetIdentifier, project },
   });
 }
 
 // --- External Identifiers (source provenance) ---
 
-export async function createAssetExternalId(assetId, data) {
-  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/external-ids`, { body: data });
-}
-
-export async function getAssetExternalIds(assetId, sourceSystem) {
-  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/external-ids`, {
-    params: { source_system: sourceSystem },
+export async function createAssetExternalId(assetId, data, project) {
+  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/external-ids`, {
+    body: data,
+    params: { project },
   });
 }
 
-export async function updateAssetExternalId(assetId, extIdId, data) {
+export async function getAssetExternalIds(assetId, sourceSystem, project) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/external-ids`, {
+    params: { source_system: sourceSystem, project },
+  });
+}
+
+export async function updateAssetExternalId(assetId, extIdId, data, project) {
   return request(
     "PUT",
     `/api/v1/assets/${encodeURIComponent(assetId)}/external-ids/${encodeURIComponent(extIdId)}`,
-    { body: data },
+    { body: data, params: { project } },
   );
 }
 
-export async function deleteAssetExternalId(assetId, extIdId) {
+export async function deleteAssetExternalId(assetId, extIdId, project) {
   await request(
     "DELETE",
     `/api/v1/assets/${encodeURIComponent(assetId)}/external-ids/${encodeURIComponent(extIdId)}`,
+    { params: { project } },
   );
 }
 
@@ -1003,40 +1081,47 @@ export async function findAssetByExternalId(sourceSystem, sourceId, project) {
 // Observation API functions
 // ---------------------------------------------------------------------------
 
-export async function createObservation(assetId, data) {
-  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/observations`, { body: data });
-}
-
-export async function listObservations(assetId, { category, key } = {}) {
-  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/observations`, {
-    params: { category, key },
+export async function createObservation(assetId, data, project) {
+  return request("POST", `/api/v1/assets/${encodeURIComponent(assetId)}/observations`, {
+    body: data,
+    params: { project },
   });
 }
 
-export async function getObservation(assetId, observationId) {
+export async function listObservations(assetId, { category, key, project } = {}) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/observations`, {
+    params: { category, key, project },
+  });
+}
+
+export async function getObservation(assetId, observationId, project) {
   return request(
     "GET",
     `/api/v1/assets/${encodeURIComponent(assetId)}/observations/${encodeURIComponent(observationId)}`,
+    { params: { project } },
   );
 }
 
-export async function updateObservation(assetId, observationId, data) {
+export async function updateObservation(assetId, observationId, data, project) {
   return request(
     "PUT",
     `/api/v1/assets/${encodeURIComponent(assetId)}/observations/${encodeURIComponent(observationId)}`,
-    { body: data },
+    { body: data, params: { project } },
   );
 }
 
-export async function deleteObservation(assetId, observationId) {
+export async function deleteObservation(assetId, observationId, project) {
   await request(
     "DELETE",
     `/api/v1/assets/${encodeURIComponent(assetId)}/observations/${encodeURIComponent(observationId)}`,
+    { params: { project } },
   );
 }
 
-export async function listLatestObservations(assetId) {
-  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/observations/latest`);
+export async function listLatestObservations(assetId, project) {
+  return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/observations/latest`, {
+    params: { project },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1051,47 +1136,185 @@ export async function listRiskScenarios(project) {
   return request("GET", "/api/v1/risk-scenarios", { params: { project } });
 }
 
-export async function getRiskScenario(id) {
-  return request("GET", `/api/v1/risk-scenarios/${encodeURIComponent(id)}`);
+export async function getRiskScenario(id, project) {
+  return request("GET", `/api/v1/risk-scenarios/${encodeURIComponent(id)}`, { params: { project } });
 }
 
 export async function getRiskScenarioByUid(uid, project) {
   return request("GET", `/api/v1/risk-scenarios/uid/${encodeURIComponent(uid)}`, { params: { project } });
 }
 
-export async function updateRiskScenario(id, data) {
-  return request("PUT", `/api/v1/risk-scenarios/${encodeURIComponent(id)}`, { body: data });
+export async function updateRiskScenario(id, data, project) {
+  return request("PUT", `/api/v1/risk-scenarios/${encodeURIComponent(id)}`, { body: data, params: { project } });
 }
 
-export async function deleteRiskScenario(id) {
-  await request("DELETE", `/api/v1/risk-scenarios/${encodeURIComponent(id)}`);
+export async function deleteRiskScenario(id, project) {
+  await request("DELETE", `/api/v1/risk-scenarios/${encodeURIComponent(id)}`, { params: { project } });
 }
 
-export async function transitionRiskScenarioStatus(id, status) {
-  return request("PUT", `/api/v1/risk-scenarios/${encodeURIComponent(id)}/status`, { body: { status } });
+export async function transitionRiskScenarioStatus(id, status, project) {
+  return request("PUT", `/api/v1/risk-scenarios/${encodeURIComponent(id)}/status`, {
+    body: { status },
+    params: { project },
+  });
 }
 
-export async function getRiskScenarioRequirements(id) {
-  return request("GET", `/api/v1/risk-scenarios/${encodeURIComponent(id)}/requirements`);
+export async function getRiskScenarioRequirements(id, project) {
+  return request("GET", `/api/v1/risk-scenarios/${encodeURIComponent(id)}/requirements`, { params: { project } });
 }
 
 // ---------------------------------------------------------------------------
 // Risk Scenario Link API functions
 // ---------------------------------------------------------------------------
 
-export async function createRiskScenarioLink(riskScenarioId, data) {
-  return request("POST", `/api/v1/risk-scenarios/${encodeURIComponent(riskScenarioId)}/links`, { body: data });
-}
-
-export async function listRiskScenarioLinks(riskScenarioId, { targetType } = {}) {
-  return request("GET", `/api/v1/risk-scenarios/${encodeURIComponent(riskScenarioId)}/links`, {
-    params: { target_type: targetType },
+export async function createRiskScenarioLink(riskScenarioId, data, project) {
+  return request("POST", `/api/v1/risk-scenarios/${encodeURIComponent(riskScenarioId)}/links`, {
+    body: data,
+    params: { project },
   });
 }
 
-export async function deleteRiskScenarioLink(riskScenarioId, linkId) {
+export async function listRiskScenarioLinks(riskScenarioId, { targetType, project } = {}) {
+  return request("GET", `/api/v1/risk-scenarios/${encodeURIComponent(riskScenarioId)}/links`, {
+    params: { target_type: targetType, project },
+  });
+}
+
+export async function deleteRiskScenarioLink(riskScenarioId, linkId, project) {
   await request(
     "DELETE",
     `/api/v1/risk-scenarios/${encodeURIComponent(riskScenarioId)}/links/${encodeURIComponent(linkId)}`,
+    { params: { project } },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Methodology Profile API functions
+// ---------------------------------------------------------------------------
+
+export async function createMethodologyProfile(data, project) {
+  return request("POST", "/api/v1/methodology-profiles", { body: data, params: { project } });
+}
+
+export async function listMethodologyProfiles(project) {
+  return request("GET", "/api/v1/methodology-profiles", { params: { project } });
+}
+
+export async function getMethodologyProfile(id, project) {
+  return request("GET", `/api/v1/methodology-profiles/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function updateMethodologyProfile(id, data, project) {
+  return request("PUT", `/api/v1/methodology-profiles/${encodeURIComponent(id)}`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function deleteMethodologyProfile(id, project) {
+  await request("DELETE", `/api/v1/methodology-profiles/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+// ---------------------------------------------------------------------------
+// Risk Register Record API functions
+// ---------------------------------------------------------------------------
+
+export async function createRiskRegisterRecord(data, project) {
+  return request("POST", "/api/v1/risk-register-records", { body: data, params: { project } });
+}
+
+export async function listRiskRegisterRecords(project) {
+  return request("GET", "/api/v1/risk-register-records", { params: { project } });
+}
+
+export async function getRiskRegisterRecord(id, project) {
+  return request("GET", `/api/v1/risk-register-records/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function updateRiskRegisterRecord(id, data, project) {
+  return request("PUT", `/api/v1/risk-register-records/${encodeURIComponent(id)}`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function transitionRiskRegisterRecordStatus(id, status, project) {
+  return request("PUT", `/api/v1/risk-register-records/${encodeURIComponent(id)}/status`, {
+    body: { status },
+    params: { project },
+  });
+}
+
+export async function deleteRiskRegisterRecord(id, project) {
+  await request("DELETE", `/api/v1/risk-register-records/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+// ---------------------------------------------------------------------------
+// Risk Assessment Result API functions
+// ---------------------------------------------------------------------------
+
+export async function createRiskAssessmentResult(data, project) {
+  return request("POST", "/api/v1/risk-assessment-results", { body: data, params: { project } });
+}
+
+export async function listRiskAssessmentResults({ riskScenarioId, riskRegisterRecordId, project } = {}) {
+  return request("GET", "/api/v1/risk-assessment-results", {
+    params: { riskScenarioId, riskRegisterRecordId, project },
+  });
+}
+
+export async function getRiskAssessmentResult(id, project) {
+  return request("GET", `/api/v1/risk-assessment-results/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function updateRiskAssessmentResult(id, data, project) {
+  return request("PUT", `/api/v1/risk-assessment-results/${encodeURIComponent(id)}`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function transitionRiskAssessmentApprovalState(id, approvalState, project) {
+  return request("PUT", `/api/v1/risk-assessment-results/${encodeURIComponent(id)}/approval-state`, {
+    body: { approval_state: approvalState },
+    params: { project },
+  });
+}
+
+export async function deleteRiskAssessmentResult(id, project) {
+  await request("DELETE", `/api/v1/risk-assessment-results/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+// ---------------------------------------------------------------------------
+// Treatment Plan API functions
+// ---------------------------------------------------------------------------
+
+export async function createTreatmentPlan(data, project) {
+  return request("POST", "/api/v1/treatment-plans", { body: data, params: { project } });
+}
+
+export async function listTreatmentPlans({ riskRegisterRecordId, project } = {}) {
+  return request("GET", "/api/v1/treatment-plans", { params: { riskRegisterRecordId, project } });
+}
+
+export async function getTreatmentPlan(id, project) {
+  return request("GET", `/api/v1/treatment-plans/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function updateTreatmentPlan(id, data, project) {
+  return request("PUT", `/api/v1/treatment-plans/${encodeURIComponent(id)}`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function transitionTreatmentPlanStatus(id, status, project) {
+  return request("PUT", `/api/v1/treatment-plans/${encodeURIComponent(id)}/status`, {
+    body: { status },
+    params: { project },
+  });
+}
+
+export async function deleteTreatmentPlan(id, project) {
+  await request("DELETE", `/api/v1/treatment-plans/${encodeURIComponent(id)}`, { params: { project } });
 }

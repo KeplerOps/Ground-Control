@@ -55,6 +55,15 @@ export const LINK_TYPES: LinkType[] = [
 ];
 export type SyncStatus = "SYNCED" | "NOT_SYNCED" | "ERROR";
 export type RevisionType = "ADD" | "MOD" | "DEL";
+export type GraphEntityType =
+  | "REQUIREMENT"
+  | "OPERATIONAL_ASSET"
+  | "OBSERVATION"
+  | "RISK_SCENARIO"
+  | "RISK_REGISTER_RECORD"
+  | "RISK_ASSESSMENT_RESULT"
+  | "TREATMENT_PLAN"
+  | "METHODOLOGY_PROFILE";
 
 // Responses
 export interface ProjectResponse {
@@ -68,6 +77,7 @@ export interface ProjectResponse {
 
 export interface RequirementResponse {
   id: string;
+  graphNodeId: string;
   uid: string;
   projectIdentifier: string;
   title: string;
@@ -94,20 +104,38 @@ export interface RelationResponse {
 
 export interface GraphVisualizationNodeResponse {
   id: string;
-  uid: string;
-  title: string;
-  statement: string;
-  priority: string;
-  status: string;
-  requirementType: string;
-  wave: number;
+  domainId: string;
+  entityType: GraphEntityType | string;
+  projectIdentifier: string;
+  uid: string | null;
+  label: string;
+  properties: Record<string, unknown>;
+}
+
+export interface GraphEdgeResponse {
+  id: string;
+  edgeType: string;
+  sourceId: string;
+  targetId: string;
+  sourceEntityType: string;
+  targetEntityType: string;
+  properties: Record<string, unknown>;
 }
 
 export interface GraphVisualizationResponse {
   nodes: GraphVisualizationNodeResponse[];
-  edges: RelationResponse[];
+  edges: GraphEdgeResponse[];
   totalNodes: number;
   totalEdges: number;
+}
+
+export interface GraphNeighborhoodResponse extends GraphVisualizationResponse {
+  rootNodeIds: string[];
+}
+
+export interface GraphPathResponse {
+  nodeIds: string[];
+  edgeTypes: string[];
 }
 
 export interface TraceabilityLinkResponse {

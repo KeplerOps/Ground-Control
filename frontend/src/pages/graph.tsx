@@ -1,6 +1,5 @@
 import { useProjectContext } from "@/contexts/project-context";
 import { apiFetch } from "@/lib/api-client";
-import type { GraphVisualizationResponse } from "@/types/api";
 import {
   type ColorScheme,
   type LayoutId,
@@ -8,36 +7,203 @@ import {
   RELATION_STYLES,
   STATUS_COLORS,
   getColorMap,
+  getEntityTypeColor,
   getNodeColor,
   getSeries,
 } from "@/lib/graph-constants";
 import { cn } from "@/lib/utils";
+import type {
+  GraphEdgeResponse,
+  GraphNeighborhoodResponse,
+  GraphVisualizationNodeResponse,
+  GraphVisualizationResponse,
+} from "@/types/api";
 import type cytoscape from "cytoscape";
 import { Filter, Loader2, Maximize, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-interface RequirementData {
-  id: string;
-  uid: string;
-  title: string;
-  statement: string;
-  priority: string;
-  status: string;
-  requirementType: string;
-  wave: number;
-}
-
-interface RelationData {
-  id: string;
-  sourceId: string;
-  targetId: string;
-  relationType: string;
-}
-
-
+type GraphNodeData = GraphVisualizationNodeResponse;
+type RelationData = GraphEdgeResponse;
 type CytoscapeInstance = cytoscape.Core;
 
 const WAVE_SPACING = 120;
+
+function isRequirementNode(node: GraphNodeData): boolean {
+  return node.entityType === "REQUIREMENT";
+}
+
+function getNodeEntityType(node: GraphNodeData): string {
+  return String(node.entityType ?? "UNKNOWN");
+}
+
+function getStringProperty(node: GraphNodeData, key: string): string {
+  const value = node.properties[key];
+  return typeof value === "string" ? value : "";
+}
+
+function getNumberProperty(node: GraphNodeData, key: string): number {
+  const value = node.properties[key];
+  return typeof value === "number" ? value : 0;
+}
+
+function getNodePriority(node: GraphNodeData): string {
+  return getStringProperty(node, "priority");
+}
+
+function getNodeStatus(node: GraphNodeData): string {
+  return getStringProperty(node, "status");
+}
+
+function getNodeRequirementType(node: GraphNodeData): string {
+  return getStringProperty(node, "requirementType");
+}
+
+function getNodeStatement(node: GraphNodeData): string {
+  return getStringProperty(node, "statement");
+}
+
+function getNodeTitle(node: GraphNodeData): string {
+  const title = getStringProperty(node, "title");
+  return title || node.label || node.uid || getNodeEntityType(node);
+}
+
+function getNodeWave(node: GraphNodeData): number {
+  return getNumberProperty(node, "wave");
+}
+
+function getNodeSeries(node: GraphNodeData): string {
+  if (!isRequirementNode(node)) {
+    return getNodeEntityType(node);
+  }
+  return getSeries(node.uid || node.label);
+}
+
+function getNodeDisplayLabel(node: GraphNodeData): string {
+  if (isRequirementNode(node)) {
+    return (node.label || node.uid || "REQ").replace("GC-", "");
+  }
+  if (getNodeEntityType(node) === "OBSERVATION") {
+    return getStringProperty(node, "observationKey") || node.label || "OBS";
+  }
+  return node.uid || node.label || getNodeTitle(node);
+}
+
+function getNodeLegendKey(
+  node: GraphNodeData,
+  colorScheme: ColorScheme,
+): string {
+  if (!isRequirementNode(node)) {
+    return getNodeEntityType(node);
+  }
+  switch (colorScheme) {
+    case "priority":
+      return getNodePriority(node) || "Unknown";
+    case "status":
+      return getNodeStatus(node) || "Unknown";
+    case "wave":
+      return `Wave ${getNodeWave(node) || 0}`;
+    case "entity":
+      return getNodeEntityType(node);
+    default:
+      return getNodeSeries(node);
+  }
+}
+
+function getNodeDescription(node: GraphNodeData): string {
+  const entityType = getNodeEntityType(node);
+  if (entityType === "REQUIREMENT") {
+    return getNodeStatement(node);
+  }
+  if (entityType === "OPERATIONAL_ASSET") {
+    return getStringProperty(node, "description");
+  }
+  if (entityType === "OBSERVATION") {
+    return getStringProperty(node, "observationValue");
+  }
+  if (entityType === "RISK_SCENARIO") {
+    return getStringProperty(node, "consequence");
+  }
+  if (entityType === "RISK_REGISTER_RECORD") {
+    return getStringProperty(node, "assetScopeSummary");
+  }
+  return "";
+}
+
+function getTooltipValue(data: Record<string, unknown>, key: string): string {
+  const value = data[key];
+  return typeof value === "string" ? value : "";
+}
+
+function getTooltipTags(
+  data: Record<string, unknown>,
+): Array<{ text: string; bg: string }> {
+  const entityType = String(data.entityType ?? "UNKNOWN");
+  const entityColor = getEntityTypeColor(entityType);
+
+  if (entityType === "REQUIREMENT") {
+    return [
+      {
+        text: String(data.priority ?? ""),
+        bg: PRIORITY_COLORS[String(data.priority ?? "")] ?? "#555",
+      },
+      {
+        text: String(data.status ?? ""),
+        bg: STATUS_COLORS[String(data.status ?? "")] ?? "#555",
+      },
+      { text: `Wave ${Number(data.wave ?? 0)}`, bg: "#6c7ee1" },
+      { text: String(data.type ?? ""), bg: "#4ecdc4" },
+    ].filter((tag) => tag.text);
+  }
+
+  const fieldsByEntityType: Record<
+    string,
+    Array<{ label: string; key: string }>
+  > = {
+    OPERATIONAL_ASSET: [
+      { label: "Asset Type", key: "assetType" },
+      { label: "Name", key: "assetName" },
+    ],
+    OBSERVATION: [
+      { label: "Category", key: "category" },
+      { label: "Source", key: "source" },
+      { label: "Confidence", key: "confidence" },
+    ],
+    RISK_SCENARIO: [
+      { label: "Status", key: "status" },
+      { label: "Threat", key: "threatSource" },
+      { label: "Event", key: "threatEvent" },
+    ],
+    RISK_REGISTER_RECORD: [
+      { label: "Status", key: "status" },
+      { label: "Owner", key: "owner" },
+      { label: "Cadence", key: "reviewCadence" },
+    ],
+    RISK_ASSESSMENT_RESULT: [
+      { label: "Approval", key: "approvalState" },
+      { label: "Confidence", key: "confidence" },
+      { label: "Analyst", key: "analystIdentity" },
+    ],
+    TREATMENT_PLAN: [
+      { label: "Strategy", key: "strategy" },
+      { label: "Status", key: "status" },
+      { label: "Owner", key: "owner" },
+    ],
+    METHODOLOGY_PROFILE: [
+      { label: "Family", key: "family" },
+      { label: "Version", key: "version" },
+      { label: "Status", key: "status" },
+    ],
+  };
+
+  return (fieldsByEntityType[entityType] ?? [])
+    .map((field) => {
+      const value = getTooltipValue(data, field.key);
+      return value
+        ? { text: `${field.label}: ${value}`, bg: entityColor }
+        : null;
+    })
+    .filter((tag): tag is { text: string; bg: string } => tag !== null);
+}
 
 export function Graph() {
   const { activeProject } = useProjectContext();
@@ -45,17 +211,22 @@ export function Graph() {
   const cyRef = useRef<CytoscapeInstance | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
 
-  const [colorScheme, setColorScheme] = useState<ColorScheme>("status");
+  const [colorScheme, setColorScheme] = useState<ColorScheme>("entity");
   const [layoutId, setLayoutId] = useState<LayoutId>("dagre-tb");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [viewMode, setViewMode] = useState<"visualization" | "traversal">(
+    "visualization",
+  );
 
+  const [filterEntityType, setFilterEntityType] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterPriority, setFilterPriority] = useState("");
   const [filterSeries, setFilterSeries] = useState("");
   const [filterWave, setFilterWave] = useState("");
 
-  const [requirements, setRequirements] = useState<RequirementData[]>([]);
+  const [nodes, setNodes] = useState<GraphNodeData[]>([]);
   const [relations, setRelations] = useState<RelationData[]>([]);
 
   const fetchData = useCallback(async () => {
@@ -68,15 +239,9 @@ export function Graph() {
         "/graph/visualization",
         { params: { project: activeProject.identifier } },
       );
-      setRequirements(data.nodes);
-      setRelations(
-        data.edges.map((e) => ({
-          id: e.id,
-          sourceId: e.sourceId,
-          targetId: e.targetId,
-          relationType: e.relationType,
-        })),
-      );
+      setNodes(data.nodes);
+      setRelations(data.edges);
+      setViewMode("visualization");
       setLoading(false);
     } catch (err) {
       setError(
@@ -86,68 +251,125 @@ export function Graph() {
     }
   }, [activeProject]);
 
+  const runTraversal = useCallback(async () => {
+    if (!activeProject || !selectedNodeId) return;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const data = await apiFetch<GraphNeighborhoodResponse>(
+        "/graph/traversal/query",
+        {
+          method: "POST",
+          params: { project: activeProject.identifier },
+          body: {
+            rootNodeIds: [selectedNodeId],
+            maxDepth: 2,
+            entityTypes: filterEntityType ? [filterEntityType] : undefined,
+          },
+        },
+      );
+      setNodes(data.nodes);
+      setRelations(data.edges);
+      setViewMode("traversal");
+      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to traverse graph");
+      setLoading(false);
+    }
+  }, [activeProject, filterEntityType, selectedNodeId]);
+
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
   const stats = useMemo(() => {
+    const entityTypes = new Set<string>();
     const waves: Record<number, number> = {};
     const seriesSet = new Set<string>();
-    for (const r of requirements) {
-      const w = r.wave || 0;
-      waves[w] = (waves[w] ?? 0) + 1;
-      seriesSet.add(getSeries(r.uid));
+    for (const node of nodes) {
+      entityTypes.add(getNodeEntityType(node));
+      const w = getNodeWave(node) || 0;
+      if (isRequirementNode(node)) {
+        waves[w] = (waves[w] ?? 0) + 1;
+        seriesSet.add(getNodeSeries(node));
+      }
     }
     const waveKeys = Object.keys(waves)
       .map(Number)
       .sort((a, b) => a - b);
     const waveStr = waveKeys.map((w) => `W${w}:${waves[w]}`).join(" ");
     return {
-      requirements: requirements.length,
-      relations: relations.length,
+      nodes: nodes.length,
+      edges: relations.length,
+      entityTypes: entityTypes.size,
       series: seriesSet.size,
       waves: waveKeys.length,
       waveStr,
     };
-  }, [requirements, relations]);
+  }, [nodes, relations]);
 
   const filterOptions = useMemo(() => {
+    const entityTypes = new Set<string>();
     const statuses = new Set<string>();
     const priorities = new Set<string>();
     const series = new Set<string>();
     const waves = new Set<number>();
-    for (const r of requirements) {
-      statuses.add(r.status);
-      priorities.add(r.priority);
-      series.add(getSeries(r.uid));
-      waves.add(r.wave || 0);
+    for (const node of nodes) {
+      entityTypes.add(getNodeEntityType(node));
+      const status = getNodeStatus(node);
+      const priority = getNodePriority(node);
+      if (status) statuses.add(status);
+      if (priority) priorities.add(priority);
+      if (isRequirementNode(node)) {
+        series.add(getNodeSeries(node));
+        waves.add(getNodeWave(node) || 0);
+      }
     }
     return {
+      entityTypes: [...entityTypes].sort(),
       statuses: [...statuses].sort(),
       priorities: [...priorities].sort(),
       series: [...series].sort(),
       waves: [...waves].sort((a, b) => a - b),
     };
-  }, [requirements]);
+  }, [nodes]);
 
   const hasFilters =
+    filterEntityType !== "" ||
     filterStatus !== "" ||
     filterPriority !== "" ||
     filterSeries !== "" ||
     filterWave !== "";
 
-  const filteredRequirements = useMemo(() => {
-    if (!hasFilters) return requirements;
-    return requirements.filter((r) => {
-      if (filterStatus && r.status !== filterStatus) return false;
-      if (filterPriority && r.priority !== filterPriority) return false;
-      if (filterSeries && getSeries(r.uid) !== filterSeries) return false;
-      if (filterWave && String(r.wave || 0) !== filterWave) return false;
+  const filteredNodes = useMemo(() => {
+    if (!hasFilters) return nodes;
+    return nodes.filter((node) => {
+      if (filterEntityType && getNodeEntityType(node) !== filterEntityType) {
+        return false;
+      }
+      if (filterStatus && getNodeStatus(node) !== filterStatus) return false;
+      if (filterPriority && getNodePriority(node) !== filterPriority)
+        return false;
+      if (filterSeries) {
+        if (!isRequirementNode(node) || getNodeSeries(node) !== filterSeries) {
+          return false;
+        }
+      }
+      if (filterWave) {
+        if (
+          !isRequirementNode(node) ||
+          String(getNodeWave(node) || 0) !== filterWave
+        ) {
+          return false;
+        }
+      }
       return true;
     });
   }, [
-    requirements,
+    nodes,
     hasFilters,
+    filterEntityType,
     filterStatus,
     filterPriority,
     filterSeries,
@@ -156,28 +378,15 @@ export function Graph() {
 
   const filteredRelations = useMemo(() => {
     if (!hasFilters) return relations;
-    const ids = new Set(filteredRequirements.map((r) => r.id));
+    const ids = new Set(filteredNodes.map((node) => node.id));
     return relations.filter((r) => ids.has(r.sourceId) && ids.has(r.targetId));
-  }, [relations, filteredRequirements, hasFilters]);
+  }, [relations, filteredNodes, hasFilters]);
 
   // Legend counts reflect the filtered graph so they match what's visible
   const legendItems = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const r of filteredRequirements) {
-      let key: string;
-      switch (colorScheme) {
-        case "priority":
-          key = r.priority;
-          break;
-        case "status":
-          key = r.status;
-          break;
-        case "wave":
-          key = `Wave ${r.wave || 0}`;
-          break;
-        default:
-          key = getSeries(r.uid);
-      }
+    for (const node of filteredNodes) {
+      const key = getNodeLegendKey(node, colorScheme);
       counts[key] = (counts[key] ?? 0) + 1;
     }
     const colorMap = getColorMap(colorScheme);
@@ -186,14 +395,14 @@ export function Graph() {
       .map((key) => ({
         key,
         count: counts[key] ?? 0,
-        color: colorMap[key] ?? "#555",
+        color: colorMap[key] ?? getEntityTypeColor(key),
       }));
-  }, [filteredRequirements, colorScheme]);
+  }, [filteredNodes, colorScheme]);
 
   const relationLegend = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const r of filteredRelations) {
-      counts[r.relationType] = (counts[r.relationType] ?? 0) + 1;
+      counts[r.edgeType] = (counts[r.edgeType] ?? 0) + 1;
     }
     return Object.entries(RELATION_STYLES)
       .filter(([type]) => (counts[type] ?? 0) > 0)
@@ -205,6 +414,7 @@ export function Graph() {
   }, [filteredRelations]);
 
   function clearFilters() {
+    setFilterEntityType("");
     setFilterStatus("");
     setFilterPriority("");
     setFilterSeries("");
@@ -219,31 +429,25 @@ export function Graph() {
       const uidDiv = document.createElement("div");
       uidDiv.style.cssText =
         "font-size:11px;color:#6c7ee1;font-weight:600;margin-bottom:4px";
-      uidDiv.textContent = String(d.uid ?? "");
+      uidDiv.textContent = String(d.uid ?? d.entityType ?? d.id ?? "");
       container.appendChild(uidDiv);
 
       const titleDiv = document.createElement("div");
       titleDiv.style.cssText = "font-weight:600;margin-bottom:6px";
-      titleDiv.textContent = String(d.title ?? "");
+      titleDiv.textContent = String(d.title ?? d.label ?? "");
       container.appendChild(titleDiv);
 
       const metaDiv = document.createElement("div");
       metaDiv.style.cssText =
         "display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap";
 
-      const tags = [
-        {
-          text: String(d.priority ?? ""),
-          bg: PRIORITY_COLORS[String(d.priority)] ?? "#555",
-        },
-        {
-          text: String(d.status ?? ""),
-          bg: STATUS_COLORS[String(d.status)] ?? "#555",
-        },
-        { text: `Wave ${Number(d.wave ?? 0)}`, bg: "#6c7ee1" },
-        { text: String(d.type ?? ""), bg: "#4ecdc4" },
-      ];
-      for (const t of tags) {
+      const typeTag = {
+        text: String(d.entityType ?? "UNKNOWN"),
+        bg: getEntityTypeColor(String(d.entityType ?? "")),
+      };
+      const detailTags = getTooltipTags(d);
+
+      for (const t of [typeTag, ...detailTags].filter((tag) => tag.text)) {
         const span = document.createElement("span");
         span.style.cssText = `display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;background:${t.bg}33;color:${t.bg}`;
         span.textContent = t.text;
@@ -251,7 +455,10 @@ export function Graph() {
       }
       container.appendChild(metaDiv);
 
-      const statement = String(d.statement ?? "");
+      const statement =
+        String(d.entityType ?? "") === "REQUIREMENT"
+          ? String(d.statement ?? "")
+          : String(d.description ?? d.observationValue ?? d.consequence ?? "");
       if (statement) {
         const stmtDiv = document.createElement("div");
         stmtDiv.style.cssText =
@@ -264,9 +471,9 @@ export function Graph() {
   );
 
   useEffect(() => {
-    if (loading || !containerRef.current || filteredRequirements.length === 0) {
+    if (loading || !containerRef.current || filteredNodes.length === 0) {
       // Destroy stale graph when filters exclude all nodes
-      if (filteredRequirements.length === 0 && cyRef.current) {
+      if (filteredNodes.length === 0 && cyRef.current) {
         cyRef.current.destroy();
         cyRef.current = null;
       }
@@ -288,31 +495,58 @@ export function Graph() {
 
       if (cancelled) return;
 
-      const nodes = filteredRequirements.map((r) => ({
+      const elements = filteredNodes.map((node) => ({
         data: {
-          id: r.id,
-          uid: r.uid,
-          label: r.uid.replace("GC-", ""),
-          title: r.title,
-          statement: r.statement,
-          priority: r.priority,
-          status: r.status,
-          type: r.requirementType,
-          wave: r.wave || 0,
-          series: getSeries(r.uid),
-          color: getNodeColor(r, colorScheme),
+          id: node.id,
+          domainId: node.domainId,
+          uid: node.uid,
+          label: getNodeDisplayLabel(node),
+          entityType: node.entityType,
+          title: getNodeTitle(node),
+          statement: getNodeStatement(node),
+          description: getNodeDescription(node),
+          priority: getNodePriority(node),
+          status: getNodeStatus(node),
+          type: getNodeRequirementType(node),
+          wave: getNodeWave(node) || 0,
+          series: getNodeSeries(node),
+          category: getStringProperty(node, "category"),
+          assetType: getStringProperty(node, "assetType"),
+          assetName: getStringProperty(node, "name"),
+          owner: getStringProperty(node, "owner"),
+          source: getStringProperty(node, "source"),
+          confidence: getStringProperty(node, "confidence"),
+          reviewCadence: getStringProperty(node, "reviewCadence"),
+          strategy: getStringProperty(node, "strategy"),
+          approvalState: getStringProperty(node, "approvalState"),
+          analystIdentity: getStringProperty(node, "analystIdentity"),
+          family: getStringProperty(node, "family"),
+          version: getStringProperty(node, "version"),
+          threatSource: getStringProperty(node, "threatSource"),
+          threatEvent: getStringProperty(node, "threatEvent"),
+          consequence: getStringProperty(node, "consequence"),
+          observationValue: getStringProperty(node, "observationValue"),
+          color: getNodeColor(
+            {
+              entityType: getNodeEntityType(node),
+              uid: node.uid,
+              priority: getNodePriority(node),
+              status: getNodeStatus(node),
+              wave: getNodeWave(node),
+            },
+            colorScheme,
+          ),
         },
       }));
 
       const edges = filteredRelations.map((rel) => {
-        const style =
-          RELATION_STYLES[rel.relationType] ?? RELATION_STYLES.RELATED;
+        const style = RELATION_STYLES[rel.edgeType] ?? RELATION_STYLES.RELATED;
         return {
           data: {
             id: `e-${rel.id}`,
             source: rel.sourceId,
             target: rel.targetId,
-            relType: rel.relationType,
+            relType: rel.edgeType,
             color: style?.color ?? "#95a5a6",
             lineStyle: style?.style ?? "dotted",
           },
@@ -351,7 +585,7 @@ export function Graph() {
 
       const cy = cytoscape({
         container: containerRef.current,
-        elements: [...nodes, ...edges],
+        elements: [...elements, ...edges],
         style: [
           {
             selector: "node",
@@ -447,6 +681,7 @@ export function Graph() {
 
       cy.on("tap", "node", (evt) => {
         const node = evt.target;
+        setSelectedNodeId(String(node.id()));
         if (node.hasClass("highlighted")) {
           cy.elements().removeClass("highlighted dimmed");
           return;
@@ -459,6 +694,7 @@ export function Graph() {
 
       cy.on("tap", (evt) => {
         if (evt.target === cy) {
+          setSelectedNodeId("");
           cy.elements().removeClass("highlighted dimmed");
         }
       });
@@ -475,7 +711,7 @@ export function Graph() {
     };
   }, [
     loading,
-    filteredRequirements,
+    filteredNodes,
     filteredRelations,
     colorScheme,
     layoutId,
@@ -487,6 +723,7 @@ export function Graph() {
   }
 
   function handleReset() {
+    setSelectedNodeId("");
     cyRef.current?.elements().removeClass("highlighted dimmed");
     cyRef.current?.fit(undefined, 30);
   }
@@ -497,16 +734,28 @@ export function Graph() {
 
     cy.elements().removeClass("highlighted dimmed");
     const matchNodes = cy.nodes().filter((n) => {
-      switch (colorScheme) {
-        case "priority":
-          return n.data("priority") === key;
-        case "status":
-          return n.data("status") === key;
-        case "wave":
-          return `Wave ${n.data("wave")}` === key;
-        default:
-          return n.data("series") === key;
+      if (n.data("entityType") !== "REQUIREMENT") {
+        return n.data("entityType") === key;
       }
+      return (
+        getNodeLegendKey(
+          {
+            id: String(n.id()),
+            domainId: String(n.data("domainId") ?? ""),
+            entityType: String(n.data("entityType") ?? ""),
+            projectIdentifier: "",
+            uid: n.data("uid") ? String(n.data("uid")) : null,
+            label: String(n.data("label") ?? ""),
+            properties: {
+              priority: n.data("priority"),
+              status: n.data("status"),
+              requirementType: n.data("type"),
+              wave: n.data("wave"),
+            },
+          },
+          colorScheme,
+        ) === key
+      );
     });
     if (matchNodes.length === 0) return;
     const neighborhood = matchNodes.union(matchNodes.connectedEdges());
@@ -519,11 +768,15 @@ export function Graph() {
       <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
         <h1 className="text-2xl font-semibold">Graph View</h1>
         <p className="text-muted-foreground">
-          Select a project to view the requirement graph.
+          Select a project to view the graph.
         </p>
       </div>
     );
   }
+
+  const selectedNode = selectedNodeId
+    ? (nodes.find((node) => node.id === selectedNodeId) ?? null)
+    : null;
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
@@ -542,6 +795,7 @@ export function Graph() {
             onChange={(e) => setColorScheme(e.target.value as ColorScheme)}
             className="rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
           >
+            <option value="entity">Entity type</option>
             <option value="series">Series</option>
             <option value="priority">Priority</option>
             <option value="status">Status</option>
@@ -583,12 +837,52 @@ export function Graph() {
         >
           <RotateCcw className="h-3 w-3" /> Reset
         </button>
+        <button
+          type="button"
+          onClick={runTraversal}
+          disabled={!selectedNodeId || loading}
+          className="flex items-center gap-1 rounded border border-input bg-background px-2 py-1 text-xs hover:border-primary disabled:cursor-not-allowed disabled:opacity-50"
+          title="Traverse two hops from the selected node"
+        >
+          <Maximize className="h-3 w-3" /> Focus selection
+        </button>
+        {viewMode === "traversal" && (
+          <button
+            type="button"
+            onClick={fetchData}
+            className="flex items-center gap-1 rounded border border-input bg-background px-2 py-1 text-xs hover:border-primary"
+            title="Restore the full mixed-entity graph"
+          >
+            <RotateCcw className="h-3 w-3" /> Full graph
+          </button>
+        )}
       </div>
 
       {/* Filters */}
       {!loading && (
         <div className="flex items-center gap-4 border-b border-border bg-card px-4 py-1.5">
           <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="graph-filter-entity-type"
+              className="text-xs text-muted-foreground"
+            >
+              Entity
+            </label>
+            <select
+              id="graph-filter-entity-type"
+              value={filterEntityType}
+              onChange={(e) => setFilterEntityType(e.target.value)}
+              className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
+            >
+              <option value="">All</option>
+              {filterOptions.entityTypes.map((entityType) => (
+                <option key={entityType} value={entityType}>
+                  {entityType}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="flex items-center gap-2">
             <label
               htmlFor="graph-filter-status"
@@ -631,48 +925,52 @@ export function Graph() {
               ))}
             </select>
           </div>
-          <div className="flex items-center gap-2">
-            <label
-              htmlFor="graph-filter-series"
-              className="text-xs text-muted-foreground"
-            >
-              Series
-            </label>
-            <select
-              id="graph-filter-series"
-              value={filterSeries}
-              onChange={(e) => setFilterSeries(e.target.value)}
-              className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
-            >
-              <option value="">All</option>
-              {filterOptions.series.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <label
-              htmlFor="graph-filter-wave"
-              className="text-xs text-muted-foreground"
-            >
-              Wave
-            </label>
-            <select
-              id="graph-filter-wave"
-              value={filterWave}
-              onChange={(e) => setFilterWave(e.target.value)}
-              className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
-            >
-              <option value="">All</option>
-              {filterOptions.waves.map((w) => (
-                <option key={w} value={String(w)}>
-                  {w}
-                </option>
-              ))}
-            </select>
-          </div>
+          {filterOptions.series.length > 0 && (
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="graph-filter-series"
+                className="text-xs text-muted-foreground"
+              >
+                Series
+              </label>
+              <select
+                id="graph-filter-series"
+                value={filterSeries}
+                onChange={(e) => setFilterSeries(e.target.value)}
+                className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
+              >
+                <option value="">All</option>
+                {filterOptions.series.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {filterOptions.waves.length > 0 && (
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="graph-filter-wave"
+                className="text-xs text-muted-foreground"
+              >
+                Wave
+              </label>
+              <select
+                id="graph-filter-wave"
+                value={filterWave}
+                onChange={(e) => setFilterWave(e.target.value)}
+                className="rounded border border-input bg-background px-2 py-0.5 text-xs text-foreground"
+              >
+                <option value="">All</option>
+                {filterOptions.waves.map((w) => (
+                  <option key={w} value={String(w)}>
+                    {w}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {hasFilters && (
             <button
               type="button"
@@ -691,18 +989,24 @@ export function Graph() {
           <span className="text-muted-foreground">
             <strong className="text-foreground text-[13px] mr-0.5">
               {hasFilters
-                ? `${filteredRequirements.length} of ${stats.requirements}`
-                : stats.requirements}
+                ? `${filteredNodes.length} of ${stats.nodes}`
+                : stats.nodes}
             </strong>
-            requirements
+            nodes
           </span>
           <span className="text-muted-foreground">
             <strong className="text-foreground text-[13px] mr-0.5">
               {hasFilters
-                ? `${filteredRelations.length} of ${stats.relations}`
-                : stats.relations}
+                ? `${filteredRelations.length} of ${stats.edges}`
+                : stats.edges}
             </strong>
-            relations
+            edges
+          </span>
+          <span className="text-muted-foreground">
+            <strong className="text-foreground text-[13px] mr-0.5">
+              {stats.entityTypes}
+            </strong>
+            entity types
           </span>
           <span className="text-muted-foreground">
             <strong className="text-foreground text-[13px] mr-0.5">
@@ -717,6 +1021,12 @@ export function Graph() {
             waves
           </span>
           <span className="text-muted-foreground">{stats.waveStr}</span>
+          {selectedNode && (
+            <span className="truncate text-muted-foreground">
+              selected:{" "}
+              <strong className="text-foreground">{selectedNode.id}</strong>
+            </span>
+          )}
         </div>
       )}
 
@@ -768,7 +1078,9 @@ export function Graph() {
         {loading && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <span className="text-sm text-muted-foreground">Loading graph...</span>
+            <span className="text-sm text-muted-foreground">
+              Loading graph...
+            </span>
           </div>
         )}
         {error && (
@@ -781,11 +1093,11 @@ export function Graph() {
         )}
         {!loading &&
           !error &&
-          requirements.length > 0 &&
-          filteredRequirements.length === 0 && (
+          nodes.length > 0 &&
+          filteredNodes.length === 0 && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background">
               <span className="text-sm text-muted-foreground">
-                No requirements match the current filters.
+                No graph nodes match the current filters.
               </span>
               <button
                 type="button"

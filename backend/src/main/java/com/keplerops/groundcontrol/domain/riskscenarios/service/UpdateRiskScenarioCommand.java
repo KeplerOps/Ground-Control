@@ -7,6 +7,4 @@ public record UpdateRiskScenarioCommand(
         String affectedObject,
         String vulnerability,
         String consequence,
-        String timeHorizon,
-        String observationRefs,
-        String topologyContext) {}
+        String timeHorizon) {}

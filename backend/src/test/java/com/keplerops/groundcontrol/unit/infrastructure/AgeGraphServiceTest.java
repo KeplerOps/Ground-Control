@@ -11,13 +11,17 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.TestUtil;
+import com.keplerops.groundcontrol.domain.graph.model.GraphEntityType;
+import com.keplerops.groundcontrol.domain.graph.model.GraphProjection;
+import com.keplerops.groundcontrol.domain.graph.service.GraphProjectionRegistryService;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
-import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
-import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.infrastructure.age.AgeGraphService;
 import com.keplerops.groundcontrol.infrastructure.age.AgeProperties;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -35,10 +39,10 @@ class AgeGraphServiceTest {
     private JdbcTemplate jdbcTemplate;
 
     @Mock
-    private RequirementRepository requirementRepository;
+    private GraphProjectionRegistryService graphProjectionRegistryService;
 
     @Mock
-    private RequirementRelationRepository relationRepository;
+    private ProjectRepository projectRepository;
 
     private AgeGraphService service;
 
@@ -54,7 +58,8 @@ class AgeGraphServiceTest {
     @BeforeEach
     void setUp() {
         var disabledProperties = new AgeProperties(false, "requirements");
-        service = new AgeGraphService(jdbcTemplate, disabledProperties, requirementRepository, relationRepository);
+        service = new AgeGraphService(
+                jdbcTemplate, disabledProperties, graphProjectionRegistryService, projectRepository);
     }
 
     @Nested
@@ -64,12 +69,12 @@ class AgeGraphServiceTest {
         void materializeGraph_isNoOp() {
             service.materializeGraph();
 
-            verifyNoInteractions(jdbcTemplate, requirementRepository, relationRepository);
+            verifyNoInteractions(jdbcTemplate, graphProjectionRegistryService, projectRepository);
         }
 
         @Test
         void getAncestors_returnsEmpty() {
-            var result = service.getAncestors("REQ-001", 10);
+            var result = service.getAncestors(PROJECT_ID, "REQ-001", 10);
 
             assertThat(result).isEmpty();
             verifyNoInteractions(jdbcTemplate);
@@ -77,7 +82,7 @@ class AgeGraphServiceTest {
 
         @Test
         void getDescendants_returnsEmpty() {
-            var result = service.getDescendants("REQ-001", 10);
+            var result = service.getDescendants(PROJECT_ID, "REQ-001", 10);
 
             assertThat(result).isEmpty();
             verifyNoInteractions(jdbcTemplate);
@@ -85,7 +90,7 @@ class AgeGraphServiceTest {
 
         @Test
         void findPaths_returnsEmpty() {
-            var result = service.findPaths("REQ-001", "REQ-002");
+            var result = service.findPaths(PROJECT_ID, "REQ-001", "REQ-002");
 
             assertThat(result).isEmpty();
             verifyNoInteractions(jdbcTemplate);
@@ -100,14 +105,14 @@ class AgeGraphServiceTest {
         @BeforeEach
         void setUp() {
             var enabledProperties = new AgeProperties(true, "test_graph");
-            enabledService =
-                    new AgeGraphService(jdbcTemplate, enabledProperties, requirementRepository, relationRepository);
+            enabledService = new AgeGraphService(
+                    jdbcTemplate, enabledProperties, graphProjectionRegistryService, projectRepository);
         }
 
         @Test
         void materializeGraph_createsNodesAndEdges() {
-            when(requirementRepository.findAll()).thenReturn(List.of());
-            when(relationRepository.findAllWithSourceAndTarget()).thenReturn(List.of());
+            when(graphProjectionRegistryService.buildProjection())
+                    .thenReturn(new GraphProjection(List.of(), List.of()));
 
             enabledService.materializeGraph();
 
@@ -119,8 +124,19 @@ class AgeGraphServiceTest {
         @Test
         void materializeGraph_withRequirements_createsNodes() {
             var req = new Requirement(TEST_PROJECT, "GC-A001", "Test Req", "Statement");
-            when(requirementRepository.findAll()).thenReturn(List.of(req));
-            when(relationRepository.findAllWithSourceAndTarget()).thenReturn(List.of());
+            when(graphProjectionRegistryService.buildProjection())
+                    .thenReturn(new GraphProjection(
+                            List.of(new com.keplerops.groundcontrol.domain.graph.model.GraphNode(
+                                    "REQUIREMENT:" + UUID.randomUUID(),
+                                    req.getId() != null
+                                            ? req.getId().toString()
+                                            : UUID.randomUUID().toString(),
+                                    GraphEntityType.REQUIREMENT,
+                                    TEST_PROJECT.getIdentifier(),
+                                    req.getUid(),
+                                    req.getUid(),
+                                    Map.of("title", req.getTitle()))),
+                            List.of()));
 
             enabledService.materializeGraph();
 
@@ -130,7 +146,8 @@ class AgeGraphServiceTest {
 
         @Test
         void getAncestors_queriesGraph() {
-            enabledService.getAncestors("REQ-001", 5);
+            when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
+            enabledService.getAncestors(PROJECT_ID, "REQ-001", 5);
 
             // setupSearchPath: LOAD + SET
             verify(jdbcTemplate, times(2)).execute(anyString());
@@ -139,7 +156,8 @@ class AgeGraphServiceTest {
 
         @Test
         void getDescendants_queriesGraph() {
-            enabledService.getDescendants("REQ-001", 5);
+            when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
+            enabledService.getDescendants(PROJECT_ID, "REQ-001", 5);
 
             verify(jdbcTemplate, times(2)).execute(anyString());
             verify(jdbcTemplate).query(contains("PARENT"), any(RowCallbackHandler.class));
@@ -147,7 +165,8 @@ class AgeGraphServiceTest {
 
         @Test
         void findPaths_queriesGraphWithRelationships() {
-            enabledService.findPaths("REQ-001", "REQ-002");
+            when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
+            enabledService.findPaths(PROJECT_ID, "REQ-001", "REQ-002");
 
             verify(jdbcTemplate, times(2)).execute(anyString());
             verify(jdbcTemplate).query(contains("label(r)"), any(RowCallbackHandler.class));

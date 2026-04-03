@@ -1,29 +1,33 @@
 package com.keplerops.groundcontrol.api.admin;
 
-import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
-import java.util.UUID;
+import com.keplerops.groundcontrol.domain.graph.model.GraphNode;
+import com.keplerops.groundcontrol.domain.graph.model.GraphProjection;
+import java.util.List;
+import java.util.Map;
 
 public record GraphVisualizationNodeResponse(
-        UUID id,
+        String id,
+        String domainId,
+        String entityType,
+        String projectIdentifier,
         String uid,
-        String title,
-        String statement,
-        String priority,
-        String status,
-        String requirementType,
-        Integer wave,
-        String entityType) {
+        String label,
+        Map<String, Object> properties) {
 
-    public static GraphVisualizationNodeResponse from(Requirement r) {
+    public static GraphVisualizationNodeResponse from(GraphNode node) {
         return new GraphVisualizationNodeResponse(
-                r.getId(),
-                r.getUid(),
-                r.getTitle(),
-                r.getStatement(),
-                r.getPriority().name(),
-                r.getStatus().name(),
-                r.getRequirementType().name(),
-                r.getWave(),
-                "REQUIREMENT");
+                node.id(),
+                node.domainId(),
+                node.entityType().name(),
+                node.projectIdentifier(),
+                node.uid(),
+                node.label(),
+                node.properties());
+    }
+
+    public static List<GraphVisualizationNodeResponse> from(GraphProjection projection) {
+        return projection.nodes().stream()
+                .map(GraphVisualizationNodeResponse::from)
+                .toList();
     }
 }

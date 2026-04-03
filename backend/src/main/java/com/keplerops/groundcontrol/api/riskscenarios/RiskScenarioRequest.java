@@ -11,6 +11,4 @@ public record RiskScenarioRequest(
         @NotBlank String affectedObject,
         String vulnerability,
         @NotBlank String consequence,
-        @NotBlank @Size(max = 100) String timeHorizon,
-        String observationRefs,
-        String topologyContext) {}
+        @NotBlank @Size(max = 100) String timeHorizon) {}

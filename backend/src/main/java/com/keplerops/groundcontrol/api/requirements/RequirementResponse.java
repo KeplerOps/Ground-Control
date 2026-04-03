@@ -1,5 +1,7 @@
 package com.keplerops.groundcontrol.api.requirements;
 
+import com.keplerops.groundcontrol.domain.graph.model.GraphEntityType;
+import com.keplerops.groundcontrol.domain.graph.model.GraphIds;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
@@ -9,6 +11,7 @@ import java.util.UUID;
 
 public record RequirementResponse(
         UUID id,
+        String graphNodeId,
         String uid,
         String projectIdentifier,
         String title,
@@ -25,6 +28,7 @@ public record RequirementResponse(
     public static RequirementResponse from(Requirement r) {
         return new RequirementResponse(
                 r.getId(),
+                GraphIds.nodeId(GraphEntityType.REQUIREMENT, r.getId()),
                 r.getUid(),
                 r.getProject() != null ? r.getProject().getIdentifier() : null,
                 r.getTitle(),

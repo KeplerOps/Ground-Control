@@ -60,8 +60,6 @@ class RiskScenarioControllerTest {
         rs.setTimeHorizon("12 months");
         rs.setCreatedBy("system");
         rs.setVulnerability("Weak password policy");
-        rs.setObservationRefs("OBS-001");
-        rs.setTopologyContext("DMZ web tier");
         setField(rs, "id", RS_ID);
         setField(rs, "createdAt", NOW);
         setField(rs, "updatedAt", NOW);
@@ -87,13 +85,12 @@ class RiskScenarioControllerTest {
                             "affectedObject": "Customer authentication portal",
                             "vulnerability": "Weak password policy",
                             "consequence": "Data breach and unauthorized access",
-                            "timeHorizon": "12 months",
-                            "observationRefs": "OBS-001",
-                            "topologyContext": "DMZ web tier"
+                            "timeHorizon": "12 months"
                         }
                         """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id", is(RS_ID.toString())))
+                .andExpect(jsonPath("$.graphNodeId", is("RISK_SCENARIO:" + RS_ID)))
                 .andExpect(jsonPath("$.uid", is("RS-001")))
                 .andExpect(jsonPath("$.threatSource", is("External threat actor")))
                 .andExpect(jsonPath("$.status", is("DRAFT")));
@@ -131,9 +128,10 @@ class RiskScenarioControllerTest {
 
     @Test
     void getByIdReturnsScenario() throws Exception {
-        when(riskScenarioService.getById(RS_ID)).thenReturn(makeScenario());
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(riskScenarioService.getById(PROJECT_ID, RS_ID)).thenReturn(makeScenario());
 
-        mockMvc.perform(get("/api/v1/risk-scenarios/{id}", RS_ID))
+        mockMvc.perform(get("/api/v1/risk-scenarios/{id}", RS_ID).param("project", "ground-control"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id", is(RS_ID.toString())))
                 .andExpect(jsonPath("$.projectIdentifier", is("ground-control")));
@@ -153,10 +151,12 @@ class RiskScenarioControllerTest {
     void updateReturnsUpdatedScenario() throws Exception {
         var updated = makeScenario();
         updated.setTitle("Updated title");
-        when(riskScenarioService.update(eq(RS_ID), any())).thenReturn(updated);
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(riskScenarioService.update(eq(PROJECT_ID), eq(RS_ID), any())).thenReturn(updated);
 
         mockMvc.perform(
                         put("/api/v1/risk-scenarios/{id}", RS_ID)
+                                .param("project", "ground-control")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -170,24 +170,29 @@ class RiskScenarioControllerTest {
 
     @Test
     void deleteReturns204() throws Exception {
-        mockMvc.perform(delete("/api/v1/risk-scenarios/{id}", RS_ID)).andExpect(status().isNoContent());
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
 
-        verify(riskScenarioService).delete(RS_ID);
+        mockMvc.perform(delete("/api/v1/risk-scenarios/{id}", RS_ID).param("project", "ground-control"))
+                .andExpect(status().isNoContent());
+
+        verify(riskScenarioService).delete(PROJECT_ID, RS_ID);
     }
 
     @Test
     void transitionStatusReturnsUpdatedScenario() throws Exception {
         var rs = makeScenario();
-        setField(rs, "status", RiskScenarioStatus.IDENTIFIED);
-        when(riskScenarioService.transitionStatus(RS_ID, RiskScenarioStatus.IDENTIFIED))
+        setField(rs, "status", RiskScenarioStatus.ACTIVE);
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(riskScenarioService.transitionStatus(PROJECT_ID, RS_ID, RiskScenarioStatus.ACTIVE))
                 .thenReturn(rs);
 
         mockMvc.perform(put("/api/v1/risk-scenarios/{id}/status", RS_ID)
+                        .param("project", "ground-control")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                        {"status": "IDENTIFIED"}
+                        {"status": "ACTIVE"}
                         """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status", is("IDENTIFIED")));
+                .andExpect(jsonPath("$.status", is("ACTIVE")));
     }
 }

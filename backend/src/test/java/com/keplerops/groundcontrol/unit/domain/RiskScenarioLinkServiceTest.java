@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.graph.service.GraphTargetResolverService;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.riskscenarios.model.RiskScenario;
 import com.keplerops.groundcontrol.domain.riskscenarios.model.RiskScenarioLink;
@@ -38,17 +39,22 @@ class RiskScenarioLinkServiceTest {
     @Mock
     private RiskScenarioRepository riskScenarioRepository;
 
+    @Mock
+    private GraphTargetResolverService graphTargetResolverService;
+
     @InjectMocks
     private RiskScenarioLinkService linkService;
 
     private RiskScenario scenario;
     private UUID scenarioId;
+    private UUID projectId;
     private static final Instant NOW = Instant.parse("2026-04-01T12:00:00Z");
 
     @BeforeEach
     void setUp() {
         var project = new Project("ground-control", "Ground Control");
-        setField(project, "id", UUID.randomUUID());
+        projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
         scenario = new RiskScenario(project, "RS-001", "Test scenario", "Source", "Event", "Object", "Consequence");
         scenario.setTimeHorizon("12 months");
         scenarioId = UUID.randomUUID();
@@ -57,7 +63,7 @@ class RiskScenarioLinkServiceTest {
 
     private RiskScenarioLink makeLink() {
         var link = new RiskScenarioLink(
-                scenario, RiskScenarioLinkTargetType.CONTROL, "CTRL-001", RiskScenarioLinkType.MITIGATED_BY);
+                scenario, RiskScenarioLinkTargetType.CONTROL, null, "CTRL-001", RiskScenarioLinkType.MITIGATED_BY);
         link.setTargetTitle("MFA Policy");
         setField(link, "id", UUID.randomUUID());
         setField(link, "createdAt", NOW);
@@ -71,6 +77,9 @@ class RiskScenarioLinkServiceTest {
         @Test
         void createsLink() {
             when(riskScenarioRepository.findById(scenarioId)).thenReturn(Optional.of(scenario));
+            when(graphTargetResolverService.validateRiskScenarioTarget(
+                            projectId, RiskScenarioLinkTargetType.CONTROL, null, "CTRL-001"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(null, "CTRL-001", false));
             when(linkRepository.existsByRiskScenarioIdAndTargetTypeAndTargetIdentifierAndLinkType(
                             any(), any(), any(), any()))
                     .thenReturn(false);
@@ -79,6 +88,7 @@ class RiskScenarioLinkServiceTest {
             var result = linkService.create(
                     scenarioId,
                     RiskScenarioLinkTargetType.CONTROL,
+                    null,
                     "CTRL-001",
                     RiskScenarioLinkType.MITIGATED_BY,
                     null,
@@ -97,6 +107,7 @@ class RiskScenarioLinkServiceTest {
             assertThatThrownBy(() -> linkService.create(
                             scenarioId,
                             RiskScenarioLinkTargetType.CONTROL,
+                            null,
                             "CTRL-001",
                             RiskScenarioLinkType.MITIGATED_BY,
                             null,
@@ -107,6 +118,9 @@ class RiskScenarioLinkServiceTest {
         @Test
         void throwsOnDuplicate() {
             when(riskScenarioRepository.findById(scenarioId)).thenReturn(Optional.of(scenario));
+            when(graphTargetResolverService.validateRiskScenarioTarget(
+                            projectId, RiskScenarioLinkTargetType.CONTROL, null, "CTRL-001"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(null, "CTRL-001", false));
             when(linkRepository.existsByRiskScenarioIdAndTargetTypeAndTargetIdentifierAndLinkType(
                             scenarioId,
                             RiskScenarioLinkTargetType.CONTROL,
@@ -117,6 +131,7 @@ class RiskScenarioLinkServiceTest {
             assertThatThrownBy(() -> linkService.create(
                             scenarioId,
                             RiskScenarioLinkTargetType.CONTROL,
+                            null,
                             "CTRL-001",
                             RiskScenarioLinkType.MITIGATED_BY,
                             null,

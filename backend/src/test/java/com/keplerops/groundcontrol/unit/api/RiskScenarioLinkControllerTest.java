@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.keplerops.groundcontrol.api.riskscenarios.RiskScenarioLinkController;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.riskscenarios.model.RiskScenario;
 import com.keplerops.groundcontrol.domain.riskscenarios.model.RiskScenarioLink;
 import com.keplerops.groundcontrol.domain.riskscenarios.service.RiskScenarioLinkService;
@@ -39,6 +40,9 @@ class RiskScenarioLinkControllerTest {
     @MockitoBean
     private RiskScenarioLinkService linkService;
 
+    @MockitoBean
+    private ProjectService projectService;
+
     private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final UUID RS_ID = UUID.fromString("00000000-0000-0000-0000-000000000100");
     private static final UUID LINK_ID = UUID.fromString("00000000-0000-0000-0000-000000000200");
@@ -51,7 +55,7 @@ class RiskScenarioLinkControllerTest {
         scenario.setTimeHorizon("12 months");
         setField(scenario, "id", RS_ID);
         var link = new RiskScenarioLink(
-                scenario, RiskScenarioLinkTargetType.CONTROL, "CTRL-001", RiskScenarioLinkType.MITIGATED_BY);
+                scenario, RiskScenarioLinkTargetType.CONTROL, null, "CTRL-001", RiskScenarioLinkType.MITIGATED_BY);
         link.setTargetTitle("MFA Policy");
         link.setTargetUrl("https://controls.example.com/CTRL-001");
         setField(link, "id", LINK_ID);
@@ -62,10 +66,13 @@ class RiskScenarioLinkControllerTest {
 
     @Test
     void createReturns201() throws Exception {
-        when(linkService.create(eq(RS_ID), any(), any(), any(), any(), any())).thenReturn(makeLink());
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(linkService.create(eq(PROJECT_ID), eq(RS_ID), any(), any(), any(), any(), any(), any()))
+                .thenReturn(makeLink());
 
         mockMvc.perform(
                         post("/api/v1/risk-scenarios/{riskScenarioId}/links", RS_ID)
+                                .param("project", "ground-control")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -101,9 +108,11 @@ class RiskScenarioLinkControllerTest {
 
     @Test
     void listReturnsLinks() throws Exception {
-        when(linkService.listByScenario(RS_ID, null)).thenReturn(List.of(makeLink()));
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(linkService.listByScenario(PROJECT_ID, RS_ID, null)).thenReturn(List.of(makeLink()));
 
-        mockMvc.perform(get("/api/v1/risk-scenarios/{riskScenarioId}/links", RS_ID))
+        mockMvc.perform(get("/api/v1/risk-scenarios/{riskScenarioId}/links", RS_ID)
+                        .param("project", "ground-control"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].targetIdentifier", is("CTRL-001")));
@@ -111,10 +120,12 @@ class RiskScenarioLinkControllerTest {
 
     @Test
     void listFiltersByTargetType() throws Exception {
-        when(linkService.listByScenario(RS_ID, RiskScenarioLinkTargetType.CONTROL))
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(linkService.listByScenario(PROJECT_ID, RS_ID, RiskScenarioLinkTargetType.CONTROL))
                 .thenReturn(List.of(makeLink()));
 
         mockMvc.perform(get("/api/v1/risk-scenarios/{riskScenarioId}/links", RS_ID)
+                        .param("project", "ground-control")
                         .param("targetType", "CONTROL"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)));
@@ -122,9 +133,12 @@ class RiskScenarioLinkControllerTest {
 
     @Test
     void deleteReturns204() throws Exception {
-        mockMvc.perform(delete("/api/v1/risk-scenarios/{riskScenarioId}/links/{linkId}", RS_ID, LINK_ID))
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+
+        mockMvc.perform(delete("/api/v1/risk-scenarios/{riskScenarioId}/links/{linkId}", RS_ID, LINK_ID)
+                        .param("project", "ground-control"))
                 .andExpect(status().isNoContent());
 
-        verify(linkService).delete(RS_ID, LINK_ID);
+        verify(linkService).delete(PROJECT_ID, RS_ID, LINK_ID);
     }
 }

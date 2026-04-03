@@ -25,6 +25,17 @@ export const SERIES_COLORS: Record<string, string> = {
   X: "#303952",
 };
 
+export const ENTITY_TYPE_COLORS: Record<string, string> = {
+  REQUIREMENT: "#6c7ee1",
+  OPERATIONAL_ASSET: "#22c55e",
+  OBSERVATION: "#0ea5e9",
+  RISK_SCENARIO: "#f97316",
+  RISK_REGISTER_RECORD: "#ef4444",
+  RISK_ASSESSMENT_RESULT: "#a855f7",
+  TREATMENT_PLAN: "#eab308",
+  METHODOLOGY_PROFILE: "#14b8a6",
+};
+
 export const PRIORITY_COLORS: Record<string, string> = {
   MUST: "#e74c3c",
   SHOULD: "#f39c12",
@@ -60,10 +71,32 @@ export const RELATION_STYLES: Record<
   REFINES: { color: "#f7b731", style: "dashed", label: "refines" },
   CONFLICTS_WITH: { color: "#e74c3c", style: "dotted", label: "conflicts" },
   SUPERSEDES: { color: "#c56cf0", style: "dashed", label: "supersedes" },
+  OBSERVED_ON: { color: "#0ea5e9", style: "dashed", label: "observed on" },
+  TRACKS: { color: "#ef4444", style: "solid", label: "tracks" },
+  ASSESSES: { color: "#a855f7", style: "solid", label: "assesses" },
+  USES_METHOD: { color: "#14b8a6", style: "dashed", label: "uses method" },
+  USED_OBSERVATION: {
+    color: "#38bdf8",
+    style: "dotted",
+    label: "used observation",
+  },
+  TREATS: { color: "#eab308", style: "solid", label: "treats" },
+  IMPLEMENTS: { color: "#16a34a", style: "solid", label: "implements" },
+  MITIGATES: { color: "#f97316", style: "solid", label: "mitigates" },
+  SUBJECT_OF: { color: "#64748b", style: "dashed", label: "subject of" },
+  EVIDENCED_BY: { color: "#38bdf8", style: "dotted", label: "evidenced by" },
+  GOVERNED_BY: { color: "#a855f7", style: "dashed", label: "governed by" },
+  ASSOCIATED: { color: "#94a3b8", style: "dotted", label: "associated" },
+  MITIGATED_BY: { color: "#f97316", style: "solid", label: "mitigated by" },
+  DOCUMENTED_IN: {
+    color: "#14b8a6",
+    style: "dashed",
+    label: "documented in",
+  },
   RELATED: { color: "#95a5a6", style: "dotted", label: "related" },
 };
 
-export type ColorScheme = "series" | "priority" | "status" | "wave";
+export type ColorScheme = "entity" | "series" | "priority" | "status" | "wave";
 export type LayoutId =
   | "dagre-lr"
   | "dagre-tb"
@@ -75,25 +108,40 @@ export function getSeries(uid: string): string {
   return m?.[1] ?? "?";
 }
 
+export function getEntityTypeColor(entityType?: string | null): string {
+  return ENTITY_TYPE_COLORS[entityType ?? ""] ?? "#64748b";
+}
+
 export function getNodeColor(
-  req: { uid: string; priority: string; status: string; wave: number },
+  req: {
+    entityType?: string | null;
+    uid?: string | null;
+    priority?: string | null;
+    status?: string | null;
+    wave?: number | null;
+  },
   scheme: ColorScheme,
 ): string {
-  const series = getSeries(req.uid);
+  const fallback = getEntityTypeColor(req.entityType);
+  const series = getSeries(req.uid ?? "");
   switch (scheme) {
+    case "entity":
+      return fallback;
     case "priority":
-      return PRIORITY_COLORS[req.priority] ?? "#555";
+      return PRIORITY_COLORS[req.priority ?? ""] ?? fallback;
     case "status":
-      return STATUS_COLORS[req.status] ?? "#555";
+      return STATUS_COLORS[req.status ?? ""] ?? fallback;
     case "wave":
-      return WAVE_COLORS[String(req.wave)] ?? "#555";
+      return WAVE_COLORS[String(req.wave ?? "")] ?? fallback;
     default:
-      return SERIES_COLORS[series] ?? "#555";
+      return SERIES_COLORS[series] ?? fallback;
   }
 }
 
 export function getColorMap(scheme: ColorScheme): Record<string, string> {
   switch (scheme) {
+    case "entity":
+      return ENTITY_TYPE_COLORS;
     case "priority":
       return PRIORITY_COLORS;
     case "status":

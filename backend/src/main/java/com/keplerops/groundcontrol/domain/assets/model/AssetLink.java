@@ -22,8 +22,10 @@ import org.hibernate.envers.Audited;
 @Audited
 @Table(
         name = "asset_link",
-        uniqueConstraints =
-                @UniqueConstraint(columnNames = {"asset_id", "target_type", "target_identifier", "link_type"}))
+        uniqueConstraints = {
+            @UniqueConstraint(columnNames = {"asset_id", "target_type", "target_identifier", "link_type"}),
+            @UniqueConstraint(columnNames = {"asset_id", "target_type", "target_entity_id", "link_type"})
+        })
 public class AssetLink extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -34,7 +36,10 @@ public class AssetLink extends BaseEntity {
     @Column(name = "target_type", nullable = false, length = 20)
     private AssetLinkTargetType targetType;
 
-    @Column(name = "target_identifier", nullable = false, length = 500)
+    @Column(name = "target_entity_id")
+    private java.util.UUID targetEntityId;
+
+    @Column(name = "target_identifier", length = 500)
     private String targetIdentifier;
 
     @Enumerated(EnumType.STRING)
@@ -52,9 +57,14 @@ public class AssetLink extends BaseEntity {
     }
 
     public AssetLink(
-            OperationalAsset asset, AssetLinkTargetType targetType, String targetIdentifier, AssetLinkType linkType) {
+            OperationalAsset asset,
+            AssetLinkTargetType targetType,
+            java.util.UUID targetEntityId,
+            String targetIdentifier,
+            AssetLinkType linkType) {
         this.asset = asset;
         this.targetType = targetType;
+        this.targetEntityId = targetEntityId;
         this.targetIdentifier = targetIdentifier;
         this.linkType = linkType;
     }
@@ -67,8 +77,16 @@ public class AssetLink extends BaseEntity {
         return targetType;
     }
 
+    public java.util.UUID getTargetEntityId() {
+        return targetEntityId;
+    }
+
     public String getTargetIdentifier() {
         return targetIdentifier;
+    }
+
+    public void setTargetIdentifier(String targetIdentifier) {
+        this.targetIdentifier = targetIdentifier;
     }
 
     public AssetLinkType getLinkType() {

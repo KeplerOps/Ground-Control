@@ -60,14 +60,14 @@ class RequirementsE2EAgeIntegrationTest extends BaseAgeIntegrationTest {
     @Test
     @Order(3)
     void ancestorQueryMatchesJPA() {
-        var ancestors = graphClient.getAncestors("E2E-REQ-003", 10);
+        var ancestors = graphClient.getAncestors(testProject.getId(), "E2E-REQ-003", 10);
         assertThat(ancestors).contains("E2E-REQ-002", "E2E-REQ-001");
     }
 
     @Test
     @Order(4)
     void descendantQueryMatchesJPA() {
-        var descendants = graphClient.getDescendants("E2E-REQ-001", 10);
+        var descendants = graphClient.getDescendants(testProject.getId(), "E2E-REQ-001", 10);
         assertThat(descendants).contains("E2E-REQ-002", "E2E-REQ-003");
     }
 }

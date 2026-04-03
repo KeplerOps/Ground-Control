@@ -70,8 +70,6 @@ class RiskScenarioServiceTest {
         rs.setTimeHorizon("12 months");
         rs.setCreatedBy("system");
         rs.setVulnerability("Weak password policy");
-        rs.setObservationRefs("OBS-001, OBS-002");
-        rs.setTopologyContext("DMZ web tier");
         setField(rs, "id", UUID.randomUUID());
         setField(rs, "createdAt", NOW);
         setField(rs, "updatedAt", NOW);
@@ -97,9 +95,7 @@ class RiskScenarioServiceTest {
                     "Auth portal",
                     "Weak passwords",
                     "Data breach",
-                    "12 months",
-                    "OBS-001",
-                    "DMZ");
+                    "12 months");
 
             var result = riskScenarioService.create(command);
 
@@ -117,7 +113,7 @@ class RiskScenarioServiceTest {
                     .thenReturn(true);
 
             var command = new CreateRiskScenarioCommand(
-                    projectId, "RS-001", "Title", "Source", "Event", "Object", null, "Consequence", "12m", null, null);
+                    projectId, "RS-001", "Title", "Source", "Event", "Object", null, "Consequence", "12m");
 
             assertThatThrownBy(() -> riskScenarioService.create(command)).isInstanceOf(ConflictException.class);
         }
@@ -129,13 +125,12 @@ class RiskScenarioServiceTest {
             when(riskScenarioRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
             var command = new CreateRiskScenarioCommand(
-                    projectId, "RS-002", "Title", "Source", "Event", "Object", null, "Consequence", "6m", null, null);
+                    projectId, "RS-002", "Title", "Source", "Event", "Object", null, "Consequence", "6m");
 
             var result = riskScenarioService.create(command);
 
             assertThat(result.getVulnerability()).isNull();
-            assertThat(result.getObservationRefs()).isNull();
-            assertThat(result.getTopologyContext()).isNull();
+            assertThat(result.getAffectedObject()).isEqualTo("Object");
         }
     }
 
@@ -145,12 +140,12 @@ class RiskScenarioServiceTest {
         @Test
         void updatesRiskScenario() {
             var rs = makeScenario();
-            when(riskScenarioRepository.findById(rs.getId())).thenReturn(Optional.of(rs));
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
             when(riskScenarioRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-            var command =
-                    new UpdateRiskScenarioCommand("Updated title", null, null, null, null, null, null, null, null);
-            var result = riskScenarioService.update(rs.getId(), command);
+            var command = new UpdateRiskScenarioCommand("Updated title", null, null, null, null, null, null);
+            var result = riskScenarioService.update(projectId, rs.getId(), command);
 
             assertThat(result.getTitle()).isEqualTo("Updated title");
             assertThat(result.getThreatSource()).isEqualTo("External threat actor");
@@ -159,11 +154,12 @@ class RiskScenarioServiceTest {
         @Test
         void throwsWhenNotFound() {
             var id = UUID.randomUUID();
-            when(riskScenarioRepository.findById(id)).thenReturn(Optional.empty());
+            when(riskScenarioRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.empty());
 
-            var command = new UpdateRiskScenarioCommand("Title", null, null, null, null, null, null, null, null);
+            var command = new UpdateRiskScenarioCommand("Title", null, null, null, null, null, null);
 
-            assertThatThrownBy(() -> riskScenarioService.update(id, command)).isInstanceOf(NotFoundException.class);
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, id, command))
+                    .isInstanceOf(NotFoundException.class);
         }
     }
 
@@ -171,23 +167,36 @@ class RiskScenarioServiceTest {
     class TransitionStatus {
 
         @Test
-        void transitionsFromDraftToIdentified() {
+        void transitionsFromDraftToActive() {
             var rs = makeScenario();
-            when(riskScenarioRepository.findById(rs.getId())).thenReturn(Optional.of(rs));
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
             when(riskScenarioRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-            var result = riskScenarioService.transitionStatus(rs.getId(), RiskScenarioStatus.IDENTIFIED);
+            var result = riskScenarioService.transitionStatus(projectId, rs.getId(), RiskScenarioStatus.ACTIVE);
 
-            assertThat(result.getStatus()).isEqualTo(RiskScenarioStatus.IDENTIFIED);
+            assertThat(result.getStatus()).isEqualTo(RiskScenarioStatus.ACTIVE);
+        }
+
+        @Test
+        void transitionsFromDraftToArchived() {
+            var rs = makeScenario();
+            var rsId = rs.getId();
+            when(riskScenarioRepository.findByIdAndProjectId(rsId, projectId)).thenReturn(Optional.of(rs));
+            when(riskScenarioRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var result = riskScenarioService.transitionStatus(projectId, rsId, RiskScenarioStatus.ARCHIVED);
+
+            assertThat(result.getStatus()).isEqualTo(RiskScenarioStatus.ARCHIVED);
         }
 
         @Test
         void throwsOnInvalidTransition() {
             var rs = makeScenario();
             var rsId = rs.getId();
-            when(riskScenarioRepository.findById(rsId)).thenReturn(Optional.of(rs));
+            when(riskScenarioRepository.findByIdAndProjectId(rsId, projectId)).thenReturn(Optional.of(rs));
 
-            assertThatThrownBy(() -> riskScenarioService.transitionStatus(rsId, RiskScenarioStatus.CLOSED))
+            assertThatThrownBy(() -> riskScenarioService.transitionStatus(projectId, rsId, RiskScenarioStatus.DRAFT))
                     .isInstanceOf(DomainValidationException.class);
         }
     }
@@ -198,9 +207,10 @@ class RiskScenarioServiceTest {
         @Test
         void returnsScenario() {
             var rs = makeScenario();
-            when(riskScenarioRepository.findById(rs.getId())).thenReturn(Optional.of(rs));
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
 
-            var result = riskScenarioService.getById(rs.getId());
+            var result = riskScenarioService.getById(projectId, rs.getId());
 
             assertThat(result.getUid()).isEqualTo("RS-001");
         }
@@ -208,9 +218,9 @@ class RiskScenarioServiceTest {
         @Test
         void throwsWhenNotFound() {
             var id = UUID.randomUUID();
-            when(riskScenarioRepository.findById(id)).thenReturn(Optional.empty());
+            when(riskScenarioRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> riskScenarioService.getById(id)).isInstanceOf(NotFoundException.class);
+            assertThatThrownBy(() -> riskScenarioService.getById(projectId, id)).isInstanceOf(NotFoundException.class);
         }
     }
 
@@ -234,9 +244,10 @@ class RiskScenarioServiceTest {
         @Test
         void deletesScenario() {
             var rs = makeScenario();
-            when(riskScenarioRepository.findById(rs.getId())).thenReturn(Optional.of(rs));
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
 
-            riskScenarioService.delete(rs.getId());
+            riskScenarioService.delete(projectId, rs.getId());
 
             verify(riskScenarioRepository).delete(rs);
         }

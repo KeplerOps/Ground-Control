@@ -44,12 +44,13 @@ describe("getNodeColor", () => {
 
   it("returns fallback for unknown values", () => {
     const unknown = {
+      entityType: "REQUIREMENT",
       uid: "GC-A001",
       priority: "NOPE",
       status: "ACTIVE",
       wave: 0,
     };
-    expect(getNodeColor(unknown, "priority")).toBe("#555");
+    expect(getNodeColor(unknown, "priority")).toBe("#6c7ee1");
   });
 });
 

@@ -2,11 +2,14 @@ package com.keplerops.groundcontrol.api.assets;
 
 import com.keplerops.groundcontrol.domain.assets.model.Observation;
 import com.keplerops.groundcontrol.domain.assets.state.ObservationCategory;
+import com.keplerops.groundcontrol.domain.graph.model.GraphEntityType;
+import com.keplerops.groundcontrol.domain.graph.model.GraphIds;
 import java.time.Instant;
 import java.util.UUID;
 
 public record ObservationResponse(
         UUID id,
+        String graphNodeId,
         UUID assetId,
         String assetUid,
         ObservationCategory category,
@@ -23,6 +26,7 @@ public record ObservationResponse(
     public static ObservationResponse from(Observation o) {
         return new ObservationResponse(
                 o.getId(),
+                GraphIds.nodeId(GraphEntityType.OBSERVATION, o.getId()),
                 o.getAsset().getId(),
                 o.getAsset().getUid(),
                 o.getCategory(),

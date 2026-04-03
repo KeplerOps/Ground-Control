@@ -13,6 +13,11 @@ public interface AssetRelationRepository extends JpaRepository<AssetRelation, UU
     @Query("SELECT r FROM AssetRelation r JOIN FETCH r.source JOIN FETCH r.target WHERE r.id = :id")
     java.util.Optional<AssetRelation> findByIdWithEntities(@Param("id") UUID id);
 
+    @Query("SELECT r FROM AssetRelation r JOIN FETCH r.source JOIN FETCH r.target"
+            + " WHERE r.id = :id AND r.source.project.id = :projectId AND r.target.project.id = :projectId")
+    java.util.Optional<AssetRelation> findByIdWithEntitiesAndProjectId(
+            @Param("id") UUID id, @Param("projectId") UUID projectId);
+
     @Query("SELECT r FROM AssetRelation r JOIN FETCH r.source JOIN FETCH r.target" + " WHERE r.source.id = :sourceId")
     List<AssetRelation> findBySourceIdWithEntities(@Param("sourceId") UUID sourceId);
 

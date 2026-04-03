@@ -62,12 +62,6 @@ public class RiskScenario extends BaseEntity {
     @Column(name = "time_horizon", nullable = false, length = 100)
     private String timeHorizon;
 
-    @Column(name = "observation_refs", columnDefinition = "TEXT")
-    private String observationRefs;
-
-    @Column(name = "topology_context", columnDefinition = "TEXT")
-    private String topologyContext;
-
     @Column(name = "created_by", length = 100)
     private String createdBy;
 
@@ -177,22 +171,6 @@ public class RiskScenario extends BaseEntity {
 
     public void setTimeHorizon(String timeHorizon) {
         this.timeHorizon = timeHorizon;
-    }
-
-    public String getObservationRefs() {
-        return observationRefs;
-    }
-
-    public void setObservationRefs(String observationRefs) {
-        this.observationRefs = observationRefs;
-    }
-
-    public String getTopologyContext() {
-        return topologyContext;
-    }
-
-    public void setTopologyContext(String topologyContext) {
-        this.topologyContext = topologyContext;
     }
 
     public String getCreatedBy() {
