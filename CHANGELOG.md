@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.99.0] - 2026-04-04
+
+### Added
+
+- Populated risk assessment methodology profile schemas defining the
+  semantics, factors, scales, units, and output rules for each supported
+  methodology (GC-T002)
+- FAIR v3.0 input/output schemas with FAIR-CAM control analytics inputs
+  (control_strength, control_coverage) and FAIR-MAM loss magnitude
+  extensions (productivity_loss, response_cost, replacement_cost,
+  competitive_advantage_loss, fines_and_judgments, reputation_damage)
+- NIST SP 800-30 Rev. 1 input/output schemas with five-level likelihood
+  and impact scales, threat source characterization, and 5x5 risk matrix
+  mapping
+- ISO 27005:2022 input/output schemas with ISO 27001-compatible risk
+  criteria, organization-defined acceptance thresholds, and consequence-
+  based terminology
+- Legacy qualitative profile with open schemas for backwards
+  compatibility with pre-methodology assessments
+- Database migration V045 to populate existing methodology profile
+  seed data with proper schemas
+- WebMvcTest controller unit test for MethodologyProfileController
+
 ## [0.98.0] - 2026-04-01
 
 ### Added
