@@ -27,9 +27,25 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
 ### Codex CLI
 - OpenAI Codex CLI (`codex-cli`) installed at `~/.nvm/versions/node/v25.8.1/bin/codex`
-- Used for cross-model code review (`codex review --base dev`)
+- Used for architecture preflight and cross-model code review via Ground Control MCP workflow tools
 
 ## Workflow: `/implement <requirement-uid>`
+
+Pass the full requirement UID exactly as it exists in Ground Control. Do not synthesize or rewrite a project prefix.
+
+Repo-local Ground Control project context should come from the current repository's `AGENTS.md`, not from hardcoded assumptions in the skill. The workflow validates this via `gc_get_repo_ground_control_context` before it starts implementation. It should:
+- use the repo's configured Ground Control `project` when present
+- treat inputs like `OBS-001`, `DSL-101`, `API-412`, or `GC-J001` as already-complete UIDs
+- avoid guessing a prefix from the repository name
+
+Recommended `AGENTS.md` convention:
+
+## Ground Control Context
+
+```yaml
+ground_control:
+  project: aces-sdl
+```
 
 ### User Touchpoints
 1. **Plan approval** — user reviews and approves the implementation plan
@@ -38,45 +54,49 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 Everything between these two checkpoints is automated.
 
 ### Phase A: Plan & Implement
-1. Fetch requirement from Ground Control, create GitHub issue if needed
-2. Checkout feature branch via `gh issue develop`
-3. Explore codebase for existing coverage
-4. **Enter plan mode — user approves**
-5. Implement, clause-by-clause verification
-6. Create traceability links (IMPLEMENTS, TESTS), transition to ACTIVE
+1. Resolve repo-local Ground Control context via `gc_get_repo_ground_control_context`
+2. Fetch requirement from Ground Control, create GitHub issue if needed
+3. Checkout feature branch via `gh issue develop`
+4. Read the GitHub issue
+5. **Codex architecture preflight** — via `gc_codex_architecture_preflight`, including ADR/design guidance updates when needed
+6. Explore codebase for existing coverage using the preflight guardrails
+7. **Enter plan mode — user approves**
+8. Implement, clause-by-clause verification
+9. Create traceability links (IMPLEMENTS, TESTS), transition to ACTIVE
 
 ### Phase B: Quality Gate
-7. Run `pre-commit run --all-files`
-8. Completion gate: `make check`, CHANGELOG, traceability, requirement status
+10. Run `pre-commit run --all-files`
+11. Completion gate: `make check`, CHANGELOG, traceability, requirement status
 
 ### Phase C: Stage, Commit, Push
-9. Stage files, pre-commit loop (fix failures, max 5 iterations)
-10. Commit (no attribution) and push
+12. Stage files, pre-commit loop (fix failures, max 5 iterations)
+13. Commit (no attribution) and push
 
 ### Phase D: Ship
-11. Create PR to dev
-12. Monitor CI (`gh run watch`)
-13. Check SonarCloud quality gate
-14. **Codex review** — cross-model review by ChatGPT via `codex review --base dev`
-15. **Code review** — Claude built-in `/review` skill via Skill tool
-16. **Security review** — Claude built-in `/security-review` skill via Skill tool
-17. Fix ALL findings from steps 14-16, commit, push, re-run CI
-18. **Report to user** — PR URL, summary of findings/fixes, CI/SonarCloud status
+14. Create PR to dev
+15. Monitor CI (`gh run watch`)
+16. Check SonarCloud quality gate
+17. **Codex review** — cross-model review by ChatGPT via `gc_codex_review`
+18. **Code review** — Claude built-in `/review` skill via Skill tool
+19. **Security review** — Claude built-in `/security-review` skill via Skill tool
+20. Fix ALL findings from steps 17-19, commit, push, re-run CI
+21. **Report to user** — PR URL, summary of findings/fixes, CI/SonarCloud status
 
 Claude does NOT merge. The user reviews the PR and merges.
 
 ## Review Pipeline
 
-Four reviewers run on every PR before the user sees it:
+The workflow now has one mandatory pre-implementation architecture pass and three reviewers before the user sees the PR.
 
-| Reviewer | What it catches | How it runs |
-|----------|----------------|-------------|
+| Stage | What it catches | How it runs |
+|-------|-----------------|-------------|
+| Codex architecture preflight | Cross-cutting concerns, reuse opportunities, abstraction/concept confusion, need for ADR/design guidance before coding | `gc_codex_architecture_preflight` |
 | SonarCloud | Coverage, code smells, duplication, security hotspots | CI job, quality gate must pass |
-| Codex (ChatGPT-5.4) | Design, abstractions, concept conflation, maintainability | `codex review --base dev` |
+| Codex (ChatGPT-5.4) review | Design, abstractions, concept conflation, maintainability, reliability, security, consistency | `gc_codex_review` |
 | `/review` (Claude built-in) | Code quality, conventions, correctness, performance | `Skill("review")` |
 | `/security-review` (Claude built-in) | OWASP Top 10, input validation, auth, injection, data exposure | `Skill("security-review")` |
 
-All reviewers operate under the same rule: **fix everything, defer nothing.** The only reason to escalate to the user is if a fix requires architectural changes touching 5+ files outside the current feature scope.
+All preflight/review stages operate under the same rule: **fix everything, defer nothing.** The only reason to escalate to the user is if a fix requires architectural changes touching 5+ files outside the current feature scope.
 
 ## Guardrails
 

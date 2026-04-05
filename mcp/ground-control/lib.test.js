@@ -4,6 +4,12 @@ import {
   buildUrl,
   parseErrorBody,
   formatIssueBody,
+  buildGroundControlContextSnippet,
+  parseRepoGroundControlContext,
+  buildCodexArchitecturePreflightPrompt,
+  buildCodexArchitectureExecArgs,
+  buildCodexReviewPrompt,
+  buildCodexReviewArgs,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -120,6 +126,144 @@ describe("formatIssueBody", () => {
     const body = formatIssueBody(req, "## Acceptance Criteria\n- [ ] Done");
     assert.ok(body.includes("## Acceptance Criteria"));
     assert.ok(body.includes("- [ ] Done"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ground Control context helpers
+// ---------------------------------------------------------------------------
+
+describe("buildGroundControlContextSnippet", () => {
+  it("renders the standardized AGENTS.md snippet", () => {
+    const snippet = buildGroundControlContextSnippet("aces-sdl");
+    assert.ok(snippet.includes("## Ground Control Context"));
+    assert.ok(snippet.includes("ground_control:"));
+    assert.ok(snippet.includes("project: aces-sdl"));
+  });
+});
+
+describe("parseRepoGroundControlContext", () => {
+  it("parses a valid Ground Control Context section", () => {
+    const result = parseRepoGroundControlContext(`
+# Agent Instructions
+
+## Ground Control Context
+
+\`\`\`yaml
+ground_control:
+  project: aces-sdl
+\`\`\`
+`);
+
+    assert.equal(result.status, "ok");
+    assert.equal(result.project, "aces-sdl");
+    assert.deepEqual(result.errors, []);
+  });
+
+  it("reports a missing Ground Control Context section", () => {
+    const result = parseRepoGroundControlContext("# Agent Instructions\n");
+
+    assert.equal(result.status, "missing_ground_control_context");
+    assert.equal(result.project, null);
+    assert.ok(result.errors[0].includes("Ground Control Context"));
+    assert.ok(result.suggested_agents_snippet.includes("ground_control:"));
+  });
+
+  it("reports an invalid project identifier", () => {
+    const result = parseRepoGroundControlContext(`
+## Ground Control Context
+
+\`\`\`yaml
+ground_control:
+  project: ACES_SDL
+\`\`\`
+`);
+
+    assert.equal(result.status, "invalid_ground_control_context");
+    assert.equal(result.project, null);
+    assert.ok(result.errors[0].includes("lowercase identifier"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Codex workflow helpers
+// ---------------------------------------------------------------------------
+
+describe("buildCodexArchitecturePreflightPrompt", () => {
+  it("captures the architecture-preflight guardrails", () => {
+    const prompt = buildCodexArchitecturePreflightPrompt({
+      requirement: {
+        uid: "GC-A123",
+        title: "Shared Concept Authority",
+        statement: "The system shall define a canonical concept authority.",
+      },
+      traceabilityLinks: [
+        {
+          artifact_type: "ADR",
+          artifact_identifier: "ADR-012",
+          artifact_title: "Shared Concept Authority",
+          link_type: "DOCUMENTS",
+        },
+      ],
+      issueContext: { number: 501, title: "Implement GC-A123" },
+    });
+
+    assert.ok(prompt.includes("Do not implement the requirement itself."));
+    assert.ok(prompt.includes("top-tier production engineering bar"));
+    assert.ok(prompt.includes("GC-A123"));
+    assert.ok(prompt.includes("ADR-012"));
+    assert.ok(prompt.includes("\"number\": 501"));
+    assert.ok(prompt.includes("gotchas and anti-patterns"));
+  });
+});
+
+describe("buildCodexArchitectureExecArgs", () => {
+  it("builds codex exec args with workspace-write, stdin prompt, and output capture", () => {
+    const args = buildCodexArchitectureExecArgs({
+      repoPath: "/tmp/repo",
+      outputPath: "/tmp/out.txt",
+    });
+
+    assert.deepEqual(args, [
+      "exec",
+      "--ephemeral",
+      "--sandbox",
+      "workspace-write",
+      "-C",
+      "/tmp/repo",
+      "--output-last-message",
+      "/tmp/out.txt",
+      "-",
+    ]);
+  });
+});
+
+describe("buildCodexReviewPrompt", () => {
+  it("demands an exhaustive non-triaged review", () => {
+    const prompt = buildCodexReviewPrompt("dev");
+    assert.ok(prompt.includes("Review the changes against dev."));
+    assert.ok(prompt.includes("Enumerate all material issues"));
+    assert.ok(prompt.includes("Do not prioritize"));
+    assert.ok(prompt.includes("The caller intends to fix everything now."));
+    assert.ok(prompt.includes("precise file and line references"));
+  });
+});
+
+describe("buildCodexReviewArgs", () => {
+  it("builds args for a committed branch review", () => {
+    const args = buildCodexReviewArgs({
+      baseBranch: "dev",
+      uncommitted: false,
+    });
+    assert.deepEqual(args, ["review", "--base", "dev", "-"]);
+  });
+
+  it("adds the uncommitted flag when requested", () => {
+    const args = buildCodexReviewArgs({
+      baseBranch: "main",
+      uncommitted: true,
+    });
+    assert.deepEqual(args, ["review", "--base", "main", "--uncommitted", "-"]);
   });
 });
 
