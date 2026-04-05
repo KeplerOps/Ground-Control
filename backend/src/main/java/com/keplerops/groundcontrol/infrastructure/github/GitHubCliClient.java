@@ -6,10 +6,12 @@ import com.keplerops.groundcontrol.domain.exception.GroundControlException;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubClient;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -32,9 +34,9 @@ public class GitHubCliClient implements GitHubClient {
     private static final Pattern GITHUB_REPO_RE =
             Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}/[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$");
 
-    private static final int MAX_TITLE_LENGTH = 256;
-    private static final int MAX_BODY_LENGTH = 65_536;
-    private static final int MAX_LABEL_LENGTH = 50;
+    public static final int MAX_TITLE_LENGTH = 256;
+    public static final int MAX_BODY_LENGTH = 65_536;
+    public static final int MAX_LABEL_LENGTH = 50;
     private static final Pattern LABEL_RE = Pattern.compile("^[a-zA-Z0-9 :._-]+$");
 
     private final ObjectMapper objectMapper;
@@ -83,6 +85,30 @@ public class GitHubCliClient implements GitHubClient {
         }
     }
 
+    public static void validateIssueContent(String title, String body, List<String> labels) {
+        if (title == null || title.isBlank() || title.length() > MAX_TITLE_LENGTH) {
+            throw new GroundControlException(
+                    "Issue title must be non-blank and at most " + MAX_TITLE_LENGTH + " characters",
+                    "invalid_issue_title");
+        }
+        if (body != null && body.length() > MAX_BODY_LENGTH) {
+            throw new GroundControlException(
+                    "Issue body must be at most " + MAX_BODY_LENGTH + " characters", "invalid_issue_body");
+        }
+        if (labels != null) {
+            for (String label : labels) {
+                if (label == null
+                        || label.length() > MAX_LABEL_LENGTH
+                        || !LABEL_RE.matcher(label).matches()) {
+                    throw new GroundControlException(
+                            "Invalid label: must be alphanumeric with spaces/colons/hyphens, max " + MAX_LABEL_LENGTH
+                                    + " chars",
+                            "invalid_issue_label");
+                }
+            }
+        }
+    }
+
     @Override
     public List<GitHubIssueData> fetchAllIssues(String owner, String repo) {
         validateOwnerRepo(owner, repo);
@@ -112,64 +138,26 @@ public class GitHubCliClient implements GitHubClient {
     }
 
     protected IssuePage fetchIssuePage(String owner, String repo, int page) {
+        String stdout = execGh(List.of(
+                ghPath,
+                "api",
+                String.format("repos/%s/%s/issues", owner, repo),
+                "--method",
+                "GET",
+                "-f",
+                "state=all",
+                "-f",
+                "per_page=" + PAGE_SIZE,
+                "-f",
+                "page=" + page));
+
         try {
-            ProcessBuilder pb = new ProcessBuilder(
-                    ghPath,
-                    "api",
-                    String.format("repos/%s/%s/issues", owner, repo),
-                    "--method",
-                    "GET",
-                    "-f",
-                    "state=all",
-                    "-f",
-                    "per_page=" + PAGE_SIZE,
-                    "-f",
-                    "page=" + page);
-            pb.redirectErrorStream(false);
-            Process process = pb.start();
-
-            // Drain stdout and stderr in background threads to avoid pipe-buffer deadlock
-            // when output exceeds the OS pipe buffer size (~64KB).
-            var stdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                try {
-                    return process.getInputStream().readAllBytes();
-                } catch (IOException ex) {
-                    throw new java.io.UncheckedIOException(ex);
-                }
-            });
-            var stderrFuture = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                try {
-                    return process.getErrorStream().readAllBytes();
-                } catch (IOException ex) {
-                    throw new java.io.UncheckedIOException(ex);
-                }
-            });
-
-            boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroyForcibly();
-                throw new GroundControlException("gh CLI timed out after " + TIMEOUT_SECONDS + "s", "github_timeout");
-            }
-
-            int exitCode = process.exitValue();
-            if (exitCode != 0) {
-                String stderr = new String(stderrFuture.join(), StandardCharsets.UTF_8);
-                throw new GroundControlException(
-                        "gh CLI exited with code " + exitCode + ": " + stderr, "github_cli_error");
-            }
-
-            String stdout = new String(stdoutFuture.join(), StandardCharsets.UTF_8);
-
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> rawIssues =
                     objectMapper.readValue(stdout, new TypeReference<List<Map<String, Object>>>() {});
-
             return new IssuePage(parseIssues(rawIssues), rawIssues.size());
         } catch (IOException e) {
-            throw new GroundControlException("Failed to execute gh CLI: " + e.getMessage(), "github_cli_error", e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new GroundControlException("gh CLI execution interrupted", "github_interrupted", e);
+            throw new GroundControlException("Failed to parse gh CLI output: " + e.getMessage(), "github_parse_error");
         }
     }
 
@@ -205,51 +193,50 @@ public class GitHubCliClient implements GitHubClient {
     @Override
     public GitHubIssueData createIssue(String repo, String title, String body, List<String> labels) {
         validateRepoSlug(repo);
-        if (title == null || title.isBlank() || title.length() > MAX_TITLE_LENGTH) {
-            throw new GroundControlException(
-                    "Issue title must be non-blank and at most " + MAX_TITLE_LENGTH + " characters",
-                    "invalid_issue_title");
-        }
-        if (body != null && body.length() > MAX_BODY_LENGTH) {
-            throw new GroundControlException(
-                    "Issue body must be at most " + MAX_BODY_LENGTH + " characters", "invalid_issue_body");
-        }
-        if (labels != null) {
-            for (String label : labels) {
-                if (label == null
-                        || label.length() > MAX_LABEL_LENGTH
-                        || !LABEL_RE.matcher(label).matches()) {
-                    throw new GroundControlException(
-                            "Invalid label: must be alphanumeric with spaces/colons/hyphens, max " + MAX_LABEL_LENGTH
-                                    + " chars",
-                            "invalid_issue_label");
-                }
-            }
-        }
-        try {
-            List<String> args = new ArrayList<>(
-                    List.of(ghPath, "issue", "create", "--repo", repo, "--title", title, "--body", body));
-            if (labels != null && !labels.isEmpty()) {
-                args.add("--label");
-                args.add(String.join(",", labels));
-            }
+        validateIssueContent(title, body, labels);
 
+        List<String> args =
+                new ArrayList<>(List.of(ghPath, "issue", "create", "--repo", repo, "--title", title, "--body", body));
+        if (labels != null && !labels.isEmpty()) {
+            args.add("--label");
+            args.add(String.join(",", labels));
+        }
+
+        String stdout = execGh(args);
+        String url = stdout.trim();
+
+        Matcher matcher = ISSUE_URL_RE.matcher(url);
+        if (!matcher.find()) {
+            throw new GroundControlException(
+                    "Could not parse issue number from gh output: " + url, "github_parse_error");
+        }
+        int number = Integer.parseInt(matcher.group(1));
+
+        log.info("github_issue_created: number={} repo={}", number, repo);
+        return new GitHubIssueData(number, title, "OPEN", url, body, labels != null ? labels : List.of());
+    }
+
+    /**
+     * Execute a gh CLI command, draining stdout/stderr concurrently to avoid pipe-buffer deadlock.
+     */
+    private String execGh(List<String> args) {
+        try {
             ProcessBuilder pb = new ProcessBuilder(args);
             pb.redirectErrorStream(false);
             Process process = pb.start();
 
-            var stdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            var stdoutFuture = CompletableFuture.supplyAsync(() -> {
                 try {
                     return process.getInputStream().readAllBytes();
                 } catch (IOException ex) {
-                    throw new java.io.UncheckedIOException(ex);
+                    throw new UncheckedIOException(ex);
                 }
             });
-            var stderrFuture = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            var stderrFuture = CompletableFuture.supplyAsync(() -> {
                 try {
                     return process.getErrorStream().readAllBytes();
                 } catch (IOException ex) {
-                    throw new java.io.UncheckedIOException(ex);
+                    throw new UncheckedIOException(ex);
                 }
             });
 
@@ -266,18 +253,7 @@ public class GitHubCliClient implements GitHubClient {
                         "gh CLI exited with code " + exitCode + ": " + stderr, "github_cli_error");
             }
 
-            String stdout = new String(stdoutFuture.join(), StandardCharsets.UTF_8);
-            String url = stdout.trim();
-
-            Matcher matcher = ISSUE_URL_RE.matcher(url);
-            if (!matcher.find()) {
-                throw new GroundControlException(
-                        "Could not parse issue number from gh output: " + url, "github_parse_error");
-            }
-            int number = Integer.parseInt(matcher.group(1));
-
-            log.info("github_issue_created: number={} repo={}", number, repo);
-            return new GitHubIssueData(number, title, "OPEN", url, body, labels != null ? labels : List.of());
+            return new String(stdoutFuture.join(), StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new GroundControlException("Failed to execute gh CLI: " + e.getMessage(), "github_cli_error", e);
         } catch (InterruptedException e) {

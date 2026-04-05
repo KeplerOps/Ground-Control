@@ -262,6 +262,67 @@ class GitHubCliClientTest {
         void acceptsValidRepoSlug() {
             GitHubCliClient.validateRepoSlug("KeplerOps/Ground-Control");
         }
+
+        @Test
+        void rejectsNullTitle() {
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent(null, "body", List.of()))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("title");
+        }
+
+        @Test
+        void rejectsBlankTitle() {
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent("", "body", List.of()))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("title");
+        }
+
+        @Test
+        void rejectsTooLongTitle() {
+            String longTitle = "x".repeat(GitHubCliClient.MAX_TITLE_LENGTH + 1);
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent(longTitle, "body", List.of()))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("title");
+        }
+
+        @Test
+        void rejectsTooLongBody() {
+            String longBody = "x".repeat(GitHubCliClient.MAX_BODY_LENGTH + 1);
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent("title", longBody, List.of()))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("body");
+        }
+
+        @Test
+        void rejectsInvalidLabel() {
+            assertThatThrownBy(
+                            () -> GitHubCliClient.validateIssueContent("title", "body", List.of("valid", "bad;label")))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("label");
+        }
+
+        @Test
+        void rejectsTooLongLabel() {
+            String longLabel = "x".repeat(GitHubCliClient.MAX_LABEL_LENGTH + 1);
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent("title", "body", List.of(longLabel)))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("label");
+        }
+
+        @Test
+        void acceptsValidIssueContent() {
+            GitHubCliClient.validateIssueContent("Valid Title", "Valid body", List.of("bug", "P0"));
+        }
+
+        @Test
+        void acceptsNullBody() {
+            GitHubCliClient.validateIssueContent("Valid Title", null, List.of());
+        }
+
+        @Test
+        void acceptsNullLabels() {
+            GitHubCliClient.validateIssueContent("Valid Title", "body", null);
+        }
     }
 
     @SuppressWarnings("unchecked")
