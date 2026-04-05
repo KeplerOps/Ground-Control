@@ -25,6 +25,18 @@ public class GitHubCliClient implements GitHubClient {
     private static final int PAGE_SIZE = 100;
     private static final Pattern ISSUE_URL_RE = Pattern.compile("/issues/(\\d+)$");
 
+    /** GitHub owner and repo names: alphanumeric, hyphens, dots, underscores; starts with alphanumeric. */
+    private static final Pattern GITHUB_NAME_RE = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$");
+
+    /** GitHub owner/repo combined format (e.g. "KeplerOps/Ground-Control"). */
+    private static final Pattern GITHUB_REPO_RE =
+            Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}/[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$");
+
+    private static final int MAX_TITLE_LENGTH = 256;
+    private static final int MAX_BODY_LENGTH = 65_536;
+    private static final int MAX_LABEL_LENGTH = 50;
+    private static final Pattern LABEL_RE = Pattern.compile("^[a-zA-Z0-9 :._-]+$");
+
     private final ObjectMapper objectMapper;
     private final String ghPath;
 
@@ -52,8 +64,28 @@ public class GitHubCliClient implements GitHubClient {
         }
     }
 
+    public static void validateOwnerRepo(String owner, String repo) {
+        if (owner == null || !GITHUB_NAME_RE.matcher(owner).matches()) {
+            throw new GroundControlException(
+                    "Invalid GitHub owner: must be alphanumeric with hyphens/dots/underscores", "invalid_github_owner");
+        }
+        if (repo == null || !GITHUB_NAME_RE.matcher(repo).matches()) {
+            throw new GroundControlException(
+                    "Invalid GitHub repo name: must be alphanumeric with hyphens/dots/underscores",
+                    "invalid_github_repo");
+        }
+    }
+
+    public static void validateRepoSlug(String repo) {
+        if (repo == null || !GITHUB_REPO_RE.matcher(repo).matches()) {
+            throw new GroundControlException(
+                    "Invalid GitHub repo: must match 'owner/repo' format", "invalid_github_repo");
+        }
+    }
+
     @Override
     public List<GitHubIssueData> fetchAllIssues(String owner, String repo) {
+        validateOwnerRepo(owner, repo);
         List<GitHubIssueData> allIssues = new ArrayList<>();
         int page = 1;
 
@@ -155,6 +187,28 @@ public class GitHubCliClient implements GitHubClient {
 
     @Override
     public GitHubIssueData createIssue(String repo, String title, String body, List<String> labels) {
+        validateRepoSlug(repo);
+        if (title == null || title.isBlank() || title.length() > MAX_TITLE_LENGTH) {
+            throw new GroundControlException(
+                    "Issue title must be non-blank and at most " + MAX_TITLE_LENGTH + " characters",
+                    "invalid_issue_title");
+        }
+        if (body != null && body.length() > MAX_BODY_LENGTH) {
+            throw new GroundControlException(
+                    "Issue body must be at most " + MAX_BODY_LENGTH + " characters", "invalid_issue_body");
+        }
+        if (labels != null) {
+            for (String label : labels) {
+                if (label == null
+                        || label.length() > MAX_LABEL_LENGTH
+                        || !LABEL_RE.matcher(label).matches()) {
+                    throw new GroundControlException(
+                            "Invalid label: must be alphanumeric with spaces/colons/hyphens, max " + MAX_LABEL_LENGTH
+                                    + " chars",
+                            "invalid_issue_label");
+                }
+            }
+        }
         try {
             List<String> args = new ArrayList<>(
                     List.of(ghPath, "issue", "create", "--repo", repo, "--title", title, "--body", body));

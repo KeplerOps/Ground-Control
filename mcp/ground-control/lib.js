@@ -726,8 +726,13 @@ export function formatIssueBody(req, extraBody) {
   return body;
 }
 
+const GITHUB_REPO_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
 export async function createGitHubIssue({ title, body, labels, repo }) {
   const targetRepo = repo || process.env.GH_REPO;
+  if (targetRepo && !GITHUB_REPO_RE.test(targetRepo)) {
+    throw new Error(`Invalid GitHub repo format: expected 'owner/repo', got '${targetRepo}'`);
+  }
   const args = ["issue", "create", "--title", title, "--body", body];
   if (targetRepo) {
     args.push("--repo", targetRepo);

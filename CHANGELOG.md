@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.100.0] - 2026-04-04
+
+### Added
+
+- Input validation on GitHub owner/repo parameters at every entry point:
+  GitHubCliClient, SyncController, GitHubIssueRequest, MCP tools
+  gc_sync_github and gc_create_github_issue (GC-D001)
+- GitHub issue state (OPEN/CLOSED) now reflected in traceability link
+  titles during sync, satisfying bidirectional state visibility (GC-D001)
+- Defensive IssueState parsing: unknown states default to OPEN with a
+  warning instead of crashing the sync
+- Validation on issue creation inputs: title length (256 chars), body
+  length (65536 chars), and label format/length (50 chars)
+- Unit tests for input validation rejection of command injection
+  payloads, malicious owner/repo names, and state reflection in
+  traceability links
+
 ## [0.99.0] - 2026-04-04
 
 ### Added

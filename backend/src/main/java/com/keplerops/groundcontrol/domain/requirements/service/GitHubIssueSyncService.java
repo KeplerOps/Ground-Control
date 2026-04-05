@@ -114,7 +114,7 @@ public class GitHubIssueSyncService {
 
     private void updateExistingSync(GitHubIssueSync sync, GitHubIssueData issue, Instant fetchedAt) {
         sync.setIssueTitle(issue.title());
-        sync.setIssueState(IssueState.valueOf(issue.state()));
+        sync.setIssueState(parseIssueState(issue.state()));
         sync.setIssueBody(issue.body() != null ? issue.body() : "");
         sync.setIssueLabels(issue.labels());
         sync.setPhase(extractPhase(issue.labels()));
@@ -126,7 +126,7 @@ public class GitHubIssueSyncService {
 
     private void createNewSync(GitHubIssueData issue, Instant fetchedAt) {
         var sync = new GitHubIssueSync(
-                issue.number(), issue.title(), IssueState.valueOf(issue.state()), issue.url(), fetchedAt);
+                issue.number(), issue.title(), parseIssueState(issue.state()), issue.url(), fetchedAt);
         sync.setIssueBody(issue.body() != null ? issue.body() : "");
         sync.setIssueLabels(issue.labels());
         sync.setPhase(extractPhase(issue.labels()));
@@ -145,7 +145,8 @@ public class GitHubIssueSyncService {
                 if (syncOpt.isPresent()) {
                     var sync = syncOpt.get();
                     link.setArtifactUrl(sync.getIssueUrl());
-                    link.setArtifactTitle(sync.getIssueTitle());
+                    String stateTag = sync.getIssueState() != null ? " [" + sync.getIssueState() + "]" : "";
+                    link.setArtifactTitle("#" + sync.getIssueNumber() + " - " + sync.getIssueTitle() + stateTag);
                     link.setSyncStatus(SyncStatus.SYNCED);
                     link.setLastSyncedAt(fetchedAt);
                     traceabilityLinkRepository.save(link);
@@ -268,5 +269,17 @@ public class GitHubIssueSyncService {
             }
         }
         return refs;
+    }
+
+    IssueState parseIssueState(String state) {
+        if (state == null) {
+            return IssueState.OPEN;
+        }
+        try {
+            return IssueState.valueOf(state);
+        } catch (IllegalArgumentException e) {
+            log.warn("github_unknown_issue_state: state={}, defaulting to OPEN", state);
+            return IssueState.OPEN;
+        }
     }
 }

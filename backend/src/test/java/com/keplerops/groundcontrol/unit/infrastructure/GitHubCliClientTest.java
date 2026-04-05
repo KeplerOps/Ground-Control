@@ -1,9 +1,11 @@
 package com.keplerops.groundcontrol.unit.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.keplerops.groundcontrol.domain.exception.GroundControlException;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
 import com.keplerops.groundcontrol.infrastructure.github.GitHubCliClient;
 import com.keplerops.groundcontrol.infrastructure.github.GitHubCliClient.IssuePage;
@@ -14,6 +16,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class GitHubCliClientTest {
 
@@ -207,6 +211,56 @@ class GitHubCliClientTest {
             Matcher matcher = pattern.matcher(url);
             assertThat(matcher.find()).isTrue();
             assertThat(Integer.parseInt(matcher.group(1))).isEqualTo(42);
+        }
+    }
+
+    @Nested
+    class InputValidation {
+
+        @ParameterizedTest
+        @ValueSource(strings = {"$(whoami)", "foo;rm -rf /", "foo&bar", "foo/bar", "../etc", ""})
+        void rejectsMaliciousOwner(String maliciousOwner) {
+            assertThatThrownBy(() -> GitHubCliClient.validateOwnerRepo(maliciousOwner, "valid-repo"))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("Invalid GitHub owner");
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"$(whoami)", "repo;drop table", "foo&bar", "foo/bar", "../..", ""})
+        void rejectsMaliciousRepo(String maliciousRepo) {
+            assertThatThrownBy(() -> GitHubCliClient.validateOwnerRepo("valid-owner", maliciousRepo))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("Invalid GitHub repo");
+        }
+
+        @Test
+        void rejectsNullOwner() {
+            assertThatThrownBy(() -> GitHubCliClient.validateOwnerRepo(null, "repo"))
+                    .isInstanceOf(GroundControlException.class);
+        }
+
+        @Test
+        void rejectsNullRepo() {
+            assertThatThrownBy(() -> GitHubCliClient.validateOwnerRepo("owner", null))
+                    .isInstanceOf(GroundControlException.class);
+        }
+
+        @Test
+        void acceptsValidOwnerRepo() {
+            GitHubCliClient.validateOwnerRepo("KeplerOps", "Ground-Control");
+            GitHubCliClient.validateOwnerRepo("user123", "my.repo_v2");
+        }
+
+        @Test
+        void rejectsInvalidRepoSlug() {
+            assertThatThrownBy(() -> GitHubCliClient.validateRepoSlug("not-a-slug"))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("owner/repo");
+        }
+
+        @Test
+        void acceptsValidRepoSlug() {
+            GitHubCliClient.validateRepoSlug("KeplerOps/Ground-Control");
         }
     }
 
