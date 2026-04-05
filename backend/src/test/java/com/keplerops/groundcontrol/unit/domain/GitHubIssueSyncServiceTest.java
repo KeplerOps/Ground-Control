@@ -250,7 +250,7 @@ class GitHubIssueSyncServiceTest {
 
             assertThat(result.linksUpdated()).isEqualTo(1);
             assertThat(link.getArtifactUrl()).isEqualTo("https://github.com/o/r/issues/10");
-            assertThat(link.getArtifactTitle()).isEqualTo("Issue 10");
+            assertThat(link.getArtifactTitle()).isEqualTo("#10 - Issue 10 [OPEN]");
             assertThat(link.getSyncStatus()).isEqualTo(SyncStatus.SYNCED);
         }
 
@@ -289,13 +289,15 @@ class GitHubIssueSyncServiceTest {
 
         @Test
         void collectsErrorsAndContinues() {
-            var issue1 = new GitHubIssueData(1, "Issue 1", "INVALID_STATE", "url1", "", List.of());
+            var issue1 = new GitHubIssueData(1, "Issue 1", "OPEN", "url1", "", List.of());
             var issue2 = new GitHubIssueData(2, "Issue 2", "OPEN", "url2", "", List.of());
 
             when(gitHubClient.fetchAllIssues("owner", "repo")).thenReturn(List.of(issue1, issue2));
             when(issueSyncRepository.findByIssueNumber(1)).thenReturn(Optional.empty());
             when(issueSyncRepository.findByIssueNumber(2)).thenReturn(Optional.empty());
-            when(issueSyncRepository.save(any(GitHubIssueSync.class))).thenAnswer(inv -> inv.getArgument(0));
+            when(issueSyncRepository.save(any(GitHubIssueSync.class)))
+                    .thenThrow(new RuntimeException("DB save failed"))
+                    .thenAnswer(inv -> inv.getArgument(0));
             when(traceabilityLinkRepository.findByArtifactType(ArtifactType.GITHUB_ISSUE))
                     .thenReturn(List.of());
             stubAuditSave();
@@ -305,6 +307,23 @@ class GitHubIssueSyncServiceTest {
             assertThat(result.issuesCreated()).isEqualTo(1);
             assertThat(result.errors()).hasSize(1);
             assertThat(result.errors().get(0).issue()).isEqualTo(1);
+        }
+
+        @Test
+        void unknownIssueStateDefaultsToOpenInsteadOfFailing() {
+            var issue = new GitHubIssueData(1, "Issue 1", "INVALID_STATE", "url1", "", List.of());
+
+            when(gitHubClient.fetchAllIssues("owner", "repo")).thenReturn(List.of(issue));
+            when(issueSyncRepository.findByIssueNumber(1)).thenReturn(Optional.empty());
+            when(issueSyncRepository.save(any(GitHubIssueSync.class))).thenAnswer(inv -> inv.getArgument(0));
+            when(traceabilityLinkRepository.findByArtifactType(ArtifactType.GITHUB_ISSUE))
+                    .thenReturn(List.of());
+            stubAuditSave();
+
+            var result = service.syncGitHubIssues("owner", "repo");
+
+            assertThat(result.issuesCreated()).isEqualTo(1);
+            assertThat(result.errors()).isEmpty();
         }
     }
 
@@ -384,6 +403,34 @@ class GitHubIssueSyncServiceTest {
             verify(traceabilityService).createLinkUnchecked(any(UUID.class), captor.capture());
             assertThat(captor.getValue().artifactIdentifier()).isEqualTo("42");
             assertThat(captor.getValue().artifactIdentifier()).doesNotStartWith("#");
+        }
+    }
+
+    @Nested
+    class TraceabilityLinkStateReflection {
+
+        @Test
+        void includesIssueStateInTraceabilityLinkTitle() {
+            var sync = new GitHubIssueSync(
+                    42, "Fix login bug", IssueState.CLOSED, "https://github.com/o/r/issues/42", Instant.now());
+            setField(sync, "id", UUID.randomUUID());
+            when(issueSyncRepository.findByIssueNumber(42)).thenReturn(Optional.of(sync));
+
+            var requirement = new Requirement(TEST_PROJECT, "GC-A001", "Test", "statement");
+            setField(requirement, "id", UUID.randomUUID());
+            var link = new TraceabilityLink(requirement, ArtifactType.GITHUB_ISSUE, "42", LinkType.IMPLEMENTS);
+            setField(link, "id", UUID.randomUUID());
+            when(traceabilityLinkRepository.findByArtifactType(ArtifactType.GITHUB_ISSUE))
+                    .thenReturn(List.of(link));
+
+            when(gitHubClient.fetchAllIssues(anyString(), anyString())).thenReturn(List.of());
+            stubAuditSave();
+
+            service.syncGitHubIssues("KeplerOps", "Ground-Control");
+
+            assertThat(link.getArtifactTitle()).contains("[CLOSED]");
+            assertThat(link.getArtifactTitle()).startsWith("#42 -");
+            assertThat(link.getSyncStatus()).isEqualTo(SyncStatus.SYNCED);
         }
     }
 }

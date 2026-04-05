@@ -262,7 +262,7 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
         assertThat(linksForReq001).hasSize(1);
         var link = linksForReq001.get(0);
         assertThat(link.getArtifactUrl()).isEqualTo("https://github.com/test/e2e/issues/10");
-        assertThat(link.getArtifactTitle()).isEqualTo("Foundation issue");
+        assertThat(link.getArtifactTitle()).isEqualTo("#10 - Foundation issue [CLOSED]");
         assertThat(link.getSyncStatus()).isEqualTo(SyncStatus.SYNCED);
     }
 

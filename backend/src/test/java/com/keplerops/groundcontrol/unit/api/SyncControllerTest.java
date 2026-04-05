@@ -61,5 +61,21 @@ class SyncControllerTest {
             mockMvc.perform(post("/api/v1/admin/sync/github").param("owner", "KeplerOps"))
                     .andExpect(status().isBadRequest());
         }
+
+        @Test
+        void withMaliciousOwner_returns400() throws Exception {
+            mockMvc.perform(post("/api/v1/admin/sync/github")
+                            .param("owner", "$(whoami)")
+                            .param("repo", "Ground-Control"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void withMaliciousRepo_returns400() throws Exception {
+            mockMvc.perform(post("/api/v1/admin/sync/github")
+                            .param("owner", "KeplerOps")
+                            .param("repo", "repo;rm -rf /"))
+                    .andExpect(status().isBadRequest());
+        }
     }
 }

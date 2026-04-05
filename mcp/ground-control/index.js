@@ -540,7 +540,7 @@ server.tool(
     uid: z.string().describe("Requirement UID (e.g. 'GC-D007')"),
     extra_body: z.string().optional().describe("Additional markdown to append to the issue body"),
     labels: z.array(z.string()).optional().describe("GitHub labels to apply"),
-    repo: z.string().optional().describe("GitHub repo as 'owner/repo' (defaults to GH_REPO env var)"),
+    repo: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/).optional().describe("GitHub repo as 'owner/repo' (defaults to GH_REPO env var)"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
   async ({ uid, extra_body, labels, repo, project }) => {
@@ -1233,8 +1233,8 @@ server.tool(
   "gc_sync_github",
   "Sync GitHub issues for a repository. Creates traceability links between issues and requirements.",
   {
-    owner: z.string().describe("GitHub repository owner"),
-    repo: z.string().describe("GitHub repository name"),
+    owner: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/).describe("GitHub repository owner"),
+    repo: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/).describe("GitHub repository name"),
   },
   async ({ owner, repo }) => {
     try {

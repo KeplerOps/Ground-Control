@@ -1,9 +1,11 @@
 package com.keplerops.groundcontrol.unit.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.keplerops.groundcontrol.domain.exception.GroundControlException;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
 import com.keplerops.groundcontrol.infrastructure.github.GitHubCliClient;
 import com.keplerops.groundcontrol.infrastructure.github.GitHubCliClient.IssuePage;
@@ -14,6 +16,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class GitHubCliClientTest {
 
@@ -207,6 +211,155 @@ class GitHubCliClientTest {
             Matcher matcher = pattern.matcher(url);
             assertThat(matcher.find()).isTrue();
             assertThat(Integer.parseInt(matcher.group(1))).isEqualTo(42);
+        }
+    }
+
+    @Nested
+    class InputValidation {
+
+        @ParameterizedTest
+        @ValueSource(strings = {"$(whoami)", "foo;rm -rf /", "foo&bar", "foo/bar", "../etc", ""})
+        void rejectsMaliciousOwner(String maliciousOwner) {
+            assertThatThrownBy(() -> GitHubCliClient.validateOwnerRepo(maliciousOwner, "valid-repo"))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("Invalid GitHub owner");
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"$(whoami)", "repo;drop table", "foo&bar", "foo/bar", "../..", ""})
+        void rejectsMaliciousRepo(String maliciousRepo) {
+            assertThatThrownBy(() -> GitHubCliClient.validateOwnerRepo("valid-owner", maliciousRepo))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("Invalid GitHub repo");
+        }
+
+        @Test
+        void rejectsNullOwner() {
+            assertThatThrownBy(() -> GitHubCliClient.validateOwnerRepo(null, "repo"))
+                    .isInstanceOf(GroundControlException.class);
+        }
+
+        @Test
+        void rejectsNullRepo() {
+            assertThatThrownBy(() -> GitHubCliClient.validateOwnerRepo("owner", null))
+                    .isInstanceOf(GroundControlException.class);
+        }
+
+        @Test
+        void acceptsValidOwnerRepo() {
+            GitHubCliClient.validateOwnerRepo("KeplerOps", "Ground-Control");
+            GitHubCliClient.validateOwnerRepo("user123", "my.repo_v2");
+        }
+
+        @Test
+        void rejectsInvalidRepoSlug() {
+            assertThatThrownBy(() -> GitHubCliClient.validateRepoSlug("not-a-slug"))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("owner/repo");
+        }
+
+        @Test
+        void acceptsValidRepoSlug() {
+            GitHubCliClient.validateRepoSlug("KeplerOps/Ground-Control");
+        }
+
+        @Test
+        void rejectsNullTitle() {
+            List<String> empty = List.of();
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent(null, "body", empty))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("title");
+        }
+
+        @Test
+        void rejectsBlankTitle() {
+            List<String> empty = List.of();
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent("", "body", empty))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("title");
+        }
+
+        @Test
+        void rejectsTooLongTitle() {
+            String longTitle = "x".repeat(GitHubCliClient.MAX_TITLE_LENGTH + 1);
+            List<String> empty = List.of();
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent(longTitle, "body", empty))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("title");
+        }
+
+        @Test
+        void rejectsTooLongBody() {
+            String longBody = "x".repeat(GitHubCliClient.MAX_BODY_LENGTH + 1);
+            List<String> empty = List.of();
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent("title", longBody, empty))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("body");
+        }
+
+        @Test
+        void rejectsInvalidLabel() {
+            List<String> labels = List.of("valid", "bad;label");
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent("title", "body", labels))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("label");
+        }
+
+        @Test
+        void rejectsTooLongLabel() {
+            String longLabel = "x".repeat(GitHubCliClient.MAX_LABEL_LENGTH + 1);
+            List<String> labels = List.of(longLabel);
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent("title", "body", labels))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("label");
+        }
+
+        @Test
+        void acceptsValidIssueContent() {
+            GitHubCliClient.validateIssueContent("Valid Title", "Valid body", List.of("bug", "P0"));
+        }
+
+        @Test
+        void acceptsNullBody() {
+            GitHubCliClient.validateIssueContent("Valid Title", null, List.of());
+        }
+
+        @Test
+        void acceptsNullLabels() {
+            GitHubCliClient.validateIssueContent("Valid Title", "body", null);
+        }
+    }
+
+    @Nested
+    class ExecGhErrorPaths {
+
+        @Test
+        void nonZeroExitCodeThrowsWithStderr() {
+            // Use a client pointing to "false" which always exits with code 1
+            var client = new GitHubCliClient(new ObjectMapper(), "/usr/bin/false") {
+                @Override
+                protected IssuePage fetchIssuePage(String owner, String repo, int page) {
+                    return super.fetchIssuePage(owner, repo, page);
+                }
+            };
+
+            assertThatThrownBy(() -> client.fetchAllIssues("test-owner", "test-repo"))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("gh CLI exited with code");
+        }
+
+        @Test
+        void invalidJsonOutputThrows() {
+            // Use "echo" to output invalid JSON
+            var client = new GitHubCliClient(new ObjectMapper(), "/usr/bin/echo") {
+                @Override
+                protected IssuePage fetchIssuePage(String owner, String repo, int page) {
+                    return super.fetchIssuePage(owner, repo, page);
+                }
+            };
+
+            assertThatThrownBy(() -> client.fetchAllIssues("test-owner", "test-repo"))
+                    .isInstanceOf(GroundControlException.class);
         }
     }
 

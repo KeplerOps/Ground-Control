@@ -122,7 +122,7 @@ class CreateIssueIntegrationTest extends BaseIntegrationTest {
         var links = traceabilityLinkRepository.findByRequirementId(testRequirement.getId());
         assertThat(links).hasSize(1);
         assertThat(links.get(0).getArtifactUrl()).isEqualTo("https://github.com/test/repo/issues/55");
-        assertThat(links.get(0).getArtifactTitle()).isEqualTo("CI-REQ-001: Test req");
+        assertThat(links.get(0).getArtifactTitle()).isEqualTo("#55 - CI-REQ-001: Test req [OPEN]");
         assertThat(links.get(0).getSyncStatus()).isEqualTo(SyncStatus.SYNCED);
     }
 }
