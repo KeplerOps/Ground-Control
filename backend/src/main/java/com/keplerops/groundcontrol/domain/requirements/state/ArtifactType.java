@@ -10,5 +10,6 @@ public enum ArtifactType {
     SPEC,
     PROOF,
     DOCUMENTATION,
-    RISK_SCENARIO
+    RISK_SCENARIO,
+    CONTROL
 }
