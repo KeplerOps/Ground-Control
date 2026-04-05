@@ -265,14 +265,16 @@ class GitHubCliClientTest {
 
         @Test
         void rejectsNullTitle() {
-            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent(null, "body", List.of()))
+            List<String> empty = List.of();
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent(null, "body", empty))
                     .isInstanceOf(GroundControlException.class)
                     .hasMessageContaining("title");
         }
 
         @Test
         void rejectsBlankTitle() {
-            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent("", "body", List.of()))
+            List<String> empty = List.of();
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent("", "body", empty))
                     .isInstanceOf(GroundControlException.class)
                     .hasMessageContaining("title");
         }
@@ -280,7 +282,8 @@ class GitHubCliClientTest {
         @Test
         void rejectsTooLongTitle() {
             String longTitle = "x".repeat(GitHubCliClient.MAX_TITLE_LENGTH + 1);
-            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent(longTitle, "body", List.of()))
+            List<String> empty = List.of();
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent(longTitle, "body", empty))
                     .isInstanceOf(GroundControlException.class)
                     .hasMessageContaining("title");
         }
@@ -288,15 +291,16 @@ class GitHubCliClientTest {
         @Test
         void rejectsTooLongBody() {
             String longBody = "x".repeat(GitHubCliClient.MAX_BODY_LENGTH + 1);
-            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent("title", longBody, List.of()))
+            List<String> empty = List.of();
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent("title", longBody, empty))
                     .isInstanceOf(GroundControlException.class)
                     .hasMessageContaining("body");
         }
 
         @Test
         void rejectsInvalidLabel() {
-            assertThatThrownBy(
-                            () -> GitHubCliClient.validateIssueContent("title", "body", List.of("valid", "bad;label")))
+            List<String> labels = List.of("valid", "bad;label");
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent("title", "body", labels))
                     .isInstanceOf(GroundControlException.class)
                     .hasMessageContaining("label");
         }
@@ -304,7 +308,8 @@ class GitHubCliClientTest {
         @Test
         void rejectsTooLongLabel() {
             String longLabel = "x".repeat(GitHubCliClient.MAX_LABEL_LENGTH + 1);
-            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent("title", "body", List.of(longLabel)))
+            List<String> labels = List.of(longLabel);
+            assertThatThrownBy(() -> GitHubCliClient.validateIssueContent("title", "body", labels))
                     .isInstanceOf(GroundControlException.class)
                     .hasMessageContaining("label");
         }
