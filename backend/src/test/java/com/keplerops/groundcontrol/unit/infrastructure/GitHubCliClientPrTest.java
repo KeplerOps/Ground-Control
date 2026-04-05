@@ -2,8 +2,10 @@ package com.keplerops.groundcontrol.unit.infrastructure;
 
 import static org.assertj.core.api.Assertions.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubPullRequestData;
 import com.keplerops.groundcontrol.infrastructure.github.GitHubCliClient;
+import com.keplerops.groundcontrol.infrastructure.github.GitHubCliClient.PrPage;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -127,6 +129,73 @@ class GitHubCliClientPrTest {
             }
 
             return raw;
+        }
+    }
+
+    @Nested
+    class PrPagination {
+
+        @Test
+        void singlePageReturnsAllPrs() {
+            var client = stubbedClient(List.of(new PrPage(List.of(pr(1), pr(2)), 2)));
+
+            List<GitHubPullRequestData> result = client.fetchAllPullRequests("o", "r");
+
+            assertThat(result).hasSize(2);
+            assertThat(result.get(0).number()).isEqualTo(1);
+            assertThat(result.get(1).number()).isEqualTo(2);
+        }
+
+        @Test
+        void paginatesUntilPartialPage() {
+            var client = stubbedClient(List.of(new PrPage(makePrs(1, 100), 100), new PrPage(makePrs(101, 120), 20)));
+
+            List<GitHubPullRequestData> result = client.fetchAllPullRequests("o", "r");
+
+            assertThat(result).hasSize(120);
+            assertThat(result.get(0).number()).isEqualTo(1);
+            assertThat(result.get(119).number()).isEqualTo(120);
+        }
+
+        @Test
+        void emptyPageReturnsEmpty() {
+            var client = stubbedClient(List.of(new PrPage(List.of(), 0)));
+
+            List<GitHubPullRequestData> result = client.fetchAllPullRequests("o", "r");
+
+            assertThat(result).isEmpty();
+        }
+
+        private GitHubCliClient stubbedClient(List<PrPage> pages) {
+            return new GitHubCliClient(new ObjectMapper(), "gh") {
+                private int callCount = 0;
+
+                @Override
+                protected PrPage fetchPrPage(String owner, String repo, int page) {
+                    return pages.get(callCount++);
+                }
+            };
+        }
+
+        private List<GitHubPullRequestData> makePrs(int from, int to) {
+            List<GitHubPullRequestData> prs = new ArrayList<>();
+            for (int i = from; i <= to; i++) {
+                prs.add(pr(i));
+            }
+            return prs;
+        }
+
+        private GitHubPullRequestData pr(int number) {
+            return new GitHubPullRequestData(
+                    number,
+                    "PR " + number,
+                    "OPEN",
+                    false,
+                    "https://github.com/o/r/pull/" + number,
+                    "",
+                    "main",
+                    "feat/" + number,
+                    List.of());
         }
     }
 }
