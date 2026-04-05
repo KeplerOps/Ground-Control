@@ -325,6 +325,39 @@ class GitHubCliClientTest {
         }
     }
 
+    @Nested
+    class ExecGhErrorPaths {
+
+        @Test
+        void nonZeroExitCodeThrowsWithStderr() {
+            // Use a client pointing to "false" which always exits with code 1
+            var client = new GitHubCliClient(new ObjectMapper(), "/usr/bin/false") {
+                @Override
+                protected IssuePage fetchIssuePage(String owner, String repo, int page) {
+                    return super.fetchIssuePage(owner, repo, page);
+                }
+            };
+
+            assertThatThrownBy(() -> client.fetchAllIssues("test-owner", "test-repo"))
+                    .isInstanceOf(GroundControlException.class)
+                    .hasMessageContaining("gh CLI exited with code");
+        }
+
+        @Test
+        void invalidJsonOutputThrows() {
+            // Use "echo" to output invalid JSON
+            var client = new GitHubCliClient(new ObjectMapper(), "/usr/bin/echo") {
+                @Override
+                protected IssuePage fetchIssuePage(String owner, String repo, int page) {
+                    return super.fetchIssuePage(owner, repo, page);
+                }
+            };
+
+            assertThatThrownBy(() -> client.fetchAllIssues("test-owner", "test-repo"))
+                    .isInstanceOf(GroundControlException.class);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static List<GitHubIssueData> parseJson(String json) throws Exception {
         List<Map<String, Object>> rawIssues = objectMapper.readValue(json, new TypeReference<>() {});
