@@ -13,6 +13,7 @@ import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRep
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubClient;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
+import com.keplerops.groundcontrol.domain.requirements.service.GitHubPullRequestData;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.SyncStatus;
 import java.util.List;
@@ -49,6 +50,11 @@ class CreateIssueIntegrationTest extends BaseIntegrationTest {
                             "https://github.com/test/repo/issues/55",
                             "Created from requirement CI-REQ-001",
                             List.of("phase-1", "P1")));
+                }
+
+                @Override
+                public List<GitHubPullRequestData> fetchAllPullRequests(String owner, String repo) {
+                    return List.of();
                 }
 
                 @Override

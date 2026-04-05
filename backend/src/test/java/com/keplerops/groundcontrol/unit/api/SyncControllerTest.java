@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.keplerops.groundcontrol.api.admin.SyncController;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueSyncService;
+import com.keplerops.groundcontrol.domain.requirements.service.PrSyncResult;
 import com.keplerops.groundcontrol.domain.requirements.service.SyncResult;
 import java.time.Instant;
 import java.util.List;
@@ -73,6 +74,55 @@ class SyncControllerTest {
         @Test
         void withMaliciousRepo_returns400() throws Exception {
             mockMvc.perform(post("/api/v1/admin/sync/github")
+                            .param("owner", "KeplerOps")
+                            .param("repo", "repo;rm -rf /"))
+                    .andExpect(status().isBadRequest());
+        }
+    }
+
+    @Nested
+    class SyncGithubPrs {
+
+        @Test
+        void returns200WithStats() throws Exception {
+            var result = new PrSyncResult(UUID.randomUUID(), Instant.now(), 30, 25, 5, 8, List.of());
+
+            when(syncService.syncGitHubPullRequests(anyString(), anyString())).thenReturn(result);
+
+            mockMvc.perform(post("/api/v1/admin/sync/github/prs")
+                            .param("owner", "KeplerOps")
+                            .param("repo", "Ground-Control"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.syncId", notNullValue()))
+                    .andExpect(jsonPath("$.prsFetched", is(30)))
+                    .andExpect(jsonPath("$.prsCreated", is(25)))
+                    .andExpect(jsonPath("$.prsUpdated", is(5)))
+                    .andExpect(jsonPath("$.linksUpdated", is(8)));
+        }
+
+        @Test
+        void withMissingOwner_returns400() throws Exception {
+            mockMvc.perform(post("/api/v1/admin/sync/github/prs").param("repo", "Ground-Control"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void withMissingRepo_returns400() throws Exception {
+            mockMvc.perform(post("/api/v1/admin/sync/github/prs").param("owner", "KeplerOps"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void withMaliciousOwner_returns400() throws Exception {
+            mockMvc.perform(post("/api/v1/admin/sync/github/prs")
+                            .param("owner", "$(whoami)")
+                            .param("repo", "Ground-Control"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void withMaliciousRepo_returns400() throws Exception {
+            mockMvc.perform(post("/api/v1/admin/sync/github/prs")
                             .param("owner", "KeplerOps")
                             .param("repo", "repo;rm -rf /"))
                     .andExpect(status().isBadRequest());

@@ -15,6 +15,7 @@ import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRep
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubClient;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
+import com.keplerops.groundcontrol.domain.requirements.service.GitHubPullRequestData;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import java.util.List;
@@ -56,6 +57,11 @@ class SyncIntegrationTest extends BaseIntegrationTest {
                                     "https://github.com/test/repo/issues/2",
                                     "Add linting tools",
                                     List.of("phase-0", "P1", "enhancement")));
+                }
+
+                @Override
+                public List<GitHubPullRequestData> fetchAllPullRequests(String owner, String repo) {
+                    return List.of();
                 }
 
                 @Override

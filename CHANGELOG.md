@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.102.0] - 2026-04-05
+
+### Added
+
+- Pull request-requirement linking via new `PULL_REQUEST` artifact type
+  in the traceability graph, with three-state PR tracking (OPEN, CLOSED,
+  MERGED) reflecting GitHub PR lifecycle (GC-D002)
+- `GitHubPullRequestSync` entity for caching PR state locally, mirroring
+  the existing `GitHubIssueSync` pattern for issues
+- REST endpoint `POST /api/v1/admin/sync/github/prs?owner=X&repo=Y` for
+  on-demand PR state synchronization
+- MCP tool `gc_sync_github_prs` for agent-initiated PR sync
+- Database migration V048 creating `github_pr_sync` table
+- `PullRequestState` enum with OPEN, CLOSED, MERGED values
+- PR sync updates traceability link titles with state tags (e.g.,
+  `#42 - Add feature [MERGED]`) matching the existing issue sync pattern
+
 ## [0.101.0] - 2026-04-05
 
 ### Added
