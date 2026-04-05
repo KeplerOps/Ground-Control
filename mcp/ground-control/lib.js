@@ -1,9 +1,61 @@
-import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, isAbsolute, join } from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
+import { load as parseYaml } from "js-yaml";
 
 const execFile = promisify(execFileCb);
+const GROUND_CONTROL_PROJECT_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+function formatCommandFailure(command, error) {
+  const details = [];
+  if (error.code === "ENOENT") {
+    details.push(`${command} is not installed or not available on PATH`);
+  } else if (error.message) {
+    details.push(error.message);
+  }
+
+  const stderr = error.stderr?.trim();
+  const stdout = error.stdout?.trim();
+  if (stderr) {
+    details.push(`stderr: ${stderr}`);
+  } else if (stdout) {
+    details.push(`stdout: ${stdout}`);
+  }
+
+  return details.join(" | ");
+}
+
+export function buildGroundControlContextSnippet(project = "your-project-id") {
+  return [
+    "## Ground Control Context",
+    "",
+    "```yaml",
+    "ground_control:",
+    `  project: ${project}`,
+    "```",
+  ].join("\n");
+}
+
+async function execFileWithInput(file, args, { input, ...options } = {}) {
+  return await new Promise((resolve, reject) => {
+    const child = execFileCb(file, args, options, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+
+      resolve({ stdout, stderr });
+    });
+
+    if (input != null) {
+      child.stdin.end(input);
+    }
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Constants (matching Java enums)
@@ -491,8 +543,26 @@ export async function getWorkOrder(project) {
   return request("GET", "/api/v1/analysis/work-order", { params: { project } });
 }
 
+function readOperatorSuppliedFile(filePath) {
+  if (!filePath || !isAbsolute(filePath)) {
+    throw new Error("file_path must be an absolute path");
+  }
+
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- file_path is validated operator input
+  return readFileSync(filePath);
+}
+
+function readAbsoluteTextFile(filePath) {
+  if (!filePath || !isAbsolute(filePath)) {
+    throw new Error("file_path must be an absolute path");
+  }
+
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- file_path is validated absolute input
+  return readFileSync(filePath, "utf8");
+}
+
 export async function importStrictdoc(filePath, project) {
-  const content = readFileSync(filePath);
+  const content = readOperatorSuppliedFile(filePath);
   const form = new FormData();
   form.append("file", new Blob([content]), basename(filePath));
   const params = {};
@@ -501,7 +571,7 @@ export async function importStrictdoc(filePath, project) {
 }
 
 export async function importReqif(filePath, project) {
-  const content = readFileSync(filePath);
+  const content = readOperatorSuppliedFile(filePath);
   const form = new FormData();
   form.append("file", new Blob([content]), basename(filePath));
   const params = {};
@@ -757,6 +827,351 @@ export async function createGitHubIssue({ title, body, labels, repo }) {
 
 export async function createGitHubIssueViaApi(data, project) {
   return request("POST", "/api/v1/admin/github/issues", { body: data, params: { project } });
+}
+
+// ---------------------------------------------------------------------------
+// Repository context helpers
+// ---------------------------------------------------------------------------
+
+export function parseRepoGroundControlContext(agentsMarkdown) {
+  const snippet = buildGroundControlContextSnippet();
+  const headingMatch = agentsMarkdown.match(/^#{1,6}\s+Ground Control Context\s*$/m);
+  if (!headingMatch || headingMatch.index == null) {
+    return {
+      status: "missing_ground_control_context",
+      project: null,
+      errors: [
+        "AGENTS.md must include a 'Ground Control Context' section with a fenced YAML block.",
+      ],
+      suggested_agents_snippet: snippet,
+    };
+  }
+
+  const sectionStart = headingMatch.index + headingMatch[0].length;
+  const afterHeading = agentsMarkdown.slice(sectionStart);
+  const nextHeadingMatch = afterHeading.match(/^#{1,6}\s+\S.*$/m);
+  const sectionBody = nextHeadingMatch ? afterHeading.slice(0, nextHeadingMatch.index) : afterHeading;
+  const yamlBlockMatch = sectionBody.match(/```(?:yaml|yml)\s*\n([\s\S]*?)```/m);
+  if (!yamlBlockMatch) {
+    return {
+      status: "invalid_ground_control_context",
+      project: null,
+      errors: [
+        "The 'Ground Control Context' section must contain a fenced YAML block.",
+      ],
+      suggested_agents_snippet: snippet,
+    };
+  }
+
+  let parsed;
+  try {
+    parsed = parseYaml(yamlBlockMatch[1]);
+  } catch (error) {
+    return {
+      status: "invalid_ground_control_context",
+      project: null,
+      errors: [`Could not parse Ground Control context YAML: ${error.message}`],
+      suggested_agents_snippet: snippet,
+    };
+  }
+
+  const project = parsed?.ground_control?.project;
+  if (typeof project !== "string" || project.trim() === "") {
+    return {
+      status: "invalid_ground_control_context",
+      project: null,
+      errors: [
+        "Ground Control context must define ground_control.project as a non-empty string.",
+      ],
+      suggested_agents_snippet: snippet,
+    };
+  }
+
+  if (!GROUND_CONTROL_PROJECT_RE.test(project)) {
+    return {
+      status: "invalid_ground_control_context",
+      project: null,
+      errors: [
+        "ground_control.project must be a lowercase identifier using letters, numbers, and hyphens only.",
+      ],
+      suggested_agents_snippet: snippet,
+    };
+  }
+
+  return {
+    status: "ok",
+    project,
+    errors: [],
+    suggested_agents_snippet: snippet,
+  };
+}
+
+export async function getRepoGroundControlContext(repoPath) {
+  const repoRoot = await ensureGitRepo(repoPath);
+  const agentsPath = join(repoRoot, "AGENTS.md");
+  const snippet = buildGroundControlContextSnippet();
+
+  let agentsMarkdown;
+  try {
+    agentsMarkdown = readAbsoluteTextFile(agentsPath);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return {
+        repo_path: repoRoot,
+        agents_path: agentsPath,
+        status: "missing_agents_md",
+        project: null,
+        errors: [
+          "AGENTS.md was not found at the repository root.",
+        ],
+        suggested_agents_snippet: snippet,
+      };
+    }
+
+    throw error;
+  }
+
+  return {
+    repo_path: repoRoot,
+    agents_path: agentsPath,
+    ...parseRepoGroundControlContext(agentsMarkdown),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Codex workflow helpers
+// ---------------------------------------------------------------------------
+
+async function ensureGitRepo(repoPath) {
+  if (!repoPath || !isAbsolute(repoPath)) {
+    throw new Error("repo_path must be an absolute path to a Git repository");
+  }
+
+  try {
+    const { stdout } = await execFile("git", ["-C", repoPath, "rev-parse", "--show-toplevel"]);
+    return stdout.trim();
+  } catch (error) {
+    throw new Error(`repo_path is not a valid Git repository: ${formatCommandFailure("git", error)}`);
+  }
+}
+
+async function getIssueContext(issueNumber, repo) {
+  if (issueNumber == null) return null;
+
+  const args = ["issue", "view", String(issueNumber), "--json", "number,title,body"];
+  const targetRepo = repo || process.env.GH_REPO;
+  if (targetRepo) {
+    args.push("--repo", targetRepo);
+  }
+
+  try {
+    const { stdout } = await execFile("gh", args);
+    return JSON.parse(stdout);
+  } catch (error) {
+    return {
+      number: issueNumber,
+      warning: `Failed to fetch GitHub issue context: ${error.message}`,
+    };
+  }
+}
+
+async function listWorkingTreeChanges(repoPath) {
+  const [tracked, untracked] = await Promise.all([
+    execFile("git", ["-C", repoPath, "diff", "--name-only", "HEAD"]),
+    execFile("git", ["-C", repoPath, "ls-files", "--others", "--exclude-standard"]),
+  ]);
+
+  const files = new Set();
+  for (const output of [tracked.stdout, untracked.stdout]) {
+    for (const line of output.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed) files.add(trimmed);
+    }
+  }
+  return Array.from(files).sort();
+}
+
+function findNewWorkingTreeChanges(beforeFiles, afterFiles) {
+  const before = new Set(beforeFiles);
+  return afterFiles.filter((file) => !before.has(file));
+}
+
+function summarizeTraceabilityLinks(traceabilityLinks = []) {
+  return traceabilityLinks.map((link) => ({
+    artifact_type: link.artifact_type,
+    artifact_identifier: link.artifact_identifier,
+    artifact_title: link.artifact_title,
+    link_type: link.link_type,
+  }));
+}
+
+function readGeneratedCodexSummary(outputPath) {
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- outputPath is created by mkdtemp within the local temp directory
+    return readFileSync(outputPath, "utf8").trim();
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  }
+}
+
+export function buildCodexArchitecturePreflightPrompt({ requirement, traceabilityLinks = [], issueContext = null }) {
+  const traceabilitySummary = summarizeTraceabilityLinks(traceabilityLinks);
+
+  return [
+    "You are Codex performing an architecture preflight before implementation.",
+    "",
+    "Your job is to set the implementation on the right road before coding starts.",
+    "",
+    "Hard constraints:",
+    "- Do not implement the requirement itself.",
+    "- You may add or update ADRs, design notes, workflow notes, or other guidance docs when they materially reduce design risk.",
+    "- Keep guidance minimal but sufficient. Do not write an implementation plan.",
+    "- Do not invent new abstractions if existing cross-cutting concerns, schemas, error handling, validation, logging, or workflow patterns already cover the need.",
+    "",
+    "Quality bar:",
+    "- Hold the upcoming implementation to a top-tier production engineering bar for maintainability, reliability, security, consistency, reuse of existing cross-cutting concerns, clear boundaries, and avoidance of abstraction or concept confusion.",
+    "- Call out all gotchas and guardrails up front. Do not silently omit concerns because they seem low priority.",
+    "",
+    "Requirement payload:",
+    JSON.stringify(requirement, null, 2),
+    "",
+    "Existing traceability summary:",
+    JSON.stringify(traceabilitySummary, null, 2),
+    "",
+    "GitHub issue context:",
+    JSON.stringify(issueContext, null, 2),
+    "",
+    "Required focus:",
+    "- Identify existing cross-cutting concerns, schemas, validation layers, exception handling, logging/observability, security patterns, persistence patterns, and workflow conventions that implementation must reuse.",
+    "- Identify risks of concept conflation, leaky abstractions, duplicate schemas, duplicate validation, duplicate exception hierarchies, or duplicate workflow logic.",
+    "- Identify where existing contracts, schemas, controllers, DTOs, services, repositories, exception handling, logging, or testing patterns already solve part of the problem.",
+    "- Add or update ADRs/design docs only if needed to lock in guardrails or clarify boundaries.",
+    "- State explicit non-goals and anti-patterns to avoid.",
+    "",
+    "Final response requirements:",
+    "- List files changed.",
+    "- Summarize architecture decisions and guardrails.",
+    "- Summarize required cross-cutting concerns to reuse.",
+    "- Summarize gotchas and anti-patterns to avoid.",
+    "- Summarize non-goals and implementation boundaries.",
+    "",
+    "Do not spend time re-fetching requirement details if the provided payload is sufficient.",
+  ].join("\n");
+}
+
+export function buildCodexArchitectureExecArgs({ repoPath, outputPath }) {
+  return [
+    "exec",
+    "--ephemeral",
+    "--sandbox",
+    "workspace-write",
+    "-C",
+    repoPath,
+    "--output-last-message",
+    outputPath,
+    "-",
+  ];
+}
+
+export async function runCodexArchitecturePreflight({
+  requirementUid,
+  project,
+  repoPath,
+  issueNumber,
+  repo,
+}) {
+  const repoRoot = await ensureGitRepo(repoPath);
+  const requirement = await getRequirementByUid(requirementUid, project);
+  const traceabilityLinks = await getTraceabilityLinks(requirement.id);
+  const issueContext = await getIssueContext(issueNumber, repo);
+  const preexistingChangedFiles = await listWorkingTreeChanges(repoRoot);
+
+  const tempDir = mkdtempSync(join(tmpdir(), "gc-codex-preflight-"));
+  const outputPath = join(tempDir, "codex-last-message.txt");
+  const prompt = buildCodexArchitecturePreflightPrompt({
+    requirement,
+    traceabilityLinks,
+    issueContext,
+  });
+
+  try {
+    await execFileWithInput(
+      "codex",
+      buildCodexArchitectureExecArgs({ repoPath: repoRoot, outputPath }),
+      {
+        input: prompt,
+        cwd: repoRoot,
+        maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env, NO_COLOR: "1" },
+      },
+    );
+
+    const summary = readGeneratedCodexSummary(outputPath);
+    const changedFiles = findNewWorkingTreeChanges(preexistingChangedFiles, await listWorkingTreeChanges(repoRoot));
+    return {
+      requirement_uid: requirementUid,
+      repo_path: repoRoot,
+      preexisting_changed_files: preexistingChangedFiles,
+      changed_files: changedFiles,
+      summary,
+    };
+  } catch (error) {
+    throw new Error(`Codex architecture preflight failed: ${formatCommandFailure("codex", error)}`);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+export function buildCodexReviewPrompt(baseBranch) {
+  return [
+    `Review the changes against ${baseBranch}.`,
+    "",
+    "Hold the code to a top-tier production engineering bar for maintainability, reliability, security, consistency, validation, logging, exception handling, schema reuse, reuse of existing cross-cutting concerns, and avoidance of abstraction or concept confusion.",
+    "",
+    "Important review rules:",
+    "- Enumerate all material issues you can find. Do not stop after a small handful of findings.",
+    "- Do not prioritize, bucket, or silently omit issues because they appear low priority. The caller intends to fix everything now.",
+    "- Call out cases where the change reinvents existing infrastructure, bypasses existing validation or error handling, duplicates schemas or DTOs, weakens observability, or introduces brittle abstractions.",
+    "- Include precise file and line references for every finding.",
+    "- If there are no findings, say 'No findings' explicitly and mention any residual test or coverage risks.",
+  ].join("\n");
+}
+
+export function buildCodexReviewArgs({ baseBranch, uncommitted }) {
+  const args = ["review", "--base", baseBranch];
+  if (uncommitted) {
+    args.push("--uncommitted");
+  }
+  args.push("-");
+  return args;
+}
+
+export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted = false }) {
+  const repoRoot = await ensureGitRepo(repoPath);
+  const prompt = buildCodexReviewPrompt(baseBranch);
+  const args = buildCodexReviewArgs({ baseBranch, uncommitted });
+  let stdout;
+
+  try {
+    ({ stdout } = await execFileWithInput("codex", args, {
+      input: prompt,
+      cwd: repoRoot,
+      maxBuffer: 10 * 1024 * 1024,
+      env: { ...process.env, NO_COLOR: "1" },
+    }));
+  } catch (error) {
+    throw new Error(`Codex review failed: ${formatCommandFailure("codex", error)}`);
+  }
+
+  return {
+    repo_path: repoRoot,
+    base_branch: baseBranch,
+    uncommitted,
+    review: stdout.trim(),
+  };
 }
 
 // ---------------------------------------------------------------------------

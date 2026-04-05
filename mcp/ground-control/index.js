@@ -54,6 +54,9 @@ import {
   formatIssueBody,
   runSweep,
   runSweepAll,
+  getRepoGroundControlContext,
+  runCodexArchitecturePreflight,
+  runCodexReview,
   embedRequirement,
   getEmbeddingStatus,
   embedProject,
@@ -581,6 +584,79 @@ server.tool(
       }
 
       return ok(JSON.stringify({ url, number, traceability_linked: true }, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Codex workflow tools
+// ==========================================================================
+
+server.tool(
+  "gc_get_repo_ground_control_context",
+  "Read the current repository's AGENTS.md and return the standardized Ground Control context used by workflow automation, including the project identifier and validation errors when the convention is missing or invalid.",
+  {
+    repo_path: z.string().describe("Absolute path to the target Git repository"),
+  },
+  async ({ repo_path }) => {
+    try {
+      return ok(JSON.stringify(await getRepoGroundControlContext(repo_path), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_codex_architecture_preflight",
+  "Run Codex architecture preflight before implementation. Codex inspects the requirement and repository, updates ADRs/design guidance when needed, and returns guardrails and changed files.",
+  {
+    requirement_uid: z.string().describe("Requirement UID (for example 'GC-J001')"),
+    repo_path: z.string().describe("Absolute path to the target Git repository"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    issue_number: z.number().int().positive().optional().describe("Optional GitHub issue number for extra implementation context"),
+    repo: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/).optional().describe("GitHub repo as 'owner/repo' (defaults to GH_REPO env var)"),
+  },
+  async ({ requirement_uid, repo_path, project, issue_number, repo }) => {
+    try {
+      return ok(JSON.stringify(
+        await runCodexArchitecturePreflight({
+          requirementUid: requirement_uid,
+          repoPath: repo_path,
+          project,
+          issueNumber: issue_number,
+          repo,
+        }),
+        null,
+        2,
+      ));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_codex_review",
+  "Run Codex review against the current repository with an exhaustive, no-triage review prompt focused on production-grade maintainability, reliability, security, and avoidance of concept confusion.",
+  {
+    repo_path: z.string().describe("Absolute path to the target Git repository"),
+    base_branch: z.string().optional().describe("Base branch to review against (defaults to 'dev')"),
+    uncommitted: z.boolean().optional().describe("Review staged/unstaged/untracked changes instead of committed branch history"),
+  },
+  async ({ repo_path, base_branch, uncommitted }) => {
+    try {
+      return ok(JSON.stringify(
+        await runCodexReview({
+          repoPath: repo_path,
+          baseBranch: base_branch || "dev",
+          uncommitted: Boolean(uncommitted),
+        }),
+        null,
+        2,
+      ));
     } catch (e) {
       return err(e);
     }

@@ -162,6 +162,10 @@ Available metrics: `COVERAGE` (% of requirements with a link type), `ORPHAN_COUN
 
 Pick the next unblocked requirement from the work order and implement it. Ground Control's `/implement` skill automates the entire cycle:
 
+- The current repository's `AGENTS.md` should define repo-local Ground Control context using a `Ground Control Context` section with a fenced YAML block.
+- The `/implement` skill validates this up front via `gc_get_repo_ground_control_context` and stops rather than guessing if the repo context is missing or invalid.
+- The `/implement` argument should be the full requirement UID as it already exists in Ground Control.
+
 1. **Fetch requirement** from Ground Control
 2. **Create GitHub issue** and link it via traceability
 3. **Checkout feature branch** via `gh issue develop`
@@ -219,14 +223,15 @@ gc_evaluate_quality_gates(project: "my-system")
 
 Returns overall pass/fail + per-gate details (actual value vs. threshold). Fix failures: write missing tests, link orphaned requirements, clean up duplicates.
 
-### Code Review Pipeline
+### Architecture + Review Pipeline
 
-The `/implement` skill runs four independent reviewers on every PR:
+The `/implement` skill now runs one mandatory Codex architecture preflight before coding and then four independent verification/review stages before the PR is presented for human review:
 
-1. **SonarCloud** — static analysis, coverage, duplication, security hotspots
-2. **Codex (ChatGPT)** — cross-model review for design, abstractions, maintainability
-3. **Claude /review** — code quality, conventions, correctness, performance
-4. **Claude /security-review** — OWASP Top 10, injection, auth, data exposure
+1. **Codex architecture preflight** — cross-cutting concerns, reuse opportunities, abstraction/concept confusion, ADR/design guidance when needed
+2. **SonarCloud** — static analysis, coverage, duplication, security hotspots
+3. **Codex (ChatGPT)** — exhaustive no-triage review for design, abstractions, maintainability, reliability, security, and consistency
+4. **Claude /review** — code quality, conventions, correctness, performance
+5. **Claude /security-review** — OWASP Top 10, injection, auth, data exposure
 
 All findings are fixed before the PR is presented for human review.
 

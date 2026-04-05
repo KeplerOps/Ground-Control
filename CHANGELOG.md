@@ -35,6 +35,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CONTROL promoted from external string identifier to internal entity in
   GraphTargetResolverService for both asset links and risk scenario links
 - CONTROL added to ArtifactType for traceability linking
+- Codex-backed Ground Control MCP workflow tools:
+  `gc_codex_architecture_preflight` for pre-implementation ADR/design
+  guidance and `gc_codex_review` for exhaustive no-triage production-quality
+  review
+- Repo-context helper tool `gc_get_repo_ground_control_context`, plus a
+  standardized `AGENTS.md` convention for declaring the repo's Ground Control
+  project before `/implement` runs
+- Codex architecture-preflight prompt builder that emphasizes reuse of
+  existing cross-cutting concerns, avoidance of abstraction and concept
+  confusion, and explicit non-goals/gotchas before coding starts
+- Codex review prompt builder that explicitly asks for an exhaustive,
+  non-triaged review across maintainability, reliability, security,
+  consistency, validation, logging, exception handling, schema reuse, and
+  reuse of existing infrastructure
+- Unit coverage for the new Codex prompt and command builders
+
+### Changed
+
+- `/implement` now requires a Codex architecture preflight before plan mode
+  and uses `gc_codex_review` instead of a raw shell review command
+- `/implement` now validates repo-local Ground Control context from `AGENTS.md`
+  and stops instead of guessing a project when the convention is missing or invalid
+- `/ship` now includes the same Codex review tool in its review pipeline
+- Development workflow and MCP server documentation now describe the Codex
+  preflight/review integration explicitly
 
 ## [0.100.0] - 2026-04-04
 

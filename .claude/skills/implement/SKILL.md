@@ -17,20 +17,49 @@ This skill handles the ENTIRE lifecycle: plan, implement, verify, commit, push, 
 
 1. Enter plan mode.
 
-2. Use the `gc_get_requirement` MCP tool with uid `GC-$ARGUMENTS` to fetch the requirement details. Note the requirement's UUID, title, statement, status, and wave.
+2. Run `pwd` to capture the absolute repository root.
 
-3. Use the `gc_get_traceability` MCP tool with the requirement's UUID to check for existing traceability links. Look for a link with artifact_type `GITHUB_ISSUE`.
+3. Call the `gc_get_repo_ground_control_context` MCP tool with:
+   - `repo_path`: absolute path from `pwd`
 
-4. If NO GitHub issue link exists:
-   - Use the `gc_create_github_issue` MCP tool with uid `$ARGUMENTS` to create a GitHub issue and auto-link it.
+4. If the tool does NOT return `status: "ok"`:
+   - Stop immediately.
+   - Tell the user the repository is missing valid Ground Control context in `AGENTS.md`.
+   - Include the tool's `suggested_agents_snippet` in your response and ask the user to add it before using `/implement`.
+   - Do NOT guess the Ground Control project.
 
-5. If a GitHub issue link DOES exist, note the issue number from the artifact_identifier.
+5. If the tool returns `status: "ok"`, use its `project` value in all Ground Control MCP calls in this workflow.
 
-6. Run `gh issue develop <issue-number> --checkout --base dev` to switch to the issue branch.
+6. Treat `$ARGUMENTS` as the full requirement UID exactly as provided by the user.
+   - Do NOT synthesize or rewrite a project prefix.
+   - Inputs like `OBS-001`, `DSL-101`, `API-412`, and `GC-J001` are already full UIDs and should be used as-is.
+
+7. Use the `gc_get_requirement` MCP tool with uid `$ARGUMENTS` and the repo-local Ground Control `project`. Note the requirement's UUID, title, statement, status, and wave.
+
+8. Use the `gc_get_traceability` MCP tool with the requirement's UUID to check for existing traceability links. Look for a link with artifact_type `GITHUB_ISSUE`.
+
+9. If NO GitHub issue link exists:
+   - Use the `gc_create_github_issue` MCP tool with uid `$ARGUMENTS` and the repo-local Ground Control `project` to create a GitHub issue and auto-link it.
+
+10. If a GitHub issue link DOES exist, note the issue number from the artifact_identifier.
+
+11. Run `gh issue develop <issue-number> --checkout --base dev` to switch to the issue branch.
 
 ### Step 2: Read the GitHub Issue
 
 Run `gh issue view <issue-number>` to read the full issue details including description, labels, and comments.
+
+### Step 2.5: Run Codex Architecture Preflight
+
+1. Reuse the absolute repository root from Step 1.
+2. Call the `gc_codex_architecture_preflight` MCP tool with:
+   - `requirement_uid`: `$ARGUMENTS`
+   - `repo_path`: absolute path from Step 1
+   - `project`: the repo-local Ground Control project from Step 1
+   - `issue_number`: the issue number from Step 1
+3. Read any ADRs, design notes, or workflow guidance that Codex created or updated.
+4. Treat the returned guardrails, cross-cutting concerns, and non-goals as binding unless they are clearly wrong.
+5. Do NOT revert or ignore Codex-added design guidance just because implementation looks possible without it.
 
 ### Step 3: Assess Codebase Coverage
 
@@ -38,6 +67,7 @@ Explore the codebase to determine whether the requirement described in the issue
 - Search for relevant classes, methods, tests, and configurations
 - Check if the described behavior already exists
 - Review any existing traceability links (IMPLEMENTS, TESTS) from Step 1
+- Reuse the architecture-preflight guidance from Step 2.5 while assessing existing coverage and planning changes
 
 ### Step 4: Plan or Report
 
@@ -160,9 +190,14 @@ If any check fails, fix it before proceeding. Do NOT move to Phase C until every
 
 ### Step 13: Cross-Model Review (Codex)
 
-Run the OpenAI Codex CLI review against the branch:
-
-`Bash(codex review --base dev)`
+1. Run `pwd` to capture the absolute repository root.
+2. Call the `gc_codex_review` MCP tool with:
+   - `repo_path`: absolute path from `pwd`
+   - `base_branch`: `dev`
+3. Read the findings carefully and fix ALL of them.
+   - Do NOT triage.
+   - Do NOT defer "low-priority" issues.
+   - Do NOT assume a small number of findings means the review is complete until you have read the full output.
 
 ### Step 14: Code Review
 
