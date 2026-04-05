@@ -4,6 +4,7 @@ import com.keplerops.groundcontrol.domain.audit.ActorHolder;
 import com.keplerops.groundcontrol.domain.baselines.model.Baseline;
 import com.keplerops.groundcontrol.domain.baselines.repository.BaselineRepository;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
@@ -90,7 +91,7 @@ public class BaselineService {
         var other = getById(otherBaselineId);
 
         if (!baseline.getProject().getId().equals(other.getProject().getId())) {
-            throw new com.keplerops.groundcontrol.domain.exception.DomainValidationException(
+            throw new DomainValidationException(
                     "Cannot compare baselines from different projects",
                     "cross_project_comparison",
                     Map.of(

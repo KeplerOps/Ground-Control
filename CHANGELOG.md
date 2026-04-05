@@ -343,7 +343,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Round-trip tested: export produces valid XML parseable by `ReqifParser`
 - `gc_export_document` MCP tool now supports `reqif` format
 
-## [0.91.0] - 2026-03-28
+## [0.92.0] - 2026-03-28
 
 ### Added
 
@@ -351,7 +351,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GET /api/v1/export/document/{id}?format=pdf` (GC-B009)
 - `gc_export_document` MCP tool now supports `pdf` format (returns base64)
 
-## [0.90.0] - 2026-03-28
+## [0.91.0] - 2026-03-28
 
 ### Added
 
@@ -361,7 +361,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   XSS-safe escaping, and responsive layout
 - `gc_export_document` MCP tool now accepts `format` param (`sdoc` or `html`)
 
-## [0.89.0] - 2026-03-28
+## [0.90.0] - 2026-03-28
 
 ### Added
 
@@ -371,7 +371,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PARENT relations between import and export
 - MCP tool `gc_export_document` for programmatic .sdoc export
 
-## [0.88.0] - 2026-03-28
+## [0.89.0] - 2026-03-28
 
 ### Added
 
@@ -384,7 +384,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Idempotent document/section creation — re-importing skips existing
   documents and sections by title match
 
-## [0.87.2] - 2026-03-26
+## [0.88.2] - 2026-03-26
 
 ### Fixed
 
@@ -395,7 +395,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add explicit regex grouping for alternation precedence in `AgeGraphService`
 - Reduce loop break/continue count in `ImportService` by extracting helper methods
 
-## [0.87.1] - 2026-03-26
+## [0.88.1] - 2026-03-26
 
 ### Changed
 
@@ -409,7 +409,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refactor `SdocParser.parse` to reduce cognitive complexity by extracting
   wave range building, block extraction, and field parsing helpers
 
-## [0.87.0] - 2026-03-26
+## [0.88.0] - 2026-03-26
 
 ### Added
 
@@ -422,7 +422,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shared `CsvUtils` utility centralizing CSV formula-injection protection
 - Apache POI (Excel) and OpenPDF (PDF) dependencies for report generation
 
-## [0.86.0] - 2026-03-26
+## [0.87.0] - 2026-03-26
 
 ### Added
 
@@ -431,7 +431,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `entityType` field on graph visualization nodes for client-side
   type identification
 
-## [0.85.0] - 2026-03-26
+## [0.86.0] - 2026-03-26
 
 ### Added
 
@@ -445,7 +445,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the backend API, fixing "gh not found" errors when the backend Docker
   container lacks `gh` authentication
 
-## [0.84.0] - 2026-03-26
+## [0.85.0] - 2026-03-26
 
 ### Added
 
@@ -456,7 +456,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP tools: `gc_set_document_grammar`, `gc_get_document_grammar`,
   `gc_delete_document_grammar`
 
-## [0.83.0] - 2026-03-26
+## [0.84.0] - 2026-03-26
 
 ### Added
 
@@ -471,7 +471,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove nullable `Optional` fields from `UpdateQualityGateCommand` to resolve
   SonarCloud S2789 reliability bugs on dev branch
 
-## [0.82.0] - 2026-03-26
+## [0.83.0] - 2026-03-26
 
 ### Added
 
@@ -482,7 +482,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP tools: `gc_add_section_content`, `gc_list_section_content`,
   `gc_update_section_content`, `gc_delete_section_content`
 
-## [0.81.0] - 2026-03-26
+## [0.82.0] - 2026-03-26
 
 ### Added
 
@@ -493,7 +493,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP tools: `gc_create_section`, `gc_list_sections`, `gc_get_section_tree`,
   `gc_get_section`, `gc_update_section`, `gc_delete_section`
 
-## [0.80.0] - 2026-03-25
+## [0.81.0] - 2026-03-25
 
 ### Added
 
@@ -515,7 +515,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simplified `.claude/settings.local.json` permissions from 90+ one-off entries
   to ~20 wildcard patterns
 
-## [0.79.0] - 2026-03-25
+## [0.80.0] - 2026-03-25
 
 ### Added
 
@@ -526,7 +526,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP tools: `gc_create_document`, `gc_list_documents`, `gc_get_document`,
   `gc_update_document`, `gc_delete_document`
 
-## [0.78.0] - 2026-03-24
+## [0.79.0] - 2026-03-24
 
 ### Added
 
@@ -538,7 +538,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gc_get_quality_gate`, `gc_update_quality_gate`, `gc_delete_quality_gate`,
   `gc_evaluate_quality_gates`
 
-## [0.77.0] - 2026-03-24
+## [0.78.0] - 2026-03-24
 
 ### Added
 
@@ -546,6 +546,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returning per-field changes, added/removed/modified relations, and
   added/removed/modified traceability links between two revision numbers
 - MCP tool `gc_get_requirement_diff` for agent-driven change review workflows
+
+## [0.77.0] - 2025-03-29
+
+### Changed
+
+- Split monolithic frontend page components (`requirement-detail`, `requirements`,
+  `graph`) into focused feature-level modules under `components/requirement-detail/`,
+  `components/requirements/`, and `components/graph/`
+- Introduced route-level code splitting via `React.lazy` + `Suspense` for all
+  major routes; Cytoscape (~537 KB) now loads only when the graph route is visited
 
 ## [0.76.0] - 2026-03-24
 

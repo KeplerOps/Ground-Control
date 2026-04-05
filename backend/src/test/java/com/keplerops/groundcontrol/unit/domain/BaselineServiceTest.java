@@ -16,6 +16,7 @@ import com.keplerops.groundcontrol.domain.baselines.repository.BaselineRepositor
 import com.keplerops.groundcontrol.domain.baselines.service.BaselineService;
 import com.keplerops.groundcontrol.domain.baselines.service.CreateBaselineCommand;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
@@ -37,6 +38,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class BaselineServiceTest {
 
     private static final UUID PROJECT_ID = UUID.fromString("a0000000-0000-0000-0000-000000000001");
+    private static final UUID OTHER_PROJECT_ID = UUID.fromString("a0000000-0000-0000-0000-000000000002");
     private static final UUID BASELINE_ID = UUID.fromString("b0000000-0000-0000-0000-000000000001");
     private static final UUID OTHER_BASELINE_ID = UUID.fromString("b0000000-0000-0000-0000-000000000002");
 
@@ -67,6 +69,15 @@ class BaselineServiceTest {
 
     private Baseline makeBaseline(UUID id, String name, int revisionNumber) {
         var project = makeProject();
+        var baseline = new Baseline(project, name, "desc", revisionNumber, "test-actor");
+        setField(baseline, "id", id);
+        setField(baseline, "createdAt", Instant.now());
+        return baseline;
+    }
+
+    private Baseline makeBaselineForProject(UUID id, String name, int revisionNumber, UUID projectId) {
+        var project = new Project("other-project", "Other Project");
+        setField(project, "id", projectId);
         var baseline = new Baseline(project, name, "desc", revisionNumber, "test-actor");
         setField(baseline, "id", id);
         setField(baseline, "createdAt", Instant.now());
@@ -231,20 +242,14 @@ class BaselineServiceTest {
         }
 
         @Test
-        void rejectsCrossProjectComparison() {
+        void throwsDomainValidationForCrossProjectComparison() {
             var baseline = makeBaseline(BASELINE_ID, "v1.0", 10);
-            var otherProjectId = UUID.fromString("a0000000-0000-0000-0000-000000000002");
-            var otherProject = new Project("other-project", "Other Project");
-            setField(otherProject, "id", otherProjectId);
-            var otherBaseline = new Baseline(otherProject, "v1.0", "desc", 10, "test-actor");
-            setField(otherBaseline, "id", OTHER_BASELINE_ID);
-            setField(otherBaseline, "createdAt", Instant.now());
-
+            var other = makeBaselineForProject(OTHER_BASELINE_ID, "v2.0", 20, OTHER_PROJECT_ID);
             when(baselineRepository.findById(BASELINE_ID)).thenReturn(Optional.of(baseline));
-            when(baselineRepository.findById(OTHER_BASELINE_ID)).thenReturn(Optional.of(otherBaseline));
+            when(baselineRepository.findById(OTHER_BASELINE_ID)).thenReturn(Optional.of(other));
 
             assertThatThrownBy(() -> service.compare(BASELINE_ID, OTHER_BASELINE_ID))
-                    .isInstanceOf(com.keplerops.groundcontrol.domain.exception.DomainValidationException.class)
+                    .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("different projects");
         }
 

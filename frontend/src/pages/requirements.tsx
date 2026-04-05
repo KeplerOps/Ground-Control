@@ -1,7 +1,12 @@
 import { RequirementDetailPanel } from "@/components/requirement-detail-panel";
 import { RequirementForm } from "@/components/requirement-form";
-import { StatusBadgeDropdown } from "@/components/status-badge";
-import { PriorityBadge, TypeBadge } from "@/components/ui/badge";
+import { FilterSelect } from "@/components/requirements/filter-select";
+import { RequirementRow } from "@/components/requirements/requirement-row";
+import { RequirementsSkeleton } from "@/components/requirements/requirements-skeleton";
+import {
+  type SortField,
+  SortableHeader,
+} from "@/components/requirements/sortable-header";
 import { Modal } from "@/components/ui/modal";
 import { SlidePanel } from "@/components/ui/slide-panel";
 import { useToast } from "@/components/ui/toast";
@@ -10,31 +15,19 @@ import {
   useBulkTransition,
   useCreateRequirement,
   useRequirements,
-  useTransitionStatus,
 } from "@/hooks/use-requirements";
-import { cn } from "@/lib/utils";
 import type {
   BulkStatusTransitionResponse,
-  Priority,
   RequirementRequest,
   RequirementResponse,
-  RequirementType,
   Status,
   UpdateRequirementRequest,
 } from "@/types/api";
 import { REQUIREMENT_TYPES } from "@/types/api";
 import * as Checkbox from "@radix-ui/react-checkbox";
-import { Check, ChevronDown, ChevronUp, FileText, Plus } from "lucide-react";
+import { Check, FileText, Plus } from "lucide-react";
 import { useCallback, useState } from "react";
 
-type SortField =
-  | "uid"
-  | "title"
-  | "requirementType"
-  | "priority"
-  | "status"
-  | "wave"
-  | "updatedAt";
 type SortDir = "asc" | "desc";
 
 export function Requirements() {
@@ -79,15 +72,6 @@ export function Requirements() {
       setSortDir("asc");
     }
     setPage(0);
-  }
-
-  function SortIcon({ field }: { field: SortField }) {
-    if (sortField !== field) return null;
-    return sortDir === "asc" ? (
-      <ChevronUp className="h-3 w-3" />
-    ) : (
-      <ChevronDown className="h-3 w-3" />
-    );
   }
 
   function toggleSelected(id: string) {
@@ -154,7 +138,7 @@ export function Requirements() {
     );
   }
 
-  if (projectLoading || isLoading) return <LoadingSkeleton />;
+  if (projectLoading || isLoading) return <RequirementsSkeleton />;
 
   if (!activeProject) {
     return (
@@ -319,58 +303,51 @@ export function Requirements() {
                 field="uid"
                 label="UID"
                 currentSort={sortField}
+                sortDir={sortDir}
                 onSort={handleSort}
-              >
-                <SortIcon field="uid" />
-              </SortableHeader>
+              />
               <SortableHeader
                 field="title"
                 label="Title"
                 currentSort={sortField}
+                sortDir={sortDir}
                 onSort={handleSort}
-              >
-                <SortIcon field="title" />
-              </SortableHeader>
+              />
               <SortableHeader
                 field="requirementType"
                 label="Type"
                 currentSort={sortField}
+                sortDir={sortDir}
                 onSort={handleSort}
-              >
-                <SortIcon field="requirementType" />
-              </SortableHeader>
+              />
               <SortableHeader
                 field="priority"
                 label="Priority"
                 currentSort={sortField}
+                sortDir={sortDir}
                 onSort={handleSort}
-              >
-                <SortIcon field="priority" />
-              </SortableHeader>
+              />
               <SortableHeader
                 field="status"
                 label="Status"
                 currentSort={sortField}
+                sortDir={sortDir}
                 onSort={handleSort}
-              >
-                <SortIcon field="status" />
-              </SortableHeader>
+              />
               <SortableHeader
                 field="wave"
                 label="Wave"
                 currentSort={sortField}
+                sortDir={sortDir}
                 onSort={handleSort}
-              >
-                <SortIcon field="wave" />
-              </SortableHeader>
+              />
               <SortableHeader
                 field="updatedAt"
                 label="Updated"
                 currentSort={sortField}
+                sortDir={sortDir}
                 onSort={handleSort}
-              >
-                <SortIcon field="updatedAt" />
-              </SortableHeader>
+              />
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -471,173 +448,6 @@ export function Requirements() {
           />
         )}
       </SlidePanel>
-    </div>
-  );
-}
-
-function RequirementRow({
-  req,
-  selected,
-  active,
-  onToggle,
-  onClick,
-}: {
-  req: {
-    id: string;
-    uid: string;
-    title: string;
-    requirementType: RequirementType;
-    priority: Priority;
-    status: Status;
-    wave: number;
-    updatedAt: string;
-  };
-  selected: boolean;
-  active?: boolean;
-  onToggle: () => void;
-  onClick: () => void;
-}) {
-  const { toast } = useToast();
-  const transition = useTransitionStatus(req.id);
-
-  function handleRowClick(e: React.MouseEvent) {
-    const target = e.target as HTMLElement;
-    if (target.closest("[data-no-row-click]")) return;
-    onClick();
-  }
-
-  function handleRowKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      onClick();
-    }
-  }
-
-  return (
-    <tr
-      className={cn(
-        "hover:bg-accent/30 cursor-pointer",
-        active && "bg-accent/50",
-      )}
-      onClick={handleRowClick}
-      onKeyDown={handleRowKeyDown}
-      tabIndex={0}
-    >
-      <td className="px-3 py-3" data-no-row-click>
-        <Checkbox.Root
-          className="flex h-4 w-4 items-center justify-center rounded border border-input bg-background"
-          checked={selected}
-          onCheckedChange={onToggle}
-        >
-          <Checkbox.Indicator>
-            <Check className="h-3 w-3" />
-          </Checkbox.Indicator>
-        </Checkbox.Root>
-      </td>
-      <td className="px-3 py-3 font-mono text-xs text-muted-foreground">
-        {req.uid}
-      </td>
-      <td className="px-3 py-3 font-medium max-w-[300px] truncate">
-        {req.title}
-      </td>
-      <td className="px-3 py-3">
-        <TypeBadge type={req.requirementType} />
-      </td>
-      <td className="px-3 py-3">
-        <PriorityBadge priority={req.priority} />
-      </td>
-      <td className="px-3 py-3" data-no-row-click>
-        <StatusBadgeDropdown
-          status={req.status}
-          onTransition={(s) =>
-            transition.mutate(s, {
-              onSuccess: () =>
-                toast({ title: `Status changed to ${s}`, variant: "success" }),
-              onError: (err) =>
-                toast({
-                  title: "Transition failed",
-                  description: err.message,
-                  variant: "error",
-                }),
-            })
-          }
-        />
-      </td>
-      <td className="px-3 py-3 text-muted-foreground">{req.wave}</td>
-      <td className="px-3 py-3 text-xs text-muted-foreground">
-        {new Date(req.updatedAt).toLocaleDateString()}
-      </td>
-    </tr>
-  );
-}
-
-function SortableHeader({
-  field,
-  label,
-  currentSort,
-  onSort,
-  children,
-}: {
-  field: SortField;
-  label: string;
-  currentSort: SortField;
-  onSort: (f: SortField) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <th className="px-3 py-3 text-left">
-      <button
-        type="button"
-        className={cn(
-          "inline-flex items-center gap-1 text-xs font-medium text-muted-foreground cursor-pointer select-none hover:text-foreground",
-          currentSort === field && "text-foreground",
-        )}
-        onClick={() => onSort(field)}
-      >
-        {label}
-        {children}
-      </button>
-    </th>
-  );
-}
-
-function FilterSelect({
-  value,
-  onChange,
-  placeholder,
-  options,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  options: string[];
-}) {
-  return (
-    <select
-      className="rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      <option value="">{placeholder}</option>
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {o.replace(/_/g, " ")}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function LoadingSkeleton() {
-  return (
-    <div className="space-y-4">
-      <div className="h-8 w-48 animate-pulse rounded bg-muted" />
-      <div className="h-12 animate-pulse rounded-lg bg-muted" />
-      <div className="space-y-1">
-        {["s1", "s2", "s3", "s4", "s5"].map((key) => (
-          <div key={key} className="h-12 animate-pulse rounded bg-muted" />
-        ))}
-      </div>
     </div>
   );
 }
