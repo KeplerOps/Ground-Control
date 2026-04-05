@@ -133,6 +133,6 @@ class SyncIntegrationTest extends BaseIntegrationTest {
         var updatedLinks = traceabilityLinkRepository.findByRequirementId(requirement.getId());
         assert updatedLinks.size() == 1;
         assert updatedLinks.get(0).getArtifactUrl().equals("https://github.com/test/repo/issues/1");
-        assert updatedLinks.get(0).getArtifactTitle().equals("#1 - Setup CI [OPEN]");
+        assert updatedLinks.get(0).getArtifactTitle().equals("#1 - Setup CI [CLOSED]");
     }
 }
