@@ -1,3 +1,7 @@
+import { GraphControls } from "@/components/graph/graph-controls";
+import { GraphFilters } from "@/components/graph/graph-filters";
+import { GraphLegend } from "@/components/graph/graph-legend";
+import { GraphStats } from "@/components/graph/graph-stats";
 import { useProjectContext } from "@/contexts/project-context";
 import { apiFetch } from "@/lib/api-client";
 import {
@@ -19,7 +23,7 @@ import type {
   GraphVisualizationResponse,
 } from "@/types/api";
 import type cytoscape from "cytoscape";
-import { Filter, Loader2, Maximize, RotateCcw, X } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type GraphNodeData = GraphVisualizationNodeResponse;
@@ -1032,45 +1036,11 @@ export function Graph() {
 
       {/* Legend */}
       {!loading && (
-        <div className="flex flex-wrap gap-3 border-b border-border bg-card px-4 py-1.5">
-          {legendItems.map((item) => (
-            <button
-              type="button"
-              key={item.key}
-              onClick={() => handleLegendClick(item.key)}
-              className="flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-            >
-              <span
-                className="inline-block h-2.5 w-2.5 rounded-sm"
-                style={{ background: item.color }}
-              />
-              {item.key} ({item.count})
-            </button>
-          ))}
-          {relationLegend.length > 0 && (
-            <>
-              <span className="ml-2 text-[11px] text-muted-foreground">
-                Edges:
-              </span>
-              {relationLegend.map((item) => (
-                <span
-                  key={item.type}
-                  className="flex items-center gap-1 text-[11px] text-muted-foreground"
-                >
-                  <span
-                    className={cn(
-                      "inline-block w-6 border-t-2",
-                      item.style === "dashed" && "border-dashed",
-                      item.style === "dotted" && "border-dotted",
-                    )}
-                    style={{ borderTopColor: item.color }}
-                  />
-                  {item.label} ({item.count})
-                </span>
-              ))}
-            </>
-          )}
-        </div>
+        <GraphLegend
+          legendItems={legendItems}
+          relationLegend={relationLegend}
+          onLegendClick={handleLegendClick}
+        />
       )}
 
       {/* Graph canvas */}
