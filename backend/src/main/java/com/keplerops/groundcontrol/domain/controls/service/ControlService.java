@@ -47,7 +47,7 @@ public class ControlService {
     }
 
     public Control update(UUID projectId, UUID id, UpdateControlCommand command) {
-        var control = getById(projectId, id);
+        var control = findOrThrow(projectId, id);
         if (command.title() != null) {
             control.setTitle(command.title());
         }
@@ -85,6 +85,10 @@ public class ControlService {
 
     @Transactional(readOnly = true)
     public Control getById(UUID projectId, UUID id) {
+        return findOrThrow(projectId, id);
+    }
+
+    private Control findOrThrow(UUID projectId, UUID id) {
         return controlRepository
                 .findByIdAndProjectId(id, projectId)
                 .orElseThrow(() -> new NotFoundException("Control not found: " + id));
@@ -103,7 +107,7 @@ public class ControlService {
     }
 
     public Control transitionStatus(UUID projectId, UUID id, ControlStatus newStatus) {
-        var control = getById(projectId, id);
+        var control = findOrThrow(projectId, id);
         control.transitionStatus(newStatus);
         control = controlRepository.save(control);
         log.info("control_status_changed: uid={} status={}", control.getUid(), newStatus);
@@ -111,7 +115,7 @@ public class ControlService {
     }
 
     public void delete(UUID projectId, UUID id) {
-        var control = getById(projectId, id);
+        var control = findOrThrow(projectId, id);
         controlRepository.delete(control);
         log.info("control_deleted: uid={} id={}", control.getUid(), id);
     }

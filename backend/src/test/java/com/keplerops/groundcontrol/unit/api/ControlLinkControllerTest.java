@@ -65,8 +65,7 @@ class ControlLinkControllerTest {
     @Test
     void createReturns201() throws Exception {
         when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
-        when(controlLinkService.create(eq(PROJECT_ID), eq(CONTROL_ID), any(), any(), any(), any(), any(), any()))
-                .thenReturn(makeLink());
+        when(controlLinkService.create(eq(PROJECT_ID), eq(CONTROL_ID), any())).thenReturn(makeLink());
 
         mockMvc.perform(
                         post("/api/v1/controls/{controlId}/links", CONTROL_ID)

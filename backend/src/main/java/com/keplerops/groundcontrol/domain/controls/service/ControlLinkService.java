@@ -3,7 +3,6 @@ package com.keplerops.groundcontrol.domain.controls.service;
 import com.keplerops.groundcontrol.domain.controls.model.ControlLink;
 import com.keplerops.groundcontrol.domain.controls.repository.ControlLinkRepository;
 import com.keplerops.groundcontrol.domain.controls.state.ControlLinkTargetType;
-import com.keplerops.groundcontrol.domain.controls.state.ControlLinkType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import java.util.List;
@@ -27,38 +26,39 @@ public class ControlLinkService {
         this.controlService = controlService;
     }
 
-    public ControlLink create(
-            UUID projectId,
-            UUID controlId,
-            ControlLinkTargetType targetType,
-            UUID targetEntityId,
-            String targetIdentifier,
-            ControlLinkType linkType,
-            String targetUrl,
-            String targetTitle) {
+    public ControlLink create(UUID projectId, UUID controlId, CreateControlLinkCommand command) {
         var control = controlService.getById(projectId, controlId);
 
-        if (targetEntityId != null) {
-            if (controlLinkRepository.existsByControlIdAndTargetTypeAndTargetEntityIdAndLinkType(
-                    controlId, targetType, targetEntityId, linkType)) {
-                throw new ConflictException("Duplicate control link");
-            }
-        } else if (targetIdentifier != null) {
-            if (controlLinkRepository.existsByControlIdAndTargetTypeAndTargetIdentifierAndLinkType(
-                    controlId, targetType, targetIdentifier, linkType)) {
-                throw new ConflictException("Duplicate control link");
-            }
+        if (command.targetEntityId() != null
+                && controlLinkRepository.existsByControlIdAndTargetTypeAndTargetEntityIdAndLinkType(
+                        controlId, command.targetType(), command.targetEntityId(), command.linkType())) {
+            throw new ConflictException("Duplicate control link");
+        }
+        if (command.targetEntityId() == null
+                && command.targetIdentifier() != null
+                && controlLinkRepository.existsByControlIdAndTargetTypeAndTargetIdentifierAndLinkType(
+                        controlId, command.targetType(), command.targetIdentifier(), command.linkType())) {
+            throw new ConflictException("Duplicate control link");
         }
 
-        var link = new ControlLink(control, targetType, targetEntityId, targetIdentifier, linkType);
-        if (targetUrl != null) {
-            link.setTargetUrl(targetUrl);
+        var link = new ControlLink(
+                control,
+                command.targetType(),
+                command.targetEntityId(),
+                command.targetIdentifier(),
+                command.linkType());
+        if (command.targetUrl() != null) {
+            link.setTargetUrl(command.targetUrl());
         }
-        if (targetTitle != null) {
-            link.setTargetTitle(targetTitle);
+        if (command.targetTitle() != null) {
+            link.setTargetTitle(command.targetTitle());
         }
         link = controlLinkRepository.save(link);
-        log.info("control_link_created: control={} targetType={} linkType={}", control.getUid(), targetType, linkType);
+        log.info(
+                "control_link_created: control={} targetType={} linkType={}",
+                control.getUid(),
+                command.targetType(),
+                command.linkType());
         return link;
     }
 

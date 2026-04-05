@@ -66,15 +66,9 @@ class ControlLinkServiceTest {
                     .thenReturn(false);
             when(controlLinkRepository.save(any(ControlLink.class))).thenAnswer(inv -> inv.getArgument(0));
 
-            var result = controlLinkService.create(
-                    projectId,
-                    controlId,
-                    ControlLinkTargetType.ASSET,
-                    null,
-                    "ASSET-001",
-                    ControlLinkType.PROTECTS,
-                    null,
-                    null);
+            var command = new com.keplerops.groundcontrol.domain.controls.service.CreateControlLinkCommand(
+                    ControlLinkTargetType.ASSET, null, "ASSET-001", ControlLinkType.PROTECTS, null, null);
+            var result = controlLinkService.create(projectId, controlId, command);
 
             assertThat(result.getTargetType()).isEqualTo(ControlLinkTargetType.ASSET);
             assertThat(result.getTargetIdentifier()).isEqualTo("ASSET-001");
@@ -88,15 +82,9 @@ class ControlLinkServiceTest {
                             controlId, ControlLinkTargetType.EXTERNAL, "ext-1", ControlLinkType.ASSOCIATED))
                     .thenReturn(true);
 
-            assertThatThrownBy(() -> controlLinkService.create(
-                            projectId,
-                            controlId,
-                            ControlLinkTargetType.EXTERNAL,
-                            null,
-                            "ext-1",
-                            ControlLinkType.ASSOCIATED,
-                            null,
-                            null))
+            var command = new com.keplerops.groundcontrol.domain.controls.service.CreateControlLinkCommand(
+                    ControlLinkTargetType.EXTERNAL, null, "ext-1", ControlLinkType.ASSOCIATED, null, null);
+            assertThatThrownBy(() -> controlLinkService.create(projectId, controlId, command))
                     .isInstanceOf(ConflictException.class);
         }
     }

@@ -36,15 +36,14 @@ public class ControlLinkController {
             @Valid @RequestBody ControlLinkRequest request,
             @RequestParam(required = false) String project) {
         var projectId = projectService.requireProjectId(project);
-        return ControlLinkResponse.from(controlLinkService.create(
-                projectId,
-                controlId,
+        var command = new com.keplerops.groundcontrol.domain.controls.service.CreateControlLinkCommand(
                 request.targetType(),
                 request.targetEntityId(),
                 request.targetIdentifier(),
                 request.linkType(),
                 request.targetUrl(),
-                request.targetTitle()));
+                request.targetTitle());
+        return ControlLinkResponse.from(controlLinkService.create(projectId, controlId, command));
     }
 
     @GetMapping
