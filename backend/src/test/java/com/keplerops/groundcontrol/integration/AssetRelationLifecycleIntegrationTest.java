@@ -60,6 +60,7 @@ class AssetRelationLifecycleIntegrationTest extends BaseIntegrationTest {
 
         Instant collectedAt = Instant.parse("2026-04-01T12:00:00Z");
         JsonNode createJson = objectMapper.readTree(mockMvc.perform(post("/api/v1/assets/{id}/relations", sourceId)
+                        .param("project", "ground-control")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of(
                                 "targetId", targetId.toString(),
@@ -85,6 +86,7 @@ class AssetRelationLifecycleIntegrationTest extends BaseIntegrationTest {
 
         JsonNode updateJson = objectMapper.readTree(mockMvc.perform(put(
                                 "/api/v1/assets/{id}/relations/{relationId}", sourceId, relationId)
+                        .param("project", "ground-control")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of(
                                 "description", "Refined dependency",

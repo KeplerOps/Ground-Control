@@ -2,6 +2,7 @@ package com.keplerops.groundcontrol.domain.requirements.state;
 
 public enum ArtifactType {
     GITHUB_ISSUE,
+    PULL_REQUEST,
     CODE_FILE,
     ADR,
     CONFIG,
@@ -10,5 +11,6 @@ public enum ArtifactType {
     SPEC,
     PROOF,
     DOCUMENTATION,
-    RISK_SCENARIO
+    RISK_SCENARIO,
+    CONTROL
 }

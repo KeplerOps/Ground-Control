@@ -49,7 +49,7 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
 
         graphClient.materializeGraph();
 
-        var ancestors = graphClient.getAncestors("AGE-C", 10);
+        var ancestors = graphClient.getAncestors(testProject.getId(), "AGE-C", 10);
         assertThat(ancestors).contains("AGE-P", "AGE-GP");
     }
 
@@ -62,7 +62,7 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
 
         graphClient.materializeGraph();
 
-        var descendants = graphClient.getDescendants("AGE-ROOT", 10);
+        var descendants = graphClient.getDescendants(testProject.getId(), "AGE-ROOT", 10);
         assertThat(descendants).contains("AGE-LEAF");
     }
 
@@ -77,7 +77,7 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
 
         graphClient.materializeGraph();
 
-        var paths = graphClient.findPaths("AGE-A", "AGE-C2");
+        var paths = graphClient.findPaths(testProject.getId(), "AGE-A", "AGE-C2");
         assertThat(paths).isNotEmpty();
         var firstPath = paths.get(0);
         assertThat(firstPath.nodeUids()).containsExactly("AGE-A", "AGE-B", "AGE-C2");

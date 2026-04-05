@@ -46,9 +46,7 @@ public class RiskScenarioController {
                 request.affectedObject(),
                 request.vulnerability(),
                 request.consequence(),
-                request.timeHorizon(),
-                request.observationRefs(),
-                request.topologyContext());
+                request.timeHorizon());
         return RiskScenarioResponse.from(riskScenarioService.create(command));
     }
 
@@ -61,8 +59,9 @@ public class RiskScenarioController {
     }
 
     @GetMapping("/{id}")
-    public RiskScenarioResponse getById(@PathVariable UUID id) {
-        return RiskScenarioResponse.from(riskScenarioService.getById(id));
+    public RiskScenarioResponse getById(@PathVariable UUID id, @RequestParam(required = false) String project) {
+        var projectId = projectService.requireProjectId(project);
+        return RiskScenarioResponse.from(riskScenarioService.getById(projectId, id));
     }
 
     @GetMapping("/uid/{uid}")
@@ -72,7 +71,11 @@ public class RiskScenarioController {
     }
 
     @PutMapping("/{id}")
-    public RiskScenarioResponse update(@PathVariable UUID id, @Valid @RequestBody UpdateRiskScenarioRequest request) {
+    public RiskScenarioResponse update(
+            @PathVariable UUID id,
+            @Valid @RequestBody UpdateRiskScenarioRequest request,
+            @RequestParam(required = false) String project) {
+        var projectId = projectService.requireProjectId(project);
         var command = new UpdateRiskScenarioCommand(
                 request.title(),
                 request.threatSource(),
@@ -80,27 +83,31 @@ public class RiskScenarioController {
                 request.affectedObject(),
                 request.vulnerability(),
                 request.consequence(),
-                request.timeHorizon(),
-                request.observationRefs(),
-                request.topologyContext());
-        return RiskScenarioResponse.from(riskScenarioService.update(id, command));
+                request.timeHorizon());
+        return RiskScenarioResponse.from(riskScenarioService.update(projectId, id, command));
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable UUID id) {
-        riskScenarioService.delete(id);
+    public void delete(@PathVariable UUID id, @RequestParam(required = false) String project) {
+        var projectId = projectService.requireProjectId(project);
+        riskScenarioService.delete(projectId, id);
     }
 
     @PutMapping("/{id}/status")
     public RiskScenarioResponse transitionStatus(
-            @PathVariable UUID id, @Valid @RequestBody RiskScenarioStatusTransitionRequest request) {
-        return RiskScenarioResponse.from(riskScenarioService.transitionStatus(id, request.status()));
+            @PathVariable UUID id,
+            @Valid @RequestBody RiskScenarioStatusTransitionRequest request,
+            @RequestParam(required = false) String project) {
+        var projectId = projectService.requireProjectId(project);
+        return RiskScenarioResponse.from(riskScenarioService.transitionStatus(projectId, id, request.status()));
     }
 
     @GetMapping("/{id}/requirements")
-    public List<RequirementResponse> getLinkedRequirements(@PathVariable UUID id) {
-        return riskScenarioService.findLinkedRequirements(id).stream()
+    public List<RequirementResponse> getLinkedRequirements(
+            @PathVariable UUID id, @RequestParam(required = false) String project) {
+        var projectId = projectService.requireProjectId(project);
+        return riskScenarioService.findLinkedRequirements(projectId, id).stream()
                 .map(RequirementResponse::from)
                 .toList();
     }

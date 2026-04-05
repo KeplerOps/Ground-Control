@@ -42,7 +42,18 @@ Assumes code is already committed and pushed. Handles: PR creation, CI monitorin
    - Re-run Phase 2.
 5. If clean, proceed.
 
-## Phase 4: Code Review
+## Phase 4: Codex Review
+
+1. Run `pwd` to capture the absolute repository root.
+2. Call the `gc_codex_review` MCP tool with:
+   - `repo_path`: absolute path from `pwd`
+   - `base_branch`: `dev`
+3. Fix ALL findings it identifies.
+   - Do NOT defer anything.
+   - Do NOT bucket or downplay "low-priority" issues.
+   - Keep going until the full review output has been addressed.
+
+## Phase 5: Code Review
 
 **CRITICAL: You MUST use the Skill tool to invoke the built-in review skill.**
 
@@ -58,7 +69,7 @@ Assumes code is already committed and pushed. Handles: PR creation, CI monitorin
      current feature scope.
 5. After fixing, re-read all findings and confirm each one was addressed.
 
-## Phase 5: Security Review
+## Phase 6: Security Review
 
 **CRITICAL: You MUST use the Skill tool to invoke the built-in security-review skill.**
 
@@ -67,16 +78,16 @@ Assumes code is already committed and pushed. Handles: PR creation, CI monitorin
    - Same rules as Phase 4: fix everything, defer nothing.
 3. After fixing, confirm all findings were addressed.
 
-## Phase 6: Final Commit & CI
+## Phase 7: Final Commit & CI
 
-If ANY fixes were made in Phases 4-5:
+If ANY fixes were made in Phases 4-6:
 1. `git add` all changed files.
 2. `git commit -m "Fix code review and security review findings"`
 3. `git push`
 4. Re-run Phase 2 (CI Monitor).
 5. Re-run Phase 3 (SonarCloud).
 
-## Phase 7: Report (DO NOT MERGE)
+## Phase 8: Report (DO NOT MERGE)
 
 **You MUST NOT merge the PR. You MUST NOT run `gh pr merge`. The user reviews and merges.**
 

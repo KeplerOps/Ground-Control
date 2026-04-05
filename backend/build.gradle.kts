@@ -13,7 +13,7 @@ plugins {
 }
 
 group = "com.keplerops"
-version = "0.20.1"
+version = "0.20.0"
 
 sonar {
     properties {

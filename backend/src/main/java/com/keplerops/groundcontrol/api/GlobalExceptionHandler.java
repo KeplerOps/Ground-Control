@@ -88,6 +88,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(BAD_REQUEST, message));
     }
 
+    @ExceptionHandler(jakarta.validation.ConstraintViolationException.class)
+    public ResponseEntity<ErrorResponse> handleConstraintViolation(jakarta.validation.ConstraintViolationException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of("validation_error", ex.getMessage()));
+    }
+
     @ExceptionHandler(GroundControlException.class)
     public ResponseEntity<ErrorResponse> handleGroundControl(GroundControlException ex) {
         log.error("Unhandled domain exception", ex);

@@ -1,0 +1,3 @@
+[allowlist]
+  description = "Global gitleaks allowlist for false positives"
+  regexes = ['''LEGACY_QUALITATIVE_V1''']

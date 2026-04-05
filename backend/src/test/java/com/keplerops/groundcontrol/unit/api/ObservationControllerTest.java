@@ -20,6 +20,7 @@ import com.keplerops.groundcontrol.domain.assets.model.OperationalAsset;
 import com.keplerops.groundcontrol.domain.assets.service.ObservationService;
 import com.keplerops.groundcontrol.domain.assets.state.ObservationCategory;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -38,6 +39,9 @@ class ObservationControllerTest {
 
     @MockitoBean
     private ObservationService observationService;
+
+    @MockitoBean
+    private ProjectService projectService;
 
     private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final UUID ASSET_ID = UUID.fromString("00000000-0000-0000-0000-000000000099");
@@ -69,10 +73,12 @@ class ObservationControllerTest {
 
     @Test
     void createReturns201() throws Exception {
-        when(observationService.create(eq(ASSET_ID), any())).thenReturn(makeObservation());
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(observationService.create(eq(PROJECT_ID), eq(ASSET_ID), any())).thenReturn(makeObservation());
 
         mockMvc.perform(
                         post("/api/v1/assets/{assetId}/observations", ASSET_ID)
+                                .param("project", "ground-control")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -116,9 +122,10 @@ class ObservationControllerTest {
 
     @Test
     void listReturnsObservations() throws Exception {
-        when(observationService.listByAsset(ASSET_ID, null, null)).thenReturn(List.of(makeObservation()));
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(observationService.listByAsset(PROJECT_ID, ASSET_ID, null, null)).thenReturn(List.of(makeObservation()));
 
-        mockMvc.perform(get("/api/v1/assets/{assetId}/observations", ASSET_ID))
+        mockMvc.perform(get("/api/v1/assets/{assetId}/observations", ASSET_ID).param("project", "ground-control"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].observationKey", is("os_version")));
@@ -126,28 +133,37 @@ class ObservationControllerTest {
 
     @Test
     void listFiltersByCategory() throws Exception {
-        when(observationService.listByAsset(ASSET_ID, ObservationCategory.CONFIGURATION, null))
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(observationService.listByAsset(PROJECT_ID, ASSET_ID, ObservationCategory.CONFIGURATION, null))
                 .thenReturn(List.of(makeObservation()));
 
-        mockMvc.perform(get("/api/v1/assets/{assetId}/observations", ASSET_ID).param("category", "CONFIGURATION"))
+        mockMvc.perform(get("/api/v1/assets/{assetId}/observations", ASSET_ID)
+                        .param("project", "ground-control")
+                        .param("category", "CONFIGURATION"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)));
     }
 
     @Test
     void listFiltersByKey() throws Exception {
-        when(observationService.listByAsset(ASSET_ID, null, "os_version")).thenReturn(List.of(makeObservation()));
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(observationService.listByAsset(PROJECT_ID, ASSET_ID, null, "os_version"))
+                .thenReturn(List.of(makeObservation()));
 
-        mockMvc.perform(get("/api/v1/assets/{assetId}/observations", ASSET_ID).param("key", "os_version"))
+        mockMvc.perform(get("/api/v1/assets/{assetId}/observations", ASSET_ID)
+                        .param("project", "ground-control")
+                        .param("key", "os_version"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)));
     }
 
     @Test
     void getByIdReturnsObservation() throws Exception {
-        when(observationService.getById(ASSET_ID, OBS_ID)).thenReturn(makeObservation());
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(observationService.getById(PROJECT_ID, ASSET_ID, OBS_ID)).thenReturn(makeObservation());
 
-        mockMvc.perform(get("/api/v1/assets/{assetId}/observations/{observationId}", ASSET_ID, OBS_ID))
+        mockMvc.perform(get("/api/v1/assets/{assetId}/observations/{observationId}", ASSET_ID, OBS_ID)
+                        .param("project", "ground-control"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id", is(OBS_ID.toString())))
                 .andExpect(jsonPath("$.assetId", is(ASSET_ID.toString())))
@@ -158,10 +174,13 @@ class ObservationControllerTest {
     void updateReturnsUpdatedObservation() throws Exception {
         var updated = makeObservation();
         updated.setObservationValue("Ubuntu 24.04");
-        when(observationService.update(eq(ASSET_ID), eq(OBS_ID), any())).thenReturn(updated);
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(observationService.update(eq(PROJECT_ID), eq(ASSET_ID), eq(OBS_ID), any()))
+                .thenReturn(updated);
 
         mockMvc.perform(
                         put("/api/v1/assets/{assetId}/observations/{observationId}", ASSET_ID, OBS_ID)
+                                .param("project", "ground-control")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -175,17 +194,22 @@ class ObservationControllerTest {
 
     @Test
     void deleteReturns204() throws Exception {
-        mockMvc.perform(delete("/api/v1/assets/{assetId}/observations/{observationId}", ASSET_ID, OBS_ID))
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+
+        mockMvc.perform(delete("/api/v1/assets/{assetId}/observations/{observationId}", ASSET_ID, OBS_ID)
+                        .param("project", "ground-control"))
                 .andExpect(status().isNoContent());
 
-        verify(observationService).delete(ASSET_ID, OBS_ID);
+        verify(observationService).delete(PROJECT_ID, ASSET_ID, OBS_ID);
     }
 
     @Test
     void listLatestReturnsLatestObservations() throws Exception {
-        when(observationService.listLatest(ASSET_ID)).thenReturn(List.of(makeObservation()));
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(observationService.listLatest(PROJECT_ID, ASSET_ID)).thenReturn(List.of(makeObservation()));
 
-        mockMvc.perform(get("/api/v1/assets/{assetId}/observations/latest", ASSET_ID))
+        mockMvc.perform(get("/api/v1/assets/{assetId}/observations/latest", ASSET_ID)
+                        .param("project", "ground-control"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].observationKey", is("os_version")));

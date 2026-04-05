@@ -590,6 +590,7 @@ sheet per analysis category.
 | POST | `/admin/import/strictdoc` | multipart/form-data | 200 | Import .sdoc file |
 | POST | `/admin/import/reqif` | multipart/form-data | 200 | Import .reqif file |
 | POST | `/admin/sync/github?owner=X&repo=Y` | — | 200 | Sync GitHub issues |
+| POST | `/admin/sync/github/prs?owner=X&repo=Y` | — | 200 | Sync GitHub pull requests |
 
 StrictDoc import creates requirements, relations, traceability links, and preserves the
 document structure (document, sections, text blocks). The response includes all counters:

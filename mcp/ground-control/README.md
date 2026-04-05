@@ -1,8 +1,8 @@
 # Ground Control MCP Server
 
-MCP server wrapping the Ground Control REST API. Provides 30 tools for
-requirements management, traceability, graph analysis, embeddings, and
-semantic analysis.
+MCP server wrapping the Ground Control REST API plus a small set of
+Ground-Control-specific workflow tools, including Codex-backed architecture
+preflight and review helpers.
 
 ## Setup
 
@@ -30,6 +30,9 @@ make up && make dev
 ```
 
 `GC_BASE_URL` defaults to `http://localhost:8000` if not set.
+
+Codex-backed workflow tools additionally require the Codex CLI to be installed
+and available on `PATH`.
 
 ## Workflow
 
@@ -75,6 +78,9 @@ be related, linked, or analyzed.
 | `gc_import_reqif` | `file_path` (required), `project` (optional) | Import requirements from a .reqif file. Idempotent |
 | `gc_sync_github` | `owner` (required), `repo` (required) | Sync GitHub issues as traceability links |
 | `gc_create_github_issue` | `uid` (required), `repo`, `labels`, `extra_body` | Create GitHub issue from requirement and auto-link |
+| `gc_get_repo_ground_control_context` | `repo_path` (required) | Read and validate the repo's standardized Ground Control context from `AGENTS.md` |
+| `gc_codex_architecture_preflight` | `requirement_uid` (required), `repo_path` (required), `project`, `issue_number`, `repo` | Run Codex architecture preflight, update ADR/design guidance when needed, and return guardrails plus changed files |
+| `gc_codex_review` | `repo_path` (required), `base_branch`, `uncommitted` | Run Codex review with an exhaustive no-triage production-quality prompt |
 | `gc_embed_requirement` | `requirement_id` (required) | Generate embedding for a requirement's text |
 | `gc_get_embedding_status` | `requirement_id` (required) | Check embedding status (stale, model mismatch) |
 | `gc_embed_project` | `project` (optional), `force` (optional) | Batch-embed all requirements in a project |
@@ -151,3 +157,12 @@ Common codes: `NOT_FOUND` (404), `CONFLICT` (409), `VALIDATION_ERROR` (422).
 `gc_create_requirement` and `gc_get_requirement` use `uid` (human-readable,
 e.g. `REQ-001`). All other tools use `id` (UUID, returned in create/list
 responses).
+
+For cross-repo workflow automation, define repo-local Ground Control context in `AGENTS.md` using this convention:
+
+## Ground Control Context
+
+```yaml
+ground_control:
+  project: your-project-id
+```

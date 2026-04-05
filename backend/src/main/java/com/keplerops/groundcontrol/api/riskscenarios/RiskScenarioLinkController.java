@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.api.riskscenarios;
 
+import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.riskscenarios.service.RiskScenarioLinkService;
 import com.keplerops.groundcontrol.domain.riskscenarios.state.RiskScenarioLinkTargetType;
 import jakarta.validation.Valid;
@@ -21,18 +22,25 @@ import org.springframework.web.bind.annotation.RestController;
 public class RiskScenarioLinkController {
 
     private final RiskScenarioLinkService linkService;
+    private final ProjectService projectService;
 
-    public RiskScenarioLinkController(RiskScenarioLinkService linkService) {
+    public RiskScenarioLinkController(RiskScenarioLinkService linkService, ProjectService projectService) {
         this.linkService = linkService;
+        this.projectService = projectService;
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public RiskScenarioLinkResponse create(
-            @PathVariable UUID riskScenarioId, @Valid @RequestBody RiskScenarioLinkRequest request) {
+            @PathVariable UUID riskScenarioId,
+            @Valid @RequestBody RiskScenarioLinkRequest request,
+            @RequestParam(required = false) String project) {
+        var projectId = projectService.requireProjectId(project);
         return RiskScenarioLinkResponse.from(linkService.create(
+                projectId,
                 riskScenarioId,
                 request.targetType(),
+                request.targetEntityId(),
                 request.targetIdentifier(),
                 request.linkType(),
                 request.targetUrl(),
@@ -41,15 +49,22 @@ public class RiskScenarioLinkController {
 
     @GetMapping
     public List<RiskScenarioLinkResponse> list(
-            @PathVariable UUID riskScenarioId, @RequestParam(required = false) RiskScenarioLinkTargetType targetType) {
-        return linkService.listByScenario(riskScenarioId, targetType).stream()
+            @PathVariable UUID riskScenarioId,
+            @RequestParam(required = false) RiskScenarioLinkTargetType targetType,
+            @RequestParam(required = false) String project) {
+        var projectId = projectService.requireProjectId(project);
+        return linkService.listByScenario(projectId, riskScenarioId, targetType).stream()
                 .map(RiskScenarioLinkResponse::from)
                 .toList();
     }
 
     @DeleteMapping("/{linkId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable UUID riskScenarioId, @PathVariable UUID linkId) {
-        linkService.delete(riskScenarioId, linkId);
+    public void delete(
+            @PathVariable UUID riskScenarioId,
+            @PathVariable UUID linkId,
+            @RequestParam(required = false) String project) {
+        var projectId = projectService.requireProjectId(project);
+        linkService.delete(projectId, riskScenarioId, linkId);
     }
 }

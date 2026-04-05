@@ -23,8 +23,10 @@ import org.hibernate.envers.Audited;
 @Audited
 @Table(
         name = "risk_scenario_link",
-        uniqueConstraints =
-                @UniqueConstraint(columnNames = {"risk_scenario_id", "target_type", "target_identifier", "link_type"}))
+        uniqueConstraints = {
+            @UniqueConstraint(columnNames = {"risk_scenario_id", "target_type", "target_identifier", "link_type"}),
+            @UniqueConstraint(columnNames = {"risk_scenario_id", "target_type", "target_entity_id", "link_type"})
+        })
 public class RiskScenarioLink extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -35,7 +37,10 @@ public class RiskScenarioLink extends BaseEntity {
     @Column(name = "target_type", nullable = false, length = 20)
     private RiskScenarioLinkTargetType targetType;
 
-    @Column(name = "target_identifier", nullable = false, length = 500)
+    @Column(name = "target_entity_id")
+    private java.util.UUID targetEntityId;
+
+    @Column(name = "target_identifier", length = 500)
     private String targetIdentifier;
 
     @Enumerated(EnumType.STRING)
@@ -55,10 +60,12 @@ public class RiskScenarioLink extends BaseEntity {
     public RiskScenarioLink(
             RiskScenario riskScenario,
             RiskScenarioLinkTargetType targetType,
+            java.util.UUID targetEntityId,
             String targetIdentifier,
             RiskScenarioLinkType linkType) {
         this.riskScenario = riskScenario;
         this.targetType = targetType;
+        this.targetEntityId = targetEntityId;
         this.targetIdentifier = targetIdentifier;
         this.linkType = linkType;
     }
@@ -71,8 +78,16 @@ public class RiskScenarioLink extends BaseEntity {
         return targetType;
     }
 
+    public java.util.UUID getTargetEntityId() {
+        return targetEntityId;
+    }
+
     public String getTargetIdentifier() {
         return targetIdentifier;
+    }
+
+    public void setTargetIdentifier(String targetIdentifier) {
+        this.targetIdentifier = targetIdentifier;
     }
 
     public RiskScenarioLinkType getLinkType() {

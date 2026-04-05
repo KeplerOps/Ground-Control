@@ -57,12 +57,6 @@ public class RiskScenarioService {
         if (command.vulnerability() != null) {
             scenario.setVulnerability(command.vulnerability());
         }
-        if (command.observationRefs() != null) {
-            scenario.setObservationRefs(command.observationRefs());
-        }
-        if (command.topologyContext() != null) {
-            scenario.setTopologyContext(command.topologyContext());
-        }
 
         var saved = riskScenarioRepository.save(scenario);
         log.info(
@@ -74,8 +68,8 @@ public class RiskScenarioService {
         return saved;
     }
 
-    public RiskScenario update(UUID id, UpdateRiskScenarioCommand command) {
-        var scenario = findByIdOrThrow(id);
+    public RiskScenario update(UUID projectId, UUID id, UpdateRiskScenarioCommand command) {
+        var scenario = findByIdOrThrow(projectId, id);
 
         if (command.title() != null) {
             scenario.setTitle(command.title());
@@ -98,21 +92,31 @@ public class RiskScenarioService {
         if (command.timeHorizon() != null) {
             scenario.setTimeHorizon(command.timeHorizon());
         }
-        if (command.observationRefs() != null) {
-            scenario.setObservationRefs(command.observationRefs());
-        }
-        if (command.topologyContext() != null) {
-            scenario.setTopologyContext(command.topologyContext());
-        }
 
         var saved = riskScenarioRepository.save(scenario);
         log.info("risk_scenario_updated: id={} uid={}", saved.getId(), saved.getUid());
         return saved;
     }
 
+    @Deprecated(forRemoval = false)
+    public RiskScenario update(UUID id, UpdateRiskScenarioCommand command) {
+        var scenario = riskScenarioRepository
+                .findById(id)
+                .orElseThrow(() -> new NotFoundException("Risk scenario not found: " + id));
+        return update(scenario.getProject().getId(), id, command);
+    }
+
+    @Transactional(readOnly = true)
+    public RiskScenario getById(UUID projectId, UUID id) {
+        return findByIdOrThrow(projectId, id);
+    }
+
+    @Deprecated(forRemoval = false)
     @Transactional(readOnly = true)
     public RiskScenario getById(UUID id) {
-        return findByIdOrThrow(id);
+        return riskScenarioRepository
+                .findById(id)
+                .orElseThrow(() -> new NotFoundException("Risk scenario not found: " + id));
     }
 
     @Transactional(readOnly = true)
@@ -127,8 +131,8 @@ public class RiskScenarioService {
         return riskScenarioRepository.findByProjectIdOrderByCreatedAtDesc(projectId);
     }
 
-    public RiskScenario transitionStatus(UUID id, RiskScenarioStatus newStatus) {
-        var scenario = findByIdOrThrow(id);
+    public RiskScenario transitionStatus(UUID projectId, UUID id, RiskScenarioStatus newStatus) {
+        var scenario = findByIdOrThrow(projectId, id);
         scenario.transitionStatus(newStatus);
         var saved = riskScenarioRepository.save(scenario);
         log.info(
@@ -139,23 +143,42 @@ public class RiskScenarioService {
         return saved;
     }
 
-    public void delete(UUID id) {
-        var scenario = findByIdOrThrow(id);
+    @Deprecated(forRemoval = false)
+    public RiskScenario transitionStatus(UUID id, RiskScenarioStatus newStatus) {
+        var scenario = getById(id);
+        return transitionStatus(scenario.getProject().getId(), id, newStatus);
+    }
+
+    public void delete(UUID projectId, UUID id) {
+        var scenario = findByIdOrThrow(projectId, id);
         riskScenarioRepository.delete(scenario);
         log.info("risk_scenario_deleted: id={} uid={}", scenario.getId(), scenario.getUid());
     }
 
+    @Deprecated(forRemoval = false)
+    public void delete(UUID id) {
+        var scenario = getById(id);
+        delete(scenario.getProject().getId(), id);
+    }
+
     @Transactional(readOnly = true)
-    public List<Requirement> findLinkedRequirements(UUID id) {
-        var scenario = findByIdOrThrow(id);
+    public List<Requirement> findLinkedRequirements(UUID projectId, UUID id) {
+        var scenario = findByIdOrThrow(projectId, id);
         var links = traceabilityLinkRepository.findByArtifactTypeAndArtifactIdentifierWithRequirement(
                 ArtifactType.RISK_SCENARIO, scenario.getUid());
         return links.stream().map(link -> link.getRequirement()).toList();
     }
 
-    private RiskScenario findByIdOrThrow(UUID id) {
+    @Deprecated(forRemoval = false)
+    @Transactional(readOnly = true)
+    public List<Requirement> findLinkedRequirements(UUID id) {
+        var scenario = getById(id);
+        return findLinkedRequirements(scenario.getProject().getId(), id);
+    }
+
+    private RiskScenario findByIdOrThrow(UUID projectId, UUID id) {
         return riskScenarioRepository
-                .findById(id)
+                .findByIdAndProjectId(id, projectId)
                 .orElseThrow(() -> new NotFoundException("Risk scenario not found: " + id));
     }
 }

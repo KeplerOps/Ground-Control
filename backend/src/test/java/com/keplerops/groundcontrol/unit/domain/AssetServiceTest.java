@@ -30,6 +30,7 @@ import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.graph.service.GraphTargetResolverService;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import java.time.Instant;
@@ -61,6 +62,9 @@ class AssetServiceTest {
 
     @Mock
     private ProjectRepository projectRepository;
+
+    @Mock
+    private GraphTargetResolverService graphTargetResolverService;
 
     @InjectMocks
     private AssetService assetService;
@@ -384,7 +388,7 @@ class AssetServiceTest {
     class Links {
 
         private AssetLink makeLink(OperationalAsset asset) {
-            var link = new AssetLink(asset, AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS);
+            var link = new AssetLink(asset, AssetLinkTargetType.REQUIREMENT, null, "GC-M010", AssetLinkType.IMPLEMENTS);
             setField(link, "id", UUID.randomUUID());
             setField(link, "createdAt", Instant.now());
             setField(link, "updatedAt", Instant.now());
@@ -398,6 +402,9 @@ class AssetServiceTest {
             when(linkRepository.existsByAssetIdAndTargetTypeAndTargetIdentifierAndLinkType(
                             asset.getId(), AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS))
                     .thenReturn(false);
+            when(graphTargetResolverService.validateAssetTarget(
+                            projectId, AssetLinkTargetType.REQUIREMENT, null, "GC-M010"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(null, "GC-M010", false));
             when(linkRepository.save(any())).thenAnswer(inv -> {
                 var saved = inv.getArgument(0, AssetLink.class);
                 setField(saved, "id", UUID.randomUUID());
@@ -405,7 +412,7 @@ class AssetServiceTest {
             });
 
             var command = new CreateAssetLinkCommand(
-                    AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
+                    AssetLinkTargetType.REQUIREMENT, null, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
             var result = assetService.createLink(asset.getId(), command);
 
             assertThat(result.getTargetType()).isEqualTo(AssetLinkTargetType.REQUIREMENT);
@@ -420,6 +427,9 @@ class AssetServiceTest {
             when(linkRepository.existsByAssetIdAndTargetTypeAndTargetIdentifierAndLinkType(
                             asset.getId(), AssetLinkTargetType.EXTERNAL, "jira-123", AssetLinkType.DEPENDS_ON))
                     .thenReturn(false);
+            when(graphTargetResolverService.validateAssetTarget(
+                            projectId, AssetLinkTargetType.EXTERNAL, null, "jira-123"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(null, "jira-123", false));
             when(linkRepository.save(any())).thenAnswer(inv -> {
                 var saved = inv.getArgument(0, AssetLink.class);
                 setField(saved, "id", UUID.randomUUID());
@@ -428,6 +438,7 @@ class AssetServiceTest {
 
             var command = new CreateAssetLinkCommand(
                     AssetLinkTargetType.EXTERNAL,
+                    null,
                     "jira-123",
                     AssetLinkType.DEPENDS_ON,
                     "https://jira.example.com/123",
@@ -445,9 +456,12 @@ class AssetServiceTest {
             when(linkRepository.existsByAssetIdAndTargetTypeAndTargetIdentifierAndLinkType(
                             asset.getId(), AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS))
                     .thenReturn(true);
+            when(graphTargetResolverService.validateAssetTarget(
+                            projectId, AssetLinkTargetType.REQUIREMENT, null, "GC-M010"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(null, "GC-M010", false));
 
             var command = new CreateAssetLinkCommand(
-                    AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
+                    AssetLinkTargetType.REQUIREMENT, null, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
 
             assertThatThrownBy(() -> assetService.createLink(asset.getId(), command))
                     .isInstanceOf(ConflictException.class);
@@ -459,7 +473,7 @@ class AssetServiceTest {
             when(assetRepository.findById(id)).thenReturn(Optional.empty());
 
             var command = new CreateAssetLinkCommand(
-                    AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
+                    AssetLinkTargetType.REQUIREMENT, null, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
 
             assertThatThrownBy(() -> assetService.createLink(id, command)).isInstanceOf(NotFoundException.class);
         }
@@ -505,7 +519,7 @@ class AssetServiceTest {
                             AssetLinkTargetType.REQUIREMENT, "GC-M010", projectId))
                     .thenReturn(List.of(makeLink(asset)));
 
-            var result = assetService.getLinksByTarget(projectId, AssetLinkTargetType.REQUIREMENT, "GC-M010");
+            var result = assetService.getLinksByTarget(projectId, AssetLinkTargetType.REQUIREMENT, null, "GC-M010");
 
             assertThat(result).hasSize(1);
         }

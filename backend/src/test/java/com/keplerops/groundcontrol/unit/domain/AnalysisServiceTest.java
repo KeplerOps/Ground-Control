@@ -840,6 +840,7 @@ class AnalysisServiceTest {
             var a = makeRequirement("REQ-A", aId, 1);
             var b = makeRequirement("REQ-B", bId, 2);
             var rel = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
+            setField(rel, "id", UUID.randomUUID());
 
             when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
                     .thenReturn(List.of(a, b));
@@ -848,8 +849,8 @@ class AnalysisServiceTest {
 
             var result = service.getGraphVisualization(PROJECT_ID);
 
-            assertThat(result.requirements()).containsExactly(a, b);
-            assertThat(result.relations()).containsExactly(rel);
+            assertThat(result.nodes()).extracting(node -> node.uid()).containsExactly("REQ-A", "REQ-B");
+            assertThat(result.edges()).extracting(edge -> edge.edgeType()).containsExactly("DEPENDS_ON");
         }
 
         @Test
@@ -861,8 +862,8 @@ class AnalysisServiceTest {
 
             var result = service.getGraphVisualization(PROJECT_ID);
 
-            assertThat(result.requirements()).isEmpty();
-            assertThat(result.relations()).isEmpty();
+            assertThat(result.nodes()).isEmpty();
+            assertThat(result.edges()).isEmpty();
         }
     }
 
@@ -881,6 +882,8 @@ class AnalysisServiceTest {
             var d = makeRequirement("REQ-D", dId, 2);
             var relAB = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
             var relBC = new RequirementRelation(b, c, RelationType.PARENT);
+            setField(relAB, "id", UUID.randomUUID());
+            setField(relBC, "id", UUID.randomUUID());
             // D is disconnected from A->B->C
 
             when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
@@ -890,8 +893,12 @@ class AnalysisServiceTest {
 
             var result = service.extractSubgraph(PROJECT_ID, List.of("REQ-A"));
 
-            assertThat(result.requirements()).containsExactlyInAnyOrder(a, b, c);
-            assertThat(result.relations()).containsExactlyInAnyOrder(relAB, relBC);
+            assertThat(result.nodes())
+                    .extracting(node -> node.uid())
+                    .containsExactlyInAnyOrder("REQ-A", "REQ-B", "REQ-C");
+            assertThat(result.edges())
+                    .extracting(edge -> edge.edgeType())
+                    .containsExactlyInAnyOrder("DEPENDS_ON", "PARENT");
         }
 
         @Test
@@ -904,6 +911,7 @@ class AnalysisServiceTest {
             var c = makeRequirement("REQ-C", cId, 1);
             // A->B and C is separate
             var relAB = new RequirementRelation(a, b, RelationType.DEPENDS_ON);
+            setField(relAB, "id", UUID.randomUUID());
 
             when(requirementRepository.findByProjectIdAndArchivedAtIsNull(PROJECT_ID))
                     .thenReturn(List.of(a, b, c));
@@ -912,8 +920,10 @@ class AnalysisServiceTest {
 
             var result = service.extractSubgraph(PROJECT_ID, List.of("REQ-A", "REQ-C"));
 
-            assertThat(result.requirements()).containsExactlyInAnyOrder(a, b, c);
-            assertThat(result.relations()).containsExactlyInAnyOrder(relAB);
+            assertThat(result.nodes())
+                    .extracting(node -> node.uid())
+                    .containsExactlyInAnyOrder("REQ-A", "REQ-B", "REQ-C");
+            assertThat(result.edges()).extracting(edge -> edge.edgeType()).containsExactlyInAnyOrder("DEPENDS_ON");
         }
 
         @Test

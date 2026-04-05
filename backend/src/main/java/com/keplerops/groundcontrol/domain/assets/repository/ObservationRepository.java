@@ -7,14 +7,22 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface ObservationRepository extends JpaRepository<Observation, UUID> {
 
     @Query("SELECT o FROM Observation o JOIN FETCH o.asset WHERE o.id = :id")
     Optional<Observation> findByIdWithAsset(UUID id);
 
+    @Query("SELECT o FROM Observation o JOIN FETCH o.asset" + " WHERE o.id = :id AND o.asset.project.id = :projectId")
+    Optional<Observation> findByIdWithAssetAndProjectId(UUID id, UUID projectId);
+
     @Query("SELECT o FROM Observation o JOIN FETCH o.asset WHERE o.asset.id = :assetId ORDER BY o.observedAt DESC")
     List<Observation> findByAssetId(UUID assetId);
+
+    @Query("SELECT o FROM Observation o JOIN FETCH o.asset"
+            + " WHERE o.asset.project.id = :projectId ORDER BY o.observedAt DESC")
+    List<Observation> findByProjectId(@Param("projectId") UUID projectId);
 
     @Query(
             "SELECT o FROM Observation o JOIN FETCH o.asset WHERE o.asset.id = :assetId AND o.category = :category ORDER BY o.observedAt DESC")
@@ -38,4 +46,7 @@ public interface ObservationRepository extends JpaRepository<Observation, UUID> 
             + "AND (o2.expiresAt IS NULL OR o2.expiresAt > :now)) "
             + "ORDER BY o.category, o.observationKey")
     List<Observation> findLatestByAssetId(UUID assetId, java.time.Instant now);
+
+    @Query("SELECT o FROM Observation o JOIN FETCH o.asset" + " WHERE o.id IN :ids AND o.asset.project.id = :projectId")
+    List<Observation> findAllByIdInAndProjectId(@Param("ids") List<UUID> ids, @Param("projectId") UUID projectId);
 }
