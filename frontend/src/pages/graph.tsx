@@ -1,7 +1,4 @@
-import { GraphControls } from "@/components/graph/graph-controls";
-import { GraphFilters } from "@/components/graph/graph-filters";
 import { GraphLegend } from "@/components/graph/graph-legend";
-import { GraphStats } from "@/components/graph/graph-stats";
 import { useProjectContext } from "@/contexts/project-context";
 import { apiFetch } from "@/lib/api-client";
 import {
@@ -15,7 +12,6 @@ import {
   getNodeColor,
   getSeries,
 } from "@/lib/graph-constants";
-import { cn } from "@/lib/utils";
 import type {
   GraphEdgeResponse,
   GraphNeighborhoodResponse,
@@ -23,7 +19,7 @@ import type {
   GraphVisualizationResponse,
 } from "@/types/api";
 import type cytoscape from "cytoscape";
-import { Loader2 } from "lucide-react";
+import { Filter, Loader2, Maximize, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type GraphNodeData = GraphVisualizationNodeResponse;

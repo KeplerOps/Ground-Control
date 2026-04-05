@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TreatmentPlanResponse, RiskRegisterRecordResponse, and project-aware
   service methods in AssetService, ObservationService, and
   RiskScenarioLinkService
+- Frontend build: fix TypeScript errors in graph.tsx — remove unused
+  imports (GraphControls, GraphFilters, GraphStats, cn) and add missing
+  lucide-react icon imports (Filter, Maximize, RotateCcw, X)
 
 ## [0.102.0] - 2026-04-05
 
