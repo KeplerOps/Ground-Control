@@ -26,4 +26,11 @@ public class SyncController {
             @RequestParam @NotBlank @Pattern(regexp = "^[a-zA-Z0-9][a-zA-Z0-9._-]*$") String repo) {
         return SyncResultResponse.from(syncService.syncGitHubIssues(owner, repo));
     }
+
+    @PostMapping("/github/prs")
+    public PrSyncResultResponse syncGithubPrs(
+            @RequestParam @NotBlank @Pattern(regexp = "^[a-zA-Z0-9][a-zA-Z0-9._-]*$") String owner,
+            @RequestParam @NotBlank @Pattern(regexp = "^[a-zA-Z0-9][a-zA-Z0-9._-]*$") String repo) {
+        return PrSyncResultResponse.from(syncService.syncGitHubPullRequests(owner, repo));
+    }
 }

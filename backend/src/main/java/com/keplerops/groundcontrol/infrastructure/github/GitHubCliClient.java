@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.keplerops.groundcontrol.domain.exception.GroundControlException;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubClient;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
+import com.keplerops.groundcontrol.domain.requirements.service.GitHubPullRequestData;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -214,6 +215,100 @@ public class GitHubCliClient implements GitHubClient {
 
         log.info("github_issue_created: number={} repo={}", number, repo);
         return new GitHubIssueData(number, title, "OPEN", url, body, labels != null ? labels : List.of());
+    }
+
+    // -----------------------------------------------------------------------
+    // Pull request fetching
+    // -----------------------------------------------------------------------
+
+    public record PrPage(List<GitHubPullRequestData> prs, int rawCount) {
+        public PrPage {
+            prs = List.copyOf(prs);
+        }
+    }
+
+    @Override
+    public List<GitHubPullRequestData> fetchAllPullRequests(String owner, String repo) {
+        validateOwnerRepo(owner, repo);
+        List<GitHubPullRequestData> allPrs = new ArrayList<>();
+        int page = 1;
+
+        while (true) {
+            PrPage batch = fetchPrPage(owner, repo, page);
+            allPrs.addAll(batch.prs());
+
+            if (batch.rawCount() < PAGE_SIZE) {
+                break;
+            }
+
+            log.info(
+                    "github_prs_page_full: page={} raw={} prs={} repo={}/{}, fetching next page",
+                    page,
+                    batch.rawCount(),
+                    batch.prs().size(),
+                    owner,
+                    repo);
+            page++;
+        }
+
+        log.info("github_prs_fetched: count={} pages={} repo={}/{}", allPrs.size(), page, owner, repo);
+        return allPrs;
+    }
+
+    protected PrPage fetchPrPage(String owner, String repo, int page) {
+        String stdout = execGh(List.of(
+                ghPath,
+                "api",
+                String.format("repos/%s/%s/pulls", owner, repo),
+                "--method",
+                "GET",
+                "-f",
+                "state=all",
+                "-f",
+                "per_page=" + PAGE_SIZE,
+                "-f",
+                "page=" + page));
+
+        try {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> rawPrs =
+                    objectMapper.readValue(stdout, new TypeReference<List<Map<String, Object>>>() {});
+            return new PrPage(parsePullRequests(rawPrs), rawPrs.size());
+        } catch (IOException e) {
+            throw new GroundControlException(
+                    "Failed to parse gh CLI PR output: " + e.getMessage(), "github_parse_error");
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public static List<GitHubPullRequestData> parsePullRequests(List<Map<String, Object>> rawPrs) {
+        List<GitHubPullRequestData> result = new ArrayList<>();
+        for (Map<String, Object> raw : rawPrs) {
+            int number = ((Number) raw.get("number")).intValue();
+            String title = (String) raw.get("title");
+            String apiState = (String) raw.get("state");
+            String state = apiState.equalsIgnoreCase("open") ? "OPEN" : "CLOSED";
+            boolean merged = Boolean.TRUE.equals(raw.get("merged"));
+            String url = (String) raw.get("html_url");
+            String body = raw.get("body") != null ? (String) raw.get("body") : "";
+
+            Map<String, Object> baseObj = (Map<String, Object>) raw.get("base");
+            String baseBranch = baseObj != null ? (String) baseObj.get("ref") : "";
+            Map<String, Object> headObj = (Map<String, Object>) raw.get("head");
+            String headBranch = headObj != null ? (String) headObj.get("ref") : "";
+
+            List<Map<String, Object>> labelObjects =
+                    raw.get("labels") != null ? (List<Map<String, Object>>) raw.get("labels") : List.of();
+
+            List<String> labels = new ArrayList<>();
+            for (Map<String, Object> labelObj : labelObjects) {
+                labels.add((String) labelObj.get("name"));
+            }
+
+            result.add(
+                    new GitHubPullRequestData(number, title, state, merged, url, body, baseBranch, headBranch, labels));
+        }
+        return result;
     }
 
     /**

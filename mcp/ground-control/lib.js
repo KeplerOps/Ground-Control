@@ -15,6 +15,7 @@ export const PRIORITIES = ["MUST", "SHOULD", "COULD", "WONT"];
 export const RELATION_TYPES = ["PARENT", "DEPENDS_ON", "CONFLICTS_WITH", "REFINES", "SUPERSEDES", "RELATED"];
 export const ARTIFACT_TYPES = [
   "GITHUB_ISSUE",
+  "PULL_REQUEST",
   "CODE_FILE",
   "ADR",
   "CONFIG",
@@ -511,6 +512,12 @@ export async function importReqif(filePath, project) {
 
 export async function syncGithub(owner, repo) {
   return request("POST", "/api/v1/admin/sync/github", {
+    params: { owner, repo },
+  });
+}
+
+export async function syncGithubPrs(owner, repo) {
+  return request("POST", "/api/v1/admin/sync/github/prs", {
     params: { owner, repo },
   });
 }

@@ -30,6 +30,7 @@ import {
   importStrictdoc,
   importReqif,
   syncGithub,
+  syncGithubPrs,
   getRequirementHistory,
   getRelationHistory,
   getTraceabilityLinkHistory,
@@ -1253,6 +1254,22 @@ server.tool(
   async ({ owner, repo }) => {
     try {
       return ok(JSON.stringify(await syncGithub(owner, repo), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_sync_github_prs",
+  "Sync GitHub pull requests for a repository. Updates traceability links with PR state (open, closed, merged).",
+  {
+    owner: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/).describe("GitHub repository owner"),
+    repo: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/).describe("GitHub repository name"),
+  },
+  async ({ owner, repo }) => {
+    try {
+      return ok(JSON.stringify(await syncGithubPrs(owner, repo), null, 2));
     } catch (e) {
       return err(e);
     }

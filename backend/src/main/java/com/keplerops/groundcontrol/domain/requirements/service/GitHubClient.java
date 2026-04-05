@@ -6,5 +6,7 @@ public interface GitHubClient {
 
     List<GitHubIssueData> fetchAllIssues(String owner, String repo);
 
+    List<GitHubPullRequestData> fetchAllPullRequests(String owner, String repo);
+
     GitHubIssueData createIssue(String repo, String title, String body, List<String> labels);
 }
