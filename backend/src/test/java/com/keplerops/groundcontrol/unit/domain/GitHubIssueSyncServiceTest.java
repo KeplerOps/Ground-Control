@@ -463,7 +463,7 @@ class GitHubIssueSyncServiceTest {
                     List.of());
 
             when(gitHubClient.fetchAllPullRequests("owner", "repo")).thenReturn(List.of(pr));
-            when(prSyncRepository.findByPrNumber(10)).thenReturn(Optional.empty());
+            when(prSyncRepository.findByRepoAndPrNumber("owner/repo", 10)).thenReturn(Optional.empty());
             when(prSyncRepository.save(any(GitHubPullRequestSync.class))).thenAnswer(inv -> inv.getArgument(0));
             when(traceabilityLinkRepository.findByArtifactType(ArtifactType.PULL_REQUEST))
                     .thenReturn(List.of());
@@ -489,10 +489,10 @@ class GitHubIssueSyncServiceTest {
                     "feat/x",
                     List.of());
             var existing = new GitHubPullRequestSync(
-                    10, "Old PR", PullRequestState.OPEN, "https://github.com/o/r/pull/10", Instant.now());
+                    "owner/repo", 10, "Old PR", PullRequestState.OPEN, "https://github.com/o/r/pull/10", Instant.now());
 
             when(gitHubClient.fetchAllPullRequests("owner", "repo")).thenReturn(List.of(pr));
-            when(prSyncRepository.findByPrNumber(10)).thenReturn(Optional.of(existing));
+            when(prSyncRepository.findByRepoAndPrNumber("owner/repo", 10)).thenReturn(Optional.of(existing));
             when(prSyncRepository.save(any(GitHubPullRequestSync.class))).thenAnswer(inv -> inv.getArgument(0));
             when(traceabilityLinkRepository.findByArtifactType(ArtifactType.PULL_REQUEST))
                     .thenReturn(List.of());
@@ -509,9 +509,14 @@ class GitHubIssueSyncServiceTest {
         @Test
         void updatesPrTraceabilityLinks() {
             var sync = new GitHubPullRequestSync(
-                    10, "Ship feature", PullRequestState.MERGED, "https://github.com/o/r/pull/10", Instant.now());
+                    "owner/repo",
+                    10,
+                    "Ship feature",
+                    PullRequestState.MERGED,
+                    "https://github.com/o/r/pull/10",
+                    Instant.now());
             setField(sync, "id", UUID.randomUUID());
-            when(prSyncRepository.findByPrNumber(10)).thenReturn(Optional.of(sync));
+            when(prSyncRepository.findByRepoAndPrNumber("owner/repo", 10)).thenReturn(Optional.of(sync));
 
             var requirement = new Requirement(TEST_PROJECT, "GC-A001", "Test", "statement");
             setField(requirement, "id", UUID.randomUUID());
@@ -540,7 +545,7 @@ class GitHubIssueSyncServiceTest {
                     1, "Merged PR", "CLOSED", true, "https://github.com/o/r/pull/1", "", "main", "feat", List.of());
 
             when(gitHubClient.fetchAllPullRequests("owner", "repo")).thenReturn(List.of(pr));
-            when(prSyncRepository.findByPrNumber(1)).thenReturn(Optional.empty());
+            when(prSyncRepository.findByRepoAndPrNumber("owner/repo", 1)).thenReturn(Optional.empty());
             when(prSyncRepository.save(any(GitHubPullRequestSync.class))).thenAnswer(inv -> inv.getArgument(0));
             when(traceabilityLinkRepository.findByArtifactType(ArtifactType.PULL_REQUEST))
                     .thenReturn(List.of());
@@ -559,7 +564,7 @@ class GitHubIssueSyncServiceTest {
                     2, "Closed PR", "CLOSED", false, "https://github.com/o/r/pull/2", "", "main", "feat", List.of());
 
             when(gitHubClient.fetchAllPullRequests("owner", "repo")).thenReturn(List.of(pr));
-            when(prSyncRepository.findByPrNumber(2)).thenReturn(Optional.empty());
+            when(prSyncRepository.findByRepoAndPrNumber("owner/repo", 2)).thenReturn(Optional.empty());
             when(prSyncRepository.save(any(GitHubPullRequestSync.class))).thenAnswer(inv -> inv.getArgument(0));
             when(traceabilityLinkRepository.findByArtifactType(ArtifactType.PULL_REQUEST))
                     .thenReturn(List.of());
@@ -586,7 +591,7 @@ class GitHubIssueSyncServiceTest {
                     List.of());
 
             when(gitHubClient.fetchAllPullRequests("owner", "repo")).thenReturn(List.of(pr));
-            when(prSyncRepository.findByPrNumber(3)).thenReturn(Optional.empty());
+            when(prSyncRepository.findByRepoAndPrNumber("owner/repo", 3)).thenReturn(Optional.empty());
             when(prSyncRepository.save(any(GitHubPullRequestSync.class))).thenAnswer(inv -> inv.getArgument(0));
             when(traceabilityLinkRepository.findByArtifactType(ArtifactType.PULL_REQUEST))
                     .thenReturn(List.of());

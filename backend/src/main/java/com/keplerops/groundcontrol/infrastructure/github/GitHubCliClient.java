@@ -288,7 +288,7 @@ public class GitHubCliClient implements GitHubClient {
             String title = (String) raw.get("title");
             String apiState = (String) raw.get("state");
             String state = apiState.equalsIgnoreCase("open") ? "OPEN" : "CLOSED";
-            boolean merged = Boolean.TRUE.equals(raw.get("merged"));
+            boolean merged = raw.get("merged_at") != null;
             String url = (String) raw.get("html_url");
             String body = raw.get("body") != null ? (String) raw.get("body") : "";
 

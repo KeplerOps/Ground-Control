@@ -116,7 +116,9 @@ class GitHubCliClientPrTest {
             raw.put("number", number);
             raw.put("title", title);
             raw.put("state", state);
-            raw.put("merged", merged);
+            if (merged) {
+                raw.put("merged_at", "2026-04-05T12:00:00Z");
+            }
             raw.put("html_url", "https://github.com/org/repo/pull/" + number);
             raw.put("body", "PR body for " + title);
             raw.put("labels", List.of());

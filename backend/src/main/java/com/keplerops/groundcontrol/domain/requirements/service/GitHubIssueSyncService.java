@@ -191,11 +191,12 @@ public class GitHubIssueSyncService {
         Instant fetchedAt = Instant.now();
         List<SyncError> errors = new ArrayList<>();
 
-        int[] prCounts = upsertPrSyncRecords(fetched, fetchedAt, errors);
+        String repoSlug = owner + "/" + repo;
+        int[] prCounts = upsertPrSyncRecords(repoSlug, fetched, fetchedAt, errors);
         int prsCreated = prCounts[0];
         int prsUpdated = prCounts[1];
 
-        int linksUpdated = updatePrTraceabilityLinks(fetchedAt, errors);
+        int linksUpdated = updatePrTraceabilityLinks(repoSlug, fetchedAt, errors);
 
         var audit = new RequirementImport(ImportSourceType.GITHUB);
         audit.setSourceFile(owner + "/" + repo + " (pull requests)");
@@ -217,18 +218,19 @@ public class GitHubIssueSyncService {
                 errors);
     }
 
-    private int[] upsertPrSyncRecords(List<GitHubPullRequestData> fetched, Instant fetchedAt, List<SyncError> errors) {
+    private int[] upsertPrSyncRecords(
+            String repoSlug, List<GitHubPullRequestData> fetched, Instant fetchedAt, List<SyncError> errors) {
         int prsCreated = 0;
         int prsUpdated = 0;
 
         for (GitHubPullRequestData pr : fetched) {
             try {
-                var existing = prSyncRepository.findByPrNumber(pr.number());
+                var existing = prSyncRepository.findByRepoAndPrNumber(repoSlug, pr.number());
                 if (existing.isPresent()) {
                     updateExistingPrSync(existing.get(), pr, fetchedAt);
                     prsUpdated++;
                 } else {
-                    createNewPrSync(pr, fetchedAt);
+                    createNewPrSync(repoSlug, pr, fetchedAt);
                     prsCreated++;
                 }
             } catch (RuntimeException e) {
@@ -250,9 +252,9 @@ public class GitHubIssueSyncService {
         prSyncRepository.save(sync);
     }
 
-    private void createNewPrSync(GitHubPullRequestData pr, Instant fetchedAt) {
+    private void createNewPrSync(String repoSlug, GitHubPullRequestData pr, Instant fetchedAt) {
         var sync = new GitHubPullRequestSync(
-                pr.number(), pr.title(), parsePrState(pr.state(), pr.merged()), pr.url(), fetchedAt);
+                repoSlug, pr.number(), pr.title(), parsePrState(pr.state(), pr.merged()), pr.url(), fetchedAt);
         sync.setPrBody(pr.body() != null ? pr.body() : "");
         sync.setBaseBranch(pr.baseBranch() != null ? pr.baseBranch() : "");
         sync.setHeadBranch(pr.headBranch() != null ? pr.headBranch() : "");
@@ -260,13 +262,13 @@ public class GitHubIssueSyncService {
         prSyncRepository.save(sync);
     }
 
-    private int updatePrTraceabilityLinks(Instant fetchedAt, List<SyncError> errors) {
+    private int updatePrTraceabilityLinks(String repoSlug, Instant fetchedAt, List<SyncError> errors) {
         int linksUpdated = 0;
         var links = traceabilityLinkRepository.findByArtifactType(ArtifactType.PULL_REQUEST);
         for (var link : links) {
             try {
                 int prNumber = Integer.parseInt(link.getArtifactIdentifier());
-                var syncOpt = prSyncRepository.findByPrNumber(prNumber);
+                var syncOpt = prSyncRepository.findByRepoAndPrNumber(repoSlug, prNumber);
                 if (syncOpt.isPresent()) {
                     var sync = syncOpt.get();
                     link.setArtifactUrl(sync.getPrUrl());

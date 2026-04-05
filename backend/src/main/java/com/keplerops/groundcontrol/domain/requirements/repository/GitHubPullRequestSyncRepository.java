@@ -7,5 +7,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface GitHubPullRequestSyncRepository extends JpaRepository<GitHubPullRequestSync, UUID> {
 
-    Optional<GitHubPullRequestSync> findByPrNumber(Integer prNumber);
+    Optional<GitHubPullRequestSync> findByRepoAndPrNumber(String repo, Integer prNumber);
 }

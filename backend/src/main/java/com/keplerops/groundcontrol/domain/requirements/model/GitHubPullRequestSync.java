@@ -11,6 +11,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,7 +23,7 @@ import org.hibernate.type.SqlTypes;
  * Cached state of a GitHub pull request for sync tracking.
  */
 @Entity
-@Table(name = "github_pr_sync")
+@Table(name = "github_pr_sync", uniqueConstraints = @UniqueConstraint(columnNames = {"repo", "pr_number"}))
 public class GitHubPullRequestSync {
 
     @Id
@@ -30,7 +31,10 @@ public class GitHubPullRequestSync {
     @Column(updatable = false, nullable = false)
     private UUID id;
 
-    @Column(name = "pr_number", unique = true, nullable = false)
+    @Column(name = "repo", nullable = false, length = 200)
+    private String repo;
+
+    @Column(name = "pr_number", nullable = false)
     private Integer prNumber;
 
     @Column(name = "pr_title", nullable = false, length = 500)
@@ -70,7 +74,13 @@ public class GitHubPullRequestSync {
     }
 
     public GitHubPullRequestSync(
-            Integer prNumber, String prTitle, PullRequestState prState, String prUrl, Instant lastFetchedAt) {
+            String repo,
+            Integer prNumber,
+            String prTitle,
+            PullRequestState prState,
+            String prUrl,
+            Instant lastFetchedAt) {
+        this.repo = repo;
         this.prNumber = prNumber;
         this.prTitle = prTitle;
         this.prState = prState;
@@ -94,6 +104,10 @@ public class GitHubPullRequestSync {
 
     public UUID getId() {
         return id;
+    }
+
+    public String getRepo() {
+        return repo;
     }
 
     public Integer getPrNumber() {

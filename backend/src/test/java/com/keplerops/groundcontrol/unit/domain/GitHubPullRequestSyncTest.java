@@ -14,7 +14,12 @@ class GitHubPullRequestSyncTest {
 
     private static GitHubPullRequestSync createSync() {
         return new GitHubPullRequestSync(
-                42, "Add feature", PullRequestState.OPEN, "https://github.com/org/repo/pull/42", Instant.now());
+                "org/repo",
+                42,
+                "Add feature",
+                PullRequestState.OPEN,
+                "https://github.com/org/repo/pull/42",
+                Instant.now());
     }
 
     @Nested
@@ -52,8 +57,9 @@ class GitHubPullRequestSyncTest {
         void requiredFieldsSetCorrectly() {
             var now = Instant.now();
             var sync = new GitHubPullRequestSync(
-                    99, "Fix bug", PullRequestState.MERGED, "https://github.com/org/repo/pull/99", now);
+                    "org/repo", 99, "Fix bug", PullRequestState.MERGED, "https://github.com/org/repo/pull/99", now);
 
+            assertThat(sync.getRepo()).isEqualTo("org/repo");
             assertThat(sync.getPrNumber()).isEqualTo(99);
             assertThat(sync.getPrTitle()).isEqualTo("Fix bug");
             assertThat(sync.getPrState()).isEqualTo(PullRequestState.MERGED);
