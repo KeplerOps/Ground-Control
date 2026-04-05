@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.102.1] - 2026-04-05
+
+### Fixed
+
+- SonarCloud quality gate: reviewed 3 SQL-injection security hotspots in
+  AgeGraphService as SAFE (Apache AGE requires dynamic Cypher-in-SQL;
+  values are sanitized via escapeCypher/validateGraphName)
+- SonarCloud quality gate: added 129 unit tests to raise new-code coverage
+  above 80% threshold — covers TreatmentPlanController,
+  RiskRegisterRecordController, JacksonTextCollectionConverters,
+  TreatmentPlanResponse, RiskRegisterRecordResponse, and project-aware
+  service methods in AssetService, ObservationService, and
+  RiskScenarioLinkService
+
 ## [0.102.0] - 2026-04-05
 
 ### Added
