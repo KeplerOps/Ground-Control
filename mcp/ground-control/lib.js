@@ -309,6 +309,10 @@ const TO_CAMEL = {
   decision_metadata: "decisionMetadata",
   asset_scope_summary: "assetScopeSummary",
   risk_scenario_ids: "riskScenarioIds",
+  control_function: "controlFunction",
+  control_id: "controlId",
+  implementation_scope: "implementationScope",
+  methodology_factors: "methodologyFactors",
   analyst_identity: "analystIdentity",
   input_factors: "inputFactors",
   observation_date: "observationDate",
@@ -1604,6 +1608,73 @@ export async function deleteRiskScenarioLink(riskScenarioId, linkId, project) {
   await request(
     "DELETE",
     `/api/v1/risk-scenarios/${encodeURIComponent(riskScenarioId)}/links/${encodeURIComponent(linkId)}`,
+    { params: { project } },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Control API functions
+// ---------------------------------------------------------------------------
+
+export const CONTROL_STATUSES = ["DRAFT", "PROPOSED", "IMPLEMENTED", "OPERATIONAL", "DEPRECATED", "RETIRED"];
+export const CONTROL_FUNCTIONS = ["PREVENTIVE", "DETECTIVE", "CORRECTIVE", "COMPENSATING"];
+export const CONTROL_LINK_TARGET_TYPES = [
+  "ASSET", "RISK_SCENARIO", "RISK_REGISTER_RECORD", "RISK_ASSESSMENT_RESULT",
+  "TREATMENT_PLAN", "METHODOLOGY_PROFILE", "OBSERVATION", "REQUIREMENT",
+  "EVIDENCE", "FINDING", "CODE", "CONFIGURATION", "OPERATIONAL_ARTIFACT", "EXTERNAL",
+];
+export const CONTROL_LINK_TYPES = [
+  "PROTECTS", "IMPLEMENTS", "EVIDENCED_BY", "OBSERVED_IN", "MITIGATES", "MAPS_TO", "ASSOCIATED",
+];
+
+export async function createControl(data, project) {
+  return request("POST", "/api/v1/controls", { body: data, params: { project } });
+}
+
+export async function listControls(project) {
+  return request("GET", "/api/v1/controls", { params: { project } });
+}
+
+export async function getControl(id, project) {
+  return request("GET", `/api/v1/controls/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function getControlByUid(uid, project) {
+  return request("GET", `/api/v1/controls/uid/${encodeURIComponent(uid)}`, { params: { project } });
+}
+
+export async function updateControl(id, data, project) {
+  return request("PUT", `/api/v1/controls/${encodeURIComponent(id)}`, { body: data, params: { project } });
+}
+
+export async function deleteControl(id, project) {
+  await request("DELETE", `/api/v1/controls/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function transitionControlStatus(id, status, project) {
+  return request("PUT", `/api/v1/controls/${encodeURIComponent(id)}/status`, {
+    body: { status },
+    params: { project },
+  });
+}
+
+export async function createControlLink(controlId, data, project) {
+  return request("POST", `/api/v1/controls/${encodeURIComponent(controlId)}/links`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function listControlLinks(controlId, { targetType, project } = {}) {
+  return request("GET", `/api/v1/controls/${encodeURIComponent(controlId)}/links`, {
+    params: { target_type: targetType, project },
+  });
+}
+
+export async function deleteControlLink(controlId, linkId, project) {
+  await request(
+    "DELETE",
+    `/api/v1/controls/${encodeURIComponent(controlId)}/links/${encodeURIComponent(linkId)}`,
     { params: { project } },
   );
 }

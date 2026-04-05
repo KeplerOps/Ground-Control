@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- First-class Control entity representing security and risk controls
+  with definitions, objectives, control function (preventive, detective,
+  corrective, compensating), ownership, implementation scope, methodology-
+  aware factor mappings (FAIR-CAM strength/coverage, NIST, ISO), and
+  effectiveness data (GC-I001)
+- Six-state control lifecycle: DRAFT, PROPOSED, IMPLEMENTED, OPERATIONAL,
+  DEPRECATED, RETIRED with reinstatement from DEPRECATED to OPERATIONAL
+- ControlLink entity for outbound linking to assets, risk scenarios,
+  observations, evidence, requirements, code, configuration, operational
+  artifacts, and external references
+- Seven link relationship types: PROTECTS, IMPLEMENTS, EVIDENCED_BY,
+  OBSERVED_IN, MITIGATES, MAPS_TO, ASSOCIATED
+- REST API endpoints: `POST/GET /api/v1/controls`,
+  `GET/PUT/DELETE /api/v1/controls/{id}`,
+  `GET /api/v1/controls/uid/{uid}`,
+  `PUT /api/v1/controls/{id}/status`,
+  `POST/GET /api/v1/controls/{id}/links`,
+  `DELETE /api/v1/controls/{id}/links/{linkId}`
+- MCP tools: `gc_create_control`, `gc_list_controls`, `gc_get_control`,
+  `gc_update_control`, `gc_delete_control`, `gc_transition_control_status`,
+  `gc_create_control_link`, `gc_list_control_links`, `gc_delete_control_link`
+- Database migrations V046-V047 for control and control_link tables
+  with Envers audit
+- CONTROL promoted from external string identifier to internal entity in
+  GraphTargetResolverService for both asset links and risk scenario links
+- CONTROL added to ArtifactType for traceability linking
 - Codex-backed Ground Control MCP workflow tools:
   `gc_codex_architecture_preflight` for pre-implementation ADR/design
   guidance and `gc_codex_review` for exhaustive no-triage production-quality

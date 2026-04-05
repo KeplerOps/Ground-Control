@@ -140,6 +140,20 @@ import {
   createRiskScenarioLink,
   listRiskScenarioLinks,
   deleteRiskScenarioLink,
+  createControl,
+  listControls,
+  getControl,
+  getControlByUid,
+  updateControl,
+  deleteControl,
+  transitionControlStatus,
+  createControlLink,
+  listControlLinks,
+  deleteControlLink,
+  CONTROL_STATUSES,
+  CONTROL_FUNCTIONS,
+  CONTROL_LINK_TARGET_TYPES,
+  CONTROL_LINK_TYPES,
   createMethodologyProfile,
   listMethodologyProfiles,
   getMethodologyProfile,
@@ -2867,6 +2881,215 @@ server.tool(
     try {
       await deleteRiskScenarioLink(risk_scenario_id, link_id, project);
       return ok("Risk scenario link deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Control tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_control",
+  "Create a control — a security or risk control with definitions, objectives, ownership, and methodology factor mappings.",
+  {
+    uid: z.string().max(50).describe("Control UID (e.g. 'CTRL-001', 'ISO-27001-A.8.1')"),
+    title: z.string().max(200).describe("Control title"),
+    control_function: z.enum(CONTROL_FUNCTIONS).describe("Control role: PREVENTIVE, DETECTIVE, CORRECTIVE, COMPENSATING"),
+    description: z.string().optional().describe("Control description"),
+    objective: z.string().optional().describe("Control objective"),
+    owner: z.string().max(200).optional().describe("Control owner"),
+    implementation_scope: z.string().optional().describe("Where/how the control is implemented"),
+    methodology_factors: z.record(z.string(), z.unknown()).optional().describe("Methodology-aware factor mappings (e.g. FAIR-CAM strength/coverage)"),
+    effectiveness: z.record(z.string(), z.unknown()).optional().describe("Effectiveness metrics"),
+    category: z.string().max(100).optional().describe("Control category (e.g. Access Control, Encryption)"),
+    source: z.string().max(200).optional().describe("Framework source (e.g. ISO 27001 A.9, NIST CSF PR.AC-1)"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ uid, title, control_function, description, objective, owner, implementation_scope, methodology_factors, effectiveness, category, source, project }) => {
+    try {
+      const data = { uid, title, control_function };
+      if (description !== undefined) data.description = description;
+      if (objective !== undefined) data.objective = objective;
+      if (owner !== undefined) data.owner = owner;
+      if (implementation_scope !== undefined) data.implementation_scope = implementation_scope;
+      if (methodology_factors !== undefined) data.methodology_factors = methodology_factors;
+      if (effectiveness !== undefined) data.effectiveness = effectiveness;
+      if (category !== undefined) data.category = category;
+      if (source !== undefined) data.source = source;
+      return ok(JSON.stringify(await createControl(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_controls",
+  "List controls for a project.",
+  {
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await listControls(project);
+      if (Array.isArray(result) && result.length === 0) return ok("No controls found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_control",
+  "Get a control by UUID or UID.",
+  {
+    id: z.string().optional().describe("Control UUID"),
+    uid: z.string().optional().describe("Control UID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, uid, project }) => {
+    try {
+      const result = id ? await getControl(id, project) : await getControlByUid(uid, project);
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_control",
+  "Update a control.",
+  {
+    id: z.string().uuid().describe("Control UUID"),
+    title: z.string().max(200).optional().describe("Updated title"),
+    control_function: z.enum(CONTROL_FUNCTIONS).optional().describe("Updated control function"),
+    description: z.string().optional().describe("Updated description"),
+    objective: z.string().optional().describe("Updated objective"),
+    owner: z.string().max(200).optional().describe("Updated owner"),
+    implementation_scope: z.string().optional().describe("Updated implementation scope"),
+    methodology_factors: z.record(z.string(), z.unknown()).optional().describe("Updated methodology factors"),
+    effectiveness: z.record(z.string(), z.unknown()).optional().describe("Updated effectiveness"),
+    category: z.string().max(100).optional().describe("Updated category"),
+    source: z.string().max(200).optional().describe("Updated source"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, title, control_function, description, objective, owner, implementation_scope, methodology_factors, effectiveness, category, source, project }) => {
+    try {
+      const data = {};
+      if (title !== undefined) data.title = title;
+      if (control_function !== undefined) data.control_function = control_function;
+      if (description !== undefined) data.description = description;
+      if (objective !== undefined) data.objective = objective;
+      if (owner !== undefined) data.owner = owner;
+      if (implementation_scope !== undefined) data.implementation_scope = implementation_scope;
+      if (methodology_factors !== undefined) data.methodology_factors = methodology_factors;
+      if (effectiveness !== undefined) data.effectiveness = effectiveness;
+      if (category !== undefined) data.category = category;
+      if (source !== undefined) data.source = source;
+      return ok(JSON.stringify(await updateControl(id, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_transition_control_status",
+  "Transition a control's lifecycle status.",
+  {
+    id: z.string().uuid().describe("Control UUID"),
+    status: z.enum(CONTROL_STATUSES).describe("Target status"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, status, project }) => {
+    try {
+      return ok(JSON.stringify(await transitionControlStatus(id, status, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_control",
+  "Delete a control.",
+  {
+    id: z.string().uuid().describe("Control UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, project }) => {
+    try {
+      await deleteControl(id, project);
+      return ok("Control deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_create_control_link",
+  "Link a control to an asset, risk scenario, evidence, code artifact, or other entity.",
+  {
+    control_id: z.string().uuid().describe("Control UUID"),
+    target_type: z.enum(CONTROL_LINK_TARGET_TYPES).describe("Target entity type"),
+    target_entity_id: z.string().uuid().optional().describe("Target entity UUID (for internal entities)"),
+    target_identifier: z.string().max(500).optional().describe("Target identifier (for external references)"),
+    link_type: z.enum(CONTROL_LINK_TYPES).describe("Relationship type"),
+    target_url: z.string().max(2000).optional().describe("URL to the target"),
+    target_title: z.string().max(255).optional().describe("Display title for the target"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ control_id, target_type, target_entity_id, target_identifier, link_type, target_url, target_title, project }) => {
+    try {
+      const data = { target_type, link_type };
+      if (target_entity_id !== undefined) data.target_entity_id = target_entity_id;
+      if (target_identifier !== undefined) data.target_identifier = target_identifier;
+      if (target_url !== undefined) data.target_url = target_url;
+      if (target_title !== undefined) data.target_title = target_title;
+      return ok(JSON.stringify(await createControlLink(control_id, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_control_links",
+  "List links from a control, optionally filtered by target type.",
+  {
+    control_id: z.string().uuid().describe("Control UUID"),
+    target_type: z.enum(CONTROL_LINK_TARGET_TYPES).optional().describe("Filter by target type"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ control_id, target_type, project }) => {
+    try {
+      const result = await listControlLinks(control_id, { targetType: target_type, project });
+      if (Array.isArray(result) && result.length === 0) return ok("No control links found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_control_link",
+  "Delete a control link.",
+  {
+    control_id: z.string().uuid().describe("Control UUID"),
+    link_id: z.string().uuid().describe("Link UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ control_id, link_id, project }) => {
+    try {
+      await deleteControlLink(control_id, link_id, project);
+      return ok("Control link deleted.");
     } catch (e) {
       return err(e);
     }

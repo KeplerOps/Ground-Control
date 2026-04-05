@@ -52,6 +52,9 @@ class GraphTargetResolverServiceTest {
     @Mock
     private MethodologyProfileRepository methodologyProfileRepository;
 
+    @Mock
+    private com.keplerops.groundcontrol.domain.controls.repository.ControlRepository controlRepository;
+
     @InjectMocks
     private GraphTargetResolverService graphTargetResolverService;
 
@@ -67,7 +70,8 @@ class GraphTargetResolverServiceTest {
                 "RISK_REGISTER_RECORD",
                 "RISK_ASSESSMENT_RESULT",
                 "TREATMENT_PLAN",
-                "METHODOLOGY_PROFILE"
+                "METHODOLOGY_PROFILE",
+                "CONTROL"
             })
     void validateAssetTargetAcceptsInternalTargets(AssetLinkTargetType targetType) {
         stubAssetInternalTarget(targetType, true);
@@ -82,7 +86,7 @@ class GraphTargetResolverServiceTest {
     @ParameterizedTest
     @EnumSource(
             value = AssetLinkTargetType.class,
-            names = {"CONTROL", "THREAT_MODEL_ENTRY", "FINDING", "EVIDENCE", "AUDIT", "EXTERNAL"})
+            names = {"THREAT_MODEL_ENTRY", "FINDING", "EVIDENCE", "AUDIT", "EXTERNAL"})
     void validateAssetTargetAcceptsExternalTargets(AssetLinkTargetType targetType) {
         var validated = graphTargetResolverService.validateAssetTarget(projectId, targetType, null, "EXT-1");
 
@@ -101,7 +105,8 @@ class GraphTargetResolverServiceTest {
                 "RISK_REGISTER_RECORD",
                 "RISK_ASSESSMENT_RESULT",
                 "TREATMENT_PLAN",
-                "METHODOLOGY_PROFILE"
+                "METHODOLOGY_PROFILE",
+                "CONTROL"
             })
     void validateRiskScenarioTargetAcceptsInternalTargets(RiskScenarioLinkTargetType targetType) {
         stubScenarioInternalTarget(targetType, true);
@@ -115,7 +120,7 @@ class GraphTargetResolverServiceTest {
     @ParameterizedTest
     @EnumSource(
             value = RiskScenarioLinkTargetType.class,
-            names = {"THREAT_MODEL", "VULNERABILITY", "CONTROL", "FINDING", "EVIDENCE", "AUDIT_RECORD", "EXTERNAL"})
+            names = {"THREAT_MODEL", "VULNERABILITY", "FINDING", "EVIDENCE", "AUDIT_RECORD", "EXTERNAL"})
     void validateRiskScenarioTargetAcceptsExternalTargets(RiskScenarioLinkTargetType targetType) {
         var validated = graphTargetResolverService.validateRiskScenarioTarget(projectId, targetType, null, "EXT-2");
 
@@ -194,7 +199,9 @@ class GraphTargetResolverServiceTest {
                                             com.keplerops.groundcontrol.domain.riskscenarios.model.MethodologyProfile
                                                     .class))
                                     : java.util.Optional.empty());
-            case CONTROL, THREAT_MODEL_ENTRY, FINDING, EVIDENCE, AUDIT, EXTERNAL -> throw new IllegalArgumentException(
+            case CONTROL -> when(controlRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case THREAT_MODEL_ENTRY, FINDING, EVIDENCE, AUDIT, EXTERNAL -> throw new IllegalArgumentException(
                     "Not an internal target type");
         }
     }
@@ -240,9 +247,10 @@ class GraphTargetResolverServiceTest {
                                             com.keplerops.groundcontrol.domain.riskscenarios.model.MethodologyProfile
                                                     .class))
                                     : java.util.Optional.empty());
+            case CONTROL -> when(controlRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
             case THREAT_MODEL,
                     VULNERABILITY,
-                    CONTROL,
                     FINDING,
                     EVIDENCE,
                     AUDIT_RECORD,
