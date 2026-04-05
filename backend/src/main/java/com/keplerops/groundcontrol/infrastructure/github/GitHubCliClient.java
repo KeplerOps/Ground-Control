@@ -128,6 +128,23 @@ public class GitHubCliClient implements GitHubClient {
             pb.redirectErrorStream(false);
             Process process = pb.start();
 
+            // Drain stdout and stderr in background threads to avoid pipe-buffer deadlock
+            // when output exceeds the OS pipe buffer size (~64KB).
+            var stdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try {
+                    return process.getInputStream().readAllBytes();
+                } catch (IOException ex) {
+                    throw new java.io.UncheckedIOException(ex);
+                }
+            });
+            var stderrFuture = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try {
+                    return process.getErrorStream().readAllBytes();
+                } catch (IOException ex) {
+                    throw new java.io.UncheckedIOException(ex);
+                }
+            });
+
             boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
@@ -136,12 +153,12 @@ public class GitHubCliClient implements GitHubClient {
 
             int exitCode = process.exitValue();
             if (exitCode != 0) {
-                String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+                String stderr = new String(stderrFuture.join(), StandardCharsets.UTF_8);
                 throw new GroundControlException(
                         "gh CLI exited with code " + exitCode + ": " + stderr, "github_cli_error");
             }
 
-            String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            String stdout = new String(stdoutFuture.join(), StandardCharsets.UTF_8);
 
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> rawIssues =
@@ -221,6 +238,21 @@ public class GitHubCliClient implements GitHubClient {
             pb.redirectErrorStream(false);
             Process process = pb.start();
 
+            var stdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try {
+                    return process.getInputStream().readAllBytes();
+                } catch (IOException ex) {
+                    throw new java.io.UncheckedIOException(ex);
+                }
+            });
+            var stderrFuture = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try {
+                    return process.getErrorStream().readAllBytes();
+                } catch (IOException ex) {
+                    throw new java.io.UncheckedIOException(ex);
+                }
+            });
+
             boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
@@ -229,12 +261,12 @@ public class GitHubCliClient implements GitHubClient {
 
             int exitCode = process.exitValue();
             if (exitCode != 0) {
-                String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+                String stderr = new String(stderrFuture.join(), StandardCharsets.UTF_8);
                 throw new GroundControlException(
                         "gh CLI exited with code " + exitCode + ": " + stderr, "github_cli_error");
             }
 
-            String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            String stdout = new String(stdoutFuture.join(), StandardCharsets.UTF_8);
             String url = stdout.trim();
 
             Matcher matcher = ISSUE_URL_RE.matcher(url);
