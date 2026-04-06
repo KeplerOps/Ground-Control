@@ -32,12 +32,12 @@ public class VerificationResult extends BaseEntity {
     private Project project;
 
     @NotAudited
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "target_id")
     private TraceabilityLink target;
 
     @NotAudited
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "requirement_id")
     private Requirement requirement;
 

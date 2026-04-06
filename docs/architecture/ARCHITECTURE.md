@@ -129,4 +129,4 @@ Environment variables use the `GC_` prefix (e.g., `GC_DATABASE_URL`, `GC_SERVER_
 ### Exists now
 
 - `specs/tla/` for design-level verification artifacts and state-machine specs, aligned with ADR-014
-- Verification result storage (VerificationResult entity, enums, CRUD API, MCP tools) — ADR-014 §2 common schema
+- Verification result storage (VerificationResult entity with eager-loaded target/requirement, enums, CRUD API, MCP tools) — ADR-014 §2 common schema

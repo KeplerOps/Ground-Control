@@ -3689,8 +3689,8 @@ server.tool(
     result: z.enum(VERIFICATION_STATUSES).describe("Verification outcome"),
     assurance_level: z.enum(ASSURANCE_LEVELS).describe("Assurance level (L0-L3)"),
     evidence: z.record(z.unknown()).optional().describe("Prover-specific output (proof artifacts, counterexamples, logs)"),
-    verified_at: z.string().describe("ISO 8601 timestamp of when the verification ran"),
-    expires_at: z.string().optional().describe("ISO 8601 timestamp for re-verification trigger"),
+    verified_at: z.string().datetime().describe("ISO 8601 timestamp of when the verification ran"),
+    expires_at: z.string().datetime().optional().describe("ISO 8601 timestamp for re-verification trigger"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
   async ({ target_id, requirement_id, prover, property, result, assurance_level, evidence, verified_at, expires_at, project }) => {
@@ -3754,8 +3754,8 @@ server.tool(
     result: z.enum(VERIFICATION_STATUSES).optional().describe("Verification outcome"),
     assurance_level: z.enum(ASSURANCE_LEVELS).optional().describe("Assurance level (L0-L3)"),
     evidence: z.record(z.unknown()).optional().describe("Prover-specific output"),
-    verified_at: z.string().optional().describe("ISO 8601 timestamp of when the verification ran"),
-    expires_at: z.string().optional().describe("ISO 8601 timestamp for re-verification trigger"),
+    verified_at: z.string().datetime().optional().describe("ISO 8601 timestamp of when the verification ran"),
+    expires_at: z.string().datetime().optional().describe("ISO 8601 timestamp for re-verification trigger"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
   async ({ id, target_id, requirement_id, prover, property, result, assurance_level, evidence, verified_at, expires_at, project }) => {

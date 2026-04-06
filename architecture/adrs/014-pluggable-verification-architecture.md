@@ -201,7 +201,7 @@ The `infrastructure/verifiers/` package follows the ports-and-adapters pattern: 
 
 ## Implementation Status
 
-- **§2 VerificationResult entity** — Implemented (GC-F001). Domain: `domain/verification/`, API: `api/verification/`, Migrations: V049-V050, MCP: 5 tools.
+- **§2 VerificationResult entity** — Implemented (GC-F001). Domain: `domain/verification/`, API: `api/verification/`, Migrations: V049-V050, MCP: 5 tools. Target and requirement FKs use eager fetch.
 - **§6 infrastructure/verifiers/ adapters** — Not yet implemented. Future work per individual prover requirements.
 
 ## Related ADRs

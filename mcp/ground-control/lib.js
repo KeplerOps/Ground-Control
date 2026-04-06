@@ -291,6 +291,8 @@ const TO_CAMEL = {
   observation_value: "observationValue",
   observed_at: "observedAt",
   expires_at: "expiresAt",
+  verified_at: "verifiedAt",
+  assurance_level: "assuranceLevel",
   evidence_ref: "evidenceRef",
   observation_id: "observationId",
   threat_source: "threatSource",
