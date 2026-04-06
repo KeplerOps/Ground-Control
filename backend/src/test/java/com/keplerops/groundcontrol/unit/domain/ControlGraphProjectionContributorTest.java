@@ -17,8 +17,13 @@ import com.keplerops.groundcontrol.domain.graph.service.ControlGraphProjectionCo
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -92,5 +97,62 @@ class ControlGraphProjectionContributorTest {
         assertThat(edge.targetEntityType()).isEqualTo(GraphEntityType.OPERATIONAL_ASSET);
         assertThat(edge.sourceId()).isEqualTo(GraphIds.nodeId(GraphEntityType.CONTROL, control.getId()));
         assertThat(edge.targetId()).isEqualTo(GraphIds.nodeId(GraphEntityType.OPERATIONAL_ASSET, assetTargetId));
+    }
+
+    static Stream<Arguments> internalTargetTypeMappings() {
+        return Stream.of(
+                Arguments.of(ControlLinkTargetType.ASSET, GraphEntityType.OPERATIONAL_ASSET),
+                Arguments.of(ControlLinkTargetType.REQUIREMENT, GraphEntityType.REQUIREMENT),
+                Arguments.of(ControlLinkTargetType.RISK_SCENARIO, GraphEntityType.RISK_SCENARIO),
+                Arguments.of(ControlLinkTargetType.RISK_REGISTER_RECORD, GraphEntityType.RISK_REGISTER_RECORD),
+                Arguments.of(ControlLinkTargetType.RISK_ASSESSMENT_RESULT, GraphEntityType.RISK_ASSESSMENT_RESULT),
+                Arguments.of(ControlLinkTargetType.TREATMENT_PLAN, GraphEntityType.TREATMENT_PLAN),
+                Arguments.of(ControlLinkTargetType.METHODOLOGY_PROFILE, GraphEntityType.METHODOLOGY_PROFILE),
+                Arguments.of(ControlLinkTargetType.OBSERVATION, GraphEntityType.OBSERVATION));
+    }
+
+    @ParameterizedTest
+    @MethodSource("internalTargetTypeMappings")
+    void mapsInternalTargetTypesToGraphEntityTypes(ControlLinkTargetType targetType, GraphEntityType expectedEntity) {
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var control = new Control(project, "CTL-001", "Test Control", ControlFunction.PREVENTIVE);
+        setField(control, "id", UUID.randomUUID());
+
+        var targetId = UUID.randomUUID();
+        var link = new ControlLink(control, targetType, targetId, null, ControlLinkType.ASSOCIATED);
+        setField(link, "id", UUID.randomUUID());
+
+        when(controlLinkRepository.findByProjectId(projectId)).thenReturn(List.of(link));
+
+        var edges = contributor.contributeEdges(projectId);
+
+        assertThat(edges).hasSize(1);
+        assertThat(edges.get(0).targetEntityType()).isEqualTo(expectedEntity);
+        assertThat(edges.get(0).targetId()).isEqualTo(GraphIds.nodeId(expectedEntity, targetId));
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = ControlLinkTargetType.class,
+            names = {"EVIDENCE", "FINDING", "CODE", "CONFIGURATION", "OPERATIONAL_ARTIFACT", "EXTERNAL"})
+    void filtersExternalTargetTypes(ControlLinkTargetType targetType) {
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var control = new Control(project, "CTL-001", "Test Control", ControlFunction.PREVENTIVE);
+        setField(control, "id", UUID.randomUUID());
+
+        var link = new ControlLink(control, targetType, null, "ext-ref", ControlLinkType.ASSOCIATED);
+        setField(link, "id", UUID.randomUUID());
+
+        when(controlLinkRepository.findByProjectId(projectId)).thenReturn(List.of(link));
+
+        var edges = contributor.contributeEdges(projectId);
+
+        assertThat(edges).isEmpty();
     }
 }
