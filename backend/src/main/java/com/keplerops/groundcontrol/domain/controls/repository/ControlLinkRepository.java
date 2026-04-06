@@ -6,8 +6,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface ControlLinkRepository extends JpaRepository<ControlLink, UUID> {
+
+    @Query("SELECT l FROM ControlLink l JOIN FETCH l.control WHERE l.control.project.id = :projectId")
+    List<ControlLink> findByProjectId(@Param("projectId") UUID projectId);
 
     List<ControlLink> findByControlId(UUID controlId);
 

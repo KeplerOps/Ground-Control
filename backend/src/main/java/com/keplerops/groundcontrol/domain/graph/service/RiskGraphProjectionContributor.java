@@ -255,7 +255,8 @@ public class RiskGraphProjectionContributor implements GraphProjectionContributo
                     case RISK_ASSESSMENT_RESULT -> GraphEntityType.RISK_ASSESSMENT_RESULT;
                     case TREATMENT_PLAN -> GraphEntityType.TREATMENT_PLAN;
                     case METHODOLOGY_PROFILE -> GraphEntityType.METHODOLOGY_PROFILE;
-                    case THREAT_MODEL, VULNERABILITY, CONTROL, FINDING, EVIDENCE, AUDIT_RECORD, EXTERNAL -> null;
+                    case CONTROL -> GraphEntityType.CONTROL;
+                    case THREAT_MODEL, VULNERABILITY, FINDING, EVIDENCE, AUDIT_RECORD, EXTERNAL -> null;
                 };
         if (targetEntityType == null) {
             return null;

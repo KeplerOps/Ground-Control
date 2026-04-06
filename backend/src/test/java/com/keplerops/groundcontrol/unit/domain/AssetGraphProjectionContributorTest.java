@@ -106,6 +106,32 @@ class AssetGraphProjectionContributorTest {
         });
     }
 
+    @Test
+    void controlTypedAssetLinkProducesGraphEdge() {
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var source = asset(project, "ASSET-1", "Gateway");
+        var controlTargetId = UUID.randomUUID();
+
+        var controlLink =
+                new AssetLink(source, AssetLinkTargetType.CONTROL, controlTargetId, null, AssetLinkType.GOVERNED_BY);
+        setField(controlLink, "id", UUID.randomUUID());
+
+        when(assetRelationRepository.findActiveByProjectId(projectId)).thenReturn(List.of());
+        when(observationRepository.findByProjectId(projectId)).thenReturn(List.of());
+        when(assetLinkRepository.findByProjectId(projectId)).thenReturn(List.of(controlLink));
+
+        var edges = contributor.contributeEdges(projectId);
+
+        assertThat(edges).hasSize(1);
+        assertThat(edges.get(0).edgeType()).isEqualTo("GOVERNED_BY");
+        assertThat(edges.get(0).targetId()).isEqualTo(GraphIds.nodeId(GraphEntityType.CONTROL, controlTargetId));
+        assertThat(edges.get(0).sourceEntityType()).isEqualTo(GraphEntityType.OPERATIONAL_ASSET);
+        assertThat(edges.get(0).targetEntityType()).isEqualTo(GraphEntityType.CONTROL);
+    }
+
     private OperationalAsset asset(Project project, String uid, String name) {
         var asset = new OperationalAsset(project, uid, name);
         setField(asset, "id", UUID.randomUUID());
