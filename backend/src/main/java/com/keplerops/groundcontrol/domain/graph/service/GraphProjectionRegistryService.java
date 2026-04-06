@@ -29,4 +29,14 @@ public class GraphProjectionRegistryService {
         }
         return new GraphProjection(nodes, edges);
     }
+
+    public GraphProjection buildProjectionForProject(java.util.UUID projectId) {
+        var nodes = new ArrayList<com.keplerops.groundcontrol.domain.graph.model.GraphNode>();
+        var edges = new ArrayList<com.keplerops.groundcontrol.domain.graph.model.GraphEdge>();
+        for (var contributor : contributors) {
+            nodes.addAll(contributor.contributeNodes(projectId));
+            edges.addAll(contributor.contributeEdges(projectId));
+        }
+        return new GraphProjection(nodes, edges);
+    }
 }
