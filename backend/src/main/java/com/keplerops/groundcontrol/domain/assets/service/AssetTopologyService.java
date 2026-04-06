@@ -68,12 +68,22 @@ public class AssetTopologyService {
                 .toList();
     }
 
-    public Set<OperationalAsset> impactAnalysis(UUID assetId) {
+    public Set<OperationalAsset> impactAnalysis(UUID projectId, UUID assetId) {
         OperationalAsset seed = assetRepository
+                .findByIdAndProjectId(assetId, projectId)
+                .orElseThrow(() -> new NotFoundException("Asset not found: " + assetId));
+        return computeImpactAnalysis(seed.getProject().getId(), assetId);
+    }
+
+    @Deprecated(forRemoval = false)
+    public Set<OperationalAsset> impactAnalysis(UUID assetId) {
+        var asset = assetRepository
                 .findById(assetId)
                 .orElseThrow(() -> new NotFoundException("Asset not found: " + assetId));
+        return computeImpactAnalysis(asset.getProject().getId(), assetId);
+    }
 
-        UUID projectId = seed.getProject().getId();
+    private Set<OperationalAsset> computeImpactAnalysis(UUID projectId, UUID assetId) {
         List<AssetRelation> relations = relationRepository.findActiveByProjectId(projectId);
 
         Map<UUID, List<UUID>> reverseAdj = new HashMap<>();

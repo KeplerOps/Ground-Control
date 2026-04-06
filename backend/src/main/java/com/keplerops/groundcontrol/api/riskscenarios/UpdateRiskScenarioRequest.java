@@ -9,6 +9,4 @@ public record UpdateRiskScenarioRequest(
         String affectedObject,
         String vulnerability,
         String consequence,
-        @Size(max = 100) String timeHorizon,
-        String observationRefs,
-        String topologyContext) {}
+        @Size(max = 100) String timeHorizon) {}

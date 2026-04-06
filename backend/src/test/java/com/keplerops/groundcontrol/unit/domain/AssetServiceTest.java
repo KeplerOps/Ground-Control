@@ -30,6 +30,7 @@ import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.graph.service.GraphTargetResolverService;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import java.time.Instant;
@@ -61,6 +62,9 @@ class AssetServiceTest {
 
     @Mock
     private ProjectRepository projectRepository;
+
+    @Mock
+    private GraphTargetResolverService graphTargetResolverService;
 
     @InjectMocks
     private AssetService assetService;
@@ -384,7 +388,7 @@ class AssetServiceTest {
     class Links {
 
         private AssetLink makeLink(OperationalAsset asset) {
-            var link = new AssetLink(asset, AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS);
+            var link = new AssetLink(asset, AssetLinkTargetType.REQUIREMENT, null, "GC-M010", AssetLinkType.IMPLEMENTS);
             setField(link, "id", UUID.randomUUID());
             setField(link, "createdAt", Instant.now());
             setField(link, "updatedAt", Instant.now());
@@ -398,6 +402,9 @@ class AssetServiceTest {
             when(linkRepository.existsByAssetIdAndTargetTypeAndTargetIdentifierAndLinkType(
                             asset.getId(), AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS))
                     .thenReturn(false);
+            when(graphTargetResolverService.validateAssetTarget(
+                            projectId, AssetLinkTargetType.REQUIREMENT, null, "GC-M010"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(null, "GC-M010", false));
             when(linkRepository.save(any())).thenAnswer(inv -> {
                 var saved = inv.getArgument(0, AssetLink.class);
                 setField(saved, "id", UUID.randomUUID());
@@ -405,7 +412,7 @@ class AssetServiceTest {
             });
 
             var command = new CreateAssetLinkCommand(
-                    AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
+                    AssetLinkTargetType.REQUIREMENT, null, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
             var result = assetService.createLink(asset.getId(), command);
 
             assertThat(result.getTargetType()).isEqualTo(AssetLinkTargetType.REQUIREMENT);
@@ -420,6 +427,9 @@ class AssetServiceTest {
             when(linkRepository.existsByAssetIdAndTargetTypeAndTargetIdentifierAndLinkType(
                             asset.getId(), AssetLinkTargetType.EXTERNAL, "jira-123", AssetLinkType.DEPENDS_ON))
                     .thenReturn(false);
+            when(graphTargetResolverService.validateAssetTarget(
+                            projectId, AssetLinkTargetType.EXTERNAL, null, "jira-123"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(null, "jira-123", false));
             when(linkRepository.save(any())).thenAnswer(inv -> {
                 var saved = inv.getArgument(0, AssetLink.class);
                 setField(saved, "id", UUID.randomUUID());
@@ -428,6 +438,7 @@ class AssetServiceTest {
 
             var command = new CreateAssetLinkCommand(
                     AssetLinkTargetType.EXTERNAL,
+                    null,
                     "jira-123",
                     AssetLinkType.DEPENDS_ON,
                     "https://jira.example.com/123",
@@ -445,9 +456,12 @@ class AssetServiceTest {
             when(linkRepository.existsByAssetIdAndTargetTypeAndTargetIdentifierAndLinkType(
                             asset.getId(), AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS))
                     .thenReturn(true);
+            when(graphTargetResolverService.validateAssetTarget(
+                            projectId, AssetLinkTargetType.REQUIREMENT, null, "GC-M010"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(null, "GC-M010", false));
 
             var command = new CreateAssetLinkCommand(
-                    AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
+                    AssetLinkTargetType.REQUIREMENT, null, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
 
             assertThatThrownBy(() -> assetService.createLink(asset.getId(), command))
                     .isInstanceOf(ConflictException.class);
@@ -459,7 +473,7 @@ class AssetServiceTest {
             when(assetRepository.findById(id)).thenReturn(Optional.empty());
 
             var command = new CreateAssetLinkCommand(
-                    AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
+                    AssetLinkTargetType.REQUIREMENT, null, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
 
             assertThatThrownBy(() -> assetService.createLink(id, command)).isInstanceOf(NotFoundException.class);
         }
@@ -505,7 +519,7 @@ class AssetServiceTest {
                             AssetLinkTargetType.REQUIREMENT, "GC-M010", projectId))
                     .thenReturn(List.of(makeLink(asset)));
 
-            var result = assetService.getLinksByTarget(projectId, AssetLinkTargetType.REQUIREMENT, "GC-M010");
+            var result = assetService.getLinksByTarget(projectId, AssetLinkTargetType.REQUIREMENT, null, "GC-M010");
 
             assertThat(result).hasSize(1);
         }
@@ -645,6 +659,629 @@ class AssetServiceTest {
             assertThat(result.getExternalSourceId()).isEqualTo("config-rule-123");
             assertThat(result.getCollectedAt()).isEqualTo(now);
             assertThat(result.getConfidence()).isEqualTo("0.95");
+        }
+    }
+
+    @Nested
+    class ProjectAwareUpdate {
+
+        @Test
+        void updateWithProjectIdSucceeds() {
+            var asset = createAsset("ASSET-001", "Old Name");
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateAssetCommand("New Name", "New desc", AssetType.DATABASE);
+            var result = assetService.update(projectId, asset.getId(), command);
+
+            assertThat(result.getName()).isEqualTo("New Name");
+            assertThat(result.getDescription()).isEqualTo("New desc");
+            assertThat(result.getAssetType()).isEqualTo(AssetType.DATABASE);
+        }
+
+        @Test
+        void updateWithProjectIdNotFoundThrows() {
+            var id = UUID.randomUUID();
+            when(assetRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.empty());
+
+            var command = new UpdateAssetCommand("New Name", null, null);
+
+            assertThatThrownBy(() -> assetService.update(projectId, id, command))
+                    .isInstanceOf(NotFoundException.class);
+        }
+    }
+
+    @Nested
+    class ProjectAwareRead {
+
+        @Test
+        void getByIdWithProjectIdReturnsAsset() {
+            var asset = createAsset("ASSET-001", "Test");
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+
+            var result = assetService.getById(projectId, asset.getId());
+            assertThat(result.getUid()).isEqualTo("ASSET-001");
+        }
+
+        @Test
+        void getByIdWithProjectIdNotFoundThrows() {
+            var id = UUID.randomUUID();
+            when(assetRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> assetService.getById(projectId, id)).isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void listByProjectAndTypeReturnsList() {
+            var a1 = createAsset("ASSET-001", "DB One");
+            a1.setAssetType(AssetType.DATABASE);
+            when(assetRepository.findByProjectIdAndAssetTypeAndArchivedAtIsNull(projectId, AssetType.DATABASE))
+                    .thenReturn(List.of(a1));
+
+            var result = assetService.listByProjectAndType(projectId, AssetType.DATABASE);
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getAssetType()).isEqualTo(AssetType.DATABASE);
+        }
+    }
+
+    @Nested
+    class ProjectAwareArchive {
+
+        @Test
+        void archiveWithProjectIdSetsArchivedAt() {
+            var asset = createAsset("ASSET-001", "Test");
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var result = assetService.archive(projectId, asset.getId());
+            assertThat(result.getArchivedAt()).isNotNull();
+        }
+    }
+
+    @Nested
+    class ProjectAwareDelete {
+
+        @Test
+        void deleteWithProjectIdSucceeds() {
+            var asset = createAsset("ASSET-001", "Test");
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+
+            assetService.delete(projectId, asset.getId());
+            verify(assetRepository).delete(asset);
+        }
+    }
+
+    @Nested
+    class ProjectAwareRelations {
+
+        @Test
+        void createRelationWithProjectIdSucceeds() {
+            var source = createAsset("ASSET-001", "Source");
+            var target = createAsset("ASSET-002", "Target");
+            when(assetRepository.findByIdAndProjectId(source.getId(), projectId))
+                    .thenReturn(Optional.of(source));
+            when(assetRepository.findByIdAndProjectId(target.getId(), projectId))
+                    .thenReturn(Optional.of(target));
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(
+                            source.getId(), target.getId(), AssetRelationType.DEPENDS_ON))
+                    .thenReturn(false);
+            when(relationRepository.save(any())).thenAnswer(inv -> {
+                var saved = inv.getArgument(0, AssetRelation.class);
+                setField(saved, "id", UUID.randomUUID());
+                return saved;
+            });
+
+            var result = assetService.createRelation(
+                    projectId, source.getId(), target.getId(), AssetRelationType.DEPENDS_ON);
+
+            assertThat(result.getRelationType()).isEqualTo(AssetRelationType.DEPENDS_ON);
+        }
+
+        @Test
+        void createRelationWithProjectIdSelfReferenceThrows() {
+            var id = UUID.randomUUID();
+
+            assertThatThrownBy(() -> assetService.createRelation(projectId, id, id, AssetRelationType.DEPENDS_ON))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("cannot relate to itself");
+        }
+
+        @Test
+        void createRelationWithProjectIdDuplicateThrowsConflict() {
+            var source = createAsset("ASSET-001", "Source");
+            var target = createAsset("ASSET-002", "Target");
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(
+                            source.getId(), target.getId(), AssetRelationType.DEPENDS_ON))
+                    .thenReturn(true);
+
+            assertThatThrownBy(() -> assetService.createRelation(
+                            projectId, source.getId(), target.getId(), AssetRelationType.DEPENDS_ON))
+                    .isInstanceOf(ConflictException.class);
+        }
+
+        @Test
+        void createRelationWithCommandAndProjectIdSucceeds() {
+            var source = createAsset("ASSET-001", "Source");
+            var target = createAsset("ASSET-002", "Target");
+            when(assetRepository.findByIdAndProjectId(source.getId(), projectId))
+                    .thenReturn(Optional.of(source));
+            when(assetRepository.findByIdAndProjectId(target.getId(), projectId))
+                    .thenReturn(Optional.of(target));
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(
+                            source.getId(), target.getId(), AssetRelationType.DEPENDS_ON))
+                    .thenReturn(false);
+            when(relationRepository.save(any())).thenAnswer(inv -> {
+                var saved = inv.getArgument(0, AssetRelation.class);
+                setField(saved, "id", UUID.randomUUID());
+                return saved;
+            });
+
+            var now = Instant.now();
+            var command = new CreateAssetRelationCommand(
+                    target.getId(), AssetRelationType.DEPENDS_ON, "desc", "SRC", "ext-1", now, "0.8");
+            var result = assetService.createRelation(projectId, command, source.getId());
+
+            assertThat(result.getRelationType()).isEqualTo(AssetRelationType.DEPENDS_ON);
+            assertThat(result.getDescription()).isEqualTo("desc");
+            assertThat(result.getSourceSystem()).isEqualTo("SRC");
+            assertThat(result.getExternalSourceId()).isEqualTo("ext-1");
+            assertThat(result.getCollectedAt()).isEqualTo(now);
+            assertThat(result.getConfidence()).isEqualTo("0.8");
+        }
+
+        @Test
+        void updateRelationWithProjectIdSucceeds() {
+            var source = createAsset("ASSET-001", "Source");
+            var target = createAsset("ASSET-002", "Target");
+            var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
+            setField(relation, "id", UUID.randomUUID());
+
+            when(relationRepository.findByIdWithEntitiesAndProjectId(relation.getId(), projectId))
+                    .thenReturn(Optional.of(relation));
+            when(relationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var now = Instant.now();
+            var command = new UpdateAssetRelationCommand("Updated", "SYS", "ext-id", now, "0.75");
+            var result = assetService.updateRelation(projectId, source.getId(), relation.getId(), command);
+
+            assertThat(result.getDescription()).isEqualTo("Updated");
+            assertThat(result.getSourceSystem()).isEqualTo("SYS");
+            assertThat(result.getExternalSourceId()).isEqualTo("ext-id");
+            assertThat(result.getCollectedAt()).isEqualTo(now);
+            assertThat(result.getConfidence()).isEqualTo("0.75");
+        }
+
+        @Test
+        void updateRelationWithProjectIdNotBelongingThrows() {
+            var source = createAsset("ASSET-001", "Source");
+            var target = createAsset("ASSET-002", "Target");
+            var unrelated = createAsset("ASSET-003", "Unrelated");
+            var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
+            setField(relation, "id", UUID.randomUUID());
+
+            when(relationRepository.findByIdWithEntitiesAndProjectId(relation.getId(), projectId))
+                    .thenReturn(Optional.of(relation));
+
+            assertThatThrownBy(() -> assetService.updateRelation(
+                            projectId,
+                            unrelated.getId(),
+                            relation.getId(),
+                            new UpdateAssetRelationCommand("desc", null, null, null, null)))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining("does not belong");
+        }
+
+        @Test
+        void getRelationsWithProjectIdReturnsCombinedList() {
+            var source = createAsset("ASSET-001", "Source");
+            var target = createAsset("ASSET-002", "Target");
+            var outgoing = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
+            setField(outgoing, "id", UUID.randomUUID());
+            var incoming = new AssetRelation(target, source, AssetRelationType.CONTAINS);
+            setField(incoming, "id", UUID.randomUUID());
+
+            when(assetRepository.findByIdAndProjectId(source.getId(), projectId))
+                    .thenReturn(Optional.of(source));
+            when(relationRepository.findBySourceIdWithEntities(source.getId())).thenReturn(List.of(outgoing));
+            when(relationRepository.findByTargetIdWithEntities(source.getId())).thenReturn(List.of(incoming));
+
+            var result = assetService.getRelations(projectId, source.getId());
+
+            assertThat(result).hasSize(2);
+        }
+
+        @Test
+        void deleteRelationWithProjectIdSucceeds() {
+            var source = createAsset("ASSET-001", "Source");
+            var target = createAsset("ASSET-002", "Target");
+            var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
+            setField(relation, "id", UUID.randomUUID());
+
+            when(relationRepository.findByIdWithEntitiesAndProjectId(relation.getId(), projectId))
+                    .thenReturn(Optional.of(relation));
+
+            assetService.deleteRelation(projectId, source.getId(), relation.getId());
+            verify(relationRepository).delete(relation);
+        }
+
+        @Test
+        void deleteRelationWithProjectIdNotBelongingThrows() {
+            var source = createAsset("ASSET-001", "Source");
+            var target = createAsset("ASSET-002", "Target");
+            var unrelated = createAsset("ASSET-003", "Unrelated");
+            var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
+            setField(relation, "id", UUID.randomUUID());
+
+            when(relationRepository.findByIdWithEntitiesAndProjectId(relation.getId(), projectId))
+                    .thenReturn(Optional.of(relation));
+
+            assertThatThrownBy(() -> assetService.deleteRelation(projectId, unrelated.getId(), relation.getId()))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining("does not belong");
+        }
+    }
+
+    @Nested
+    class ProjectAwareLinks {
+
+        private AssetLink makeLink(OperationalAsset asset) {
+            var link = new AssetLink(asset, AssetLinkTargetType.REQUIREMENT, null, "GC-M010", AssetLinkType.IMPLEMENTS);
+            setField(link, "id", UUID.randomUUID());
+            setField(link, "createdAt", Instant.now());
+            setField(link, "updatedAt", Instant.now());
+            return link;
+        }
+
+        @Test
+        void createLinkWithProjectIdSucceeds() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(graphTargetResolverService.validateAssetTarget(
+                            projectId, AssetLinkTargetType.REQUIREMENT, null, "GC-M010"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(null, "GC-M010", false));
+            when(linkRepository.existsByAssetIdAndTargetTypeAndTargetIdentifierAndLinkType(
+                            asset.getId(), AssetLinkTargetType.REQUIREMENT, "GC-M010", AssetLinkType.IMPLEMENTS))
+                    .thenReturn(false);
+            when(linkRepository.save(any())).thenAnswer(inv -> {
+                var saved = inv.getArgument(0, AssetLink.class);
+                setField(saved, "id", UUID.randomUUID());
+                return saved;
+            });
+
+            var command = new CreateAssetLinkCommand(
+                    AssetLinkTargetType.REQUIREMENT, null, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
+            var result = assetService.createLink(projectId, asset.getId(), command);
+
+            assertThat(result.getTargetType()).isEqualTo(AssetLinkTargetType.REQUIREMENT);
+            assertThat(result.getTargetIdentifier()).isEqualTo("GC-M010");
+        }
+
+        @Test
+        void createLinkWithProjectIdInternalTargetSucceeds() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var targetEntityId = UUID.randomUUID();
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(graphTargetResolverService.validateAssetTarget(
+                            projectId, AssetLinkTargetType.REQUIREMENT, targetEntityId, "GC-M010"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(targetEntityId, "GC-M010", true));
+            when(linkRepository.existsByAssetIdAndTargetTypeAndTargetEntityIdAndLinkType(
+                            asset.getId(), AssetLinkTargetType.REQUIREMENT, targetEntityId, AssetLinkType.IMPLEMENTS))
+                    .thenReturn(false);
+            when(linkRepository.save(any())).thenAnswer(inv -> {
+                var saved = inv.getArgument(0, AssetLink.class);
+                setField(saved, "id", UUID.randomUUID());
+                return saved;
+            });
+
+            var command = new CreateAssetLinkCommand(
+                    AssetLinkTargetType.REQUIREMENT, targetEntityId, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
+            var result = assetService.createLink(projectId, asset.getId(), command);
+
+            assertThat(result.getTargetType()).isEqualTo(AssetLinkTargetType.REQUIREMENT);
+        }
+
+        @Test
+        void createLinkWithProjectIdDuplicateInternalTargetThrowsConflict() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var targetEntityId = UUID.randomUUID();
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(graphTargetResolverService.validateAssetTarget(
+                            projectId, AssetLinkTargetType.REQUIREMENT, targetEntityId, "GC-M010"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(targetEntityId, "GC-M010", true));
+            when(linkRepository.existsByAssetIdAndTargetTypeAndTargetEntityIdAndLinkType(
+                            asset.getId(), AssetLinkTargetType.REQUIREMENT, targetEntityId, AssetLinkType.IMPLEMENTS))
+                    .thenReturn(true);
+
+            var command = new CreateAssetLinkCommand(
+                    AssetLinkTargetType.REQUIREMENT, targetEntityId, "GC-M010", AssetLinkType.IMPLEMENTS, null, null);
+
+            assertThatThrownBy(() -> assetService.createLink(projectId, asset.getId(), command))
+                    .isInstanceOf(ConflictException.class);
+        }
+
+        @Test
+        void createLinkWithProjectIdSetsOptionalFields() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(graphTargetResolverService.validateAssetTarget(
+                            projectId, AssetLinkTargetType.EXTERNAL, null, "ext-123"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(null, "ext-123", false));
+            when(linkRepository.existsByAssetIdAndTargetTypeAndTargetIdentifierAndLinkType(
+                            asset.getId(), AssetLinkTargetType.EXTERNAL, "ext-123", AssetLinkType.DEPENDS_ON))
+                    .thenReturn(false);
+            when(linkRepository.save(any())).thenAnswer(inv -> {
+                var saved = inv.getArgument(0, AssetLink.class);
+                setField(saved, "id", UUID.randomUUID());
+                return saved;
+            });
+
+            var command = new CreateAssetLinkCommand(
+                    AssetLinkTargetType.EXTERNAL,
+                    null,
+                    "ext-123",
+                    AssetLinkType.DEPENDS_ON,
+                    "https://example.com",
+                    "Example");
+            var result = assetService.createLink(projectId, asset.getId(), command);
+
+            assertThat(result.getTargetUrl()).isEqualTo("https://example.com");
+            assertThat(result.getTargetTitle()).isEqualTo("Example");
+        }
+
+        @Test
+        void getLinksForAssetWithProjectIdReturnsList() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(linkRepository.findByAssetId(asset.getId())).thenReturn(List.of(makeLink(asset)));
+
+            var result = assetService.getLinksForAsset(projectId, asset.getId());
+
+            assertThat(result).hasSize(1);
+        }
+
+        @Test
+        void getLinksForAssetByTargetTypeReturnsList() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(linkRepository.findByAssetIdAndTargetType(asset.getId(), AssetLinkTargetType.REQUIREMENT))
+                    .thenReturn(List.of(makeLink(asset)));
+
+            var result = assetService.getLinksForAssetByTargetType(
+                    projectId, asset.getId(), AssetLinkTargetType.REQUIREMENT);
+
+            assertThat(result).hasSize(1);
+        }
+
+        @Test
+        void getLinksForAssetByTargetTypeLegacyReturnsList() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(linkRepository.findByAssetIdAndTargetType(asset.getId(), AssetLinkTargetType.REQUIREMENT))
+                    .thenReturn(List.of(makeLink(asset)));
+
+            var result = assetService.getLinksForAssetByTargetType(asset.getId(), AssetLinkTargetType.REQUIREMENT);
+
+            assertThat(result).hasSize(1);
+        }
+
+        @Test
+        void getLinksByTargetWithEntityIdReturnsList() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var targetEntityId = UUID.randomUUID();
+            when(linkRepository.findByTargetTypeAndTargetEntityIdAndProjectId(
+                            AssetLinkTargetType.REQUIREMENT, targetEntityId, projectId))
+                    .thenReturn(List.of(makeLink(asset)));
+
+            var result = assetService.getLinksByTarget(
+                    projectId, AssetLinkTargetType.REQUIREMENT, targetEntityId, "GC-M010");
+
+            assertThat(result).hasSize(1);
+        }
+
+        @Test
+        void deleteLinkWithProjectIdSucceeds() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var link = makeLink(asset);
+            when(linkRepository.findByIdWithAssetAndProjectId(link.getId(), projectId))
+                    .thenReturn(Optional.of(link));
+
+            assetService.deleteLink(projectId, asset.getId(), link.getId());
+            verify(linkRepository).delete(link);
+        }
+
+        @Test
+        void deleteLinkWithProjectIdNotBelongingThrows() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var other = createAsset("ASSET-002", "Other");
+            var link = makeLink(asset);
+            when(linkRepository.findByIdWithAssetAndProjectId(link.getId(), projectId))
+                    .thenReturn(Optional.of(link));
+
+            assertThatThrownBy(() -> assetService.deleteLink(projectId, other.getId(), link.getId()))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining("does not belong");
+        }
+
+        @Test
+        void deleteLinkWithProjectIdNotFoundThrows() {
+            var linkId = UUID.randomUUID();
+            when(linkRepository.findByIdWithAssetAndProjectId(linkId, projectId))
+                    .thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> assetService.deleteLink(projectId, UUID.randomUUID(), linkId))
+                    .isInstanceOf(NotFoundException.class);
+        }
+    }
+
+    @Nested
+    class ProjectAwareExternalIds {
+
+        @Test
+        void createExternalIdWithProjectIdSucceeds() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(externalIdRepository.existsByAssetIdAndSourceSystemAndSourceId(asset.getId(), "AWS", "i-abc"))
+                    .thenReturn(false);
+            when(externalIdRepository.save(any())).thenAnswer(inv -> {
+                var saved = inv.getArgument(0, AssetExternalId.class);
+                setField(saved, "id", UUID.randomUUID());
+                return saved;
+            });
+
+            var now = Instant.now();
+            var command = new CreateAssetExternalIdCommand("AWS", "i-abc", now, "HIGH");
+            var result = assetService.createExternalId(projectId, asset.getId(), command);
+
+            assertThat(result.getSourceSystem()).isEqualTo("AWS");
+            assertThat(result.getSourceId()).isEqualTo("i-abc");
+            assertThat(result.getCollectedAt()).isEqualTo(now);
+            assertThat(result.getConfidence()).isEqualTo("HIGH");
+        }
+
+        @Test
+        void createExternalIdWithProjectIdDuplicateThrowsConflict() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(externalIdRepository.existsByAssetIdAndSourceSystemAndSourceId(asset.getId(), "AWS", "i-abc"))
+                    .thenReturn(true);
+
+            var command = new CreateAssetExternalIdCommand("AWS", "i-abc", null, null);
+
+            assertThatThrownBy(() -> assetService.createExternalId(projectId, asset.getId(), command))
+                    .isInstanceOf(ConflictException.class);
+        }
+
+        @Test
+        void updateExternalIdWithProjectIdSucceeds() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var extId = new AssetExternalId(asset, "AWS", "i-abc");
+            setField(extId, "id", UUID.randomUUID());
+
+            when(externalIdRepository.findByIdWithAssetAndProjectId(extId.getId(), projectId))
+                    .thenReturn(Optional.of(extId));
+            when(externalIdRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var now = Instant.now();
+            var command = new UpdateAssetExternalIdCommand(now, "LOW");
+            var result = assetService.updateExternalId(projectId, asset.getId(), extId.getId(), command);
+
+            assertThat(result.getCollectedAt()).isEqualTo(now);
+            assertThat(result.getConfidence()).isEqualTo("LOW");
+        }
+
+        @Test
+        void updateExternalIdWithProjectIdNotBelongingThrows() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var other = createAsset("ASSET-002", "Other");
+            var extId = new AssetExternalId(asset, "AWS", "i-abc");
+            setField(extId, "id", UUID.randomUUID());
+
+            when(externalIdRepository.findByIdWithAssetAndProjectId(extId.getId(), projectId))
+                    .thenReturn(Optional.of(extId));
+
+            assertThatThrownBy(() -> assetService.updateExternalId(
+                            projectId, other.getId(), extId.getId(), new UpdateAssetExternalIdCommand(null, "LOW")))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining("does not belong");
+        }
+
+        @Test
+        void getExternalIdsWithProjectIdReturnsList() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var extId = new AssetExternalId(asset, "AWS", "i-abc");
+            setField(extId, "id", UUID.randomUUID());
+
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(externalIdRepository.findByAssetId(asset.getId())).thenReturn(List.of(extId));
+
+            var result = assetService.getExternalIds(projectId, asset.getId());
+
+            assertThat(result).hasSize(1);
+        }
+
+        @Test
+        void getExternalIdsBySourceWithProjectIdReturnsList() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var extId = new AssetExternalId(asset, "AWS", "i-abc");
+            setField(extId, "id", UUID.randomUUID());
+
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(externalIdRepository.findByAssetIdAndSourceSystem(asset.getId(), "AWS"))
+                    .thenReturn(List.of(extId));
+
+            var result = assetService.getExternalIdsBySource(projectId, asset.getId(), "AWS");
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getSourceSystem()).isEqualTo("AWS");
+        }
+
+        @Test
+        void getExternalIdsBySourceLegacyReturnsList() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var extId = new AssetExternalId(asset, "GCP", "proj/inst");
+            setField(extId, "id", UUID.randomUUID());
+
+            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(externalIdRepository.findByAssetIdAndSourceSystem(asset.getId(), "GCP"))
+                    .thenReturn(List.of(extId));
+
+            var result = assetService.getExternalIdsBySource(asset.getId(), "GCP");
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getSourceSystem()).isEqualTo("GCP");
+        }
+
+        @Test
+        void findByExternalIdReturnsList() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var extId = new AssetExternalId(asset, "AWS", "i-abc");
+            setField(extId, "id", UUID.randomUUID());
+
+            when(externalIdRepository.findBySourceSystemAndSourceIdAndProjectId("AWS", "i-abc", projectId))
+                    .thenReturn(List.of(extId));
+
+            var result = assetService.findByExternalId(projectId, "AWS", "i-abc");
+
+            assertThat(result).hasSize(1);
+        }
+
+        @Test
+        void deleteExternalIdWithProjectIdSucceeds() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var extId = new AssetExternalId(asset, "AWS", "i-abc");
+            setField(extId, "id", UUID.randomUUID());
+
+            when(externalIdRepository.findByIdWithAssetAndProjectId(extId.getId(), projectId))
+                    .thenReturn(Optional.of(extId));
+
+            assetService.deleteExternalId(projectId, asset.getId(), extId.getId());
+            verify(externalIdRepository).delete(extId);
+        }
+
+        @Test
+        void deleteExternalIdWithProjectIdNotBelongingThrows() {
+            var asset = createAsset("ASSET-001", "Web Server");
+            var other = createAsset("ASSET-002", "Other");
+            var extId = new AssetExternalId(asset, "AWS", "i-abc");
+            setField(extId, "id", UUID.randomUUID());
+
+            when(externalIdRepository.findByIdWithAssetAndProjectId(extId.getId(), projectId))
+                    .thenReturn(Optional.of(extId));
+
+            assertThatThrownBy(() -> assetService.deleteExternalId(projectId, other.getId(), extId.getId()))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining("does not belong");
+        }
+
+        @Test
+        void deleteExternalIdWithProjectIdNotFoundThrows() {
+            var extIdId = UUID.randomUUID();
+            when(externalIdRepository.findByIdWithAssetAndProjectId(extIdId, projectId))
+                    .thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> assetService.deleteExternalId(projectId, UUID.randomUUID(), extIdId))
+                    .isInstanceOf(NotFoundException.class);
         }
     }
 }

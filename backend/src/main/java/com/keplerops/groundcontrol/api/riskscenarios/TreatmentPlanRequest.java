@@ -1,0 +1,24 @@
+package com.keplerops.groundcontrol.api.riskscenarios;
+
+import com.keplerops.groundcontrol.domain.riskscenarios.state.TreatmentPlanStatus;
+import com.keplerops.groundcontrol.domain.riskscenarios.state.TreatmentStrategy;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+public record TreatmentPlanRequest(
+        @NotBlank @Size(max = 50) String uid,
+        @NotBlank @Size(max = 200) String title,
+        @NotNull UUID riskRegisterRecordId,
+        UUID riskScenarioId,
+        @NotNull TreatmentStrategy strategy,
+        @Size(max = 200) String owner,
+        String rationale,
+        Instant dueDate,
+        TreatmentPlanStatus status,
+        List<Map<String, Object>> actionItems,
+        List<String> reassessmentTriggers) {}

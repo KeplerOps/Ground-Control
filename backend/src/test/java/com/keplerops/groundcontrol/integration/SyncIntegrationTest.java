@@ -15,6 +15,7 @@ import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRep
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubClient;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubIssueData;
+import com.keplerops.groundcontrol.domain.requirements.service.GitHubPullRequestData;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import java.util.List;
@@ -56,6 +57,11 @@ class SyncIntegrationTest extends BaseIntegrationTest {
                                     "https://github.com/test/repo/issues/2",
                                     "Add linting tools",
                                     List.of("phase-0", "P1", "enhancement")));
+                }
+
+                @Override
+                public List<GitHubPullRequestData> fetchAllPullRequests(String owner, String repo) {
+                    return List.of();
                 }
 
                 @Override
@@ -133,6 +139,6 @@ class SyncIntegrationTest extends BaseIntegrationTest {
         var updatedLinks = traceabilityLinkRepository.findByRequirementId(requirement.getId());
         assert updatedLinks.size() == 1;
         assert updatedLinks.get(0).getArtifactUrl().equals("https://github.com/test/repo/issues/1");
-        assert updatedLinks.get(0).getArtifactTitle().equals("Setup CI");
+        assert updatedLinks.get(0).getArtifactTitle().equals("#1 - Setup CI [CLOSED]");
     }
 }

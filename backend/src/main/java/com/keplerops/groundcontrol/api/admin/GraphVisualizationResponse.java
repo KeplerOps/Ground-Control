@@ -1,17 +1,14 @@
 package com.keplerops.groundcontrol.api.admin;
 
-import com.keplerops.groundcontrol.api.requirements.RelationResponse;
-import com.keplerops.groundcontrol.domain.requirements.service.GraphVisualizationResult;
+import com.keplerops.groundcontrol.domain.graph.model.GraphProjection;
 import java.util.List;
 
 public record GraphVisualizationResponse(
-        List<GraphVisualizationNodeResponse> nodes, List<RelationResponse> edges, int totalNodes, int totalEdges) {
+        List<GraphVisualizationNodeResponse> nodes, List<GraphEdgeResponse> edges, int totalNodes, int totalEdges) {
 
-    public static GraphVisualizationResponse from(GraphVisualizationResult result) {
-        var nodes = result.requirements().stream()
-                .map(GraphVisualizationNodeResponse::from)
-                .toList();
-        var edges = result.relations().stream().map(RelationResponse::from).toList();
+    public static GraphVisualizationResponse from(GraphProjection result) {
+        var nodes = GraphVisualizationNodeResponse.from(result);
+        var edges = result.edges().stream().map(GraphEdgeResponse::from).toList();
         return new GraphVisualizationResponse(nodes, edges, nodes.size(), edges.size());
     }
 }

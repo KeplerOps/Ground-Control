@@ -45,12 +45,14 @@ class ObservationServiceTest {
 
     private OperationalAsset asset;
     private UUID assetId;
+    private UUID projectId;
     private static final Instant NOW = Instant.parse("2026-04-01T12:00:00Z");
 
     @BeforeEach
     void setUp() {
         var project = new Project("ground-control", "Ground Control");
-        setField(project, "id", UUID.randomUUID());
+        projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
         asset = new OperationalAsset(project, "WEB-001", "Web Server");
         assetId = UUID.randomUUID();
         setField(asset, "id", assetId);
@@ -306,6 +308,344 @@ class ObservationServiceTest {
             observationService.delete(assetId, obsId);
 
             verify(observationRepository).delete(obs);
+        }
+    }
+
+    @Nested
+    class ProjectAwareCreate {
+
+        @Test
+        void createsObservationWithProjectId() {
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.of(asset));
+            when(observationRepository.existsByAssetIdAndCategoryAndObservationKeyAndObservedAt(
+                            assetId, ObservationCategory.CONFIGURATION, "os_version", NOW))
+                    .thenReturn(false);
+            when(observationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new CreateObservationCommand(
+                    ObservationCategory.CONFIGURATION,
+                    "os_version",
+                    "Ubuntu 22.04",
+                    "scanner-agent",
+                    NOW,
+                    NOW.plusSeconds(86400),
+                    "HIGH",
+                    "https://evidence.example.com/scan/123");
+
+            var result = observationService.create(projectId, assetId, command);
+
+            assertThat(result.getCategory()).isEqualTo(ObservationCategory.CONFIGURATION);
+            assertThat(result.getObservationKey()).isEqualTo("os_version");
+            assertThat(result.getObservationValue()).isEqualTo("Ubuntu 22.04");
+            assertThat(result.getSource()).isEqualTo("scanner-agent");
+            assertThat(result.getExpiresAt()).isEqualTo(NOW.plusSeconds(86400));
+            assertThat(result.getConfidence()).isEqualTo("HIGH");
+            assertThat(result.getEvidenceRef()).isEqualTo("https://evidence.example.com/scan/123");
+        }
+
+        @Test
+        void throwsWhenAssetNotFoundInProject() {
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.empty());
+
+            var command = new CreateObservationCommand(
+                    ObservationCategory.CONFIGURATION, "os_version", "Ubuntu 22.04", "scanner", NOW, null, null, null);
+
+            assertThatThrownBy(() -> observationService.create(projectId, assetId, command))
+                    .isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void throwsOnDuplicateWithProjectId() {
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.of(asset));
+            when(observationRepository.existsByAssetIdAndCategoryAndObservationKeyAndObservedAt(
+                            assetId, ObservationCategory.CONFIGURATION, "os_version", NOW))
+                    .thenReturn(true);
+
+            var command = new CreateObservationCommand(
+                    ObservationCategory.CONFIGURATION, "os_version", "Ubuntu 22.04", "scanner", NOW, null, null, null);
+
+            assertThatThrownBy(() -> observationService.create(projectId, assetId, command))
+                    .isInstanceOf(ConflictException.class);
+        }
+
+        @Test
+        void throwsWhenExpiresAtBeforeObservedAtWithProjectId() {
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.of(asset));
+            when(observationRepository.existsByAssetIdAndCategoryAndObservationKeyAndObservedAt(
+                            any(), any(), any(), any()))
+                    .thenReturn(false);
+
+            var command = new CreateObservationCommand(
+                    ObservationCategory.CONFIGURATION,
+                    "os_version",
+                    "Ubuntu 22.04",
+                    "scanner",
+                    NOW,
+                    NOW.minusSeconds(3600),
+                    null,
+                    null);
+
+            assertThatThrownBy(() -> observationService.create(projectId, assetId, command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("expiresAt must be after observedAt");
+        }
+
+        @Test
+        void createsWithNullOptionalFieldsWithProjectId() {
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.of(asset));
+            when(observationRepository.existsByAssetIdAndCategoryAndObservationKeyAndObservedAt(
+                            any(), any(), any(), any()))
+                    .thenReturn(false);
+            when(observationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new CreateObservationCommand(
+                    ObservationCategory.EXPOSURE, "cve_status", "vulnerable", "nessus", NOW, null, null, null);
+
+            var result = observationService.create(projectId, assetId, command);
+
+            assertThat(result.getExpiresAt()).isNull();
+            assertThat(result.getConfidence()).isNull();
+            assertThat(result.getEvidenceRef()).isNull();
+        }
+    }
+
+    @Nested
+    class ProjectAwareUpdate {
+
+        @Test
+        void updatesObservationWithProjectId() {
+            var obs = makeObservation();
+            var obsId = obs.getId();
+            when(observationRepository.findByIdWithAssetAndProjectId(obsId, projectId))
+                    .thenReturn(Optional.of(obs));
+            when(observationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateObservationCommand("Ubuntu 24.04", null, "MEDIUM", null);
+            var result = observationService.update(projectId, assetId, obsId, command);
+
+            assertThat(result.getObservationValue()).isEqualTo("Ubuntu 24.04");
+            assertThat(result.getConfidence()).isEqualTo("MEDIUM");
+        }
+
+        @Test
+        void updatesAllFieldsWithProjectId() {
+            var obs = makeObservation();
+            var obsId = obs.getId();
+            when(observationRepository.findByIdWithAssetAndProjectId(obsId, projectId))
+                    .thenReturn(Optional.of(obs));
+            when(observationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var newExpiry = NOW.plusSeconds(172800);
+            var command =
+                    new UpdateObservationCommand("new-value", newExpiry, "LOW", "https://new-evidence.example.com");
+            var result = observationService.update(projectId, assetId, obsId, command);
+
+            assertThat(result.getObservationValue()).isEqualTo("new-value");
+            assertThat(result.getExpiresAt()).isEqualTo(newExpiry);
+            assertThat(result.getConfidence()).isEqualTo("LOW");
+            assertThat(result.getEvidenceRef()).isEqualTo("https://new-evidence.example.com");
+        }
+
+        @Test
+        void throwsWhenExpiresAtBeforeObservedAtOnUpdate() {
+            var obs = makeObservation();
+            var obsId = obs.getId();
+            when(observationRepository.findByIdWithAssetAndProjectId(obsId, projectId))
+                    .thenReturn(Optional.of(obs));
+
+            var command = new UpdateObservationCommand(null, NOW.minusSeconds(3600), null, null);
+
+            assertThatThrownBy(() -> observationService.update(projectId, assetId, obsId, command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("expiresAt must be after observedAt");
+        }
+
+        @Test
+        void throwsWhenObservationNotFoundWithProjectId() {
+            var obsId = UUID.randomUUID();
+            when(observationRepository.findByIdWithAssetAndProjectId(obsId, projectId))
+                    .thenReturn(Optional.empty());
+
+            var command = new UpdateObservationCommand("new value", null, null, null);
+
+            assertThatThrownBy(() -> observationService.update(projectId, assetId, obsId, command))
+                    .isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void throwsWhenObservationBelongsToDifferentAssetWithProjectId() {
+            var obs = makeObservation();
+            var obsId = obs.getId();
+            var otherAssetId = UUID.randomUUID();
+            when(observationRepository.findByIdWithAssetAndProjectId(obsId, projectId))
+                    .thenReturn(Optional.of(obs));
+
+            var command = new UpdateObservationCommand("new value", null, null, null);
+
+            assertThatThrownBy(() -> observationService.update(projectId, otherAssetId, obsId, command))
+                    .isInstanceOf(NotFoundException.class);
+        }
+    }
+
+    @Nested
+    class ProjectAwareGetById {
+
+        @Test
+        void returnsObservationWithProjectId() {
+            var obs = makeObservation();
+            var obsId = obs.getId();
+            when(observationRepository.findByIdWithAssetAndProjectId(obsId, projectId))
+                    .thenReturn(Optional.of(obs));
+
+            var result = observationService.getById(projectId, assetId, obsId);
+
+            assertThat(result.getId()).isEqualTo(obsId);
+        }
+
+        @Test
+        void throwsWhenNotFoundWithProjectId() {
+            var obsId = UUID.randomUUID();
+            when(observationRepository.findByIdWithAssetAndProjectId(obsId, projectId))
+                    .thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> observationService.getById(projectId, assetId, obsId))
+                    .isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void throwsWhenBelongsToDifferentAssetWithProjectId() {
+            var obs = makeObservation();
+            var obsId = obs.getId();
+            var otherAssetId = UUID.randomUUID();
+            when(observationRepository.findByIdWithAssetAndProjectId(obsId, projectId))
+                    .thenReturn(Optional.of(obs));
+
+            assertThatThrownBy(() -> observationService.getById(projectId, otherAssetId, obsId))
+                    .isInstanceOf(NotFoundException.class);
+        }
+    }
+
+    @Nested
+    class ProjectAwareListByAsset {
+
+        @Test
+        void listsAllObservationsWithProjectId() {
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.of(asset));
+            when(observationRepository.findByAssetId(assetId)).thenReturn(List.of(makeObservation()));
+
+            var result = observationService.listByAsset(projectId, assetId, null, null);
+
+            assertThat(result).hasSize(1);
+        }
+
+        @Test
+        void filtersByCategoryWithProjectId() {
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.of(asset));
+            when(observationRepository.findByAssetIdAndCategory(assetId, ObservationCategory.CONFIGURATION))
+                    .thenReturn(List.of(makeObservation()));
+
+            var result = observationService.listByAsset(projectId, assetId, ObservationCategory.CONFIGURATION, null);
+
+            assertThat(result).hasSize(1);
+        }
+
+        @Test
+        void filtersByKeyWithProjectId() {
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.of(asset));
+            when(observationRepository.findByAssetIdAndKey(assetId, "os_version"))
+                    .thenReturn(List.of(makeObservation()));
+
+            var result = observationService.listByAsset(projectId, assetId, null, "os_version");
+
+            assertThat(result).hasSize(1);
+        }
+
+        @Test
+        void filtersByCategoryAndKeyWithProjectId() {
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.of(asset));
+            when(observationRepository.findByAssetIdAndCategoryAndKey(
+                            assetId, ObservationCategory.CONFIGURATION, "os_version"))
+                    .thenReturn(List.of(makeObservation()));
+
+            var result =
+                    observationService.listByAsset(projectId, assetId, ObservationCategory.CONFIGURATION, "os_version");
+
+            assertThat(result).hasSize(1);
+        }
+
+        @Test
+        void throwsWhenAssetNotFoundWithProjectId() {
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> observationService.listByAsset(projectId, assetId, null, null))
+                    .isInstanceOf(NotFoundException.class);
+        }
+    }
+
+    @Nested
+    class ProjectAwareListLatest {
+
+        @Test
+        void returnsLatestWithProjectId() {
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.of(asset));
+            when(observationRepository.findLatestByAssetId(any(), any())).thenReturn(List.of(makeObservation()));
+
+            var result = observationService.listLatest(projectId, assetId);
+
+            assertThat(result).hasSize(1);
+        }
+
+        @Test
+        void throwsWhenAssetNotFoundForLatest() {
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> observationService.listLatest(projectId, assetId))
+                    .isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void throwsWhenAssetNotFoundForLegacyLatest() {
+            when(assetRepository.existsById(assetId)).thenReturn(false);
+
+            assertThatThrownBy(() -> observationService.listLatest(assetId)).isInstanceOf(NotFoundException.class);
+        }
+    }
+
+    @Nested
+    class ProjectAwareDelete {
+
+        @Test
+        void deletesObservationWithProjectId() {
+            var obs = makeObservation();
+            var obsId = obs.getId();
+            when(observationRepository.findByIdWithAssetAndProjectId(obsId, projectId))
+                    .thenReturn(Optional.of(obs));
+
+            observationService.delete(projectId, assetId, obsId);
+
+            verify(observationRepository).delete(obs);
+        }
+
+        @Test
+        void throwsWhenObservationNotFoundForDeleteWithProjectId() {
+            var obsId = UUID.randomUUID();
+            when(observationRepository.findByIdWithAssetAndProjectId(obsId, projectId))
+                    .thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> observationService.delete(projectId, assetId, obsId))
+                    .isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void throwsWhenObservationBelongsToDifferentAssetForDelete() {
+            var obs = makeObservation();
+            var obsId = obs.getId();
+            var otherAssetId = UUID.randomUUID();
+            when(observationRepository.findByIdWithAssetAndProjectId(obsId, projectId))
+                    .thenReturn(Optional.of(obs));
+
+            assertThatThrownBy(() -> observationService.delete(projectId, otherAssetId, obsId))
+                    .isInstanceOf(NotFoundException.class);
         }
     }
 }

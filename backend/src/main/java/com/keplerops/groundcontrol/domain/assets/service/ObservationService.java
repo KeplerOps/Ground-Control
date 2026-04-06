@@ -25,6 +25,36 @@ public class ObservationService {
         this.assetRepository = assetRepository;
     }
 
+    public Observation create(UUID projectId, UUID assetId, CreateObservationCommand command) {
+        var asset = getAssetOrThrow(projectId, assetId);
+        if (observationRepository.existsByAssetIdAndCategoryAndObservationKeyAndObservedAt(
+                assetId, command.category(), command.observationKey(), command.observedAt())) {
+            throw new ConflictException("Observation already exists: " + command.category() + ":"
+                    + command.observationKey() + " at " + command.observedAt());
+        }
+        if (command.expiresAt() != null && command.expiresAt().isBefore(command.observedAt())) {
+            throw new DomainValidationException("expiresAt must be after observedAt");
+        }
+        var observation = new Observation(
+                asset,
+                command.category(),
+                command.observationKey(),
+                command.observationValue(),
+                command.source(),
+                command.observedAt());
+        if (command.expiresAt() != null) {
+            observation.setExpiresAt(command.expiresAt());
+        }
+        if (command.confidence() != null) {
+            observation.setConfidence(command.confidence());
+        }
+        if (command.evidenceRef() != null) {
+            observation.setEvidenceRef(command.evidenceRef());
+        }
+        return observationRepository.save(observation);
+    }
+
+    @Deprecated(forRemoval = false)
     public Observation create(UUID assetId, CreateObservationCommand command) {
         var asset = assetRepository
                 .findById(assetId)
@@ -56,12 +86,36 @@ public class ObservationService {
         return observationRepository.save(observation);
     }
 
-    public Observation update(UUID assetId, UUID observationId, UpdateObservationCommand command) {
-        var observation = getObservationBelongingTo(assetId, observationId);
+    public Observation update(UUID projectId, UUID assetId, UUID observationId, UpdateObservationCommand command) {
+        var observation = getObservationBelongingTo(projectId, assetId, observationId);
         if (command.observationValue() != null) {
             observation.setObservationValue(command.observationValue());
         }
         if (command.expiresAt() != null) {
+            if (command.expiresAt().isBefore(observation.getObservedAt())) {
+                throw new DomainValidationException("expiresAt must be after observedAt");
+            }
+            observation.setExpiresAt(command.expiresAt());
+        }
+        if (command.confidence() != null) {
+            observation.setConfidence(command.confidence());
+        }
+        if (command.evidenceRef() != null) {
+            observation.setEvidenceRef(command.evidenceRef());
+        }
+        return observationRepository.save(observation);
+    }
+
+    @Deprecated(forRemoval = false)
+    public Observation update(UUID assetId, UUID observationId, UpdateObservationCommand command) {
+        var observation = getLegacyObservationBelongingTo(assetId, observationId);
+        if (command.observationValue() != null) {
+            observation.setObservationValue(command.observationValue());
+        }
+        if (command.expiresAt() != null) {
+            if (command.expiresAt().isBefore(observation.getObservedAt())) {
+                throw new DomainValidationException("expiresAt must be after observedAt");
+            }
             observation.setExpiresAt(command.expiresAt());
         }
         if (command.confidence() != null) {
@@ -74,13 +128,37 @@ public class ObservationService {
     }
 
     @Transactional(readOnly = true)
+    public Observation getById(UUID projectId, UUID assetId, UUID observationId) {
+        return getObservationBelongingTo(projectId, assetId, observationId);
+    }
+
+    @Deprecated(forRemoval = false)
+    @Transactional(readOnly = true)
     public Observation getById(UUID assetId, UUID observationId) {
-        return getObservationBelongingTo(assetId, observationId);
+        return getLegacyObservationBelongingTo(assetId, observationId);
     }
 
     @Transactional(readOnly = true)
+    public List<Observation> listByAsset(UUID projectId, UUID assetId, ObservationCategory category, String key) {
+        getAssetOrThrow(projectId, assetId);
+        if (category != null && key != null) {
+            return observationRepository.findByAssetIdAndCategoryAndKey(assetId, category, key);
+        }
+        if (category != null) {
+            return observationRepository.findByAssetIdAndCategory(assetId, category);
+        }
+        if (key != null) {
+            return observationRepository.findByAssetIdAndKey(assetId, key);
+        }
+        return observationRepository.findByAssetId(assetId);
+    }
+
+    @Deprecated(forRemoval = false)
+    @Transactional(readOnly = true)
     public List<Observation> listByAsset(UUID assetId, ObservationCategory category, String key) {
-        verifyAssetExists(assetId);
+        if (!assetRepository.existsById(assetId)) {
+            throw new NotFoundException("Asset not found: " + assetId);
+        }
         if (category != null && key != null) {
             return observationRepository.findByAssetIdAndCategoryAndKey(assetId, category, key);
         }
@@ -94,16 +172,40 @@ public class ObservationService {
     }
 
     @Transactional(readOnly = true)
-    public List<Observation> listLatest(UUID assetId) {
-        verifyAssetExists(assetId);
+    public List<Observation> listLatest(UUID projectId, UUID assetId) {
+        getAssetOrThrow(projectId, assetId);
         return observationRepository.findLatestByAssetId(assetId, Instant.now());
     }
 
-    public void delete(UUID assetId, UUID observationId) {
-        observationRepository.delete(getObservationBelongingTo(assetId, observationId));
+    @Deprecated(forRemoval = false)
+    @Transactional(readOnly = true)
+    public List<Observation> listLatest(UUID assetId) {
+        if (!assetRepository.existsById(assetId)) {
+            throw new NotFoundException("Asset not found: " + assetId);
+        }
+        return observationRepository.findLatestByAssetId(assetId, Instant.now());
     }
 
-    private Observation getObservationBelongingTo(UUID assetId, UUID observationId) {
+    public void delete(UUID projectId, UUID assetId, UUID observationId) {
+        observationRepository.delete(getObservationBelongingTo(projectId, assetId, observationId));
+    }
+
+    @Deprecated(forRemoval = false)
+    public void delete(UUID assetId, UUID observationId) {
+        observationRepository.delete(getLegacyObservationBelongingTo(assetId, observationId));
+    }
+
+    private Observation getObservationBelongingTo(UUID projectId, UUID assetId, UUID observationId) {
+        var observation = observationRepository
+                .findByIdWithAssetAndProjectId(observationId, projectId)
+                .orElseThrow(() -> new NotFoundException("Observation not found: " + observationId));
+        if (!observation.getAsset().getId().equals(assetId)) {
+            throw new NotFoundException("Observation " + observationId + " does not belong to asset " + assetId);
+        }
+        return observation;
+    }
+
+    private Observation getLegacyObservationBelongingTo(UUID assetId, UUID observationId) {
         var observation = observationRepository
                 .findByIdWithAsset(observationId)
                 .orElseThrow(() -> new NotFoundException("Observation not found: " + observationId));
@@ -113,9 +215,10 @@ public class ObservationService {
         return observation;
     }
 
-    private void verifyAssetExists(UUID assetId) {
-        if (!assetRepository.existsById(assetId)) {
-            throw new NotFoundException("Asset not found: " + assetId);
-        }
+    private com.keplerops.groundcontrol.domain.assets.model.OperationalAsset getAssetOrThrow(
+            UUID projectId, UUID assetId) {
+        return assetRepository
+                .findByIdAndProjectId(assetId, projectId)
+                .orElseThrow(() -> new NotFoundException("Asset not found: " + assetId));
     }
 }

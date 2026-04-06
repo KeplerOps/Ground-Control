@@ -12,6 +12,10 @@ public interface AssetExternalIdRepository extends JpaRepository<AssetExternalId
     @Query("SELECT e FROM AssetExternalId e JOIN FETCH e.asset WHERE e.id = :id")
     Optional<AssetExternalId> findByIdWithAsset(UUID id);
 
+    @Query("SELECT e FROM AssetExternalId e JOIN FETCH e.asset"
+            + " WHERE e.id = :id AND e.asset.project.id = :projectId")
+    Optional<AssetExternalId> findByIdWithAssetAndProjectId(UUID id, UUID projectId);
+
     @Query("SELECT e FROM AssetExternalId e JOIN FETCH e.asset WHERE e.asset.id = :assetId")
     List<AssetExternalId> findByAssetId(UUID assetId);
 

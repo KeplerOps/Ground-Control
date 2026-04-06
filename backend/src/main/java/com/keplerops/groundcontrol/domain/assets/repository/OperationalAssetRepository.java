@@ -16,4 +16,8 @@ public interface OperationalAssetRepository extends JpaRepository<OperationalAss
     boolean existsByProjectIdAndUidIgnoreCase(UUID projectId, String uid);
 
     Optional<OperationalAsset> findByProjectIdAndUidIgnoreCase(UUID projectId, String uid);
+
+    Optional<OperationalAsset> findByIdAndProjectId(UUID id, UUID projectId);
+
+    boolean existsByIdAndProjectId(UUID id, UUID projectId);
 }

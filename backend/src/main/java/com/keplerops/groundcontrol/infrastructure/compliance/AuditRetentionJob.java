@@ -31,7 +31,16 @@ public class AuditRetentionJob {
             "operational_asset_audit",
             "asset_relation_audit",
             "asset_link_audit",
-            "asset_external_id_audit");
+            "asset_external_id_audit",
+            "observation_audit",
+            "risk_scenario_audit",
+            "risk_scenario_link_audit",
+            "methodology_profile_audit",
+            "risk_register_record_audit",
+            "risk_register_record_scenario_audit",
+            "risk_assessment_result_audit",
+            "risk_assessment_result_observation_audit",
+            "treatment_plan_audit");
 
     private final AuditRetentionProperties properties;
     private final EntityManager entityManager;

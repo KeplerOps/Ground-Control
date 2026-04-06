@@ -5,6 +5,136 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.102.1] - 2026-04-05
+
+### Fixed
+
+- SonarCloud quality gate: reviewed 3 SQL-injection security hotspots in
+  AgeGraphService as SAFE (Apache AGE requires dynamic Cypher-in-SQL;
+  values are sanitized via escapeCypher/validateGraphName)
+- SonarCloud quality gate: added 129 unit tests to raise new-code coverage
+  above 80% threshold — covers TreatmentPlanController,
+  RiskRegisterRecordController, JacksonTextCollectionConverters,
+  TreatmentPlanResponse, RiskRegisterRecordResponse, and project-aware
+  service methods in AssetService, ObservationService, and
+  RiskScenarioLinkService
+- Frontend build: fix TypeScript errors in graph.tsx — remove unused
+  imports (GraphControls, GraphFilters, GraphStats, cn) and add missing
+  lucide-react icon imports (Filter, Maximize, RotateCcw, X)
+
+## [0.102.0] - 2026-04-05
+
+### Added
+
+- Pull request-requirement linking via new `PULL_REQUEST` artifact type
+  in the traceability graph, with three-state PR tracking (OPEN, CLOSED,
+  MERGED) reflecting GitHub PR lifecycle (GC-D002)
+- `GitHubPullRequestSync` entity for caching PR state locally, mirroring
+  the existing `GitHubIssueSync` pattern for issues
+- REST endpoint `POST /api/v1/admin/sync/github/prs?owner=X&repo=Y` for
+  on-demand PR state synchronization
+- MCP tool `gc_sync_github_prs` for agent-initiated PR sync
+- Database migration V048 creating `github_pr_sync` table
+- `PullRequestState` enum with OPEN, CLOSED, MERGED values
+- PR sync updates traceability link titles with state tags (e.g.,
+  `#42 - Add feature [MERGED]`) matching the existing issue sync pattern
+
+## [0.101.0] - 2026-04-05
+
+### Added
+
+- First-class Control entity representing security and risk controls
+  with definitions, objectives, control function (preventive, detective,
+  corrective, compensating), ownership, implementation scope, methodology-
+  aware factor mappings (FAIR-CAM strength/coverage, NIST, ISO), and
+  effectiveness data (GC-I001)
+- Six-state control lifecycle: DRAFT, PROPOSED, IMPLEMENTED, OPERATIONAL,
+  DEPRECATED, RETIRED with reinstatement from DEPRECATED to OPERATIONAL
+- ControlLink entity for outbound linking to assets, risk scenarios,
+  observations, evidence, requirements, code, configuration, operational
+  artifacts, and external references
+- Seven link relationship types: PROTECTS, IMPLEMENTS, EVIDENCED_BY,
+  OBSERVED_IN, MITIGATES, MAPS_TO, ASSOCIATED
+- REST API endpoints: `POST/GET /api/v1/controls`,
+  `GET/PUT/DELETE /api/v1/controls/{id}`,
+  `GET /api/v1/controls/uid/{uid}`,
+  `PUT /api/v1/controls/{id}/status`,
+  `POST/GET /api/v1/controls/{id}/links`,
+  `DELETE /api/v1/controls/{id}/links/{linkId}`
+- MCP tools: `gc_create_control`, `gc_list_controls`, `gc_get_control`,
+  `gc_update_control`, `gc_delete_control`, `gc_transition_control_status`,
+  `gc_create_control_link`, `gc_list_control_links`, `gc_delete_control_link`
+- Database migrations V046-V047 for control and control_link tables
+  with Envers audit
+- CONTROL promoted from external string identifier to internal entity in
+  GraphTargetResolverService for both asset links and risk scenario links
+- CONTROL added to ArtifactType for traceability linking
+- Codex-backed Ground Control MCP workflow tools:
+  `gc_codex_architecture_preflight` for pre-implementation ADR/design
+  guidance and `gc_codex_review` for exhaustive no-triage production-quality
+  review
+- Repo-context helper tool `gc_get_repo_ground_control_context`, plus a
+  standardized `AGENTS.md` convention for declaring the repo's Ground Control
+  project before `/implement` runs
+- Codex architecture-preflight prompt builder that emphasizes reuse of
+  existing cross-cutting concerns, avoidance of abstraction and concept
+  confusion, and explicit non-goals/gotchas before coding starts
+- Codex review prompt builder that explicitly asks for an exhaustive,
+  non-triaged review across maintainability, reliability, security,
+  consistency, validation, logging, exception handling, schema reuse, and
+  reuse of existing infrastructure
+- Unit coverage for the new Codex prompt and command builders
+
+### Changed
+
+- `/implement` now requires a Codex architecture preflight before plan mode
+  and uses `gc_codex_review` instead of a raw shell review command
+- `/implement` now validates repo-local Ground Control context from `AGENTS.md`
+  and stops instead of guessing a project when the convention is missing or invalid
+- `/ship` now includes the same Codex review tool in its review pipeline
+- Development workflow and MCP server documentation now describe the Codex
+  preflight/review integration explicitly
+
+## [0.100.0] - 2026-04-04
+
+### Added
+
+- Input validation on GitHub owner/repo parameters at every entry point:
+  GitHubCliClient, SyncController, GitHubIssueRequest, MCP tools
+  gc_sync_github and gc_create_github_issue (GC-D001)
+- GitHub issue state (OPEN/CLOSED) now reflected in traceability link
+  titles during sync, satisfying bidirectional state visibility (GC-D001)
+- Defensive IssueState parsing: unknown states default to OPEN with a
+  warning instead of crashing the sync
+- Validation on issue creation inputs: title length (256 chars), body
+  length (65536 chars), and label format/length (50 chars)
+- Unit tests for input validation rejection of command injection
+  payloads, malicious owner/repo names, and state reflection in
+  traceability links
+
+## [0.99.0] - 2026-04-04
+
+### Added
+
+- Populated risk assessment methodology profile schemas defining the
+  semantics, factors, scales, units, and output rules for each supported
+  methodology (GC-T002)
+- FAIR v3.0 input/output schemas with FAIR-CAM control analytics inputs
+  (control_strength, control_coverage) and FAIR-MAM loss magnitude
+  extensions (productivity_loss, response_cost, replacement_cost,
+  competitive_advantage_loss, fines_and_judgments, reputation_damage)
+- NIST SP 800-30 Rev. 1 input/output schemas with five-level likelihood
+  and impact scales, threat source characterization, and 5x5 risk matrix
+  mapping
+- ISO 27005:2022 input/output schemas with ISO 27001-compatible risk
+  criteria, organization-defined acceptance thresholds, and consequence-
+  based terminology
+- Legacy qualitative profile with open schemas for backwards
+  compatibility with pre-methodology assessments
+- Database migration V045 to populate existing methodology profile
+  seed data with proper schemas
+- WebMvcTest controller unit test for MethodologyProfileController
+
 ## [0.98.0] - 2026-04-01
 
 ### Added

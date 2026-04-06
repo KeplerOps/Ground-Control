@@ -30,6 +30,7 @@ import {
   importStrictdoc,
   importReqif,
   syncGithub,
+  syncGithubPrs,
   getRequirementHistory,
   getRelationHistory,
   getTraceabilityLinkHistory,
@@ -48,10 +49,15 @@ import {
   findPaths,
   getGraphVisualization,
   extractSubgraph,
+  traverseGraph,
+  findGraphPaths,
   createGitHubIssue,
   formatIssueBody,
   runSweep,
   runSweepAll,
+  getRepoGroundControlContext,
+  runCodexArchitecturePreflight,
+  runCodexReview,
   embedRequirement,
   getEmbeddingStatus,
   embedProject,
@@ -135,6 +141,43 @@ import {
   createRiskScenarioLink,
   listRiskScenarioLinks,
   deleteRiskScenarioLink,
+  createControl,
+  listControls,
+  getControl,
+  getControlByUid,
+  updateControl,
+  deleteControl,
+  transitionControlStatus,
+  createControlLink,
+  listControlLinks,
+  deleteControlLink,
+  CONTROL_STATUSES,
+  CONTROL_FUNCTIONS,
+  CONTROL_LINK_TARGET_TYPES,
+  CONTROL_LINK_TYPES,
+  createMethodologyProfile,
+  listMethodologyProfiles,
+  getMethodologyProfile,
+  updateMethodologyProfile,
+  deleteMethodologyProfile,
+  createRiskRegisterRecord,
+  listRiskRegisterRecords,
+  getRiskRegisterRecord,
+  updateRiskRegisterRecord,
+  transitionRiskRegisterRecordStatus,
+  deleteRiskRegisterRecord,
+  createRiskAssessmentResult,
+  listRiskAssessmentResults,
+  getRiskAssessmentResult,
+  updateRiskAssessmentResult,
+  transitionRiskAssessmentApprovalState,
+  deleteRiskAssessmentResult,
+  createTreatmentPlan,
+  listTreatmentPlans,
+  getTreatmentPlan,
+  updateTreatmentPlan,
+  transitionTreatmentPlanStatus,
+  deleteTreatmentPlan,
   STATUSES,
   REQUIREMENT_TYPES,
   PRIORITIES,
@@ -150,6 +193,12 @@ import {
   ASSET_LINK_TYPES,
   OBSERVATION_CATEGORIES,
   RISK_SCENARIO_STATUSES,
+  METHODOLOGY_FAMILIES,
+  METHODOLOGY_PROFILE_STATUSES,
+  RISK_REGISTER_STATUSES,
+  RISK_ASSESSMENT_APPROVAL_STATUSES,
+  TREATMENT_PLAN_STATUSES,
+  TREATMENT_STRATEGIES,
   RISK_SCENARIO_LINK_TARGET_TYPES,
   RISK_SCENARIO_LINK_TYPES,
 } from "./lib.js";
@@ -509,7 +558,7 @@ server.tool(
     uid: z.string().describe("Requirement UID (e.g. 'GC-D007')"),
     extra_body: z.string().optional().describe("Additional markdown to append to the issue body"),
     labels: z.array(z.string()).optional().describe("GitHub labels to apply"),
-    repo: z.string().optional().describe("GitHub repo as 'owner/repo' (defaults to GH_REPO env var)"),
+    repo: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/).optional().describe("GitHub repo as 'owner/repo' (defaults to GH_REPO env var)"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
   async ({ uid, extra_body, labels, repo, project }) => {
@@ -536,6 +585,79 @@ server.tool(
       }
 
       return ok(JSON.stringify({ url, number, traceability_linked: true }, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Codex workflow tools
+// ==========================================================================
+
+server.tool(
+  "gc_get_repo_ground_control_context",
+  "Read the current repository's AGENTS.md and return the standardized Ground Control context used by workflow automation, including the project identifier and validation errors when the convention is missing or invalid.",
+  {
+    repo_path: z.string().describe("Absolute path to the target Git repository"),
+  },
+  async ({ repo_path }) => {
+    try {
+      return ok(JSON.stringify(await getRepoGroundControlContext(repo_path), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_codex_architecture_preflight",
+  "Run Codex architecture preflight before implementation. Codex inspects the requirement and repository, updates ADRs/design guidance when needed, and returns guardrails and changed files.",
+  {
+    requirement_uid: z.string().describe("Requirement UID (for example 'GC-J001')"),
+    repo_path: z.string().describe("Absolute path to the target Git repository"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    issue_number: z.number().int().positive().optional().describe("Optional GitHub issue number for extra implementation context"),
+    repo: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/).optional().describe("GitHub repo as 'owner/repo' (defaults to GH_REPO env var)"),
+  },
+  async ({ requirement_uid, repo_path, project, issue_number, repo }) => {
+    try {
+      return ok(JSON.stringify(
+        await runCodexArchitecturePreflight({
+          requirementUid: requirement_uid,
+          repoPath: repo_path,
+          project,
+          issueNumber: issue_number,
+          repo,
+        }),
+        null,
+        2,
+      ));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_codex_review",
+  "Run Codex review against the current repository with an exhaustive, no-triage review prompt focused on production-grade maintainability, reliability, security, and avoidance of concept confusion.",
+  {
+    repo_path: z.string().describe("Absolute path to the target Git repository"),
+    base_branch: z.string().optional().describe("Base branch to review against (defaults to 'dev')"),
+    uncommitted: z.boolean().optional().describe("Review staged/unstaged/untracked changes instead of committed branch history"),
+  },
+  async ({ repo_path, base_branch, uncommitted }) => {
+    try {
+      return ok(JSON.stringify(
+        await runCodexReview({
+          repoPath: repo_path,
+          baseBranch: base_branch || "dev",
+          uncommitted: Boolean(uncommitted),
+        }),
+        null,
+        2,
+      ));
     } catch (e) {
       return err(e);
     }
@@ -909,7 +1031,7 @@ server.tool(
 
 server.tool(
   "gc_materialize_graph",
-  "Materialize the requirements dependency graph in Apache AGE. Run this after bulk changes to relations.",
+  "Materialize the mixed-entity graph in Apache AGE. Run this after bulk changes to graph-participating entities and relations.",
   {},
   async () => {
     try {
@@ -980,7 +1102,7 @@ server.tool(
 
 server.tool(
   "gc_get_graph_visualization",
-  "Get the full graph visualization data (nodes and relation edges with metadata) for a project. Supports filtering by entity type.",
+  "Get the full mixed-entity graph visualization data (nodes and edges with metadata) for a project. Supports filtering by entity type.",
   {
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
     entity_types: z.array(z.string()).optional().describe("Filter by entity types (e.g. ['REQUIREMENT']). Omit to include all types."),
@@ -997,16 +1119,63 @@ server.tool(
 
 server.tool(
   "gc_extract_subgraph",
-  "Extract a subgraph starting from one or more root nodes. Returns all transitively reachable nodes and their relations. Supports filtering by entity type.",
+  "Extract a mixed-entity subgraph starting from one or more root graph node IDs. Returns all reachable nodes and edges. Supports filtering by entity type.",
   {
-    roots: z.array(z.string()).describe("Root requirement UIDs to start traversal from (e.g. ['GC-G001', 'GC-G002'])"),
+    roots: z.array(z.string()).describe("Root graph node IDs to start traversal from (e.g. ['REQUIREMENT:<uuid>', 'RISK_SCENARIO:<uuid>'])"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
     entity_types: z.array(z.string()).optional().describe("Filter by entity types (e.g. ['REQUIREMENT']). Omit to include all types."),
+    max_depth: z.number().int().positive().optional().describe("Optional traversal depth limit"),
   },
-  async ({ roots, project, entity_types }) => {
+  async ({ roots, project, entity_types, max_depth }) => {
     try {
-      const data = await extractSubgraph(roots, project, entity_types);
+      const data = await extractSubgraph(roots, project, entity_types, max_depth);
       return ok(JSON.stringify(data, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_traverse_graph",
+  "Traverse the mixed-entity graph outward from one or more root graph node IDs. Returns the visited neighborhood as nodes and edges.",
+  {
+    root_node_ids: z.array(z.string()).min(1).describe("Root graph node IDs to traverse from"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    entity_types: z.array(z.string()).optional().describe("Optional entity-type filter for the traversal result"),
+    max_depth: z.number().int().positive().optional().describe("Optional traversal depth limit"),
+  },
+  async ({ root_node_ids, project, entity_types, max_depth }) => {
+    try {
+      const data = await traverseGraph(root_node_ids, project, entity_types, max_depth);
+      return ok(JSON.stringify(data, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_find_graph_paths",
+  "Find paths in the mixed-entity graph between two graph node IDs. Returns mixed-node path results, not requirement-DAG-only paths.",
+  {
+    source_node_id: z.string().describe("Source graph node ID"),
+    target_node_id: z.string().describe("Target graph node ID"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    entity_types: z.array(z.string()).optional().describe("Optional entity-type filter to constrain returned paths"),
+    max_depth: z.number().int().positive().optional().describe("Optional path length limit"),
+  },
+  async ({ source_node_id, target_node_id, project, entity_types, max_depth }) => {
+    try {
+      const paths = await findGraphPaths(
+        source_node_id,
+        target_node_id,
+        project,
+        entity_types,
+        max_depth,
+      );
+      if (Array.isArray(paths) && paths.length === 0) return ok("No paths found.");
+      return ok(JSON.stringify(paths, null, 2));
     } catch (e) {
       return err(e);
     }
@@ -1155,12 +1324,28 @@ server.tool(
   "gc_sync_github",
   "Sync GitHub issues for a repository. Creates traceability links between issues and requirements.",
   {
-    owner: z.string().describe("GitHub repository owner"),
-    repo: z.string().describe("GitHub repository name"),
+    owner: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/).describe("GitHub repository owner"),
+    repo: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/).describe("GitHub repository name"),
   },
   async ({ owner, repo }) => {
     try {
       return ok(JSON.stringify(await syncGithub(owner, repo), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_sync_github_prs",
+  "Sync GitHub pull requests for a repository. Updates traceability links with PR state (open, closed, merged).",
+  {
+    owner: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/).describe("GitHub repository owner"),
+    repo: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/).describe("GitHub repository name"),
+  },
+  async ({ owner, repo }) => {
+    try {
+      return ok(JSON.stringify(await syncGithubPrs(owner, repo), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -1977,10 +2162,11 @@ server.tool(
   "Get an operational asset by its UUID.",
   {
     id: z.string().uuid().describe("Asset UUID"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ id }) => {
+  async ({ id, project }) => {
     try {
-      return ok(JSON.stringify(await getAsset(id), null, 2));
+      return ok(JSON.stringify(await getAsset(id, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -2011,14 +2197,15 @@ server.tool(
     name: z.string().max(200).optional().describe("New name"),
     description: z.string().optional().describe("New description"),
     asset_type: z.enum(ASSET_TYPES).optional().describe("New asset type"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ id, name, description, asset_type }) => {
+  async ({ id, name, description, asset_type, project }) => {
     try {
       const data = {};
       if (name !== undefined) data.name = name;
       if (description !== undefined) data.description = description;
       if (asset_type !== undefined) data.asset_type = asset_type;
-      return ok(JSON.stringify(await updateAsset(id, data), null, 2));
+      return ok(JSON.stringify(await updateAsset(id, data, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -2030,10 +2217,11 @@ server.tool(
   "Delete an operational asset by its UUID. Cascade-deletes all its relations.",
   {
     id: z.string().uuid().describe("Asset UUID"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ id }) => {
+  async ({ id, project }) => {
     try {
-      await deleteAsset(id);
+      await deleteAsset(id, project);
       return ok("Asset deleted.");
     } catch (e) {
       return err(e);
@@ -2046,10 +2234,11 @@ server.tool(
   "Archive (soft-delete) an operational asset.",
   {
     id: z.string().uuid().describe("Asset UUID"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ id }) => {
+  async ({ id, project }) => {
     try {
-      return ok(JSON.stringify(await archiveAsset(id), null, 2));
+      return ok(JSON.stringify(await archiveAsset(id, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -2067,21 +2256,16 @@ server.tool(
     external_source_id: z.string().max(500).optional().describe("Identifier for this fact in the source system"),
     collected_at: z.string().optional().describe("ISO-8601 timestamp when fact was collected/asserted"),
     confidence: z.string().max(50).optional().describe("Confidence or quality metadata"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ source_id, target_id, relation_type, source_system, external_source_id, collected_at, confidence }) => {
+  async ({ source_id, target_id, relation_type, source_system, external_source_id, collected_at, confidence, project }) => {
     try {
       const data = { target_id, relation_type };
       if (source_system !== undefined) data.source_system = source_system;
       if (external_source_id !== undefined) data.external_source_id = external_source_id;
       if (collected_at !== undefined) data.collected_at = collected_at;
       if (confidence !== undefined) data.confidence = confidence;
-      return ok(
-        JSON.stringify(
-          await createAssetRelation(source_id, data),
-          null,
-          2,
-        ),
-      );
+      return ok(JSON.stringify(await createAssetRelation(source_id, data, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -2093,10 +2277,11 @@ server.tool(
   "Get all incoming and outgoing relations for an operational asset.",
   {
     id: z.string().uuid().describe("Asset UUID"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ id }) => {
+  async ({ id, project }) => {
     try {
-      const rels = await getAssetRelations(id);
+      const rels = await getAssetRelations(id, project);
       if (Array.isArray(rels) && rels.length === 0) return ok("No relations found.");
       return ok(JSON.stringify(rels, null, 2));
     } catch (e) {
@@ -2111,10 +2296,11 @@ server.tool(
   {
     asset_id: z.string().uuid().describe("Asset UUID (source or target of the relation)"),
     relation_id: z.string().uuid().describe("Relation UUID"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ asset_id, relation_id }) => {
+  async ({ asset_id, relation_id, project }) => {
     try {
-      await deleteAssetRelation(asset_id, relation_id);
+      await deleteAssetRelation(asset_id, relation_id, project);
       return ok("Asset relation deleted.");
     } catch (e) {
       return err(e);
@@ -2144,10 +2330,11 @@ server.tool(
   "Multi-hop impact analysis: find all assets transitively affected by a given asset.",
   {
     id: z.string().uuid().describe("Asset UUID to analyze impact from"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ id }) => {
+  async ({ id, project }) => {
     try {
-      const result = await assetImpactAnalysis(id);
+      const result = await assetImpactAnalysis(id, project);
       if (Array.isArray(result) && result.length === 0) return ok("No impacted assets found.");
       return ok(JSON.stringify(result, null, 2));
     } catch (e) {
@@ -2182,17 +2369,21 @@ server.tool(
   {
     asset_id: z.string().uuid().describe("UUID of the operational asset"),
     target_type: z.enum(ASSET_LINK_TARGET_TYPES).describe("Type of the target entity"),
-    target_identifier: z.string().max(500).describe("Identifier of the target (e.g. requirement UID, URL)"),
+    target_entity_id: z.string().uuid().optional().describe("UUID of the modeled target entity when linking to a first-class internal node"),
+    target_identifier: z.string().max(500).optional().describe("Identifier of the external or unmodeled target (e.g. requirement UID, URL)"),
     link_type: z.enum(ASSET_LINK_TYPES).describe("Nature of the relationship"),
     target_url: z.string().max(2000).optional().describe("Optional URL for the target"),
     target_title: z.string().max(255).optional().describe("Optional display title for the target"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ asset_id, target_type, target_identifier, link_type, target_url, target_title }) => {
+  async ({ asset_id, target_type, target_entity_id, target_identifier, link_type, target_url, target_title, project }) => {
     try {
-      const data = { target_type, target_identifier, link_type };
+      const data = { target_type, link_type };
+      if (target_entity_id !== undefined) data.target_entity_id = target_entity_id;
+      if (target_identifier !== undefined) data.target_identifier = target_identifier;
       if (target_url !== undefined) data.target_url = target_url;
       if (target_title !== undefined) data.target_title = target_title;
-      return ok(JSON.stringify(await createAssetLink(asset_id, data), null, 2));
+      return ok(JSON.stringify(await createAssetLink(asset_id, data, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -2205,10 +2396,11 @@ server.tool(
   {
     asset_id: z.string().uuid().describe("UUID of the operational asset"),
     target_type: z.enum(ASSET_LINK_TARGET_TYPES).optional().describe("Filter by target type"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ asset_id, target_type }) => {
+  async ({ asset_id, target_type, project }) => {
     try {
-      return ok(JSON.stringify(await getAssetLinks(asset_id, target_type), null, 2));
+      return ok(JSON.stringify(await getAssetLinks(asset_id, target_type, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -2221,10 +2413,11 @@ server.tool(
   {
     asset_id: z.string().uuid().describe("UUID of the operational asset"),
     link_id: z.string().uuid().describe("UUID of the link to delete"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ asset_id, link_id }) => {
+  async ({ asset_id, link_id, project }) => {
     try {
-      await deleteAssetLink(asset_id, link_id);
+      await deleteAssetLink(asset_id, link_id, project);
       return ok("Link deleted.");
     } catch (e) {
       return err(e);
@@ -2237,12 +2430,22 @@ server.tool(
   "Find all assets linked to a specific target (e.g. all assets linked to a requirement).",
   {
     target_type: z.enum(ASSET_LINK_TARGET_TYPES).describe("Type of the target entity"),
-    target_identifier: z.string().describe("Identifier of the target"),
+    target_entity_id: z.string().uuid().optional().describe("UUID of the target entity"),
+    target_identifier: z.string().optional().describe("Identifier of the target"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ target_type, target_identifier, project }) => {
+  async ({ target_type, target_entity_id, target_identifier, project }) => {
     try {
-      return ok(JSON.stringify(await getAssetLinksByTarget(target_type, target_identifier, project), null, 2));
+      if (!target_entity_id && !target_identifier) {
+        return err(new Error("Provide either 'target_entity_id' or 'target_identifier'."));
+      }
+      return ok(
+        JSON.stringify(
+          await getAssetLinksByTarget(target_type, target_entity_id, target_identifier, project),
+          null,
+          2,
+        ),
+      );
     } catch (e) {
       return err(e);
     }
@@ -2262,13 +2465,14 @@ server.tool(
     source_id: z.string().max(500).describe("Identifier in the source system (e.g. ARN, resource ID)"),
     collected_at: z.string().optional().describe("ISO-8601 timestamp when this identifier was collected/asserted"),
     confidence: z.string().max(50).optional().describe("Confidence or quality metadata (e.g. HIGH, 0.95)"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ asset_id, source_system, source_id, collected_at, confidence }) => {
+  async ({ asset_id, source_system, source_id, collected_at, confidence, project }) => {
     try {
       const data = { source_system, source_id };
       if (collected_at !== undefined) data.collected_at = collected_at;
       if (confidence !== undefined) data.confidence = confidence;
-      return ok(JSON.stringify(await createAssetExternalId(asset_id, data), null, 2));
+      return ok(JSON.stringify(await createAssetExternalId(asset_id, data, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -2281,10 +2485,11 @@ server.tool(
   {
     asset_id: z.string().uuid().describe("UUID of the operational asset"),
     source_system: z.string().optional().describe("Filter by source system name"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ asset_id, source_system }) => {
+  async ({ asset_id, source_system, project }) => {
     try {
-      const result = await getAssetExternalIds(asset_id, source_system);
+      const result = await getAssetExternalIds(asset_id, source_system, project);
       if (Array.isArray(result) && result.length === 0) return ok("No external identifiers found.");
       return ok(JSON.stringify(result, null, 2));
     } catch (e) {
@@ -2301,13 +2506,14 @@ server.tool(
     external_id_id: z.string().uuid().describe("UUID of the external identifier to update"),
     collected_at: z.string().optional().describe("ISO-8601 timestamp when this identifier was collected/asserted"),
     confidence: z.string().max(50).optional().describe("Confidence or quality metadata"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ asset_id, external_id_id, collected_at, confidence }) => {
+  async ({ asset_id, external_id_id, collected_at, confidence, project }) => {
     try {
       const data = {};
       if (collected_at !== undefined) data.collected_at = collected_at;
       if (confidence !== undefined) data.confidence = confidence;
-      return ok(JSON.stringify(await updateAssetExternalId(asset_id, external_id_id, data), null, 2));
+      return ok(JSON.stringify(await updateAssetExternalId(asset_id, external_id_id, data, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -2320,10 +2526,11 @@ server.tool(
   {
     asset_id: z.string().uuid().describe("UUID of the operational asset"),
     external_id_id: z.string().uuid().describe("UUID of the external identifier to delete"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ asset_id, external_id_id }) => {
+  async ({ asset_id, external_id_id, project }) => {
     try {
-      await deleteAssetExternalId(asset_id, external_id_id);
+      await deleteAssetExternalId(asset_id, external_id_id, project);
       return ok("External identifier deleted.");
     } catch (e) {
       return err(e);
@@ -2367,14 +2574,15 @@ server.tool(
     expires_at: z.string().optional().describe("ISO-8601 timestamp when this observation becomes stale/invalid"),
     confidence: z.string().max(50).optional().describe("Confidence level (e.g. HIGH, MEDIUM, 0.95)"),
     evidence_ref: z.string().max(2000).optional().describe("URL or reference to supporting evidence"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ asset_id, category, observation_key, observation_value, source, observed_at, expires_at, confidence, evidence_ref }) => {
+  async ({ asset_id, category, observation_key, observation_value, source, observed_at, expires_at, confidence, evidence_ref, project }) => {
     try {
       const data = { category, observation_key, observation_value, source, observed_at };
       if (expires_at !== undefined) data.expires_at = expires_at;
       if (confidence !== undefined) data.confidence = confidence;
       if (evidence_ref !== undefined) data.evidence_ref = evidence_ref;
-      return ok(JSON.stringify(await createObservation(asset_id, data), null, 2));
+      return ok(JSON.stringify(await createObservation(asset_id, data, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -2388,10 +2596,11 @@ server.tool(
     asset_id: z.string().uuid().describe("UUID of the operational asset"),
     category: z.enum(OBSERVATION_CATEGORIES).optional().describe("Filter by observation category"),
     key: z.string().optional().describe("Filter by observation key"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ asset_id, category, key }) => {
+  async ({ asset_id, category, key, project }) => {
     try {
-      const result = await listObservations(asset_id, { category, key });
+      const result = await listObservations(asset_id, { category, key, project });
       if (Array.isArray(result) && result.length === 0) return ok("No observations found.");
       return ok(JSON.stringify(result, null, 2));
     } catch (e) {
@@ -2406,10 +2615,11 @@ server.tool(
   {
     asset_id: z.string().uuid().describe("UUID of the operational asset"),
     observation_id: z.string().uuid().describe("UUID of the observation"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ asset_id, observation_id }) => {
+  async ({ asset_id, observation_id, project }) => {
     try {
-      return ok(JSON.stringify(await getObservation(asset_id, observation_id), null, 2));
+      return ok(JSON.stringify(await getObservation(asset_id, observation_id, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -2426,15 +2636,16 @@ server.tool(
     expires_at: z.string().optional().describe("Updated expiry timestamp"),
     confidence: z.string().max(50).optional().describe("Updated confidence level"),
     evidence_ref: z.string().max(2000).optional().describe("Updated evidence reference"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ asset_id, observation_id, observation_value, expires_at, confidence, evidence_ref }) => {
+  async ({ asset_id, observation_id, observation_value, expires_at, confidence, evidence_ref, project }) => {
     try {
       const data = {};
       if (observation_value !== undefined) data.observation_value = observation_value;
       if (expires_at !== undefined) data.expires_at = expires_at;
       if (confidence !== undefined) data.confidence = confidence;
       if (evidence_ref !== undefined) data.evidence_ref = evidence_ref;
-      return ok(JSON.stringify(await updateObservation(asset_id, observation_id, data), null, 2));
+      return ok(JSON.stringify(await updateObservation(asset_id, observation_id, data, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -2447,10 +2658,11 @@ server.tool(
   {
     asset_id: z.string().uuid().describe("UUID of the operational asset"),
     observation_id: z.string().uuid().describe("UUID of the observation to delete"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ asset_id, observation_id }) => {
+  async ({ asset_id, observation_id, project }) => {
     try {
-      await deleteObservation(asset_id, observation_id);
+      await deleteObservation(asset_id, observation_id, project);
       return ok("Observation deleted.");
     } catch (e) {
       return err(e);
@@ -2463,10 +2675,11 @@ server.tool(
   "Get the most recent non-expired observation for each unique (category, key) pair on an operational asset. Useful for building a current-state snapshot. Expired observations (past their expiresAt timestamp) are excluded.",
   {
     asset_id: z.string().uuid().describe("UUID of the operational asset"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ asset_id }) => {
+  async ({ asset_id, project }) => {
     try {
-      const result = await listLatestObservations(asset_id);
+      const result = await listLatestObservations(asset_id, project);
       if (Array.isArray(result) && result.length === 0) return ok("No observations found.");
       return ok(JSON.stringify(result, null, 2));
     } catch (e) {
@@ -2491,16 +2704,12 @@ server.tool(
     vulnerability: z.string().optional().describe("Vulnerability, exposure, or resistance condition (when applicable)"),
     consequence: z.string().describe("Effect or consequence description"),
     time_horizon: z.string().max(100).describe("Defined time horizon (e.g. '12 months', 'Q2 2026')"),
-    observation_refs: z.string().optional().describe("Supporting observations or evidence references"),
-    topology_context: z.string().optional().describe("Links to related topology context"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
-  async ({ uid, title, threat_source, threat_event, affected_object, vulnerability, consequence, time_horizon, observation_refs, topology_context, project }) => {
+  async ({ uid, title, threat_source, threat_event, affected_object, vulnerability, consequence, time_horizon, project }) => {
     try {
       const data = { uid, title, threat_source, threat_event, affected_object, consequence, time_horizon };
       if (vulnerability !== undefined) data.vulnerability = vulnerability;
-      if (observation_refs !== undefined) data.observation_refs = observation_refs;
-      if (topology_context !== undefined) data.topology_context = topology_context;
       return ok(JSON.stringify(await createRiskScenario(data, project), null, 2));
     } catch (e) {
       return err(e);
@@ -2536,7 +2745,7 @@ server.tool(
   async ({ id, uid, project }) => {
     try {
       if (id) {
-        return ok(JSON.stringify(await getRiskScenario(id), null, 2));
+        return ok(JSON.stringify(await getRiskScenario(id, project), null, 2));
       }
       if (uid) {
         return ok(JSON.stringify(await getRiskScenarioByUid(uid, project), null, 2));
@@ -2560,10 +2769,9 @@ server.tool(
     vulnerability: z.string().optional().describe("Updated vulnerability"),
     consequence: z.string().optional().describe("Updated consequence"),
     time_horizon: z.string().max(100).optional().describe("Updated time horizon"),
-    observation_refs: z.string().optional().describe("Updated observation references"),
-    topology_context: z.string().optional().describe("Updated topology context"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ id, title, threat_source, threat_event, affected_object, vulnerability, consequence, time_horizon, observation_refs, topology_context }) => {
+  async ({ id, title, threat_source, threat_event, affected_object, vulnerability, consequence, time_horizon, project }) => {
     try {
       const data = {};
       if (title !== undefined) data.title = title;
@@ -2573,9 +2781,7 @@ server.tool(
       if (vulnerability !== undefined) data.vulnerability = vulnerability;
       if (consequence !== undefined) data.consequence = consequence;
       if (time_horizon !== undefined) data.time_horizon = time_horizon;
-      if (observation_refs !== undefined) data.observation_refs = observation_refs;
-      if (topology_context !== undefined) data.topology_context = topology_context;
-      return ok(JSON.stringify(await updateRiskScenario(id, data), null, 2));
+      return ok(JSON.stringify(await updateRiskScenario(id, data, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -2587,10 +2793,11 @@ server.tool(
   "Delete a risk scenario.",
   {
     id: z.string().uuid().describe("Risk scenario UUID"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ id }) => {
+  async ({ id, project }) => {
     try {
-      await deleteRiskScenario(id);
+      await deleteRiskScenario(id, project);
       return ok("Risk scenario deleted.");
     } catch (e) {
       return err(e);
@@ -2600,14 +2807,33 @@ server.tool(
 
 server.tool(
   "gc_transition_risk_scenario_status",
-  "Transition a risk scenario to a new status. Valid transitions: DRAFT→IDENTIFIED, IDENTIFIED→ASSESSED|CLOSED, ASSESSED→TREATED|CLOSED, TREATED→ACCEPTED|CLOSED, ACCEPTED→CLOSED.",
+  "Transition a risk scenario content lifecycle status. Valid transitions: DRAFT→ACTIVE|ARCHIVED, ACTIVE→ARCHIVED.",
   {
     id: z.string().uuid().describe("Risk scenario UUID"),
     status: z.enum(RISK_SCENARIO_STATUSES).describe("Target status"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ id, status }) => {
+  async ({ id, status, project }) => {
     try {
-      return ok(JSON.stringify(await transitionRiskScenarioStatus(id, status), null, 2));
+      return ok(JSON.stringify(await transitionRiskScenarioStatus(id, status, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_risk_scenario_requirements",
+  "Get requirements linked to a risk scenario.",
+  {
+    id: z.string().uuid().describe("Risk scenario UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, project }) => {
+    try {
+      const result = await getRiskScenarioRequirements(id, project);
+      if (Array.isArray(result) && result.length === 0) return ok("No linked requirements found.");
+      return ok(JSON.stringify(result, null, 2));
     } catch (e) {
       return err(e);
     }
@@ -2620,17 +2846,21 @@ server.tool(
   {
     risk_scenario_id: z.string().uuid().describe("Risk scenario UUID"),
     target_type: z.enum(RISK_SCENARIO_LINK_TARGET_TYPES).describe("Type of the linked artifact"),
-    target_identifier: z.string().max(500).describe("Identifier of the linked artifact (UID, URL, or external ID)"),
+    target_entity_id: z.string().uuid().optional().describe("UUID of the modeled internal target entity"),
+    target_identifier: z.string().max(500).optional().describe("Identifier of the linked artifact (UID, URL, or external ID)"),
     link_type: z.enum(RISK_SCENARIO_LINK_TYPES).describe("Nature of the relationship"),
     target_url: z.string().max(2000).optional().describe("URL of the linked artifact"),
     target_title: z.string().max(255).optional().describe("Human-readable title of the linked artifact"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ risk_scenario_id, target_type, target_identifier, link_type, target_url, target_title }) => {
+  async ({ risk_scenario_id, target_type, target_entity_id, target_identifier, link_type, target_url, target_title, project }) => {
     try {
-      const data = { target_type, target_identifier, link_type };
+      const data = { target_type, link_type };
+      if (target_entity_id !== undefined) data.target_entity_id = target_entity_id;
+      if (target_identifier !== undefined) data.target_identifier = target_identifier;
       if (target_url !== undefined) data.target_url = target_url;
       if (target_title !== undefined) data.target_title = target_title;
-      return ok(JSON.stringify(await createRiskScenarioLink(risk_scenario_id, data), null, 2));
+      return ok(JSON.stringify(await createRiskScenarioLink(risk_scenario_id, data, project), null, 2));
     } catch (e) {
       return err(e);
     }
@@ -2643,10 +2873,11 @@ server.tool(
   {
     risk_scenario_id: z.string().uuid().describe("Risk scenario UUID"),
     target_type: z.enum(RISK_SCENARIO_LINK_TARGET_TYPES).optional().describe("Filter by target type"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ risk_scenario_id, target_type }) => {
+  async ({ risk_scenario_id, target_type, project }) => {
     try {
-      const result = await listRiskScenarioLinks(risk_scenario_id, { targetType: target_type });
+      const result = await listRiskScenarioLinks(risk_scenario_id, { targetType: target_type, project });
       if (Array.isArray(result) && result.length === 0) return ok("No links found.");
       return ok(JSON.stringify(result, null, 2));
     } catch (e) {
@@ -2661,11 +2892,775 @@ server.tool(
   {
     risk_scenario_id: z.string().uuid().describe("Risk scenario UUID"),
     link_id: z.string().uuid().describe("Link UUID"),
+    project: z.string().optional().describe("Project identifier"),
   },
-  async ({ risk_scenario_id, link_id }) => {
+  async ({ risk_scenario_id, link_id, project }) => {
     try {
-      await deleteRiskScenarioLink(risk_scenario_id, link_id);
+      await deleteRiskScenarioLink(risk_scenario_id, link_id, project);
       return ok("Risk scenario link deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Control tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_control",
+  "Create a control — a security or risk control with definitions, objectives, ownership, and methodology factor mappings.",
+  {
+    uid: z.string().max(50).describe("Control UID (e.g. 'CTRL-001', 'ISO-27001-A.8.1')"),
+    title: z.string().max(200).describe("Control title"),
+    control_function: z.enum(CONTROL_FUNCTIONS).describe("Control role: PREVENTIVE, DETECTIVE, CORRECTIVE, COMPENSATING"),
+    description: z.string().optional().describe("Control description"),
+    objective: z.string().optional().describe("Control objective"),
+    owner: z.string().max(200).optional().describe("Control owner"),
+    implementation_scope: z.string().optional().describe("Where/how the control is implemented"),
+    methodology_factors: z.record(z.string(), z.unknown()).optional().describe("Methodology-aware factor mappings (e.g. FAIR-CAM strength/coverage)"),
+    effectiveness: z.record(z.string(), z.unknown()).optional().describe("Effectiveness metrics"),
+    category: z.string().max(100).optional().describe("Control category (e.g. Access Control, Encryption)"),
+    source: z.string().max(200).optional().describe("Framework source (e.g. ISO 27001 A.9, NIST CSF PR.AC-1)"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ uid, title, control_function, description, objective, owner, implementation_scope, methodology_factors, effectiveness, category, source, project }) => {
+    try {
+      const data = { uid, title, control_function };
+      if (description !== undefined) data.description = description;
+      if (objective !== undefined) data.objective = objective;
+      if (owner !== undefined) data.owner = owner;
+      if (implementation_scope !== undefined) data.implementation_scope = implementation_scope;
+      if (methodology_factors !== undefined) data.methodology_factors = methodology_factors;
+      if (effectiveness !== undefined) data.effectiveness = effectiveness;
+      if (category !== undefined) data.category = category;
+      if (source !== undefined) data.source = source;
+      return ok(JSON.stringify(await createControl(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_controls",
+  "List controls for a project.",
+  {
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await listControls(project);
+      if (Array.isArray(result) && result.length === 0) return ok("No controls found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_control",
+  "Get a control by UUID or UID.",
+  {
+    id: z.string().optional().describe("Control UUID"),
+    uid: z.string().optional().describe("Control UID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, uid, project }) => {
+    try {
+      const result = id ? await getControl(id, project) : await getControlByUid(uid, project);
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_control",
+  "Update a control.",
+  {
+    id: z.string().uuid().describe("Control UUID"),
+    title: z.string().max(200).optional().describe("Updated title"),
+    control_function: z.enum(CONTROL_FUNCTIONS).optional().describe("Updated control function"),
+    description: z.string().optional().describe("Updated description"),
+    objective: z.string().optional().describe("Updated objective"),
+    owner: z.string().max(200).optional().describe("Updated owner"),
+    implementation_scope: z.string().optional().describe("Updated implementation scope"),
+    methodology_factors: z.record(z.string(), z.unknown()).optional().describe("Updated methodology factors"),
+    effectiveness: z.record(z.string(), z.unknown()).optional().describe("Updated effectiveness"),
+    category: z.string().max(100).optional().describe("Updated category"),
+    source: z.string().max(200).optional().describe("Updated source"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, title, control_function, description, objective, owner, implementation_scope, methodology_factors, effectiveness, category, source, project }) => {
+    try {
+      const data = {};
+      if (title !== undefined) data.title = title;
+      if (control_function !== undefined) data.control_function = control_function;
+      if (description !== undefined) data.description = description;
+      if (objective !== undefined) data.objective = objective;
+      if (owner !== undefined) data.owner = owner;
+      if (implementation_scope !== undefined) data.implementation_scope = implementation_scope;
+      if (methodology_factors !== undefined) data.methodology_factors = methodology_factors;
+      if (effectiveness !== undefined) data.effectiveness = effectiveness;
+      if (category !== undefined) data.category = category;
+      if (source !== undefined) data.source = source;
+      return ok(JSON.stringify(await updateControl(id, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_transition_control_status",
+  "Transition a control's lifecycle status.",
+  {
+    id: z.string().uuid().describe("Control UUID"),
+    status: z.enum(CONTROL_STATUSES).describe("Target status"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, status, project }) => {
+    try {
+      return ok(JSON.stringify(await transitionControlStatus(id, status, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_control",
+  "Delete a control.",
+  {
+    id: z.string().uuid().describe("Control UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, project }) => {
+    try {
+      await deleteControl(id, project);
+      return ok("Control deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_create_control_link",
+  "Link a control to an asset, risk scenario, evidence, code artifact, or other entity.",
+  {
+    control_id: z.string().uuid().describe("Control UUID"),
+    target_type: z.enum(CONTROL_LINK_TARGET_TYPES).describe("Target entity type"),
+    target_entity_id: z.string().uuid().optional().describe("Target entity UUID (for internal entities)"),
+    target_identifier: z.string().max(500).optional().describe("Target identifier (for external references)"),
+    link_type: z.enum(CONTROL_LINK_TYPES).describe("Relationship type"),
+    target_url: z.string().max(2000).optional().describe("URL to the target"),
+    target_title: z.string().max(255).optional().describe("Display title for the target"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ control_id, target_type, target_entity_id, target_identifier, link_type, target_url, target_title, project }) => {
+    try {
+      const data = { target_type, link_type };
+      if (target_entity_id !== undefined) data.target_entity_id = target_entity_id;
+      if (target_identifier !== undefined) data.target_identifier = target_identifier;
+      if (target_url !== undefined) data.target_url = target_url;
+      if (target_title !== undefined) data.target_title = target_title;
+      return ok(JSON.stringify(await createControlLink(control_id, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_control_links",
+  "List links from a control, optionally filtered by target type.",
+  {
+    control_id: z.string().uuid().describe("Control UUID"),
+    target_type: z.enum(CONTROL_LINK_TARGET_TYPES).optional().describe("Filter by target type"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ control_id, target_type, project }) => {
+    try {
+      const result = await listControlLinks(control_id, { targetType: target_type, project });
+      if (Array.isArray(result) && result.length === 0) return ok("No control links found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_control_link",
+  "Delete a control link.",
+  {
+    control_id: z.string().uuid().describe("Control UUID"),
+    link_id: z.string().uuid().describe("Link UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ control_id, link_id, project }) => {
+    try {
+      await deleteControlLink(control_id, link_id, project);
+      return ok("Control link deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Methodology Profile tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_methodology_profile",
+  "Create a methodology profile that defines a risk assessment method and schema.",
+  {
+    profile_key: z.string().max(100).describe("Stable methodology profile key"),
+    name: z.string().max(200).describe("Methodology profile name"),
+    version: z.string().max(50).describe("Profile version"),
+    family: z.enum(METHODOLOGY_FAMILIES).describe("Methodology family"),
+    description: z.string().optional().describe("Profile description"),
+    input_schema: z.record(z.string(), z.unknown()).optional().describe("Input schema metadata"),
+    output_schema: z.record(z.string(), z.unknown()).optional().describe("Output schema metadata"),
+    status: z.enum(METHODOLOGY_PROFILE_STATUSES).optional().describe("Lifecycle status"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ profile_key, name, version, family, description, input_schema, output_schema, status, project }) => {
+    try {
+      const data = { profile_key, name, version, family };
+      if (description !== undefined) data.description = description;
+      if (input_schema !== undefined) data.input_schema = input_schema;
+      if (output_schema !== undefined) data.output_schema = output_schema;
+      if (status !== undefined) data.status = status;
+      return ok(JSON.stringify(await createMethodologyProfile(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_methodology_profiles",
+  "List methodology profiles for a project.",
+  {
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await listMethodologyProfiles(project);
+      if (Array.isArray(result) && result.length === 0) return ok("No methodology profiles found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_methodology_profile",
+  "Get a methodology profile by UUID.",
+  {
+    id: z.string().uuid().describe("Methodology profile UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, project }) => {
+    try {
+      return ok(JSON.stringify(await getMethodologyProfile(id, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_methodology_profile",
+  "Update a methodology profile.",
+  {
+    id: z.string().uuid().describe("Methodology profile UUID"),
+    name: z.string().max(200).optional().describe("Updated name"),
+    version: z.string().max(50).optional().describe("Updated version"),
+    family: z.enum(METHODOLOGY_FAMILIES).optional().describe("Updated family"),
+    description: z.string().optional().describe("Updated description"),
+    input_schema: z.record(z.string(), z.unknown()).optional().describe("Updated input schema metadata"),
+    output_schema: z.record(z.string(), z.unknown()).optional().describe("Updated output schema metadata"),
+    status: z.enum(METHODOLOGY_PROFILE_STATUSES).optional().describe("Updated lifecycle status"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, name, version, family, description, input_schema, output_schema, status, project }) => {
+    try {
+      const data = {};
+      if (name !== undefined) data.name = name;
+      if (version !== undefined) data.version = version;
+      if (family !== undefined) data.family = family;
+      if (description !== undefined) data.description = description;
+      if (input_schema !== undefined) data.input_schema = input_schema;
+      if (output_schema !== undefined) data.output_schema = output_schema;
+      if (status !== undefined) data.status = status;
+      return ok(JSON.stringify(await updateMethodologyProfile(id, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_methodology_profile",
+  "Delete a methodology profile.",
+  {
+    id: z.string().uuid().describe("Methodology profile UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, project }) => {
+    try {
+      await deleteMethodologyProfile(id, project);
+      return ok("Methodology profile deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Risk Register Record tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_risk_register_record",
+  "Create a risk register record that governs one or more risk scenarios.",
+  {
+    uid: z.string().max(50).describe("Risk register record UID"),
+    title: z.string().max(200).describe("Risk register record title"),
+    owner: z.string().max(200).optional().describe("Owner"),
+    review_cadence: z.string().max(100).optional().describe("Review cadence"),
+    next_review_at: z.string().optional().describe("Next review timestamp"),
+    category_tags: z.array(z.string()).optional().describe("Category tags"),
+    decision_metadata: z.record(z.string(), z.unknown()).optional().describe("Decision metadata"),
+    asset_scope_summary: z.string().optional().describe("Asset scope summary"),
+    risk_scenario_ids: z.array(z.string().uuid()).optional().describe("Linked risk scenario UUIDs"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ uid, title, owner, review_cadence, next_review_at, category_tags, decision_metadata, asset_scope_summary, risk_scenario_ids, project }) => {
+    try {
+      const data = { uid, title };
+      if (owner !== undefined) data.owner = owner;
+      if (review_cadence !== undefined) data.review_cadence = review_cadence;
+      if (next_review_at !== undefined) data.next_review_at = next_review_at;
+      if (category_tags !== undefined) data.category_tags = category_tags;
+      if (decision_metadata !== undefined) data.decision_metadata = decision_metadata;
+      if (asset_scope_summary !== undefined) data.asset_scope_summary = asset_scope_summary;
+      if (risk_scenario_ids !== undefined) data.risk_scenario_ids = risk_scenario_ids;
+      return ok(JSON.stringify(await createRiskRegisterRecord(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_risk_register_records",
+  "List risk register records for a project.",
+  {
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await listRiskRegisterRecords(project);
+      if (Array.isArray(result) && result.length === 0) return ok("No risk register records found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_risk_register_record",
+  "Get a risk register record by UUID.",
+  {
+    id: z.string().uuid().describe("Risk register record UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, project }) => {
+    try {
+      return ok(JSON.stringify(await getRiskRegisterRecord(id, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_risk_register_record",
+  "Update a risk register record.",
+  {
+    id: z.string().uuid().describe("Risk register record UUID"),
+    title: z.string().max(200).optional().describe("Updated title"),
+    owner: z.string().max(200).optional().describe("Updated owner"),
+    review_cadence: z.string().max(100).optional().describe("Updated review cadence"),
+    next_review_at: z.string().optional().describe("Updated next review timestamp"),
+    category_tags: z.array(z.string()).optional().describe("Updated category tags"),
+    decision_metadata: z.record(z.string(), z.unknown()).optional().describe("Updated decision metadata"),
+    asset_scope_summary: z.string().optional().describe("Updated asset scope summary"),
+    risk_scenario_ids: z.array(z.string().uuid()).optional().describe("Updated risk scenario UUID list"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, title, owner, review_cadence, next_review_at, category_tags, decision_metadata, asset_scope_summary, risk_scenario_ids, project }) => {
+    try {
+      const data = {};
+      if (title !== undefined) data.title = title;
+      if (owner !== undefined) data.owner = owner;
+      if (review_cadence !== undefined) data.review_cadence = review_cadence;
+      if (next_review_at !== undefined) data.next_review_at = next_review_at;
+      if (category_tags !== undefined) data.category_tags = category_tags;
+      if (decision_metadata !== undefined) data.decision_metadata = decision_metadata;
+      if (asset_scope_summary !== undefined) data.asset_scope_summary = asset_scope_summary;
+      if (risk_scenario_ids !== undefined) data.risk_scenario_ids = risk_scenario_ids;
+      return ok(JSON.stringify(await updateRiskRegisterRecord(id, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_transition_risk_register_record_status",
+  "Transition a risk register record status through the governance workflow.",
+  {
+    id: z.string().uuid().describe("Risk register record UUID"),
+    status: z.enum(RISK_REGISTER_STATUSES).describe("Target status"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, status, project }) => {
+    try {
+      return ok(JSON.stringify(await transitionRiskRegisterRecordStatus(id, status, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_risk_register_record",
+  "Delete a risk register record.",
+  {
+    id: z.string().uuid().describe("Risk register record UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, project }) => {
+    try {
+      await deleteRiskRegisterRecord(id, project);
+      return ok("Risk register record deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Risk Assessment Result tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_risk_assessment_result",
+  "Create a versioned risk assessment result for a risk scenario.",
+  {
+    risk_scenario_id: z.string().uuid().describe("Risk scenario UUID"),
+    risk_register_record_id: z.string().uuid().optional().describe("Risk register record UUID"),
+    methodology_profile_id: z.string().uuid().describe("Methodology profile UUID"),
+    analyst_identity: z.string().optional().describe("Analyst or agent identity"),
+    assumptions: z.string().optional().describe("Assessment assumptions"),
+    input_factors: z.record(z.string(), z.unknown()).optional().describe("Structured input factors"),
+    observation_date: z.string().optional().describe("Observation date/time"),
+    assessment_at: z.string().optional().describe("Assessment timestamp"),
+    time_horizon: z.string().optional().describe("Assessment time horizon"),
+    confidence: z.string().optional().describe("Confidence metadata"),
+    uncertainty_metadata: z.record(z.string(), z.unknown()).optional().describe("Structured uncertainty metadata"),
+    computed_outputs: z.record(z.string(), z.unknown()).optional().describe("Structured computed outputs"),
+    evidence_refs: z.array(z.string()).optional().describe("Evidence references"),
+    notes: z.string().optional().describe("Additional notes"),
+    observation_ids: z.array(z.string().uuid()).optional().describe("Observation UUIDs used in the assessment"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ risk_scenario_id, risk_register_record_id, methodology_profile_id, analyst_identity, assumptions, input_factors, observation_date, assessment_at, time_horizon, confidence, uncertainty_metadata, computed_outputs, evidence_refs, notes, observation_ids, project }) => {
+    try {
+      const data = { risk_scenario_id, methodology_profile_id };
+      if (risk_register_record_id !== undefined) data.risk_register_record_id = risk_register_record_id;
+      if (analyst_identity !== undefined) data.analyst_identity = analyst_identity;
+      if (assumptions !== undefined) data.assumptions = assumptions;
+      if (input_factors !== undefined) data.input_factors = input_factors;
+      if (observation_date !== undefined) data.observation_date = observation_date;
+      if (assessment_at !== undefined) data.assessment_at = assessment_at;
+      if (time_horizon !== undefined) data.time_horizon = time_horizon;
+      if (confidence !== undefined) data.confidence = confidence;
+      if (uncertainty_metadata !== undefined) data.uncertainty_metadata = uncertainty_metadata;
+      if (computed_outputs !== undefined) data.computed_outputs = computed_outputs;
+      if (evidence_refs !== undefined) data.evidence_refs = evidence_refs;
+      if (notes !== undefined) data.notes = notes;
+      if (observation_ids !== undefined) data.observation_ids = observation_ids;
+      return ok(JSON.stringify(await createRiskAssessmentResult(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_risk_assessment_results",
+  "List risk assessment results, optionally filtered by scenario or risk register record.",
+  {
+    risk_scenario_id: z.string().uuid().optional().describe("Risk scenario UUID"),
+    risk_register_record_id: z.string().uuid().optional().describe("Risk register record UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ risk_scenario_id, risk_register_record_id, project }) => {
+    try {
+      const result = await listRiskAssessmentResults({
+        riskScenarioId: risk_scenario_id,
+        riskRegisterRecordId: risk_register_record_id,
+        project,
+      });
+      if (Array.isArray(result) && result.length === 0) return ok("No risk assessment results found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_risk_assessment_result",
+  "Get a risk assessment result by UUID.",
+  {
+    id: z.string().uuid().describe("Risk assessment result UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, project }) => {
+    try {
+      return ok(JSON.stringify(await getRiskAssessmentResult(id, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_risk_assessment_result",
+  "Update a risk assessment result.",
+  {
+    id: z.string().uuid().describe("Risk assessment result UUID"),
+    risk_register_record_id: z.string().uuid().optional().describe("Updated risk register record UUID"),
+    methodology_profile_id: z.string().uuid().optional().describe("Updated methodology profile UUID"),
+    analyst_identity: z.string().optional().describe("Updated analyst identity"),
+    assumptions: z.string().optional().describe("Updated assumptions"),
+    input_factors: z.record(z.string(), z.unknown()).optional().describe("Updated input factors"),
+    observation_date: z.string().optional().describe("Updated observation date"),
+    assessment_at: z.string().optional().describe("Updated assessment timestamp"),
+    time_horizon: z.string().optional().describe("Updated time horizon"),
+    confidence: z.string().optional().describe("Updated confidence"),
+    uncertainty_metadata: z.record(z.string(), z.unknown()).optional().describe("Updated uncertainty metadata"),
+    computed_outputs: z.record(z.string(), z.unknown()).optional().describe("Updated computed outputs"),
+    evidence_refs: z.array(z.string()).optional().describe("Updated evidence references"),
+    notes: z.string().optional().describe("Updated notes"),
+    observation_ids: z.array(z.string().uuid()).optional().describe("Updated observation UUIDs"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, risk_register_record_id, methodology_profile_id, analyst_identity, assumptions, input_factors, observation_date, assessment_at, time_horizon, confidence, uncertainty_metadata, computed_outputs, evidence_refs, notes, observation_ids, project }) => {
+    try {
+      const data = {};
+      if (risk_register_record_id !== undefined) data.risk_register_record_id = risk_register_record_id;
+      if (methodology_profile_id !== undefined) data.methodology_profile_id = methodology_profile_id;
+      if (analyst_identity !== undefined) data.analyst_identity = analyst_identity;
+      if (assumptions !== undefined) data.assumptions = assumptions;
+      if (input_factors !== undefined) data.input_factors = input_factors;
+      if (observation_date !== undefined) data.observation_date = observation_date;
+      if (assessment_at !== undefined) data.assessment_at = assessment_at;
+      if (time_horizon !== undefined) data.time_horizon = time_horizon;
+      if (confidence !== undefined) data.confidence = confidence;
+      if (uncertainty_metadata !== undefined) data.uncertainty_metadata = uncertainty_metadata;
+      if (computed_outputs !== undefined) data.computed_outputs = computed_outputs;
+      if (evidence_refs !== undefined) data.evidence_refs = evidence_refs;
+      if (notes !== undefined) data.notes = notes;
+      if (observation_ids !== undefined) data.observation_ids = observation_ids;
+      return ok(JSON.stringify(await updateRiskAssessmentResult(id, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_transition_risk_assessment_approval_state",
+  "Transition a risk assessment result approval state.",
+  {
+    id: z.string().uuid().describe("Risk assessment result UUID"),
+    approval_state: z.enum(RISK_ASSESSMENT_APPROVAL_STATUSES).describe("Target approval state"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, approval_state, project }) => {
+    try {
+      return ok(JSON.stringify(await transitionRiskAssessmentApprovalState(id, approval_state, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_risk_assessment_result",
+  "Delete a risk assessment result.",
+  {
+    id: z.string().uuid().describe("Risk assessment result UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, project }) => {
+    try {
+      await deleteRiskAssessmentResult(id, project);
+      return ok("Risk assessment result deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Treatment Plan tools
+// ==========================================================================
+
+server.tool(
+  "gc_create_treatment_plan",
+  "Create a treatment plan linked to a risk register record.",
+  {
+    uid: z.string().max(50).describe("Treatment plan UID"),
+    title: z.string().max(200).describe("Treatment plan title"),
+    risk_register_record_id: z.string().uuid().describe("Risk register record UUID"),
+    risk_scenario_id: z.string().uuid().optional().describe("Optional risk scenario UUID"),
+    strategy: z.enum(TREATMENT_STRATEGIES).describe("Treatment strategy"),
+    owner: z.string().max(200).optional().describe("Owner"),
+    rationale: z.string().optional().describe("Rationale"),
+    due_date: z.string().optional().describe("Due date"),
+    status: z.enum(TREATMENT_PLAN_STATUSES).optional().describe("Initial status"),
+    action_items: z.array(z.record(z.string(), z.unknown())).optional().describe("Structured action items"),
+    reassessment_triggers: z.array(z.string()).optional().describe("Reassessment triggers"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ uid, title, risk_register_record_id, risk_scenario_id, strategy, owner, rationale, due_date, status, action_items, reassessment_triggers, project }) => {
+    try {
+      const data = { uid, title, risk_register_record_id, strategy };
+      if (risk_scenario_id !== undefined) data.risk_scenario_id = risk_scenario_id;
+      if (owner !== undefined) data.owner = owner;
+      if (rationale !== undefined) data.rationale = rationale;
+      if (due_date !== undefined) data.due_date = due_date;
+      if (status !== undefined) data.status = status;
+      if (action_items !== undefined) data.action_items = action_items;
+      if (reassessment_triggers !== undefined) data.reassessment_triggers = reassessment_triggers;
+      return ok(JSON.stringify(await createTreatmentPlan(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_treatment_plans",
+  "List treatment plans, optionally filtered by risk register record.",
+  {
+    risk_register_record_id: z.string().uuid().optional().describe("Risk register record UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ risk_register_record_id, project }) => {
+    try {
+      const result = await listTreatmentPlans({ riskRegisterRecordId: risk_register_record_id, project });
+      if (Array.isArray(result) && result.length === 0) return ok("No treatment plans found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_treatment_plan",
+  "Get a treatment plan by UUID.",
+  {
+    id: z.string().uuid().describe("Treatment plan UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, project }) => {
+    try {
+      return ok(JSON.stringify(await getTreatmentPlan(id, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_treatment_plan",
+  "Update a treatment plan.",
+  {
+    id: z.string().uuid().describe("Treatment plan UUID"),
+    title: z.string().max(200).optional().describe("Updated title"),
+    risk_scenario_id: z.string().uuid().optional().describe("Updated risk scenario UUID"),
+    strategy: z.enum(TREATMENT_STRATEGIES).optional().describe("Updated strategy"),
+    owner: z.string().max(200).optional().describe("Updated owner"),
+    rationale: z.string().optional().describe("Updated rationale"),
+    due_date: z.string().optional().describe("Updated due date"),
+    action_items: z.array(z.record(z.string(), z.unknown())).optional().describe("Updated action items"),
+    reassessment_triggers: z.array(z.string()).optional().describe("Updated reassessment triggers"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, title, risk_scenario_id, strategy, owner, rationale, due_date, action_items, reassessment_triggers, project }) => {
+    try {
+      const data = {};
+      if (title !== undefined) data.title = title;
+      if (risk_scenario_id !== undefined) data.risk_scenario_id = risk_scenario_id;
+      if (strategy !== undefined) data.strategy = strategy;
+      if (owner !== undefined) data.owner = owner;
+      if (rationale !== undefined) data.rationale = rationale;
+      if (due_date !== undefined) data.due_date = due_date;
+      if (action_items !== undefined) data.action_items = action_items;
+      if (reassessment_triggers !== undefined) data.reassessment_triggers = reassessment_triggers;
+      return ok(JSON.stringify(await updateTreatmentPlan(id, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_transition_treatment_plan_status",
+  "Transition a treatment plan status.",
+  {
+    id: z.string().uuid().describe("Treatment plan UUID"),
+    status: z.enum(TREATMENT_PLAN_STATUSES).describe("Target status"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, status, project }) => {
+    try {
+      return ok(JSON.stringify(await transitionTreatmentPlanStatus(id, status, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_treatment_plan",
+  "Delete a treatment plan.",
+  {
+    id: z.string().uuid().describe("Treatment plan UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, project }) => {
+    try {
+      await deleteTreatmentPlan(id, project);
+      return ok("Treatment plan deleted.");
     } catch (e) {
       return err(e);
     }

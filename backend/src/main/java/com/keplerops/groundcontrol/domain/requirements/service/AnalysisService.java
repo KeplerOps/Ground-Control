@@ -1,6 +1,10 @@
 package com.keplerops.groundcontrol.domain.requirements.service;
 
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.graph.model.GraphEdge;
+import com.keplerops.groundcontrol.domain.graph.model.GraphEntityType;
+import com.keplerops.groundcontrol.domain.graph.model.GraphNode;
+import com.keplerops.groundcontrol.domain.graph.model.GraphProjection;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
@@ -426,7 +430,7 @@ public class AnalysisService {
                 .toList();
     }
 
-    public SubgraphResult extractSubgraph(UUID projectId, List<String> rootUids) {
+    public GraphProjection extractSubgraph(UUID projectId, List<String> rootUids) {
         List<Requirement> allRequirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
         List<RequirementRelation> allRelations = relationRepository.findActiveWithSourceAndTargetByProjectId(projectId);
 
@@ -465,12 +469,51 @@ public class AnalysisService {
                         && reachableIds.contains(rel.getTarget().getId()))
                 .toList();
 
-        return new SubgraphResult(subgraphRequirements, subgraphRelations);
+        return toGraphProjection(subgraphRequirements, subgraphRelations);
     }
 
-    public GraphVisualizationResult getGraphVisualization(UUID projectId) {
+    public GraphProjection getGraphVisualization(UUID projectId) {
         List<Requirement> requirements = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId);
         List<RequirementRelation> relations = relationRepository.findActiveWithSourceAndTargetByProjectId(projectId);
-        return new GraphVisualizationResult(requirements, relations);
+        return toGraphProjection(requirements, relations);
+    }
+
+    private GraphProjection toGraphProjection(List<Requirement> requirements, List<RequirementRelation> relations) {
+        return new GraphProjection(
+                requirements.stream().map(this::toGraphNode).toList(),
+                relations.stream().map(this::toGraphEdge).toList());
+    }
+
+    private GraphNode toGraphNode(Requirement requirement) {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("title", requirement.getTitle());
+        properties.put("statement", requirement.getStatement());
+        properties.put("priority", requirement.getPriority().name());
+        properties.put("status", requirement.getStatus().name());
+        properties.put("requirementType", requirement.getRequirementType().name());
+        properties.put("wave", requirement.getWave());
+        return new GraphNode(
+                requirement.getId().toString(),
+                requirement.getId().toString(),
+                GraphEntityType.REQUIREMENT,
+                requirement.getProject().getIdentifier(),
+                requirement.getUid(),
+                requirement.getUid(),
+                properties);
+    }
+
+    private GraphEdge toGraphEdge(RequirementRelation relation) {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("sourceUid", relation.getSource().getUid());
+        properties.put("targetUid", relation.getTarget().getUid());
+        properties.put("createdAt", relation.getCreatedAt());
+        return new GraphEdge(
+                relation.getId().toString(),
+                relation.getRelationType().name(),
+                relation.getSource().getId().toString(),
+                relation.getTarget().getId().toString(),
+                GraphEntityType.REQUIREMENT,
+                GraphEntityType.REQUIREMENT,
+                properties);
     }
 }

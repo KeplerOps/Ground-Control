@@ -21,6 +21,10 @@ public interface RequirementRepository extends JpaRepository<Requirement, UUID>,
 
     boolean existsByProjectIdAndUid(UUID projectId, String uid);
 
+    Optional<Requirement> findByIdAndProjectId(UUID id, UUID projectId);
+
+    boolean existsByIdAndProjectId(UUID id, UUID projectId);
+
     @Query("SELECT r FROM Requirement r WHERE r.project.id = :projectId AND UPPER(r.uid) = UPPER(:uid)")
     Optional<Requirement> findByProjectIdAndUidIgnoreCase(@Param("projectId") UUID projectId, @Param("uid") String uid);
 
