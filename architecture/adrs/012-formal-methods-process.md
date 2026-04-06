@@ -174,6 +174,12 @@ SDD extends TDD by adding contracts as a specification layer:
 - OpenJML + Hibernate proxies: JPA entity proxies may interfere with JML runtime checks. Mitigated by scoping RAC to domain logic methods, not framework-generated code.
 - Over-contracting L0 code: enthusiasm may lead to contracts on configuration or DTOs. Mitigated by explicit L0 classification in the decision table — if it matches an L0 rule, do not contract it.
 
+## Implementation Status
+
+- Assurance levels L0-L3 are codified as the `AssuranceLevel` enum in `domain/verification/state/AssuranceLevel.java`.
+- Verification outcomes are codified as the `VerificationStatus` enum in `domain/verification/state/VerificationStatus.java`.
+- Both enums are used by the `VerificationResult` entity (ADR-014 §2, GC-F001).
+
 ## Related ADRs
 
 - **ADR-013** (Java/Spring Boot Backend Rewrite) — Current tool names (JML, OpenJML, jqwik, KeY) for Ground Control's own code.

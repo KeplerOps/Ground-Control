@@ -598,6 +598,28 @@ document structure (document, sections, text blocks). The response includes all 
 `relationsSkipped`, `traceabilityLinksCreated`, `traceabilityLinksSkipped`,
 `documentsCreated`, `sectionsCreated`, `sectionContentsCreated`, `errors`.
 
+### Verification Results
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/verification-results` | VerificationResultRequest | 201 | Create verification result |
+| GET | `/verification-results` | — | 200 | List verification results |
+| GET | `/verification-results/{id}` | — | 200 | Get verification result by UUID |
+| PUT | `/verification-results/{id}` | UpdateVerificationResultRequest | 200 | Update verification result |
+| DELETE | `/verification-results/{id}` | — | 204 | Delete verification result |
+
+All endpoints accept an optional `project` query parameter.
+
+**Filters on GET list:**
+- `requirement_id` (UUID) — filter by requirement
+- `prover` (string) — filter by verifier tool identifier
+- `result` (enum) — PROVEN, REFUTED, TIMEOUT, UNKNOWN, ERROR
+
+**VerificationResultRequest fields:** `prover` (required), `result` (required),
+`assuranceLevel` (required, L0-L3), `verifiedAt` (required, ISO 8601), `targetId`
+(optional, traceability link UUID), `requirementId` (optional), `property` (optional),
+`evidence` (optional, JSON object), `expiresAt` (optional, ISO 8601).
+
 ## Request / Response Format
 
 JSON. Error responses use a nested envelope:

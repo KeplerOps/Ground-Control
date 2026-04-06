@@ -57,11 +57,13 @@ backend/src/main/java/com/keplerops/groundcontrol/
 │   ├── requirements/             # RequirementController, request/response records
 │   ├── baselines/                # BaselineController, request/response records
 │   ├── admin/                    # ImportController, SweepController, AnalysisController, GraphController, EmbeddingController
+│   ├── verification/             # VerificationResultController, request/response records
 │   └── GlobalExceptionHandler.java
 ├── domain/                       # Business logic (Spring-web-free)
 │   ├── exception/                # Domain exception hierarchy
 │   ├── projects/                 # Project entity, repository, service
 │   ├── baselines/                # Baseline entity, repository, service
+│   ├── verification/             # VerificationResult entity, VerificationStatus/AssuranceLevel enums, repository, service
 │   └── requirements/
 │       ├── model/                # JPA entities (Requirement, RequirementRelation, TraceabilityLink, RequirementEmbedding, etc.)
 │       ├── repository/           # Spring Data JPA repository interfaces
@@ -120,10 +122,11 @@ Environment variables use the `GC_` prefix (e.g., `GC_DATABASE_URL`, `GC_SERVER_
 - Production deployment infrastructure (local Docker Compose + EC2 via CDK)
 - Multi-tenancy
 - Search
-- Verification result tracking (VerificationResult entity from ADR-014 not yet implemented)
+- Verification result tracking — future: infrastructure verifier adapters (ADR-014 §6 infrastructure/verifiers/ layer)
 - Traceability Matrix view (`/traceability`) and Audit Timeline view (`/audit`) in the frontend
 - Apache AGE is optional — the app gracefully degrades to JPA-only analysis when AGE is unavailable
 
 ### Exists now
 
 - `specs/tla/` for design-level verification artifacts and state-machine specs, aligned with ADR-014
+- Verification result storage (VerificationResult entity with eager-loaded target/requirement, enums, CRUD API, MCP tools) — ADR-014 §2 common schema

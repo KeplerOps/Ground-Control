@@ -199,6 +199,11 @@ The `infrastructure/verifiers/` package follows the ports-and-adapters pattern: 
 | Too many verification tools to maintain | Ground Control orchestrates — it doesn't maintain the provers themselves. Each backend is a thin adapter (~100-200 lines) calling an external tool's CLI or API. |
 | VerificationResult expiry/staleness is hard to track | `expiresAt` field combined with TraceabilityLink's `syncStatus` flag stale results when source artifacts change. Graph queries surface "verification gaps" — requirements with expired or missing results. |
 
+## Implementation Status
+
+- **§2 VerificationResult entity** — Implemented (GC-F001). Domain: `domain/verification/`, API: `api/verification/`, Migrations: V049-V050, MCP: 5 tools. Target and requirement FKs use eager fetch.
+- **§6 infrastructure/verifiers/ adapters** — Not yet implemented. Future work per individual prover requirements.
+
 ## Related ADRs
 
 - **ADR-005** (Apache AGE) — The graph is the integration point for multi-prover verification results. Cypher queries span requirements, traceability links, and verification results.
