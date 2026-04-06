@@ -30,6 +30,7 @@ Codify the gated agentic development loop as a first-class requirement (GC-O007)
 The workflow is implemented by:
 - `/implement` skill (`.claude/skills/implement/SKILL.md`)
 - Completion verifier agent (`.claude/agents/completion-verifier.md`)
+- Repo-native policy guardrails (`architecture/policies/adr-policy.json`, `bin/policy`, `make policy`)
 - Development workflow docs (`docs/DEVELOPMENT_WORKFLOW.md`, `docs/WORKFLOW.md`)
 
 The requirement:
@@ -45,6 +46,7 @@ The requirement:
 - Self-referential traceability links dogfood GC's own traceability system
 - Changes to `/implement` can be evaluated against the requirement to detect gate weakening
 - Foundation for automating gate evaluation via GC-C010 quality gates
+- Workflow conformance no longer depends only on Claude-specific user hooks; the repo itself now enforces the critical guardrails in pre-commit and CI
 
 ### Negative
 

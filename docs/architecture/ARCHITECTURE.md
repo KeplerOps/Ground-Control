@@ -123,3 +123,7 @@ Environment variables use the `GC_` prefix (e.g., `GC_DATABASE_URL`, `GC_SERVER_
 - Verification result tracking (VerificationResult entity from ADR-014 not yet implemented)
 - Traceability Matrix view (`/traceability`) and Audit Timeline view (`/audit`) in the frontend
 - Apache AGE is optional — the app gracefully degrades to JPA-only analysis when AGE is unavailable
+
+### Exists now
+
+- `specs/tla/` for design-level verification artifacts and state-machine specs, aligned with ADR-014

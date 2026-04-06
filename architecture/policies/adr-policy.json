@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "policies": [
+    {
+      "id": "ADR-021",
+      "title": "Gated Agentic Development Loop",
+      "adrPath": "architecture/adrs/021-gated-agentic-development-loop.md",
+      "rules": [
+        {
+          "id": "workflow-guardrail-sync",
+          "whenAny": [
+            ".claude/skills/implement/SKILL.md",
+            ".claude/agents/completion-verifier.md",
+            ".claude/rules/*.md",
+            ".claude/hooks/verify-extra.sh",
+            ".github/PULL_REQUEST_TEMPLATE.md",
+            "AGENTS.md"
+          ],
+          "requireAll": [
+            "docs/DEVELOPMENT_WORKFLOW.md",
+            "docs/WORKFLOW.md",
+            "architecture/adrs/021-gated-agentic-development-loop.md"
+          ],
+          "message": "Workflow guardrails changed without syncing ADR-021 and workflow docs."
+        }
+      ]
+    },
+    {
+      "id": "ADR-014",
+      "title": "Pluggable Verification Architecture",
+      "adrPath": "architecture/adrs/014-pluggable-verification-architecture.md",
+      "rules": [
+        {
+          "id": "verification-architecture-sync",
+          "whenAny": [
+            "specs/tla/**",
+            "backend/src/main/java/com/keplerops/groundcontrol/domain/verification/**",
+            "backend/src/main/java/com/keplerops/groundcontrol/infrastructure/verifiers/**",
+            "tools/ground_control/**"
+          ],
+          "requireAll": [
+            "docs/architecture/ARCHITECTURE.md",
+            "architecture/adrs/014-pluggable-verification-architecture.md"
+          ],
+          "message": "Verification architecture changed without syncing ADR-014 and architecture docs."
+        }
+      ]
+    },
+    {
+      "id": "ADR-012",
+      "title": "Formal Methods Development Process",
+      "adrPath": "architecture/adrs/012-formal-methods-process.md",
+      "rules": [
+        {
+          "id": "formal-methods-sync",
+          "whenAny": [
+            "backend/gradle/openjml.gradle.kts",
+            "backend/src/main/java/com/keplerops/groundcontrol/domain/**/state/*.java",
+            "specs/tla/**"
+          ],
+          "requireAll": [
+            "docs/CODING_STANDARDS.md",
+            "architecture/adrs/012-formal-methods-process.md"
+          ],
+          "message": "Formal methods surfaces changed without syncing ADR-012 and coding standards."
+        }
+      ]
+    }
+  ]
+}

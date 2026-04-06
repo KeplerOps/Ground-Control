@@ -49,7 +49,7 @@ The core development loop for all L1+ code is:
 2. **Spec** — Write JML contracts (`requires`, `ensures`, `invariant`) that express the behavioral intent.
 3. **Test** — Write a failing test that exercises the contract (both happy-path and contract-violation).
 4. **Code** — Implement the method body to satisfy the contracts and pass the test.
-5. **Verify** — Run `./gradlew check` (compilation + OpenJML + tests + Spotless + ArchUnit).
+5. **Verify** — Run `make policy` and `./gradlew check` (repo guardrails + compilation + OpenJML + tests + Spotless + ArchUnit).
 
 This is "TDD for invariants": contracts are the failing specification, implementation satisfies them. Contracts and tests are complementary — contracts define *what must always hold*, tests verify *specific scenarios*.
 
@@ -140,6 +140,8 @@ During pre-alpha, the drift detection bar is relaxed:
 3. **L2 property tests** (jqwik) run in CI, tagged `@Tag("slow")` so they can be skipped locally for fast iteration.
 
 Existing JML contracts without tests are acceptable during pre-alpha — they still serve as documentation. The post-alpha process will require test coverage for all contracts.
+
+Repo-native guardrails complement the formal-methods toolchain. They enforce that workflow, migration, controller, and ADR changes stay synchronized with the documents and policy artifacts that make the methodology legible to both humans and agents.
 
 ### Relationship to TDD
 

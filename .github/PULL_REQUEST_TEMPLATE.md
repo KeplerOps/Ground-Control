@@ -2,9 +2,18 @@
 
 <!-- Brief description of changes -->
 
+## Requirement UIDs
+
+- `GC-...`
+
 ## Related Issues
 
 <!-- Link to GitHub issues: Closes #XX -->
+
+## ADR Impact
+
+- ADR-...
+- or: No ADR required
 
 ## Changes
 
@@ -16,6 +25,17 @@
 - [ ] Integration tests pass if applicable (`make integration`)
 - [ ] `make check` passes (Spotless, SpotBugs, Error Prone, Checkstyle, JaCoCo)
 - [ ] No coverage regression
+
+## Ground Control Checks
+
+- [ ] `make policy` passes
+- [ ] `gc_evaluate_quality_gates` passes or is unchanged by this repo-only change
+- [ ] `gc_run_sweep` reviewed or intentionally deferred with reason
+
+## Traceability
+
+- IMPLEMENTS:
+- TESTS:
 
 ## Checklist
 
