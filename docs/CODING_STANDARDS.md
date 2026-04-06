@@ -172,6 +172,7 @@ OpenJML Extended Static Checking (ESC) runs the Z3 SMT solver to formally prove 
 
 ESC runs on **pure logic classes** with no String constructor parameters and no framework annotations:
 - `domain/requirements/state/` — enums, state machines, transition tables
+- `domain/verification/state/` — `VerificationStatus`, `AssuranceLevel` enums (simple value enums, L0)
 - Future pure domain logic classes that follow the same pattern
 
 ### What ESC cannot verify (and why)

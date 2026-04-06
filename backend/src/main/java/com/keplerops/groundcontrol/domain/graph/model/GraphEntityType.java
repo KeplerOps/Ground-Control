@@ -10,5 +10,6 @@ public enum GraphEntityType {
     TREATMENT_PLAN,
     METHODOLOGY_PROFILE,
     CONTROL,
-    CONTROL_LINK
+    CONTROL_LINK,
+    VERIFICATION_RESULT
 }

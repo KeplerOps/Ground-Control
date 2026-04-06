@@ -1817,3 +1817,35 @@ export async function transitionTreatmentPlanStatus(id, status, project) {
 export async function deleteTreatmentPlan(id, project) {
   await request("DELETE", `/api/v1/treatment-plans/${encodeURIComponent(id)}`, { params: { project } });
 }
+
+// ---------------------------------------------------------------------------
+// Verification Result constants & API functions
+// ---------------------------------------------------------------------------
+
+export const VERIFICATION_STATUSES = ["PROVEN", "REFUTED", "TIMEOUT", "UNKNOWN", "ERROR"];
+export const ASSURANCE_LEVELS = ["L0", "L1", "L2", "L3"];
+
+export async function createVerificationResult(data, project) {
+  return request("POST", "/api/v1/verification-results", { body: data, params: { project } });
+}
+
+export async function listVerificationResults({ requirementId, prover, result, project } = {}) {
+  return request("GET", "/api/v1/verification-results", {
+    params: { requirement_id: requirementId, prover, result, project },
+  });
+}
+
+export async function getVerificationResult(id, project) {
+  return request("GET", `/api/v1/verification-results/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function updateVerificationResult(id, data, project) {
+  return request("PUT", `/api/v1/verification-results/${encodeURIComponent(id)}`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function deleteVerificationResult(id, project) {
+  await request("DELETE", `/api/v1/verification-results/${encodeURIComponent(id)}`, { params: { project } });
+}

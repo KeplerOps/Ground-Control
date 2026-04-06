@@ -201,6 +201,13 @@ import {
   TREATMENT_STRATEGIES,
   RISK_SCENARIO_LINK_TARGET_TYPES,
   RISK_SCENARIO_LINK_TYPES,
+  createVerificationResult,
+  listVerificationResults,
+  getVerificationResult,
+  updateVerificationResult,
+  deleteVerificationResult,
+  VERIFICATION_STATUSES,
+  ASSURANCE_LEVELS,
 } from "./lib.js";
 
 function ok(text) {
@@ -3661,6 +3668,126 @@ server.tool(
     try {
       await deleteTreatmentPlan(id, project);
       return ok("Treatment plan deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Verification Results
+// ==========================================================================
+
+server.tool(
+  "gc_create_verification_result",
+  "Store a verification result from any prover or verifier.",
+  {
+    target_id: z.string().uuid().optional().describe("Traceability link UUID (what was verified)"),
+    requirement_id: z.string().uuid().optional().describe("Requirement UUID driving the verification"),
+    prover: z.string().max(100).describe("Verifier tool identifier (e.g. 'openjml-esc', 'tlaplus-tlc', 'opa', 'manual-review')"),
+    property: z.string().optional().describe("The formal property checked (human-readable or formal notation)"),
+    result: z.enum(VERIFICATION_STATUSES).describe("Verification outcome"),
+    assurance_level: z.enum(ASSURANCE_LEVELS).describe("Assurance level (L0-L3)"),
+    evidence: z.record(z.unknown()).optional().describe("Prover-specific output (proof artifacts, counterexamples, logs)"),
+    verified_at: z.string().describe("ISO 8601 timestamp of when the verification ran"),
+    expires_at: z.string().optional().describe("ISO 8601 timestamp for re-verification trigger"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ target_id, requirement_id, prover, property, result, assurance_level, evidence, verified_at, expires_at, project }) => {
+    try {
+      const data = { prover, result, assurance_level, verified_at };
+      if (target_id !== undefined) data.target_id = target_id;
+      if (requirement_id !== undefined) data.requirement_id = requirement_id;
+      if (property !== undefined) data.property = property;
+      if (evidence !== undefined) data.evidence = evidence;
+      if (expires_at !== undefined) data.expires_at = expires_at;
+      return ok(JSON.stringify(await createVerificationResult(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_verification_results",
+  "List verification results with optional filters.",
+  {
+    requirement_id: z.string().uuid().optional().describe("Filter by requirement UUID"),
+    prover: z.string().optional().describe("Filter by prover identifier"),
+    result: z.enum(VERIFICATION_STATUSES).optional().describe("Filter by verification outcome"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ requirement_id, prover, result, project }) => {
+    try {
+      return ok(JSON.stringify(await listVerificationResults({ requirementId: requirement_id, prover, result, project }), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_verification_result",
+  "Get a verification result by UUID.",
+  {
+    id: z.string().uuid().describe("Verification result UUID"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ id, project }) => {
+    try {
+      return ok(JSON.stringify(await getVerificationResult(id, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_verification_result",
+  "Update a verification result.",
+  {
+    id: z.string().uuid().describe("Verification result UUID"),
+    target_id: z.string().uuid().optional().describe("Traceability link UUID"),
+    requirement_id: z.string().uuid().optional().describe("Requirement UUID"),
+    prover: z.string().max(100).optional().describe("Verifier tool identifier"),
+    property: z.string().optional().describe("The formal property checked"),
+    result: z.enum(VERIFICATION_STATUSES).optional().describe("Verification outcome"),
+    assurance_level: z.enum(ASSURANCE_LEVELS).optional().describe("Assurance level (L0-L3)"),
+    evidence: z.record(z.unknown()).optional().describe("Prover-specific output"),
+    verified_at: z.string().optional().describe("ISO 8601 timestamp of when the verification ran"),
+    expires_at: z.string().optional().describe("ISO 8601 timestamp for re-verification trigger"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ id, target_id, requirement_id, prover, property, result, assurance_level, evidence, verified_at, expires_at, project }) => {
+    try {
+      const data = {};
+      if (target_id !== undefined) data.target_id = target_id;
+      if (requirement_id !== undefined) data.requirement_id = requirement_id;
+      if (prover !== undefined) data.prover = prover;
+      if (property !== undefined) data.property = property;
+      if (result !== undefined) data.result = result;
+      if (assurance_level !== undefined) data.assurance_level = assurance_level;
+      if (evidence !== undefined) data.evidence = evidence;
+      if (verified_at !== undefined) data.verified_at = verified_at;
+      if (expires_at !== undefined) data.expires_at = expires_at;
+      return ok(JSON.stringify(await updateVerificationResult(id, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_verification_result",
+  "Delete a verification result.",
+  {
+    id: z.string().uuid().describe("Verification result UUID"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ id, project }) => {
+    try {
+      await deleteVerificationResult(id, project);
+      return ok("Verification result deleted.");
     } catch (e) {
       return err(e);
     }

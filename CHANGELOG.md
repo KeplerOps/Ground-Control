@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.104.0] - 2026-04-06
+
+### Added
+
+- Verification result storage (GC-F001): prover-agnostic schema for storing
+  verification results from any verifier (OpenJML, TLA+, OPA, manual review)
+- VerificationResult entity with VerificationStatus and AssuranceLevel enums
+- REST API: CRUD endpoints at `/api/v1/verification-results` with filtering
+  by requirement, prover, and result status
+- MCP tools: `gc_create_verification_result`, `gc_list_verification_results`,
+  `gc_get_verification_result`, `gc_update_verification_result`,
+  `gc_delete_verification_result`
+- Flyway migrations V049-V050 for verification_result and audit tables
+- Unit tests for VerificationResultController and VerificationResultService
+
 ## [0.103.0] - 2026-04-06
 
 ### Added
