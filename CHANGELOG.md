@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of returning empty lists
 - Added `buildProjectionForProject(UUID)` to GraphProjectionRegistryService
   for project-scoped JPA-based graph building
+- SonarCloud bug: bind SpaController path template variables to a
+  @PathVariable parameter to satisfy rule java:S6856
+- Set SonarCloud new code period to `previous_version` on main branch
+  so quality gate conditions can be evaluated
 
 ## [0.102.1] - 2026-04-05
 
