@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.102.2] - 2026-04-06
+
+### Fixed
+
+- Graph visualization returns empty data when Apache AGE is disabled
+  (the default). The MixedGraphClient now falls back to building the
+  graph projection from JPA entities via GraphProjectionContributors
+  instead of returning empty lists
+- Added `buildProjectionForProject(UUID)` to GraphProjectionRegistryService
+  for project-scoped JPA-based graph building
+- SonarCloud bug: bind SpaController path template variables to a
+  @PathVariable parameter to satisfy rule java:S6856
+- Set SonarCloud new code period to `previous_version` on main branch
+  so quality gate conditions can be evaluated
+
 ## [0.102.1] - 2026-04-05
 
 ### Fixed

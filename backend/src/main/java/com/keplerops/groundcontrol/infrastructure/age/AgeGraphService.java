@@ -140,7 +140,7 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
     @Override
     public GraphProjection getVisualization(UUID projectId) {
         if (!ageProperties.enabled()) {
-            return new GraphProjection(List.of(), List.of());
+            return graphProjectionRegistryService.buildProjectionForProject(projectId);
         }
         String graph = validateGraphName(ageProperties.graphName());
         String projectIdentifier = getProjectIdentifier(projectId);

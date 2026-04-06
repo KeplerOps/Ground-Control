@@ -1,7 +1,9 @@
 package com.keplerops.groundcontrol.infrastructure.web;
 
+import java.util.Map;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 
 /**
  * Forwards non-API, non-static routes to {@code index.html} so that React Router can handle
@@ -26,7 +28,7 @@ public class SpaController {
     private static final String S6 = S5 + "/{f:" + NO_DOT + "}";
 
     @GetMapping({S1, S2, S3, S4, S5, S6})
-    public String forward() {
+    public String forward(@PathVariable Map<String, String> segments) {
         return "forward:/index.html";
     }
 }
