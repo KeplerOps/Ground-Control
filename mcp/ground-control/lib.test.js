@@ -289,11 +289,20 @@ describe("constants", () => {
   });
 
   it("ARTIFACT_TYPES matches Java ArtifactType enum", () => {
-    assert.equal(ARTIFACT_TYPES.length, 10);
-    assert.ok(ARTIFACT_TYPES.includes("GITHUB_ISSUE"));
-    assert.ok(ARTIFACT_TYPES.includes("CODE_FILE"));
-    assert.ok(ARTIFACT_TYPES.includes("ADR"));
-    assert.ok(ARTIFACT_TYPES.includes("RISK_SCENARIO"));
+    assert.deepEqual(ARTIFACT_TYPES, [
+      "GITHUB_ISSUE",
+      "PULL_REQUEST",
+      "CODE_FILE",
+      "ADR",
+      "CONFIG",
+      "POLICY",
+      "TEST",
+      "SPEC",
+      "PROOF",
+      "DOCUMENTATION",
+      "RISK_SCENARIO",
+      "CONTROL",
+    ]);
   });
 
   it("LINK_TYPES matches Java LinkType enum", () => {

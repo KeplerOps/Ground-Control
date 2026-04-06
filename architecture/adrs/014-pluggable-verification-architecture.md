@@ -132,6 +132,8 @@ TLA+ is adopted for verifying Ground Control's own design-level properties:
 
 TLA+ specs live in `specs/tla/` at the repository root, versioned with code. TLC model checking runs as part of the verification pipeline.
 
+Implementation is staged. The repository now carries versioned TLA+ specs and policy sync tooling that keeps verification-oriented ADR and quality-gate metadata aligned, while the `VerificationResult` domain entity and verifier adapters remain future implementation work.
+
 ### 5. Separation of concerns
 
 | Concern | Scope | Tools |
