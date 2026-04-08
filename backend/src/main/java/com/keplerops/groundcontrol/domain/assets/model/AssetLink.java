@@ -33,7 +33,7 @@ public class AssetLink extends BaseEntity {
     private OperationalAsset asset;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "target_type", nullable = false, length = 20)
+    @Column(name = "target_type", nullable = false, length = 40)
     private AssetLinkTargetType targetType;
 
     @Column(name = "target_entity_id")

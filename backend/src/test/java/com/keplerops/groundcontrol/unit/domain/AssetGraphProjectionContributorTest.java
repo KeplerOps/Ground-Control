@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -104,6 +106,54 @@ class AssetGraphProjectionContributorTest {
                         .isEqualTo(GraphIds.nodeId(GraphEntityType.RISK_SCENARIO, internalLink.getTargetEntityId()));
             }
         });
+    }
+
+    @Test
+    void controlTypedAssetLinkProducesGraphEdge() {
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var source = asset(project, "ASSET-1", "Gateway");
+        var controlTargetId = UUID.randomUUID();
+
+        var controlLink =
+                new AssetLink(source, AssetLinkTargetType.CONTROL, controlTargetId, null, AssetLinkType.GOVERNED_BY);
+        setField(controlLink, "id", UUID.randomUUID());
+
+        when(assetRelationRepository.findActiveByProjectId(projectId)).thenReturn(List.of());
+        when(observationRepository.findByProjectId(projectId)).thenReturn(List.of());
+        when(assetLinkRepository.findByProjectId(projectId)).thenReturn(List.of(controlLink));
+
+        var edges = contributor.contributeEdges(projectId);
+
+        assertThat(edges).hasSize(1);
+        assertThat(edges.get(0).edgeType()).isEqualTo("GOVERNED_BY");
+        assertThat(edges.get(0).targetId()).isEqualTo(GraphIds.nodeId(GraphEntityType.CONTROL, controlTargetId));
+        assertThat(edges.get(0).sourceEntityType()).isEqualTo(GraphEntityType.OPERATIONAL_ASSET);
+        assertThat(edges.get(0).targetEntityType()).isEqualTo(GraphEntityType.CONTROL);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = AssetLinkTargetType.class,
+            names = {"ISSUE", "CODE", "CONFIGURATION"})
+    void newExternalTargetTypesAreFilteredFromGraph(AssetLinkTargetType targetType) {
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var source = asset(project, "ASSET-1", "Gateway");
+        var link = new AssetLink(source, targetType, null, "ref-1", AssetLinkType.ASSOCIATED);
+        setField(link, "id", UUID.randomUUID());
+
+        when(assetRelationRepository.findActiveByProjectId(projectId)).thenReturn(List.of());
+        when(observationRepository.findByProjectId(projectId)).thenReturn(List.of());
+        when(assetLinkRepository.findByProjectId(projectId)).thenReturn(List.of(link));
+
+        var edges = contributor.contributeEdges(projectId);
+
+        assertThat(edges).isEmpty();
     }
 
     private OperationalAsset asset(Project project, String uid, String name) {

@@ -175,6 +175,11 @@ ESC runs on **pure logic classes** with no String constructor parameters and no 
 - `domain/verification/state/` — `VerificationStatus`, `AssuranceLevel` enums (simple value enums, L0)
 - Future pure domain logic classes that follow the same pattern
 
+Other `state/` packages contain simple value enums (L0) that are **not** ESC-verified:
+- `domain/assets/state/` — `AssetType`, `AssetLinkTargetType`, `AssetLinkType`, `AssetRelationType`, `ObservationCategory`
+- `domain/controls/state/` — `ControlFunction`, `ControlStatus`, `ControlLinkTargetType`, `ControlLinkType`
+- `domain/riskscenarios/state/` — risk scenario link and status enums
+
 ### What ESC cannot verify (and why)
 
 - `domain/requirements/model/` — JPA entities (Hibernate no-arg constructor produces `NullField` false positives)

@@ -12,5 +12,8 @@ public enum AssetLinkTargetType {
     FINDING,
     EVIDENCE,
     AUDIT,
+    ISSUE,
+    CODE,
+    CONFIGURATION,
     EXTERNAL
 }

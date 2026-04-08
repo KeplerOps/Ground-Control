@@ -121,6 +121,9 @@ export const ASSET_LINK_TARGET_TYPES = [
   "FINDING",
   "EVIDENCE",
   "AUDIT",
+  "ISSUE",
+  "CODE",
+  "CONFIGURATION",
   "EXTERNAL",
 ];
 export const ASSET_LINK_TYPES = [

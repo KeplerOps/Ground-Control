@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.105.0] - 2026-04-06
+
+### Added
+
+- Asset-centric traceability target types: ISSUE, CODE, CONFIGURATION added
+  to AssetLinkTargetType for first-class traceability from assets to issues,
+  code files, and configuration artifacts (GC-M017)
+- ControlGraphProjectionContributor: projects Control entities as graph nodes
+  and ControlLink edges into the mixed-entity graph
+
+### Fixed
+
+- CONTROL asset links now produce graph edges in AssetGraphProjectionContributor
+  (previously silently dropped)
+- CONTROL risk-scenario links now produce graph edges in
+  RiskGraphProjectionContributor (same fix)
+- Stale JPA @Column(length=20) annotations on AssetLink.targetType and
+  RiskScenarioLink.targetType corrected to length=40 (matching V043 migration)
+
 ## [0.104.0] - 2026-04-06
 
 ### Added
