@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `VerificationOutcome`) enabling integration with OpenJML, TLA+/TLC, OPA/Rego,
   Frama-C, and manual review processes (GC-F005, ADR-014 §6)
 
+## [0.105.1] - 2026-04-08
+
+### Fixed
+
+- Zod update broke GC mcp
+
 ## [0.105.0] - 2026-04-06
 
 ### Added
