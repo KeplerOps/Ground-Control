@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.109.0] - 2026-04-09
+
+### Added
+
+- Pack registry, resolution, and trust model (GC-P016, ADR-022 Section 6): registry
+  catalog for discoverable packs, semver-aware version resolution with dependency
+  tracking, configurable trust policy evaluation, and auditable install records
+- `pack_registry_entry`, `pack_install_record`, `trust_policy` tables with Envers
+  audit trails (V053)
+- `PackType` (CONTROL_PACK, REQUIREMENTS_PACK, CUSTOM), `CatalogStatus` (AVAILABLE,
+  WITHDRAWN, SUPERSEDED), `TrustOutcome` (TRUSTED, REJECTED, UNKNOWN), `InstallOutcome`
+  (INSTALLED, UPGRADED, REJECTED, FAILED), `TrustPolicyRuleOperator` enums
+- `PackRegistryService` for registry catalog CRUD, `PackResolver` for semver resolution
+  with caret/tilde/range constraints and dependency resolution, `TrustEvaluator` for
+  declarative rule-based trust policy evaluation, `TrustPolicyService` for trust policy
+  CRUD, `PackInstallOrchestrator` that wraps existing ControlPackService with registry
+  lookup, compatibility check, and trust gate
+- REST API: `POST/GET /api/v1/pack-registry`, `GET /api/v1/pack-registry/{packId}`,
+  `GET/PUT/DELETE /api/v1/pack-registry/{packId}/{version}`,
+  `PUT /api/v1/pack-registry/{packId}/{version}/withdraw`,
+  `POST /api/v1/pack-registry/resolve`, `POST /api/v1/pack-registry/check-compatibility`,
+  `POST/GET /api/v1/trust-policies`, `GET/PUT/DELETE /api/v1/trust-policies/{id}`,
+  `POST /api/v1/pack-install-records/install`, `POST /api/v1/pack-install-records/upgrade`,
+  `GET /api/v1/pack-install-records`, `GET /api/v1/pack-install-records/{id}`
+- MCP tools: `gc_register_pack_registry_entry`, `gc_list_pack_registry_entries`,
+  `gc_get_pack_registry_entry`, `gc_list_pack_versions`, `gc_update_pack_registry_entry`,
+  `gc_withdraw_pack_registry_entry`, `gc_delete_pack_registry_entry`,
+  `gc_resolve_pack`, `gc_check_pack_compatibility`, `gc_create_trust_policy`,
+  `gc_list_trust_policies`, `gc_get_trust_policy`, `gc_update_trust_policy`,
+  `gc_delete_trust_policy`, `gc_install_pack_from_registry`,
+  `gc_upgrade_pack_from_registry`, `gc_list_pack_install_records`,
+  `gc_get_pack_install_record`
+
 ## [0.108.0] - 2026-04-08
 
 ### Added

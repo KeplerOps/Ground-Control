@@ -50,6 +50,8 @@ The `PluginRegistry` service manages two sources of plugins:
 
 **Dynamic plugins** are registered at runtime (e.g., when a content pack is installed) and persisted in a `registered_plugin` database table. They survive application restarts because their registrations are stored in PostgreSQL. The registry loads them from the database alongside classpath plugins.
 
+`PluginRegistry` is a runtime inventory and metadata persistence service, not a package registry, dependency solver, or trust-policy engine. Any future plugin installation workflow introduced for GC-P016 must resolve artifacts, evaluate compatibility and trust policy, and persist an auditable policy decision before it invokes dynamic registration.
+
 ### 4. Existing Adapters Not Retrofitted
 
 The three existing adapter interfaces (`VerifierAdapter`, `EmbeddingProvider`, `GraphProjectionContributor`) are not forced to implement `Plugin`. They serve domain-specific contracts with different method signatures. Conflating them with the generic plugin interface would add coupling without behavioral benefit.

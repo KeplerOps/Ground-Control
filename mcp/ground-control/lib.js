@@ -1939,3 +1939,93 @@ export async function listControlPackOverrides(packId, entryUid, project) {
 export async function deleteControlPackOverride(packId, entryUid, overrideId, project) {
   await request("DELETE", `/api/v1/control-packs/${encodeURIComponent(packId)}/entries/${encodeURIComponent(entryUid)}/overrides/${encodeURIComponent(overrideId)}`, { params: { project } });
 }
+
+// ---------------------------------------------------------------------------
+// Pack Registry API functions (GC-P016)
+// ---------------------------------------------------------------------------
+
+export const PACK_TYPES = ["CONTROL_PACK", "REQUIREMENTS_PACK", "CUSTOM"];
+export const CATALOG_STATUSES = ["AVAILABLE", "WITHDRAWN", "SUPERSEDED"];
+export const TRUST_OUTCOMES = ["TRUSTED", "REJECTED", "UNKNOWN"];
+export const INSTALL_OUTCOMES = ["INSTALLED", "UPGRADED", "REJECTED", "FAILED"];
+export const TRUST_POLICY_RULE_OPERATORS = ["EQUALS", "NOT_EQUALS", "CONTAINS", "MATCHES_PATTERN", "IN_LIST"];
+
+export async function registerPackRegistryEntry(data, project) {
+  return request("POST", "/api/v1/pack-registry", { body: data, params: { project } });
+}
+
+export async function listPackRegistryEntries(project, { packType } = {}) {
+  return request("GET", "/api/v1/pack-registry", { params: { project, packType } });
+}
+
+export async function listPackVersions(packId, project) {
+  return request("GET", `/api/v1/pack-registry/${encodeURIComponent(packId)}`, { params: { project } });
+}
+
+export async function getPackRegistryEntry(packId, version, project) {
+  return request("GET", `/api/v1/pack-registry/${encodeURIComponent(packId)}/${encodeURIComponent(version)}`, { params: { project } });
+}
+
+export async function updatePackRegistryEntry(packId, version, data, project) {
+  return request("PUT", `/api/v1/pack-registry/${encodeURIComponent(packId)}/${encodeURIComponent(version)}`, { body: data, params: { project } });
+}
+
+export async function withdrawPackRegistryEntry(packId, version, project) {
+  return request("PUT", `/api/v1/pack-registry/${encodeURIComponent(packId)}/${encodeURIComponent(version)}/withdraw`, { params: { project } });
+}
+
+export async function deletePackRegistryEntry(packId, version, project) {
+  await request("DELETE", `/api/v1/pack-registry/${encodeURIComponent(packId)}/${encodeURIComponent(version)}`, { params: { project } });
+}
+
+export async function resolvePack(data, project) {
+  return request("POST", "/api/v1/pack-registry/resolve", { body: data, params: { project } });
+}
+
+export async function checkPackCompatibility(data, project) {
+  return request("POST", "/api/v1/pack-registry/check-compatibility", { body: data, params: { project } });
+}
+
+// ---------------------------------------------------------------------------
+// Trust Policy API functions (GC-P016)
+// ---------------------------------------------------------------------------
+
+export async function createTrustPolicy(data, project) {
+  return request("POST", "/api/v1/trust-policies", { body: data, params: { project } });
+}
+
+export async function listTrustPolicies(project) {
+  return request("GET", "/api/v1/trust-policies", { params: { project } });
+}
+
+export async function getTrustPolicy(id) {
+  return request("GET", `/api/v1/trust-policies/${encodeURIComponent(id)}`);
+}
+
+export async function updateTrustPolicy(id, data) {
+  return request("PUT", `/api/v1/trust-policies/${encodeURIComponent(id)}`, { body: data });
+}
+
+export async function deleteTrustPolicy(id) {
+  await request("DELETE", `/api/v1/trust-policies/${encodeURIComponent(id)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Pack Install Record API functions (GC-P016)
+// ---------------------------------------------------------------------------
+
+export async function installPackFromRegistry(data, project) {
+  return request("POST", "/api/v1/pack-install-records/install", { body: data, params: { project } });
+}
+
+export async function upgradePackFromRegistry(data, project) {
+  return request("POST", "/api/v1/pack-install-records/upgrade", { body: data, params: { project } });
+}
+
+export async function listPackInstallRecords(project, { packId } = {}) {
+  return request("GET", "/api/v1/pack-install-records", { params: { project, packId } });
+}
+
+export async function getPackInstallRecord(id) {
+  return request("GET", `/api/v1/pack-install-records/${encodeURIComponent(id)}`);
+}

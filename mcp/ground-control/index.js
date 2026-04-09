@@ -227,6 +227,29 @@ import {
   deleteControlPackOverride,
   CONTROL_PACK_LIFECYCLE_STATES,
   CONTROL_PACK_ENTRY_STATUSES,
+  registerPackRegistryEntry,
+  listPackRegistryEntries,
+  listPackVersions,
+  getPackRegistryEntry,
+  updatePackRegistryEntry,
+  withdrawPackRegistryEntry,
+  deletePackRegistryEntry,
+  resolvePack,
+  checkPackCompatibility,
+  createTrustPolicy,
+  listTrustPolicies,
+  getTrustPolicy,
+  updateTrustPolicy,
+  deleteTrustPolicy,
+  installPackFromRegistry,
+  upgradePackFromRegistry,
+  listPackInstallRecords,
+  getPackInstallRecord,
+  PACK_TYPES,
+  CATALOG_STATUSES,
+  TRUST_OUTCOMES,
+  INSTALL_OUTCOMES,
+  TRUST_POLICY_RULE_OPERATORS,
 } from "./lib.js";
 
 function ok(text) {
@@ -4191,6 +4214,404 @@ server.tool(
     try {
       await deleteControlPackOverride(pack_id, entry_uid, override_id, project);
       return ok("Override deleted and original value restored.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Pack Registry tools (GC-P016)
+// ==========================================================================
+
+server.tool(
+  "gc_register_pack_registry_entry",
+  "Register a new pack version in the registry catalog. This adds the pack as a discoverable, installable artifact.",
+  {
+    pack_id: z.string().max(200).describe("Stable pack identity (e.g. 'nist-sp800-53-rev5')"),
+    pack_type: z.enum(PACK_TYPES).describe("Pack type: CONTROL_PACK, REQUIREMENTS_PACK, or CUSTOM"),
+    version: z.string().max(50).describe("Semantic version (e.g. '1.0.0')"),
+    publisher: z.string().max(200).optional().describe("Organization or author who published the pack"),
+    description: z.string().optional().describe("Human-readable pack description"),
+    source_url: z.string().max(2000).optional().describe("Origin URL (registry, git repo, etc.)"),
+    checksum: z.string().max(128).optional().describe("SHA-256 content hash for integrity verification"),
+    signature_info: z.record(z.string(), z.unknown()).optional().describe("Signature metadata"),
+    compatibility: z.record(z.string(), z.unknown()).optional().describe("Compatibility constraints (e.g. minVersion, maxVersion)"),
+    dependencies: z.array(z.record(z.string(), z.unknown())).optional().describe("Pack dependencies [{packId, versionConstraint}]"),
+    provenance: z.record(z.string(), z.unknown()).optional().describe("Origin/build metadata"),
+    registry_metadata: z.record(z.string(), z.unknown()).optional().describe("Extensible registry annotations"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ project, ...data }) => {
+    try {
+      return ok(JSON.stringify(await registerPackRegistryEntry(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_pack_registry_entries",
+  "List pack registry entries for a project, optionally filtered by pack type.",
+  {
+    pack_type: z.enum(PACK_TYPES).optional().describe("Filter by pack type"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_type, project }) => {
+    try {
+      const result = await listPackRegistryEntries(project, { packType: pack_type });
+      if (Array.isArray(result) && result.length === 0) return ok("No pack registry entries found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_pack_versions",
+  "List all registered versions of a specific pack.",
+  {
+    pack_id: z.string().describe("Pack identity"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, project }) => {
+    try {
+      const result = await listPackVersions(pack_id, project);
+      if (Array.isArray(result) && result.length === 0) return ok("No versions found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_pack_registry_entry",
+  "Get a specific pack registry entry by pack ID and version.",
+  {
+    pack_id: z.string().describe("Pack identity"),
+    version: z.string().describe("Semantic version"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, version, project }) => {
+    try {
+      return ok(JSON.stringify(await getPackRegistryEntry(pack_id, version, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_pack_registry_entry",
+  "Update metadata of a pack registry entry.",
+  {
+    pack_id: z.string().describe("Pack identity"),
+    version: z.string().describe("Semantic version"),
+    publisher: z.string().max(200).optional().describe("Updated publisher"),
+    description: z.string().optional().describe("Updated description"),
+    source_url: z.string().max(2000).optional().describe("Updated source URL"),
+    checksum: z.string().max(128).optional().describe("Updated checksum"),
+    signature_info: z.record(z.string(), z.unknown()).optional().describe("Updated signature metadata"),
+    compatibility: z.record(z.string(), z.unknown()).optional().describe("Updated compatibility constraints"),
+    dependencies: z.array(z.record(z.string(), z.unknown())).optional().describe("Updated dependencies"),
+    provenance: z.record(z.string(), z.unknown()).optional().describe("Updated provenance"),
+    registry_metadata: z.record(z.string(), z.unknown()).optional().describe("Updated registry metadata"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, version, project, ...data }) => {
+    try {
+      return ok(JSON.stringify(await updatePackRegistryEntry(pack_id, version, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_withdraw_pack_registry_entry",
+  "Withdraw a pack version from the registry (marks as WITHDRAWN, terminal state).",
+  {
+    pack_id: z.string().describe("Pack identity"),
+    version: z.string().describe("Semantic version to withdraw"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, version, project }) => {
+    try {
+      return ok(JSON.stringify(await withdrawPackRegistryEntry(pack_id, version, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_pack_registry_entry",
+  "Delete a pack registry entry permanently.",
+  {
+    pack_id: z.string().describe("Pack identity"),
+    version: z.string().describe("Semantic version to delete"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, version, project }) => {
+    try {
+      await deletePackRegistryEntry(pack_id, version, project);
+      return ok("Pack registry entry deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_resolve_pack",
+  "Resolve a pack version from the registry using semantic version constraints. Returns the best matching available version and compatibility status.",
+  {
+    pack_id: z.string().describe("Pack identity to resolve"),
+    version_constraint: z.string().optional().describe("Version constraint (exact, ^, ~, >=, <=). Omit for latest."),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, version_constraint, project }) => {
+    try {
+      return ok(JSON.stringify(await resolvePack({ pack_id, version_constraint }, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_check_pack_compatibility",
+  "Check if a pack version is compatible with the current platform.",
+  {
+    pack_id: z.string().describe("Pack identity"),
+    version_constraint: z.string().optional().describe("Version constraint"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, version_constraint, project }) => {
+    try {
+      return ok(JSON.stringify(await checkPackCompatibility({ pack_id, version_constraint }, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Trust Policy tools (GC-P016)
+// ==========================================================================
+
+server.tool(
+  "gc_create_trust_policy",
+  "Create a trust policy with declarative rules for evaluating pack trust. Rules match against pack fields (publisher, packId, packType, sourceUrl, checksum) using operators (EQUALS, NOT_EQUALS, CONTAINS, MATCHES_PATTERN, IN_LIST).",
+  {
+    name: z.string().max(200).describe("Policy name (unique per project)"),
+    description: z.string().optional().describe("Policy description"),
+    default_outcome: z.enum(TRUST_OUTCOMES).describe("Default outcome when no rules match"),
+    rules: z.array(z.object({
+      field: z.string().describe("Pack field to match: publisher, packId, packType, sourceUrl, checksum"),
+      operator: z.enum(TRUST_POLICY_RULE_OPERATORS).describe("Comparison operator"),
+      value: z.string().describe("Value to compare against"),
+      outcome: z.enum(TRUST_OUTCOMES).describe("Outcome if rule matches: TRUSTED or REJECTED"),
+    })).optional().describe("Ordered list of trust rules (first match wins)"),
+    priority: z.number().int().describe("Evaluation priority (lower = higher priority)"),
+    enabled: z.boolean().describe("Whether this policy is active"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ project, ...data }) => {
+    try {
+      return ok(JSON.stringify(await createTrustPolicy(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_trust_policies",
+  "List trust policies for a project, ordered by priority.",
+  {
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await listTrustPolicies(project);
+      if (Array.isArray(result) && result.length === 0) return ok("No trust policies found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_trust_policy",
+  "Get a trust policy by ID.",
+  {
+    id: z.string().uuid().describe("Trust policy UUID"),
+  },
+  async ({ id }) => {
+    try {
+      return ok(JSON.stringify(await getTrustPolicy(id), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_trust_policy",
+  "Update a trust policy.",
+  {
+    id: z.string().uuid().describe("Trust policy UUID"),
+    name: z.string().max(200).optional().describe("Updated policy name"),
+    description: z.string().optional().describe("Updated description"),
+    default_outcome: z.enum(TRUST_OUTCOMES).optional().describe("Updated default outcome"),
+    rules: z.array(z.object({
+      field: z.string().describe("Pack field to match"),
+      operator: z.enum(TRUST_POLICY_RULE_OPERATORS).describe("Comparison operator"),
+      value: z.string().describe("Value to compare against"),
+      outcome: z.enum(TRUST_OUTCOMES).describe("Outcome if rule matches"),
+    })).optional().describe("Updated rules"),
+    priority: z.number().int().optional().describe("Updated priority"),
+    enabled: z.boolean().optional().describe("Updated enabled state"),
+  },
+  async ({ id, ...data }) => {
+    try {
+      return ok(JSON.stringify(await updateTrustPolicy(id, data), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_trust_policy",
+  "Delete a trust policy.",
+  {
+    id: z.string().uuid().describe("Trust policy UUID"),
+  },
+  async ({ id }) => {
+    try {
+      await deleteTrustPolicy(id);
+      return ok("Trust policy deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Pack Install Record tools (GC-P016)
+// ==========================================================================
+
+server.tool(
+  "gc_install_pack_from_registry",
+  "Install a pack through the registry with trust evaluation. Resolves the version, checks compatibility, evaluates trust policy, and delegates to the type-specific installer. Produces an auditable install record.",
+  {
+    pack_id: z.string().max(200).describe("Pack identity to install"),
+    version_constraint: z.string().max(100).optional().describe("Version constraint (exact, ^, ~, >=, <=). Omit for latest."),
+    performed_by: z.string().max(255).optional().describe("Actor performing the installation"),
+    entries: z.array(z.object({
+      uid: z.string().max(50).describe("Control UID within the pack"),
+      title: z.string().max(200).describe("Control title"),
+      control_function: z.enum(CONTROL_FUNCTIONS).describe("Control function"),
+      description: z.string().optional().describe("Control description"),
+      objective: z.string().optional().describe("Control objective"),
+      owner: z.string().max(200).optional().describe("Control owner"),
+      implementation_scope: z.string().optional().describe("Implementation scope"),
+      methodology_factors: z.record(z.string(), z.unknown()).optional().describe("Methodology factor mappings"),
+      effectiveness: z.record(z.string(), z.unknown()).optional().describe("Effectiveness metrics"),
+      category: z.string().max(100).optional().describe("Control category"),
+      source: z.string().max(200).optional().describe("Framework source"),
+      implementation_guidance: z.string().optional().describe("How to implement this control"),
+      expected_evidence: z.array(z.record(z.string(), z.unknown())).optional().describe("Evidence pattern templates"),
+      framework_mappings: z.array(z.object({
+        framework: z.string().optional().describe("Framework name"),
+        identifier: z.string().describe("Framework control identifier"),
+        title: z.string().optional().describe("Mapping title"),
+        url: z.string().optional().describe("Reference URL"),
+      })).optional().describe("Framework mappings"),
+    })).describe("Control pack entry definitions"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ project, ...data }) => {
+    try {
+      return ok(JSON.stringify(await installPackFromRegistry(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_upgrade_pack_from_registry",
+  "Upgrade a pack through the registry with trust evaluation. Same flow as install but delegates to the upgrade path.",
+  {
+    pack_id: z.string().max(200).describe("Pack identity to upgrade"),
+    version_constraint: z.string().max(100).optional().describe("Version constraint for new version"),
+    performed_by: z.string().max(255).optional().describe("Actor performing the upgrade"),
+    entries: z.array(z.object({
+      uid: z.string().max(50).describe("Control UID within the pack"),
+      title: z.string().max(200).describe("Control title"),
+      control_function: z.enum(CONTROL_FUNCTIONS).describe("Control function"),
+      description: z.string().optional().describe("Control description"),
+      objective: z.string().optional().describe("Control objective"),
+      owner: z.string().max(200).optional().describe("Control owner"),
+      implementation_scope: z.string().optional().describe("Implementation scope"),
+      methodology_factors: z.record(z.string(), z.unknown()).optional().describe("Methodology factor mappings"),
+      effectiveness: z.record(z.string(), z.unknown()).optional().describe("Effectiveness metrics"),
+      category: z.string().max(100).optional().describe("Control category"),
+      source: z.string().max(200).optional().describe("Framework source"),
+      implementation_guidance: z.string().optional().describe("How to implement this control"),
+      expected_evidence: z.array(z.record(z.string(), z.unknown())).optional().describe("Evidence pattern templates"),
+      framework_mappings: z.array(z.object({
+        framework: z.string().optional().describe("Framework name"),
+        identifier: z.string().describe("Framework control identifier"),
+        title: z.string().optional().describe("Mapping title"),
+        url: z.string().optional().describe("Reference URL"),
+      })).optional().describe("Framework mappings"),
+    })).describe("Control pack entry definitions for new version"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ project, ...data }) => {
+    try {
+      return ok(JSON.stringify(await upgradePackFromRegistry(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_pack_install_records",
+  "List auditable pack install/rejection records for a project.",
+  {
+    pack_id: z.string().optional().describe("Filter by pack identity"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, project }) => {
+    try {
+      const result = await listPackInstallRecords(project, { packId: pack_id });
+      if (Array.isArray(result) && result.length === 0) return ok("No install records found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_pack_install_record",
+  "Get a specific pack install record by ID.",
+  {
+    id: z.string().uuid().describe("Install record UUID"),
+  },
+  async ({ id }) => {
+    try {
+      return ok(JSON.stringify(await getPackInstallRecord(id), null, 2));
     } catch (e) {
       return err(e);
     }

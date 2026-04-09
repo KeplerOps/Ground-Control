@@ -107,6 +107,17 @@ GC-P015 must reuse the existing control-domain model where the semantics already
 - Local tailoring must stay explicit and minimal. Tailoring is a project-local overlay on installed content, not mutation of the upstream pack definition and not a wholesale cloned fork of the originating catalog by default.
 - Pack-driven changes that create or update controls or control links must stay inside the existing project-scoping, Envers audit, exception-mapping, logging, and graph-projection conventions already used elsewhere in the platform.
 
+### 6. Registry / Resolution / Trust Guardrails
+
+GC-P016 must keep discovery, policy, and application as separate concerns even when they participate in one install workflow.
+
+- **Registry catalog metadata** describes candidate artifacts and publishers. It is not the same thing as installed pack state, dynamic plugin registration state, or an install audit record.
+- **Resolution** selects an exact artifact version and dependency closure before any mutation occurs. Compatibility checks, dependency solving, and semantic-version comparison belong in one shared resolver path, not in each pack handler or controller.
+- **Trust evaluation** runs after resolution and before any content materialization or dynamic plugin registration. The policy decision must be computed server-side from resolved provenance, integrity material, and configured policy; clients must not be allowed to assert their own trust outcome.
+- **Auditable install records** are first-class durable state. Structured logs and Envers history are complementary, but they are not a substitute for a record that captures the requested identity, resolved source, resolved version, verified digest or signature material, policy outcome, and resulting install or rejection outcome.
+- **First-class trust and resolution fields** must not be hidden in generic metadata blobs when they drive policy or compatibility decisions. Extensible maps remain appropriate for vendor-specific annotations, but identity, dependency, compatibility, provenance, and integrity semantics need one shared contract across pack types.
+- **Shared orchestration, typed materialization** remains the boundary. The shared registry and trust substrate may call type-specific installers such as control-pack materialization, but it must not collapse pack-specific aggregates into one opaque generic pack record.
+
 ## Consequences
 
 **Positive:**

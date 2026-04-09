@@ -717,6 +717,39 @@ Standard Spring Page parameters:
 Response wraps results in a Spring Page object with `content`, `totalElements`,
 `totalPages`, `number`, `size`.
 
+### Pack Registry
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/pack-registry` | RegisterPackRequest | 201 | Register pack version in catalog |
+| GET | `/pack-registry` | — | 200 | List registry entries (optional `packType` filter) |
+| GET | `/pack-registry/{packId}` | — | 200 | List versions of a pack |
+| GET | `/pack-registry/{packId}/{version}` | — | 200 | Get specific pack version |
+| PUT | `/pack-registry/{packId}/{version}` | UpdatePackRegistryEntryRequest | 200 | Update pack metadata |
+| PUT | `/pack-registry/{packId}/{version}/withdraw` | — | 200 | Withdraw pack version |
+| DELETE | `/pack-registry/{packId}/{version}` | — | 204 | Delete pack version |
+| POST | `/pack-registry/resolve` | ResolvePackRequest | 200 | Resolve version from registry |
+| POST | `/pack-registry/check-compatibility` | ResolvePackRequest | 200 | Check pack compatibility |
+
+### Trust Policies
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/trust-policies` | CreateTrustPolicyRequest | 201 | Create trust policy |
+| GET | `/trust-policies` | — | 200 | List trust policies |
+| GET | `/trust-policies/{id}` | — | 200 | Get trust policy |
+| PUT | `/trust-policies/{id}` | UpdateTrustPolicyRequest | 200 | Update trust policy |
+| DELETE | `/trust-policies/{id}` | — | 204 | Delete trust policy |
+
+### Pack Install Records
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/pack-install-records/install` | InstallPackRequest | 201 | Install pack via registry with trust evaluation |
+| POST | `/pack-install-records/upgrade` | InstallPackRequest | 200 | Upgrade pack via registry with trust evaluation |
+| GET | `/pack-install-records` | — | 200 | List install records (optional `packId` filter) |
+| GET | `/pack-install-records/{id}` | — | 200 | Get install record |
+
 ## Interactive Docs
 
 - Swagger UI: `http://localhost:8000/api/docs`
