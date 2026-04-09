@@ -76,9 +76,8 @@ public class PluginRegistry {
         if (managed != null) {
             return managed.toInfo();
         }
-        var dynamic = registeredPluginRepository.findAll().stream()
-                .filter(rp -> rp.getName().equals(name))
-                .findFirst()
+        var dynamic = registeredPluginRepository
+                .findByName(name)
                 .orElseThrow(() -> new NotFoundException("Plugin not found: " + name));
         return toDynamicInfo(dynamic);
     }
@@ -89,8 +88,7 @@ public class PluginRegistry {
                 .filter(mp -> mp.descriptor().type() == type)
                 .map(ManagedPlugin::toInfo)
                 .toList());
-        registeredPluginRepository.findAll().stream()
-                .filter(rp -> rp.getPluginType() == type)
+        registeredPluginRepository.findByPluginType(type).stream()
                 .map(this::toDynamicInfo)
                 .forEach(results::add);
         return Collections.unmodifiableList(results);

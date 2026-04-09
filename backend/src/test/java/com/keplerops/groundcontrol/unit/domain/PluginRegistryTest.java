@@ -178,14 +178,15 @@ class PluginRegistryTest {
 
         @Test
         void getPluginByNameThrowsForUnknown() {
-            when(registeredPluginRepository.findAll()).thenReturn(List.of());
+            when(registeredPluginRepository.findByName("nonexistent")).thenReturn(java.util.Optional.empty());
 
             assertThatThrownBy(() -> registry.getPlugin("nonexistent")).isInstanceOf(NotFoundException.class);
         }
 
         @Test
         void listByTypeFiltersCorrectly() {
-            when(registeredPluginRepository.findAll()).thenReturn(List.of());
+            when(registeredPluginRepository.findByPluginType(PluginType.VERIFIER))
+                    .thenReturn(List.of());
 
             var verifiers = registry.listByType(PluginType.VERIFIER);
             assertThat(verifiers).hasSize(1);

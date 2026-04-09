@@ -16,4 +16,8 @@ public interface RegisteredPluginRepository extends JpaRepository<RegisteredPlug
     Optional<RegisteredPlugin> findByProjectIdAndName(UUID projectId, String name);
 
     boolean existsByProjectIdAndName(UUID projectId, String name);
+
+    List<RegisteredPlugin> findByPluginType(PluginType pluginType);
+
+    Optional<RegisteredPlugin> findByName(String name);
 }
