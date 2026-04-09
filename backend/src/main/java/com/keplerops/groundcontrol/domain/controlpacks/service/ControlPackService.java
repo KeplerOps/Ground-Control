@@ -36,8 +36,23 @@ public class ControlPackService {
 
     private static final Logger log = LoggerFactory.getLogger(ControlPackService.class);
 
-    private static final Set<String> OVERRIDABLE_FIELDS =
-            Set.of("title", "description", "objective", "controlFunction", "owner", "implementationScope", "category");
+    private static final String FIELD_TITLE = "title";
+    private static final String FIELD_DESCRIPTION = "description";
+    private static final String FIELD_OBJECTIVE = "objective";
+    private static final String FIELD_CONTROL_FUNCTION = "controlFunction";
+    private static final String FIELD_OWNER = "owner";
+    private static final String FIELD_IMPLEMENTATION_SCOPE = "implementationScope";
+    private static final String FIELD_CATEGORY = "category";
+    private static final String DETAIL_KEY_FIELD = "field";
+
+    private static final Set<String> OVERRIDABLE_FIELDS = Set.of(
+            FIELD_TITLE,
+            FIELD_DESCRIPTION,
+            FIELD_OBJECTIVE,
+            FIELD_CONTROL_FUNCTION,
+            FIELD_OWNER,
+            FIELD_IMPLEMENTATION_SCOPE,
+            FIELD_CATEGORY);
 
     private final ControlPackRepository controlPackRepository;
     private final ControlPackEntryRepository entryRepository;
@@ -68,7 +83,6 @@ public class ControlPackService {
         if (existing.isPresent()) {
             var pack = existing.get();
             if (pack.getVersion().equals(command.version())) {
-                // Idempotent: same version already installed, reconcile any missing entries
                 var counters = reconcileEntries(pack, command.entries());
                 log.info("control_pack_install_idempotent: packId={} version={}", command.packId(), command.version());
                 return new ControlPackInstallResult(
@@ -155,7 +169,6 @@ public class ControlPackService {
             }
         }
 
-        // Deprecate entries removed in the new version
         for (var entry : existingEntries) {
             if (!processedUids.contains(entry.getEntryUid())
                     && entry.getEntryStatus() == ControlPackEntryStatus.ACTIVE) {
@@ -165,7 +178,6 @@ public class ControlPackService {
             }
         }
 
-        // Update pack-level metadata
         pack.setVersion(command.newVersion());
         pack.setPublisher(command.publisher());
         pack.setDescription(command.description());
@@ -230,20 +242,19 @@ public class ControlPackService {
     @Transactional(readOnly = true)
     public ControlPackEntry getEntry(UUID projectId, String packId, String entryUid) {
         var pack = findPackOrThrow(projectId, packId);
-        return entryRepository
-                .findByControlPackIdAndEntryUid(pack.getId(), entryUid)
-                .orElseThrow(() -> new NotFoundException("Pack entry not found: " + entryUid));
+        return findEntryOrThrow(pack.getId(), entryUid);
     }
 
     public ControlPackOverride createOverride(
             UUID projectId, String packId, String entryUid, CreateControlPackOverrideCommand command) {
-        var entry = getEntry(projectId, packId, entryUid);
+        var pack = findPackOrThrow(projectId, packId);
+        var entry = findEntryOrThrow(pack.getId(), entryUid);
 
         if (!OVERRIDABLE_FIELDS.contains(command.fieldName())) {
             throw new DomainValidationException(
                     "Cannot override field: " + command.fieldName(),
                     "invalid_override_field",
-                    Map.of("field", command.fieldName(), "allowed", String.join(", ", OVERRIDABLE_FIELDS)));
+                    Map.of(DETAIL_KEY_FIELD, command.fieldName(), "allowed", String.join(", ", OVERRIDABLE_FIELDS)));
         }
 
         var existing = overrideRepository.findByControlPackEntryIdAndFieldName(entry.getId(), command.fieldName());
@@ -257,14 +268,13 @@ public class ControlPackService {
         }
         override = overrideRepository.save(override);
 
-        // Apply override to the materialized control
         var control = entry.getControl();
         applyFieldToControl(control, command.fieldName(), command.overrideValue());
         controlRepository.save(control);
 
         log.info(
                 "control_pack_override_created: packId={} entryUid={} field={}",
-                entry.getControlPack().getPackId(),
+                pack.getPackId(),
                 entry.getEntryUid(),
                 override.getFieldName());
         return override;
@@ -272,18 +282,19 @@ public class ControlPackService {
 
     @Transactional(readOnly = true)
     public List<ControlPackOverride> listOverrides(UUID projectId, String packId, String entryUid) {
-        var entry = getEntry(projectId, packId, entryUid);
+        var pack = findPackOrThrow(projectId, packId);
+        var entry = findEntryOrThrow(pack.getId(), entryUid);
         return overrideRepository.findByControlPackEntryId(entry.getId());
     }
 
     public void deleteOverride(UUID projectId, String packId, String entryUid, UUID overrideId) {
-        var entry = getEntry(projectId, packId, entryUid);
+        var pack = findPackOrThrow(projectId, packId);
+        var entry = findEntryOrThrow(pack.getId(), entryUid);
         var override = overrideRepository
                 .findById(overrideId)
                 .filter(o -> o.getControlPackEntry().getId().equals(entry.getId()))
                 .orElseThrow(() -> new NotFoundException("Override not found: " + overrideId));
 
-        // Restore original value from pack snapshot
         var originalDef = entry.getOriginalDefinition();
         var originalValue = originalDef != null ? originalDef.get(override.getFieldName()) : null;
         applyFieldToControl(
@@ -293,7 +304,7 @@ public class ControlPackService {
         overrideRepository.delete(override);
         log.info(
                 "control_pack_override_deleted: packId={} entryUid={} field={}",
-                entry.getControlPack().getPackId(),
+                pack.getPackId(),
                 entry.getEntryUid(),
                 override.getFieldName());
     }
@@ -306,16 +317,20 @@ public class ControlPackService {
                 .orElseThrow(() -> new NotFoundException("Control pack not found: " + packId));
     }
 
+    private ControlPackEntry findEntryOrThrow(UUID controlPackId, String entryUid) {
+        return entryRepository
+                .findByControlPackIdAndEntryUid(controlPackId, entryUid)
+                .orElseThrow(() -> new NotFoundException("Pack entry not found: " + entryUid));
+    }
+
     private void materializeEntry(
             UUID projectId, ControlPack pack, ControlPackEntryDefinition entryDef, InstallCounters counters) {
         var provenanceSource = "pack:" + pack.getPackId() + ":" + pack.getVersion();
 
-        // Check if entry already exists in this pack (idempotent reconciliation)
         if (entryRepository.existsByControlPackIdAndEntryUid(pack.getId(), entryDef.uid())) {
             return;
         }
 
-        // Find or create Control record
         var existingControl = controlRepository.findByProjectIdAndUid(projectId, entryDef.uid());
         Control control;
 
@@ -331,7 +346,6 @@ public class ControlPackService {
             counters.controlsCreated++;
         }
 
-        // Create pack entry
         var entry = new ControlPackEntry(pack, control, entryDef.uid());
         entry.setOriginalDefinition(buildOriginalDefinitionSnapshot(entryDef));
         entry.setExpectedEvidence(entryDef.expectedEvidence());
@@ -340,7 +354,6 @@ public class ControlPackService {
         entryRepository.save(entry);
         counters.entriesCreated++;
 
-        // Materialize framework mappings as ControlLinks
         if (entryDef.frameworkMappings() != null) {
             for (var mapping : entryDef.frameworkMappings()) {
                 materializeFrameworkMapping(control, mapping, counters);
@@ -371,7 +384,6 @@ public class ControlPackService {
             return;
         }
 
-        // Check for duplicate (idempotent)
         if (controlLinkRepository.existsByControlIdAndTargetTypeAndTargetIdentifierAndLinkType(
                 control.getId(), ControlLinkTargetType.EXTERNAL, targetIdentifier, ControlLinkType.MAPS_TO)) {
             counters.mappingsSkipped++;
@@ -384,7 +396,7 @@ public class ControlPackService {
         if (targetUrl != null) {
             link.setTargetUrl(targetUrl.toString());
         }
-        var targetTitle = mapping.get("title");
+        var targetTitle = mapping.get(FIELD_TITLE);
         if (targetTitle != null) {
             link.setTargetTitle(targetTitle.toString());
         }
@@ -413,12 +425,10 @@ public class ControlPackService {
         var newOriginalDef = buildOriginalDefinitionSnapshot(newEntryDef);
         var oldOriginalDef = existingEntry.getOriginalDefinition();
 
-        // Load overrides for this entry
         var overrides = overrideRepository.findByControlPackEntryId(existingEntry.getId());
         var overriddenFields =
                 overrides.stream().map(ControlPackOverride::getFieldName).collect(Collectors.toSet());
 
-        // Apply upstream changes to non-overridden fields
         boolean changed = false;
         for (var fieldName : OVERRIDABLE_FIELDS) {
             var oldValue = oldOriginalDef != null ? oldOriginalDef.get(fieldName) : null;
@@ -440,7 +450,6 @@ public class ControlPackService {
             counters.controlsUpdated++;
         }
 
-        // Update entry snapshot and pack-specific fields
         existingEntry.setOriginalDefinition(newOriginalDef);
         existingEntry.setExpectedEvidence(newEntryDef.expectedEvidence());
         existingEntry.setImplementationGuidance(newEntryDef.implementationGuidance());
@@ -463,15 +472,15 @@ public class ControlPackService {
     private Map<String, Object> buildOriginalDefinitionSnapshot(ControlPackEntryDefinition entryDef) {
         var snapshot = new LinkedHashMap<String, Object>();
         snapshot.put("uid", entryDef.uid());
-        snapshot.put("title", entryDef.title());
-        snapshot.put("description", entryDef.description());
-        snapshot.put("objective", entryDef.objective());
+        snapshot.put(FIELD_TITLE, entryDef.title());
+        snapshot.put(FIELD_DESCRIPTION, entryDef.description());
+        snapshot.put(FIELD_OBJECTIVE, entryDef.objective());
         if (entryDef.controlFunction() != null) {
-            snapshot.put("controlFunction", entryDef.controlFunction().name());
+            snapshot.put(FIELD_CONTROL_FUNCTION, entryDef.controlFunction().name());
         }
-        snapshot.put("owner", entryDef.owner());
-        snapshot.put("implementationScope", entryDef.implementationScope());
-        snapshot.put("category", entryDef.category());
+        snapshot.put(FIELD_OWNER, entryDef.owner());
+        snapshot.put(FIELD_IMPLEMENTATION_SCOPE, entryDef.implementationScope());
+        snapshot.put(FIELD_CATEGORY, entryDef.category());
         snapshot.put("source", entryDef.source());
         if (entryDef.methodologyFactors() != null) {
             snapshot.put("methodologyFactors", entryDef.methodologyFactors());
@@ -484,18 +493,18 @@ public class ControlPackService {
 
     private void applyFieldToControl(Control control, String fieldName, String value) {
         switch (fieldName) {
-            case "title" -> {
+            case FIELD_TITLE -> {
                 if (value == null || value.isBlank()) {
                     throw new DomainValidationException(
                             "Control title cannot be null or blank",
                             "invalid_override_value",
-                            Map.of("field", "title"));
+                            Map.of(DETAIL_KEY_FIELD, FIELD_TITLE));
                 }
                 control.setTitle(value);
             }
-            case "description" -> control.setDescription(value);
-            case "objective" -> control.setObjective(value);
-            case "controlFunction" -> {
+            case FIELD_DESCRIPTION -> control.setDescription(value);
+            case FIELD_OBJECTIVE -> control.setObjective(value);
+            case FIELD_CONTROL_FUNCTION -> {
                 if (value != null) {
                     try {
                         control.setControlFunction(
@@ -504,15 +513,15 @@ public class ControlPackService {
                         throw new DomainValidationException(
                                 "Invalid control function: " + value,
                                 "invalid_override_value",
-                                Map.of("field", "controlFunction", "value", value));
+                                Map.of(DETAIL_KEY_FIELD, FIELD_CONTROL_FUNCTION, "value", value));
                     }
                 }
             }
-            case "owner" -> control.setOwner(value);
-            case "implementationScope" -> control.setImplementationScope(value);
-            case "category" -> control.setCategory(value);
+            case FIELD_OWNER -> control.setOwner(value);
+            case FIELD_IMPLEMENTATION_SCOPE -> control.setImplementationScope(value);
+            case FIELD_CATEGORY -> control.setCategory(value);
             default -> throw new DomainValidationException(
-                    "Unknown control field: " + fieldName, "unknown_field", Map.of("field", fieldName));
+                    "Unknown control field: " + fieldName, "unknown_field", Map.of(DETAIL_KEY_FIELD, fieldName));
         }
     }
 

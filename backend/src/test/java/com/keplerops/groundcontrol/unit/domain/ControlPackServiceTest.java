@@ -167,7 +167,7 @@ class ControlPackServiceTest {
             var result = service.install(installCmd("test-pack", "1.0.0", entryDef("AC-1", "Access Control")));
 
             assertThat(result.wasIdempotent()).isTrue();
-            assertThat(result.controlsCreated()).isEqualTo(0);
+            assertThat(result.controlsCreated()).isZero();
         }
 
         @Test
@@ -177,8 +177,8 @@ class ControlPackServiceTest {
             when(controlPackRepository.findByProjectIdAndPackId(PROJECT_ID, "test-pack"))
                     .thenReturn(Optional.of(existingPack));
 
-            assertThatThrownBy(
-                            () -> service.install(installCmd("test-pack", "2.0.0", entryDef("AC-1", "Access Control"))))
+            var cmd = installCmd("test-pack", "2.0.0", entryDef("AC-1", "Access Control"));
+            assertThatThrownBy(() -> service.install(cmd))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("Use upgrade");
         }
@@ -204,7 +204,7 @@ class ControlPackServiceTest {
             var result = service.install(installCmd("test-pack", "1.0.0", entryDef("AC-1", "New Title")));
 
             assertThat(result.controlsLinked()).isEqualTo(1);
-            assertThat(result.controlsCreated()).isEqualTo(0);
+            assertThat(result.controlsCreated()).isZero();
             // Source should not be overwritten since it was already set
             assertThat(existingControl.getSource()).isEqualTo("manual");
         }
