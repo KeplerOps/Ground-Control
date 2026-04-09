@@ -11,7 +11,6 @@ import com.keplerops.groundcontrol.domain.controlpacks.state.ControlPackLifecycl
 import com.keplerops.groundcontrol.domain.controls.model.Control;
 import com.keplerops.groundcontrol.domain.controls.repository.ControlLinkRepository;
 import com.keplerops.groundcontrol.domain.controls.repository.ControlRepository;
-import com.keplerops.groundcontrol.domain.controls.service.CreateControlCommand;
 import com.keplerops.groundcontrol.domain.controls.state.ControlLinkTargetType;
 import com.keplerops.groundcontrol.domain.controls.state.ControlLinkType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
@@ -325,7 +324,7 @@ public class ControlPackService {
             }
             counters.controlsLinked++;
         } else {
-            control = createControlFromDefinition(projectId, entryDef, provenanceSource);
+            control = createControlFromDefinition(pack, entryDef, provenanceSource);
             counters.controlsCreated++;
         }
 
@@ -347,32 +346,19 @@ public class ControlPackService {
     }
 
     private Control createControlFromDefinition(
-            UUID projectId, ControlPackEntryDefinition entryDef, String provenanceSource) {
-        var createCmd = new CreateControlCommand(
-                projectId,
-                entryDef.uid(),
-                entryDef.title(),
-                entryDef.controlFunction(),
-                entryDef.description(),
-                entryDef.objective(),
-                entryDef.owner(),
-                entryDef.implementationScope(),
-                entryDef.methodologyFactors(),
-                entryDef.effectiveness(),
-                entryDef.category(),
-                provenanceSource);
-        var project = projectService.getById(projectId);
-        var control = new Control(project, createCmd.uid(), createCmd.title(), createCmd.controlFunction());
-        control.setDescription(createCmd.description());
-        control.setObjective(createCmd.objective());
-        control.setOwner(createCmd.owner());
-        control.setImplementationScope(createCmd.implementationScope());
-        control.setMethodologyFactors(createCmd.methodologyFactors());
-        control.setEffectiveness(createCmd.effectiveness());
-        control.setCategory(createCmd.category());
-        control.setSource(createCmd.source());
+            ControlPack pack, ControlPackEntryDefinition entryDef, String provenanceSource) {
+        var project = pack.getProject();
+        var control = new Control(project, entryDef.uid(), entryDef.title(), entryDef.controlFunction());
+        control.setDescription(entryDef.description());
+        control.setObjective(entryDef.objective());
+        control.setOwner(entryDef.owner());
+        control.setImplementationScope(entryDef.implementationScope());
+        control.setMethodologyFactors(entryDef.methodologyFactors());
+        control.setEffectiveness(entryDef.effectiveness());
+        control.setCategory(entryDef.category());
+        control.setSource(provenanceSource);
         control = controlRepository.save(control);
-        log.info("control_created_from_pack: uid={} packId={}", control.getUid(), entryDef.uid());
+        log.info("control_created_from_pack: uid={} packId={}", control.getUid(), pack.getPackId());
         return control;
     }
 
@@ -495,13 +481,28 @@ public class ControlPackService {
 
     private void applyFieldToControl(Control control, String fieldName, String value) {
         switch (fieldName) {
-            case "title" -> control.setTitle(value);
+            case "title" -> {
+                if (value == null || value.isBlank()) {
+                    throw new DomainValidationException(
+                            "Control title cannot be null or blank",
+                            "invalid_override_value",
+                            Map.of("field", "title"));
+                }
+                control.setTitle(value);
+            }
             case "description" -> control.setDescription(value);
             case "objective" -> control.setObjective(value);
             case "controlFunction" -> {
                 if (value != null) {
-                    control.setControlFunction(
-                            com.keplerops.groundcontrol.domain.controls.state.ControlFunction.valueOf(value));
+                    try {
+                        control.setControlFunction(
+                                com.keplerops.groundcontrol.domain.controls.state.ControlFunction.valueOf(value));
+                    } catch (IllegalArgumentException e) {
+                        throw new DomainValidationException(
+                                "Invalid control function: " + value,
+                                "invalid_override_value",
+                                Map.of("field", "controlFunction", "value", value));
+                    }
                 }
             }
             case "owner" -> control.setOwner(value);

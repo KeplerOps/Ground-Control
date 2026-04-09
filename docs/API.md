@@ -668,8 +668,8 @@ All endpoints accept an optional `project` query parameter.
 **UpgradeControlPackRequest fields:** Same as install, but uses `newVersion` instead of `version`.
 
 **CreateControlPackOverrideRequest fields:** `fieldName` (required — title, description, objective,
-controlFunction, owner, implementationScope, or category), `overrideValue` (optional),
-`reason` (optional, max 500).
+controlFunction, owner, implementationScope, or category), `overrideValue` (optional; title
+must be non-blank), `reason` (optional, max 500).
 
 **Lifecycle states:** INSTALLED → UPGRADED → DEPRECATED → REMOVED.
 

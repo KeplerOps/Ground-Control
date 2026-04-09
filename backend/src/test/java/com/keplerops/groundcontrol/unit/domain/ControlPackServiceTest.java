@@ -390,7 +390,7 @@ class ControlPackServiceTest {
             });
             when(controlRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-            var cmd = new CreateControlPackOverrideCommand(null, "title", "Custom Title", "Local policy");
+            var cmd = new CreateControlPackOverrideCommand("title", "Custom Title", "Local policy");
             service.createOverride(PROJECT_ID, "test-pack", "AC-1", cmd);
 
             assertThat(control.getTitle()).isEqualTo("Custom Title");
@@ -410,7 +410,7 @@ class ControlPackServiceTest {
             when(entryRepository.findByControlPackIdAndEntryUid(PACK_UUID, "AC-1"))
                     .thenReturn(Optional.of(entry));
 
-            var cmd = new CreateControlPackOverrideCommand(null, "status", "ACTIVE", "Reason");
+            var cmd = new CreateControlPackOverrideCommand("status", "ACTIVE", "Reason");
 
             assertThatThrownBy(() -> service.createOverride(PROJECT_ID, "test-pack", "AC-1", cmd))
                     .isInstanceOf(DomainValidationException.class)

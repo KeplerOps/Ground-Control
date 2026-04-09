@@ -1915,7 +1915,9 @@ export async function deprecateControlPack(packId, project) {
 }
 
 export async function removeControlPack(packId, project) {
-  await request("DELETE", `/api/v1/control-packs/${encodeURIComponent(packId)}`, { params: { project } });
+  await request("DELETE", `/api/v1/control-packs/${encodeURIComponent(packId)}`, {
+    params: { project },
+  });
 }
 
 export async function listControlPackEntries(packId, project) {

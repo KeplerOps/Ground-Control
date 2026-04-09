@@ -4086,7 +4086,7 @@ server.tool(
 
 server.tool(
   "gc_remove_control_pack",
-  "Remove an installed control pack (terminal state). Controls remain but provenance link is severed.",
+  "Remove an installed control pack (terminal state, irreversible). Controls remain but provenance link is severed.",
   {
     pack_id: z.string().describe("Pack identity to remove"),
     project: z.string().optional().describe("Project identifier"),

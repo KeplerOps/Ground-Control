@@ -131,8 +131,7 @@ public class ControlPackController {
                 projectId,
                 packId,
                 entryUid,
-                new CreateControlPackOverrideCommand(
-                        null, request.fieldName(), request.overrideValue(), request.reason())));
+                new CreateControlPackOverrideCommand(request.fieldName(), request.overrideValue(), request.reason())));
     }
 
     @GetMapping("/{packId}/entries/{entryUid}/overrides")
