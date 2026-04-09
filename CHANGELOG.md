@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.108.0] - 2026-04-08
+
+### Added
+
+- Control pack distribution and installation (GC-P015, ADR-022): versioned control
+  packs as installable content bundles with idempotent installation, version-aware
+  upgrades, source provenance tracking, and field-level local tailoring
+- `control_pack`, `control_pack_entry`, `control_pack_override` tables with Envers
+  audit trails (V052)
+- `ControlPackLifecycleState` enum (INSTALLED, UPGRADED, DEPRECATED, REMOVED) with
+  validated state transitions
+- `ControlPackService` with install (idempotent, materializes `Control` records and
+  `ControlLink` MAPS_TO framework mappings), upgrade (applies upstream changes while
+  preserving local overrides), deprecate, and remove operations
+- REST API: `POST /api/v1/control-packs/install`, `POST /api/v1/control-packs/upgrade`,
+  `GET /api/v1/control-packs`, `GET /api/v1/control-packs/{packId}`,
+  `PUT /api/v1/control-packs/{packId}/deprecate`, `DELETE /api/v1/control-packs/{packId}`,
+  entry and override sub-resource endpoints
+- MCP tools: `gc_install_control_pack`, `gc_upgrade_control_pack`,
+  `gc_list_control_packs`, `gc_get_control_pack`, `gc_deprecate_control_pack`,
+  `gc_remove_control_pack`, `gc_list_control_pack_entries`, `gc_get_control_pack_entry`,
+  `gc_create_control_pack_override`, `gc_list_control_pack_overrides`,
+  `gc_delete_control_pack_override`
+
 ## [0.107.0] - 2026-04-09
 
 ### Added

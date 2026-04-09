@@ -214,6 +214,19 @@ import {
   unregisterPlugin,
   PLUGIN_TYPES,
   PLUGIN_LIFECYCLE_STATES,
+  installControlPack,
+  upgradeControlPack,
+  listControlPacks,
+  getControlPack,
+  deprecateControlPack,
+  removeControlPack,
+  listControlPackEntries,
+  getControlPackEntry,
+  createControlPackOverride,
+  listControlPackOverrides,
+  deleteControlPackOverride,
+  CONTROL_PACK_LIFECYCLE_STATES,
+  CONTROL_PACK_ENTRY_STATUSES,
 } from "./lib.js";
 
 function ok(text) {
@@ -3872,6 +3885,312 @@ server.tool(
     try {
       await unregisterPlugin(name, project);
       return ok("Plugin unregistered.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Control Pack tools
+// ==========================================================================
+
+server.tool(
+  "gc_install_control_pack",
+  "Install a versioned control pack into a project. Creates control records, framework mapping links, and pack entries idempotently.",
+  {
+    pack_id: z.string().max(200).describe("Stable pack identity (e.g. 'nist-sp800-53-rev5', 'iso-27001-annex-a')"),
+    version: z.string().max(50).describe("Semantic version of the pack (e.g. '1.0.0')"),
+    publisher: z.string().max(200).optional().describe("Organization or author who published the pack"),
+    description: z.string().optional().describe("Human-readable pack description"),
+    source_url: z.string().max(2000).optional().describe("Origin URL (registry, git repo, etc.)"),
+    checksum: z.string().max(128).optional().describe("SHA-256 content hash for integrity verification"),
+    compatibility: z.record(z.string(), z.unknown()).optional().describe("Compatibility constraints (e.g. min GC version)"),
+    pack_metadata: z.record(z.string(), z.unknown()).optional().describe("Arbitrary pack-level metadata"),
+    entries: z.array(z.object({
+      uid: z.string().max(50).describe("Control UID within the pack"),
+      title: z.string().max(200).describe("Control title"),
+      control_function: z.enum(CONTROL_FUNCTIONS).describe("Control function"),
+      description: z.string().optional().describe("Control description"),
+      objective: z.string().optional().describe("Control objective"),
+      owner: z.string().max(200).optional().describe("Control owner"),
+      implementation_scope: z.string().optional().describe("Implementation scope"),
+      methodology_factors: z.record(z.string(), z.unknown()).optional().describe("Methodology factor mappings"),
+      effectiveness: z.record(z.string(), z.unknown()).optional().describe("Effectiveness metrics"),
+      category: z.string().max(100).optional().describe("Control category"),
+      source: z.string().max(200).optional().describe("Framework source"),
+      implementation_guidance: z.string().optional().describe("How to implement this control"),
+      expected_evidence: z.array(z.record(z.string(), z.unknown())).optional().describe("Evidence pattern templates (not real evidence)"),
+      framework_mappings: z.array(z.object({
+        framework: z.string().optional().describe("Framework name (e.g. 'NIST CSF')"),
+        identifier: z.string().describe("Framework control identifier (e.g. 'PR.AC-1')"),
+        title: z.string().optional().describe("Mapping title"),
+        url: z.string().optional().describe("Reference URL"),
+      })).optional().describe("Framework mappings (materialized as MAPS_TO control links)"),
+    })).min(1).describe("Control definitions to install"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, version, publisher, description, source_url, checksum, compatibility, pack_metadata, entries, project }) => {
+    try {
+      const body = {
+        packId: pack_id,
+        version,
+        entries: entries.map(e => ({
+          uid: e.uid,
+          title: e.title,
+          controlFunction: e.control_function,
+          description: e.description,
+          objective: e.objective,
+          owner: e.owner,
+          implementationScope: e.implementation_scope,
+          methodologyFactors: e.methodology_factors,
+          effectiveness: e.effectiveness,
+          category: e.category,
+          source: e.source,
+          implementationGuidance: e.implementation_guidance,
+          expectedEvidence: e.expected_evidence,
+          frameworkMappings: e.framework_mappings,
+        })),
+      };
+      if (publisher !== undefined) body.publisher = publisher;
+      if (description !== undefined) body.description = description;
+      if (source_url !== undefined) body.sourceUrl = source_url;
+      if (checksum !== undefined) body.checksum = checksum;
+      if (compatibility !== undefined) body.compatibility = compatibility;
+      if (pack_metadata !== undefined) body.packMetadata = pack_metadata;
+      return ok(JSON.stringify(await installControlPack(body, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_upgrade_control_pack",
+  "Upgrade an installed control pack to a new version. Applies upstream changes to non-overridden fields and preserves local tailoring.",
+  {
+    pack_id: z.string().max(200).describe("Pack identity to upgrade"),
+    new_version: z.string().max(50).describe("New semantic version"),
+    publisher: z.string().max(200).optional().describe("Publisher"),
+    description: z.string().optional().describe("Updated description"),
+    source_url: z.string().max(2000).optional().describe("Updated origin URL"),
+    checksum: z.string().max(128).optional().describe("Updated content hash"),
+    compatibility: z.record(z.string(), z.unknown()).optional().describe("Updated compatibility constraints"),
+    pack_metadata: z.record(z.string(), z.unknown()).optional().describe("Updated pack metadata"),
+    entries: z.array(z.object({
+      uid: z.string().max(50).describe("Control UID within the pack"),
+      title: z.string().max(200).describe("Control title"),
+      control_function: z.enum(CONTROL_FUNCTIONS).describe("Control function"),
+      description: z.string().optional().describe("Control description"),
+      objective: z.string().optional().describe("Control objective"),
+      owner: z.string().max(200).optional().describe("Control owner"),
+      implementation_scope: z.string().optional().describe("Implementation scope"),
+      methodology_factors: z.record(z.string(), z.unknown()).optional().describe("Methodology factor mappings"),
+      effectiveness: z.record(z.string(), z.unknown()).optional().describe("Effectiveness metrics"),
+      category: z.string().max(100).optional().describe("Control category"),
+      source: z.string().max(200).optional().describe("Framework source"),
+      implementation_guidance: z.string().optional().describe("Implementation guidance"),
+      expected_evidence: z.array(z.record(z.string(), z.unknown())).optional().describe("Evidence pattern templates"),
+      framework_mappings: z.array(z.object({
+        framework: z.string().optional().describe("Framework name"),
+        identifier: z.string().describe("Framework control identifier"),
+        title: z.string().optional().describe("Mapping title"),
+        url: z.string().optional().describe("Reference URL"),
+      })).optional().describe("Framework mappings"),
+    })).min(1).describe("Updated control definitions"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, new_version, publisher, description, source_url, checksum, compatibility, pack_metadata, entries, project }) => {
+    try {
+      const body = {
+        packId: pack_id,
+        newVersion: new_version,
+        entries: entries.map(e => ({
+          uid: e.uid,
+          title: e.title,
+          controlFunction: e.control_function,
+          description: e.description,
+          objective: e.objective,
+          owner: e.owner,
+          implementationScope: e.implementation_scope,
+          methodologyFactors: e.methodology_factors,
+          effectiveness: e.effectiveness,
+          category: e.category,
+          source: e.source,
+          implementationGuidance: e.implementation_guidance,
+          expectedEvidence: e.expected_evidence,
+          frameworkMappings: e.framework_mappings,
+        })),
+      };
+      if (publisher !== undefined) body.publisher = publisher;
+      if (description !== undefined) body.description = description;
+      if (source_url !== undefined) body.sourceUrl = source_url;
+      if (checksum !== undefined) body.checksum = checksum;
+      if (compatibility !== undefined) body.compatibility = compatibility;
+      if (pack_metadata !== undefined) body.packMetadata = pack_metadata;
+      return ok(JSON.stringify(await upgradeControlPack(body, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_control_packs",
+  "List installed control packs for a project.",
+  {
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await listControlPacks(project);
+      if (Array.isArray(result) && result.length === 0) return ok("No control packs found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_control_pack",
+  "Get a control pack by its pack identifier.",
+  {
+    pack_id: z.string().describe("Pack identity (e.g. 'nist-sp800-53-rev5')"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, project }) => {
+    try {
+      return ok(JSON.stringify(await getControlPack(pack_id, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_deprecate_control_pack",
+  "Deprecate an installed control pack.",
+  {
+    pack_id: z.string().describe("Pack identity to deprecate"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, project }) => {
+    try {
+      return ok(JSON.stringify(await deprecateControlPack(pack_id, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_remove_control_pack",
+  "Remove an installed control pack (terminal state, irreversible). Controls remain but provenance link is severed.",
+  {
+    pack_id: z.string().describe("Pack identity to remove"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, project }) => {
+    try {
+      await removeControlPack(pack_id, project);
+      return ok("Control pack removed.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_control_pack_entries",
+  "List entries (control definitions) within an installed control pack.",
+  {
+    pack_id: z.string().describe("Pack identity"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, project }) => {
+    try {
+      const result = await listControlPackEntries(pack_id, project);
+      if (Array.isArray(result) && result.length === 0) return ok("No entries found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_control_pack_entry",
+  "Get a specific entry from a control pack by its entry UID.",
+  {
+    pack_id: z.string().describe("Pack identity"),
+    entry_uid: z.string().describe("Entry UID within the pack"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, entry_uid, project }) => {
+    try {
+      return ok(JSON.stringify(await getControlPackEntry(pack_id, entry_uid, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_create_control_pack_override",
+  "Create or update a field-level override on a pack entry for local tailoring.",
+  {
+    pack_id: z.string().describe("Pack identity"),
+    entry_uid: z.string().describe("Entry UID within the pack"),
+    field_name: z.string().max(100).describe("Field to override (title, description, objective, controlFunction, owner, implementationScope, category)"),
+    override_value: z.string().optional().describe("Override value"),
+    reason: z.string().max(500).optional().describe("Reason for the override"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, entry_uid, field_name, override_value, reason, project }) => {
+    try {
+      const data = { fieldName: field_name };
+      if (override_value !== undefined) data.overrideValue = override_value;
+      if (reason !== undefined) data.reason = reason;
+      return ok(JSON.stringify(await createControlPackOverride(pack_id, entry_uid, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_control_pack_overrides",
+  "List field-level overrides for a pack entry.",
+  {
+    pack_id: z.string().describe("Pack identity"),
+    entry_uid: z.string().describe("Entry UID within the pack"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, entry_uid, project }) => {
+    try {
+      const result = await listControlPackOverrides(pack_id, entry_uid, project);
+      if (Array.isArray(result) && result.length === 0) return ok("No overrides found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_control_pack_override",
+  "Delete a field-level override, restoring the original pack value on the materialized control.",
+  {
+    pack_id: z.string().describe("Pack identity"),
+    entry_uid: z.string().describe("Entry UID within the pack"),
+    override_id: z.string().uuid().describe("Override UUID to delete"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ pack_id, entry_uid, override_id, project }) => {
+    try {
+      await deleteControlPackOverride(pack_id, entry_uid, override_id, project);
+      return ok("Override deleted and original value restored.");
     } catch (e) {
       return err(e);
     }

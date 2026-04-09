@@ -1886,3 +1886,56 @@ export async function registerPlugin(data, project) {
 export async function unregisterPlugin(name, project) {
   await request("DELETE", `/api/v1/plugins/${encodeURIComponent(name)}`, { params: { project } });
 }
+
+// ---------------------------------------------------------------------------
+// Control Pack API functions
+// ---------------------------------------------------------------------------
+
+export const CONTROL_PACK_LIFECYCLE_STATES = ["INSTALLED", "UPGRADED", "DEPRECATED", "REMOVED"];
+export const CONTROL_PACK_ENTRY_STATUSES = ["ACTIVE", "DEPRECATED", "REMOVED"];
+
+export async function installControlPack(data, project) {
+  return request("POST", "/api/v1/control-packs/install", { body: data, params: { project } });
+}
+
+export async function upgradeControlPack(data, project) {
+  return request("POST", "/api/v1/control-packs/upgrade", { body: data, params: { project } });
+}
+
+export async function listControlPacks(project) {
+  return request("GET", "/api/v1/control-packs", { params: { project } });
+}
+
+export async function getControlPack(packId, project) {
+  return request("GET", `/api/v1/control-packs/${encodeURIComponent(packId)}`, { params: { project } });
+}
+
+export async function deprecateControlPack(packId, project) {
+  return request("PUT", `/api/v1/control-packs/${encodeURIComponent(packId)}/deprecate`, { params: { project } });
+}
+
+export async function removeControlPack(packId, project) {
+  await request("DELETE", `/api/v1/control-packs/${encodeURIComponent(packId)}`, {
+    params: { project },
+  });
+}
+
+export async function listControlPackEntries(packId, project) {
+  return request("GET", `/api/v1/control-packs/${encodeURIComponent(packId)}/entries`, { params: { project } });
+}
+
+export async function getControlPackEntry(packId, entryUid, project) {
+  return request("GET", `/api/v1/control-packs/${encodeURIComponent(packId)}/entries/${encodeURIComponent(entryUid)}`, { params: { project } });
+}
+
+export async function createControlPackOverride(packId, entryUid, data, project) {
+  return request("POST", `/api/v1/control-packs/${encodeURIComponent(packId)}/entries/${encodeURIComponent(entryUid)}/overrides`, { body: data, params: { project } });
+}
+
+export async function listControlPackOverrides(packId, entryUid, project) {
+  return request("GET", `/api/v1/control-packs/${encodeURIComponent(packId)}/entries/${encodeURIComponent(entryUid)}/overrides`, { params: { project } });
+}
+
+export async function deleteControlPackOverride(packId, entryUid, overrideId, project) {
+  await request("DELETE", `/api/v1/control-packs/${encodeURIComponent(packId)}/entries/${encodeURIComponent(entryUid)}/overrides/${encodeURIComponent(overrideId)}`, { params: { project } });
+}

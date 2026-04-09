@@ -640,6 +640,39 @@ All endpoints accept an optional `project` query parameter.
 `type` (required, PluginType enum), `description` (optional), `capabilities` (optional, string set),
 `metadata` (optional, JSON object).
 
+### Control Packs
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/control-packs/install` | InstallControlPackRequest | 201 | Install a control pack (idempotent) |
+| POST | `/control-packs/upgrade` | UpgradeControlPackRequest | 200 | Upgrade to a new version |
+| GET | `/control-packs` | — | 200 | List installed packs |
+| GET | `/control-packs/{packId}` | — | 200 | Get pack by identifier |
+| PUT | `/control-packs/{packId}/deprecate` | — | 200 | Deprecate a pack |
+| DELETE | `/control-packs/{packId}` | — | 204 | Remove a pack |
+| GET | `/control-packs/{packId}/entries` | — | 200 | List pack entries |
+| GET | `/control-packs/{packId}/entries/{entryUid}` | — | 200 | Get a pack entry |
+| POST | `/control-packs/{packId}/entries/{entryUid}/overrides` | CreateControlPackOverrideRequest | 201 | Create field override |
+| GET | `/control-packs/{packId}/entries/{entryUid}/overrides` | — | 200 | List overrides |
+| DELETE | `/control-packs/{packId}/entries/{entryUid}/overrides/{id}` | — | 204 | Delete override |
+
+All endpoints accept an optional `project` query parameter.
+
+**InstallControlPackRequest fields:** `packId` (required, max 200), `version` (required, max 50),
+`publisher` (optional), `description` (optional), `sourceUrl` (optional), `checksum` (optional),
+`compatibility` (optional, JSON object), `packMetadata` (optional, JSON object),
+`entries` (required, array of control definitions with `uid`, `title`, `controlFunction`, plus optional
+`description`, `objective`, `owner`, `implementationScope`, `methodologyFactors`, `effectiveness`,
+`category`, `source`, `implementationGuidance`, `expectedEvidence`, `frameworkMappings`).
+
+**UpgradeControlPackRequest fields:** Same as install, but uses `newVersion` instead of `version`.
+
+**CreateControlPackOverrideRequest fields:** `fieldName` (required — title, description, objective,
+controlFunction, owner, implementationScope, or category), `overrideValue` (optional; title
+must be non-blank), `reason` (optional, max 500).
+
+**Lifecycle states:** INSTALLED → UPGRADED → DEPRECATED → REMOVED.
+
 ## Request / Response Format
 
 JSON. Error responses use a nested envelope:

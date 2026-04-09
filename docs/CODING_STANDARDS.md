@@ -180,6 +180,7 @@ Other `state/` packages contain simple value enums (L0) that are **not** ESC-ver
 - `domain/controls/state/` — `ControlFunction`, `ControlStatus`, `ControlLinkTargetType`, `ControlLinkType`
 - `domain/riskscenarios/state/` — risk scenario link and status enums
 - `domain/plugins/state/` — `PluginType`, `PluginLifecycleState` enums
+- `domain/controlpacks/state/` — `ControlPackLifecycleState`, `ControlPackEntryStatus` enums
 
 ### What ESC cannot verify (and why)
 
