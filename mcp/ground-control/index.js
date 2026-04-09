@@ -208,6 +208,12 @@ import {
   deleteVerificationResult,
   VERIFICATION_STATUSES,
   ASSURANCE_LEVELS,
+  listPlugins,
+  getPlugin,
+  registerPlugin,
+  unregisterPlugin,
+  PLUGIN_TYPES,
+  PLUGIN_LIFECYCLE_STATES,
 } from "./lib.js";
 
 function ok(text) {
@@ -3788,6 +3794,84 @@ server.tool(
     try {
       await deleteVerificationResult(id, project);
       return ok("Verification result deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Plugins (GC-P005)
+// ==========================================================================
+
+server.tool(
+  "gc_list_plugins",
+  "List all registered plugins with their metadata, type, state, and capabilities. Returns both built-in (classpath) and dynamic (DB-persisted) plugins.",
+  {
+    type: z.enum(PLUGIN_TYPES).optional().describe("Filter by plugin type"),
+    capability: z.string().optional().describe("Filter by capability tag"),
+    project: z.string().optional().describe("Project identifier to scope dynamic plugins"),
+  },
+  async ({ type, capability, project }) => {
+    try {
+      return ok(JSON.stringify(await listPlugins({ type, capability, project }), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_plugin",
+  "Get a registered plugin by its canonical name.",
+  {
+    name: z.string().describe("The plugin's canonical name"),
+  },
+  async ({ name }) => {
+    try {
+      return ok(JSON.stringify(await getPlugin(name), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_register_plugin",
+  "Register a dynamic plugin. Persisted to the database and survives restarts.",
+  {
+    name: z.string().max(100).describe("Unique plugin name"),
+    version: z.string().max(50).describe("Semantic version"),
+    type: z.enum(PLUGIN_TYPES).describe("Plugin type/category"),
+    description: z.string().optional().describe("Human-readable description"),
+    capabilities: z.array(z.string()).optional().describe("Capability tags"),
+    metadata: z.record(z.unknown()).optional().describe("Plugin-specific metadata"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ name, version, type, description, capabilities, metadata, project }) => {
+    try {
+      const data = { name, version, type };
+      if (description !== undefined) data.description = description;
+      if (capabilities !== undefined) data.capabilities = capabilities;
+      if (metadata !== undefined) data.metadata = metadata;
+      return ok(JSON.stringify(await registerPlugin(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_unregister_plugin",
+  "Unregister a dynamic plugin. Removes it from the database.",
+  {
+    name: z.string().describe("The plugin's canonical name"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ name, project }) => {
+    try {
+      await unregisterPlugin(name, project);
+      return ok("Plugin unregistered.");
     } catch (e) {
       return err(e);
     }

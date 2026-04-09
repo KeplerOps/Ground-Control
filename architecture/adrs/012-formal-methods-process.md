@@ -111,7 +111,7 @@ When in doubt, use L0 during pre-alpha. The bar rises at beta.
 - Version: OpenJML 21-0.21 (JDK 21 series)
 - Gradle tasks: `./gradlew downloadOpenJml` (fetches binary), `./gradlew openjmlEsc` (runs Z3 prover)
 - Defined in: `backend/gradle/openjml.gradle.kts`, applied from `build.gradle.kts`
-- Scope: `domain/requirements/state/` and `domain/verification/state/` only (pure enums with no framework annotations). Other `state/` packages (`assets`, `controls`, `riskscenarios`) contain L0 value enums not covered by ESC.
+- Scope: `domain/requirements/state/` and `domain/verification/state/` only (pure enums with no framework annotations). Other `state/` packages (`assets`, `controls`, `riskscenarios`, `plugins`) contain L0 value enums not covered by ESC.
 - Gradle up-to-date checking: skips when source files haven't changed (~1s no-op)
 - **Known limitations**: OpenJML's bundled `CharSequence.jml` spec has invariant bugs that cause false positives on classes with `String` constructor parameters. JPA entities fail due to Hibernate's no-arg constructor leaving fields `null`. These classes remain at L1 (contract + test pairs). See `docs/CODING_STANDARDS.md` "OpenJML ESC Scoping" for design guidelines.
 

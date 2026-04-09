@@ -620,6 +620,26 @@ All endpoints accept an optional `project` query parameter.
 (optional, traceability link UUID), `requirementId` (optional), `property` (optional),
 `evidence` (optional, JSON object), `expiresAt` (optional, ISO 8601).
 
+### Plugins
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| GET | `/plugins` | — | 200 | List all registered plugins |
+| GET | `/plugins/{name}` | — | 200 | Get plugin by name |
+| POST | `/plugins` | RegisterPluginRequest | 201 | Register a dynamic plugin |
+| DELETE | `/plugins/{name}` | — | 204 | Unregister a dynamic plugin |
+
+All endpoints accept an optional `project` query parameter.
+
+**Filters on GET list:**
+- `type` (enum) — PACK_HANDLER, REGISTRY_BACKEND, VALIDATOR, POLICY_HOOK, VERIFIER, EMBEDDING_PROVIDER, GRAPH_CONTRIBUTOR, CUSTOM
+- `capability` (string) — filter by capability tag
+- `project` (string) — filter dynamic plugins by project
+
+**RegisterPluginRequest fields:** `name` (required, max 100), `version` (required, max 50),
+`type` (required, PluginType enum), `description` (optional), `capabilities` (optional, string set),
+`metadata` (optional, JSON object).
+
 ## Request / Response Format
 
 JSON. Error responses use a nested envelope:

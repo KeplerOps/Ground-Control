@@ -58,12 +58,14 @@ backend/src/main/java/com/keplerops/groundcontrol/
 │   ├── baselines/                # BaselineController, request/response records
 │   ├── admin/                    # ImportController, SweepController, AnalysisController, GraphController, EmbeddingController
 │   ├── verification/             # VerificationResultController, request/response records
+│   ├── plugins/                  # PluginController, request/response records
 │   └── GlobalExceptionHandler.java
 ├── domain/                       # Business logic (Spring-web-free)
 │   ├── exception/                # Domain exception hierarchy
 │   ├── projects/                 # Project entity, repository, service
 │   ├── baselines/                # Baseline entity, repository, service
 │   ├── verification/             # VerificationResult entity, VerificationStatus/AssuranceLevel enums, repository, service
+│   ├── plugins/                  # Plugin interface, PluginRegistry, RegisteredPlugin entity, PluginType/PluginLifecycleState enums
 │   └── requirements/
 │       ├── model/                # JPA entities (Requirement, RequirementRelation, TraceabilityLink, RequirementEmbedding, etc.)
 │       ├── repository/           # Spring Data JPA repository interfaces

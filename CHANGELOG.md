@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.107.0] - 2026-04-09
+
+### Added
+
+- Plugin architecture with dual-source registry for built-in and dynamic plugins
+  (GC-P005, ADR-023): `Plugin` interface with lifecycle management, `PluginDescriptor`
+  metadata record, `PluginRegistry` service with classpath discovery and DB persistence,
+  typed plugin categories (pack handler, registry backend, validator, policy hook,
+  verifier, embedding provider, graph contributor, custom)
+- `registered_plugin` database table (V051) for dynamic plugin registrations that
+  survive application restarts
+- REST API: `GET /api/v1/plugins`, `GET /api/v1/plugins/{name}`,
+  `POST /api/v1/plugins`, `DELETE /api/v1/plugins/{name}` with type/capability filtering
+- MCP tools: `gc_list_plugins`, `gc_register_plugin`, `gc_unregister_plugin`
+- `StringSetConverter` in `JacksonTextCollectionConverters` for JSON-serialized
+  `Set<String>` JPA columns
+
 ## [0.106.0] - 2026-04-08
 
 ### Added
