@@ -58,6 +58,11 @@ class PackRegistryControllerTest {
     private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final UUID ENTRY_ID = UUID.fromString("00000000-0000-0000-0000-000000000060");
 
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        when(accessGuard.requireAdminActor(any())).thenReturn("pack-admin");
+    }
+
     private Project makeProject() {
         var project = new Project("ground-control", "Ground Control");
         setField(project, "id", PROJECT_ID);

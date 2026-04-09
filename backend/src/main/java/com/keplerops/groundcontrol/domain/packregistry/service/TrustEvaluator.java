@@ -5,9 +5,9 @@ import com.keplerops.groundcontrol.domain.packregistry.model.TrustPolicyRule;
 import com.keplerops.groundcontrol.domain.packregistry.repository.TrustPolicyRepository;
 import com.keplerops.groundcontrol.domain.packregistry.state.TrustOutcome;
 import com.keplerops.groundcontrol.domain.packregistry.state.TrustPolicyField;
+import com.keplerops.groundcontrol.domain.packregistry.state.TrustPolicyRuleOperator;
 import java.util.List;
 import java.util.UUID;
-import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -16,7 +16,6 @@ import org.springframework.stereotype.Service;
 public class TrustEvaluator {
 
     private static final Logger log = LoggerFactory.getLogger(TrustEvaluator.class);
-    private static final int MAX_PATTERN_LENGTH = 500;
 
     private final TrustPolicyRepository trustPolicyRepository;
 
@@ -82,6 +81,15 @@ public class TrustEvaluator {
 
     private boolean evaluateRule(
             TrustPolicyRule rule, ResolvedPack resolvedPack, PackIntegrityVerification integrityVerification) {
+        if (rule.operator() == TrustPolicyRuleOperator.MATCHES_PATTERN) {
+            log.warn("trust_rule_unsupported_operator: operator={}", rule.operator());
+            return false;
+        }
+        if (rule.field() == TrustPolicyField.SIGNATURE_VERIFIED) {
+            log.warn("trust_rule_unsupported_field: field={}", rule.field().wireValue());
+            return false;
+        }
+
         var actualValue = extractField(resolvedPack, integrityVerification, rule.field());
         if (actualValue == null) {
             return false;
@@ -91,24 +99,11 @@ public class TrustEvaluator {
             case EQUALS -> actualValue.equals(rule.value());
             case NOT_EQUALS -> !actualValue.equals(rule.value());
             case CONTAINS -> actualValue.contains(rule.value());
-            case MATCHES_PATTERN -> {
-                if (rule.value().length() > MAX_PATTERN_LENGTH) {
-                    log.warn(
-                            "trust_rule_pattern_too_long: length={}",
-                            rule.value().length());
-                    yield false;
-                }
-                try {
-                    yield Pattern.compile(rule.value()).matcher(actualValue).matches();
-                } catch (java.util.regex.PatternSyntaxException e) {
-                    log.warn("trust_rule_invalid_pattern: pattern={}", rule.value());
-                    yield false;
-                }
-            }
             case IN_LIST -> {
                 var items = List.of(rule.value().split(","));
                 yield items.stream().map(String::trim).anyMatch(actualValue::equals);
             }
+            case MATCHES_PATTERN -> false;
         };
     }
 
@@ -126,8 +121,9 @@ public class TrustEvaluator {
             case CHECKSUM_VERIFIED -> integrityVerification != null
                     ? Boolean.toString(integrityVerification.checksumVerified())
                     : null;
-            case SIGNATURE_VERIFIED -> integrityVerification != null
-                    ? stringifyNullableBoolean(integrityVerification.signatureVerified())
+            case SIGNATURE_VERIFIED -> null;
+            case SIGNER_TRUSTED -> integrityVerification != null
+                    ? stringifyNullableBoolean(integrityVerification.signerTrusted())
                     : null;
         };
     }

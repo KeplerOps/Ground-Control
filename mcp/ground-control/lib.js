@@ -356,6 +356,7 @@ const TO_CAMEL = {
   resolved_checksum: "resolvedChecksum",
   requested_version: "requestedVersion",
   signature_verified: "signatureVerified",
+  signer_trusted: "signerTrusted",
   trust_policy_id: "trustPolicyId",
   registered_at: "registeredAt",
   implementation_guidance: "implementationGuidance",
@@ -417,6 +418,19 @@ export function parseErrorBody(text) {
   }
 }
 
+function requiresPackRegistryAdmin(path) {
+  return path.startsWith("/api/v1/pack-registry")
+    || path.startsWith("/api/v1/trust-policies")
+    || path.startsWith("/api/v1/pack-install-records");
+}
+
+function addPackRegistryAdminHeader(path, headers) {
+  const token = process.env.GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN;
+  if (requiresPackRegistryAdmin(path) && token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+}
+
 async function request(method, path, { body, params, formData } = {}) {
   const url = buildUrl(path, params);
   const options = { method };
@@ -431,6 +445,7 @@ async function request(method, path, { body, params, formData } = {}) {
   } else {
     options.headers = { "X-Actor": "mcp-server" };
   }
+  addPackRegistryAdminHeader(path, options.headers);
 
   const res = await fetch(url, options);
 
@@ -1984,9 +1999,9 @@ export const TRUST_POLICY_FIELDS = [
   "checksum",
   "verifiedChecksum",
   "checksumVerified",
-  "signatureVerified",
+  "signerTrusted",
 ];
-export const TRUST_POLICY_RULE_OPERATORS = ["EQUALS", "NOT_EQUALS", "CONTAINS", "MATCHES_PATTERN", "IN_LIST"];
+export const TRUST_POLICY_RULE_OPERATORS = ["EQUALS", "NOT_EQUALS", "CONTAINS", "IN_LIST"];
 
 export async function registerPackRegistryEntry(data, project) {
   return request("POST", "/api/v1/pack-registry", { body: data, params: { project } });

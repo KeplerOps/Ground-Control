@@ -719,6 +719,12 @@ Response wraps results in a Spring Page object with `content`, `totalElements`,
 
 ### Pack Registry
 
+All pack registry, trust policy, and pack install record routes require a pack
+registry admin token: `Authorization: Bearer <token>`. Tokens and their audit
+principal names are configured with
+`ground-control.pack-registry.security.admin-credentials`. The repo-local MCP
+helper forwards `GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN` when set.
+
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
 | POST | `/pack-registry` | RegisterPackRequest | 201 | Register pack version in catalog |
@@ -753,8 +759,9 @@ Response wraps results in a Spring Page object with `content`, `totalElements`,
 `RegisterPackRequest` and `UpdatePackRegistryEntryRequest` accept
 `controlPackEntries` for `CONTROL_PACK` artifacts. Registry-driven install and
 upgrade now materialize that stored server-side content; `InstallPackRequest`
-contains only `packId`, optional `versionConstraint`, and optional
-`performedBy`.
+contains only `packId` and optional `versionConstraint`. The install record
+`performedBy` value is derived server-side from the authenticated admin token,
+not request JSON.
 
 When a `checksum` is supplied, the server verifies it against the canonical
 pack payload and normalizes the stored value to `sha256:<hex>`. Unsigned packs
@@ -769,14 +776,20 @@ trust evaluation and install recording, but they do not become
 `publicKey` (required, base64 DER or PEM-encoded X.509 public key),
 `signature` (required, base64 detached signature over the canonical pack
 payload), and `keyAlgorithm` (optional when it can be inferred from
-`algorithm`, otherwise required).
+`algorithm`, otherwise required). A valid signature is cryptographic evidence
+only. Trust policy must use `signerTrusted`, which becomes `true` only when the
+signature public key matches a configured trusted signer under
+`ground-control.pack-registry.security.trusted-signers`.
 
 Install and upgrade return `422 Unprocessable Entity` when the request is
 accepted syntactically but the resolved pack is rejected or fails to apply.
 
 Trust policy rules may match not only raw pack metadata, but also verified
 integrity fields exposed by the server: `verifiedChecksum`,
-`checksumVerified`, and `signatureVerified`.
+`checksumVerified`, and `signerTrusted`. The `signatureVerified` field is
+informational and is rejected in trust policy rules. Regex policy rules are also
+disabled; use bounded operators `EQUALS`, `NOT_EQUALS`, `CONTAINS`, and
+`IN_LIST`.
 
 ## Interactive Docs
 

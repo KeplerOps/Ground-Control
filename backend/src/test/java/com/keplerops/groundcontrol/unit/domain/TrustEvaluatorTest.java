@@ -35,7 +35,7 @@ class TrustEvaluatorTest {
 
     private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final PackIntegrityVerification VERIFIED_INTEGRITY =
-            new PackIntegrityVerification("sha256:verified", true, true);
+            new PackIntegrityVerification("sha256:verified", true, true, true);
 
     private Project makeProject() {
         var project = new Project("ground-control", "Ground Control");
@@ -183,7 +183,7 @@ class TrustEvaluatorTest {
         }
 
         @Test
-        void matchesPatternOperatorWorks() {
+        void matchesPatternOperatorDoesNotExecute() {
             var project = makeProject();
             var policy = new TrustPolicy(project, "pattern-test", TrustOutcome.REJECTED);
             setField(policy, "id", UUID.randomUUID());
@@ -198,7 +198,7 @@ class TrustEvaluatorTest {
                     .thenReturn(List.of(policy));
 
             var decision = evaluator.evaluate(PROJECT_ID, makeResolvedPack("NIST"), VERIFIED_INTEGRITY);
-            assertThat(decision.outcome()).isEqualTo(TrustOutcome.TRUSTED);
+            assertThat(decision.outcome()).isEqualTo(TrustOutcome.REJECTED);
         }
 
         @Test
@@ -279,10 +279,7 @@ class TrustEvaluatorTest {
             var policy = new TrustPolicy(project, "signed-only", TrustOutcome.REJECTED);
             setField(policy, "id", UUID.randomUUID());
             policy.setRules(List.of(rule(
-                    TrustPolicyField.SIGNATURE_VERIFIED,
-                    TrustPolicyRuleOperator.EQUALS,
-                    "true",
-                    TrustOutcome.TRUSTED)));
+                    TrustPolicyField.SIGNER_TRUSTED, TrustPolicyRuleOperator.EQUALS, "true", TrustOutcome.TRUSTED)));
             policy.setPriority(1);
 
             when(trustPolicyRepository.findByProjectIdAndEnabledOrderByPriorityAsc(PROJECT_ID, true))

@@ -209,7 +209,10 @@ public class PackInstallOrchestrator {
         } catch (PackIntegrityException exception) {
             var trust = new TrustDecision(TrustOutcome.REJECTED, exception.getMessage(), null);
             var integrity = new PackIntegrityVerification(
-                    exception.getVerifiedChecksum(), exception.isChecksumVerified(), exception.getSignatureVerified());
+                    exception.getVerifiedChecksum(),
+                    exception.isChecksumVerified(),
+                    exception.getSignatureVerified(),
+                    exception.getSignerTrusted());
             var record = buildRecord(project, command, entry, resolvedPack, integrity, trust, InstallOutcome.REJECTED);
             record.setErrorDetail(exception.getMessage());
             log.info("pack_{}_rejected: pack_id={}, reason=integrity_failed", operation.logLabel(), entry.getPackId());

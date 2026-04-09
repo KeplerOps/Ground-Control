@@ -11,6 +11,7 @@ import com.keplerops.groundcontrol.domain.packregistry.service.RegisterPackComma
 import com.keplerops.groundcontrol.domain.packregistry.service.UpdatePackRegistryEntryCommand;
 import com.keplerops.groundcontrol.domain.packregistry.state.PackType;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -32,18 +33,26 @@ public class PackRegistryController {
     private final PackRegistryService registryService;
     private final PackResolver packResolver;
     private final ProjectService projectService;
+    private final PackRegistryAccessGuard accessGuard;
 
     public PackRegistryController(
-            PackRegistryService registryService, PackResolver packResolver, ProjectService projectService) {
+            PackRegistryService registryService,
+            PackResolver packResolver,
+            ProjectService projectService,
+            PackRegistryAccessGuard accessGuard) {
         this.registryService = registryService;
         this.packResolver = packResolver;
         this.projectService = projectService;
+        this.accessGuard = accessGuard;
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public PackRegistryEntryResponse register(
-            @Valid @RequestBody RegisterPackRequest request, @RequestParam(required = false) String project) {
+            @Valid @RequestBody RegisterPackRequest request,
+            @RequestParam(required = false) String project,
+            HttpServletRequest httpRequest) {
+        accessGuard.requireAdminActor(httpRequest);
         var projectId = projectService.resolveProjectId(project);
         var result = registryService.registerEntry(new RegisterPackCommand(
                 projectId,
@@ -65,7 +74,10 @@ public class PackRegistryController {
 
     @GetMapping
     public List<PackRegistryEntryResponse> list(
-            @RequestParam(required = false) String project, @RequestParam(required = false) PackType packType) {
+            @RequestParam(required = false) String project,
+            @RequestParam(required = false) PackType packType,
+            HttpServletRequest httpRequest) {
+        accessGuard.requireAdminActor(httpRequest);
         var projectId = projectService.resolveProjectId(project);
         var entries = packType != null
                 ? registryService.listEntries(projectId, packType)
@@ -75,7 +87,10 @@ public class PackRegistryController {
 
     @GetMapping("/{packId}")
     public List<PackRegistryEntryResponse> listVersions(
-            @PathVariable String packId, @RequestParam(required = false) String project) {
+            @PathVariable String packId,
+            @RequestParam(required = false) String project,
+            HttpServletRequest httpRequest) {
+        accessGuard.requireAdminActor(httpRequest);
         var projectId = projectService.requireProjectId(project);
         return registryService.listVersions(projectId, packId).stream()
                 .map(PackRegistryEntryResponse::from)
@@ -84,7 +99,11 @@ public class PackRegistryController {
 
     @GetMapping("/{packId}/{version}")
     public PackRegistryEntryResponse getEntry(
-            @PathVariable String packId, @PathVariable String version, @RequestParam(required = false) String project) {
+            @PathVariable String packId,
+            @PathVariable String version,
+            @RequestParam(required = false) String project,
+            HttpServletRequest httpRequest) {
+        accessGuard.requireAdminActor(httpRequest);
         var projectId = projectService.requireProjectId(project);
         return PackRegistryEntryResponse.from(registryService.findEntry(projectId, packId, version));
     }
@@ -94,7 +113,9 @@ public class PackRegistryController {
             @PathVariable String packId,
             @PathVariable String version,
             @Valid @RequestBody UpdatePackRegistryEntryRequest request,
-            @RequestParam(required = false) String project) {
+            @RequestParam(required = false) String project,
+            HttpServletRequest httpRequest) {
+        accessGuard.requireAdminActor(httpRequest);
         var projectId = projectService.requireProjectId(project);
         var result = registryService.updateEntry(
                 projectId,
@@ -118,7 +139,11 @@ public class PackRegistryController {
 
     @PutMapping("/{packId}/{version}/withdraw")
     public PackRegistryEntryResponse withdraw(
-            @PathVariable String packId, @PathVariable String version, @RequestParam(required = false) String project) {
+            @PathVariable String packId,
+            @PathVariable String version,
+            @RequestParam(required = false) String project,
+            HttpServletRequest httpRequest) {
+        accessGuard.requireAdminActor(httpRequest);
         var projectId = projectService.requireProjectId(project);
         return PackRegistryEntryResponse.from(registryService.withdrawEntry(projectId, packId, version));
     }
@@ -126,14 +151,21 @@ public class PackRegistryController {
     @DeleteMapping("/{packId}/{version}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteEntry(
-            @PathVariable String packId, @PathVariable String version, @RequestParam(required = false) String project) {
+            @PathVariable String packId,
+            @PathVariable String version,
+            @RequestParam(required = false) String project,
+            HttpServletRequest httpRequest) {
+        accessGuard.requireAdminActor(httpRequest);
         var projectId = projectService.requireProjectId(project);
         registryService.deleteEntry(projectId, packId, version);
     }
 
     @PostMapping("/resolve")
     public ResolvedPackResponse resolve(
-            @Valid @RequestBody ResolvePackRequest request, @RequestParam(required = false) String project) {
+            @Valid @RequestBody ResolvePackRequest request,
+            @RequestParam(required = false) String project,
+            HttpServletRequest httpRequest) {
+        accessGuard.requireAdminActor(httpRequest);
         var projectId = projectService.requireProjectId(project);
         var resolved = packResolver.resolve(projectId, request.packId(), request.versionConstraint());
         var compatible = packResolver.checkCompatibility(resolved);
@@ -142,7 +174,10 @@ public class PackRegistryController {
 
     @PostMapping("/check-compatibility")
     public CompatibilityCheckResponse checkCompatibility(
-            @Valid @RequestBody ResolvePackRequest request, @RequestParam(required = false) String project) {
+            @Valid @RequestBody ResolvePackRequest request,
+            @RequestParam(required = false) String project,
+            HttpServletRequest httpRequest) {
+        accessGuard.requireAdminActor(httpRequest);
         var projectId = projectService.requireProjectId(project);
         var resolved = packResolver.resolve(projectId, request.packId(), request.versionConstraint());
         var compatible = packResolver.checkCompatibility(resolved);

@@ -19,7 +19,8 @@ import org.junit.jupiter.api.Test;
 
 class PackIntegrityVerifierTest {
 
-    private final PackIntegrityVerifier verifier = new PackIntegrityVerifier();
+    private final PackRegistrySecurityProperties securityProperties = new PackRegistrySecurityProperties();
+    private final PackIntegrityVerifier verifier = new PackIntegrityVerifier(securityProperties);
 
     @Test
     void computesChecksumForUnsignedPack() {
@@ -28,6 +29,7 @@ class PackIntegrityVerifierTest {
         assertThat(verification.verifiedChecksum()).startsWith("sha256:");
         assertThat(verification.checksumVerified()).isFalse();
         assertThat(verification.signatureVerified()).isNull();
+        assertThat(verification.signerTrusted()).isNull();
     }
 
     @Test
@@ -59,6 +61,38 @@ class PackIntegrityVerifierTest {
         var verification = verifier.verify(entry);
 
         assertThat(verification.signatureVerified()).isTrue();
+        assertThat(verification.signerTrusted()).isFalse();
+    }
+
+    @Test
+    void trustsDetachedSignatureOnlyWhenSignerKeyIsConfigured() throws Exception {
+        var entry = makeEntry();
+        var keyPairGenerator = KeyPairGenerator.getInstance("RSA");
+        keyPairGenerator.initialize(2048);
+        var keyPair = keyPairGenerator.generateKeyPair();
+
+        var signer = Signature.getInstance("SHA256withRSA");
+        signer.initSign(keyPair.getPrivate());
+        signer.update(verifier.canonicalPayloadBytes(entry));
+        var encodedPublicKey =
+                Base64.getEncoder().encodeToString(keyPair.getPublic().getEncoded());
+        entry.setSignatureInfo(Map.of(
+                "algorithm",
+                "SHA256withRSA",
+                "publicKey",
+                encodedPublicKey,
+                "signature",
+                Base64.getEncoder().encodeToString(signer.sign())));
+        var trustedSigner = new PackRegistrySecurityProperties.TrustedSigner();
+        trustedSigner.setKeyId("nist-signing-key");
+        trustedSigner.setPublisher("NIST");
+        trustedSigner.setPublicKey(encodedPublicKey);
+        securityProperties.setTrustedSigners(List.of(trustedSigner));
+
+        var verification = verifier.verify(entry);
+
+        assertThat(verification.signatureVerified()).isTrue();
+        assertThat(verification.signerTrusted()).isTrue();
     }
 
     @Test

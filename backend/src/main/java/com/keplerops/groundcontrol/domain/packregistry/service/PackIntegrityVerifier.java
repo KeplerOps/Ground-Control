@@ -36,6 +36,12 @@ public class PackIntegrityVerifier {
     private static final ObjectMapper OBJECT_MAPPER =
             new ObjectMapper().findAndRegisterModules().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
+    private final PackRegistrySecurityProperties securityProperties;
+
+    public PackIntegrityVerifier(PackRegistrySecurityProperties securityProperties) {
+        this.securityProperties = securityProperties;
+    }
+
     public PackIntegrityVerification verify(ResolvedPack resolvedPack) {
         for (var dependency : resolvedPack.resolvedDependencies()) {
             try {
@@ -46,7 +52,8 @@ public class PackIntegrityVerifier {
                                 .formatted(dependency.entry().getPackId(), exception.getMessage()),
                         exception.getVerifiedChecksum(),
                         exception.isChecksumVerified(),
-                        exception.getSignatureVerified());
+                        exception.getSignatureVerified(),
+                        exception.getSignerTrusted());
             }
         }
         return verify(resolvedPack.entry());
@@ -79,11 +86,14 @@ public class PackIntegrityVerifier {
         }
 
         Boolean signatureVerified = null;
+        Boolean signerTrusted = null;
         if (entry.getSignatureInfo() != null && !entry.getSignatureInfo().isEmpty()) {
-            signatureVerified = verifySignature(entry, canonicalPayload, verifiedChecksum, checksumVerified);
+            var signatureResult = verifySignature(entry, canonicalPayload, verifiedChecksum, checksumVerified);
+            signatureVerified = signatureResult.signatureVerified();
+            signerTrusted = signatureResult.signerTrusted();
         }
 
-        return new PackIntegrityVerification(verifiedChecksum, checksumVerified, signatureVerified);
+        return new PackIntegrityVerification(verifiedChecksum, checksumVerified, signatureVerified, signerTrusted);
     }
 
     byte[] canonicalPayloadBytes(PackRegistryEntry entry) throws JsonProcessingException {
@@ -214,10 +224,12 @@ public class PackIntegrityVerifier {
         }
     }
 
-    private Boolean verifySignature(
+    private SignatureVerificationResult verifySignature(
             PackRegistryEntry entry, byte[] canonicalPayload, String verifiedChecksum, boolean checksumVerified) {
-        SignatureMaterial signatureMaterial = parseSignatureMaterial(entry, verifiedChecksum, checksumVerified);
+        Boolean signerTrusted = null;
         try {
+            SignatureMaterial signatureMaterial = parseSignatureMaterial(entry, verifiedChecksum, checksumVerified);
+            signerTrusted = isTrustedSigner(entry, signatureMaterial, verifiedChecksum, checksumVerified);
             Signature verifier = Signature.getInstance(signatureMaterial.algorithm());
             verifier.initVerify(toPublicKey(signatureMaterial));
             verifier.update(canonicalPayload);
@@ -227,9 +239,10 @@ public class PackIntegrityVerifier {
                                 .formatted(entry.getPackId(), entry.getVersion()),
                         verifiedChecksum,
                         checksumVerified,
-                        false);
+                        false,
+                        signerTrusted);
             }
-            return true;
+            return new SignatureVerificationResult(true, signerTrusted);
         } catch (PackIntegrityException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -238,7 +251,8 @@ public class PackIntegrityVerifier {
                             .formatted(entry.getPackId(), entry.getVersion(), exception.getMessage()),
                     verifiedChecksum,
                     checksumVerified,
-                    false);
+                    false,
+                    signerTrusted);
         }
     }
 
@@ -285,7 +299,7 @@ public class PackIntegrityVerifier {
                     checksumVerified,
                     false);
         }
-        return new SignatureMaterial(algorithm, keyAlgorithm, publicKey, signature);
+        return new SignatureMaterial(algorithm, keyAlgorithm, signature, decodeBase64(publicKey));
     }
 
     private String readRequiredSignatureField(
@@ -302,9 +316,48 @@ public class PackIntegrityVerifier {
                 false);
     }
 
+    private Boolean isTrustedSigner(
+            PackRegistryEntry entry,
+            SignatureMaterial signatureMaterial,
+            String verifiedChecksum,
+            boolean checksumVerified) {
+        for (var trustedSigner : securityProperties.getTrustedSigners()) {
+            if (!hasText(trustedSigner.getPublicKey())) {
+                continue;
+            }
+            try {
+                if (!MessageDigest.isEqual(
+                        signatureMaterial.publicKeyBytes(), decodeBase64(trustedSigner.getPublicKey()))) {
+                    continue;
+                }
+            } catch (IllegalArgumentException exception) {
+                var signerId = hasText(trustedSigner.getKeyId())
+                        ? trustedSigner.getKeyId().trim()
+                        : "<unknown>";
+                throw new PackIntegrityException(
+                        "Trusted signer configuration '%s' has an invalid public key".formatted(signerId),
+                        verifiedChecksum,
+                        checksumVerified,
+                        null,
+                        false);
+            }
+
+            if (hasText(trustedSigner.getPublisher())
+                    && !trustedSigner.getPublisher().trim().equals(entry.getPublisher())) {
+                continue;
+            }
+            if (hasText(trustedSigner.getPackId())
+                    && !trustedSigner.getPackId().trim().equals(entry.getPackId())) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
     private java.security.PublicKey toPublicKey(SignatureMaterial signatureMaterial) throws Exception {
         KeyFactory keyFactory = KeyFactory.getInstance(signatureMaterial.keyAlgorithm());
-        return keyFactory.generatePublic(new X509EncodedKeySpec(decodeBase64(signatureMaterial.publicKey())));
+        return keyFactory.generatePublic(new X509EncodedKeySpec(signatureMaterial.publicKeyBytes()));
     }
 
     private byte[] decodeBase64(String value) {
@@ -326,5 +379,7 @@ public class PackIntegrityVerifier {
         return value != null && !value.isBlank();
     }
 
-    private record SignatureMaterial(String algorithm, String keyAlgorithm, String publicKey, String signature) {}
+    private record SignatureVerificationResult(Boolean signatureVerified, Boolean signerTrusted) {}
+
+    private record SignatureMaterial(String algorithm, String keyAlgorithm, String signature, byte[] publicKeyBytes) {}
 }

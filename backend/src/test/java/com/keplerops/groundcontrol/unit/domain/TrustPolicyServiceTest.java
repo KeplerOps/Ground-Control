@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.packregistry.model.TrustPolicy;
 import com.keplerops.groundcontrol.domain.packregistry.model.TrustPolicyRule;
@@ -97,6 +98,52 @@ class TrustPolicyServiceTest {
                     new CreateTrustPolicyCommand(PROJECT_ID, "allow-nist", null, TrustOutcome.REJECTED, null, 1, true);
 
             assertThatThrownBy(() -> service.create(command)).isInstanceOf(ConflictException.class);
+        }
+
+        @Test
+        void rejectsRegexRules() {
+            var project = makeProject();
+            when(projectService.getById(PROJECT_ID)).thenReturn(project);
+            when(trustPolicyRepository.existsByProjectIdAndName(PROJECT_ID, "pattern-policy"))
+                    .thenReturn(false);
+
+            var command = new CreateTrustPolicyCommand(
+                    PROJECT_ID,
+                    "pattern-policy",
+                    null,
+                    TrustOutcome.REJECTED,
+                    List.of(rule(
+                            TrustPolicyField.PUBLISHER,
+                            TrustPolicyRuleOperator.MATCHES_PATTERN,
+                            "NI.*",
+                            TrustOutcome.TRUSTED)),
+                    1,
+                    true);
+
+            assertThatThrownBy(() -> service.create(command)).isInstanceOf(DomainValidationException.class);
+        }
+
+        @Test
+        void rejectsSignatureVerifiedTrustRules() {
+            var project = makeProject();
+            when(projectService.getById(PROJECT_ID)).thenReturn(project);
+            when(trustPolicyRepository.existsByProjectIdAndName(PROJECT_ID, "signed-policy"))
+                    .thenReturn(false);
+
+            var command = new CreateTrustPolicyCommand(
+                    PROJECT_ID,
+                    "signed-policy",
+                    null,
+                    TrustOutcome.REJECTED,
+                    List.of(rule(
+                            TrustPolicyField.SIGNATURE_VERIFIED,
+                            TrustPolicyRuleOperator.EQUALS,
+                            "true",
+                            TrustOutcome.TRUSTED)),
+                    1,
+                    true);
+
+            assertThatThrownBy(() -> service.create(command)).isInstanceOf(DomainValidationException.class);
         }
     }
 

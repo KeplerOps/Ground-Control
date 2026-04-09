@@ -20,6 +20,7 @@ import com.keplerops.groundcontrol.domain.packregistry.service.ControlPackTypeHa
 import com.keplerops.groundcontrol.domain.packregistry.service.CustomPackTypeHandler;
 import com.keplerops.groundcontrol.domain.packregistry.service.EmptyPackRegistrationContent;
 import com.keplerops.groundcontrol.domain.packregistry.service.PackIntegrityVerifier;
+import com.keplerops.groundcontrol.domain.packregistry.service.PackRegistrySecurityProperties;
 import com.keplerops.groundcontrol.domain.packregistry.service.PackRegistryService;
 import com.keplerops.groundcontrol.domain.packregistry.service.PackTypeHandlerRegistry;
 import com.keplerops.groundcontrol.domain.packregistry.service.RegisterPackCommand;
@@ -85,7 +86,7 @@ class PackRegistryServiceTest {
         service = new PackRegistryService(
                 registryRepository,
                 projectService,
-                new PackIntegrityVerifier(),
+                new PackIntegrityVerifier(new PackRegistrySecurityProperties()),
                 new PackTypeHandlerRegistry(List.of(
                         new ControlPackTypeHandler(controlPackService),
                         new RequirementsPackTypeHandler(),
@@ -245,7 +246,7 @@ class PackRegistryServiceTest {
                     .thenReturn(false);
             when(registryRepository.save(any(PackRegistryEntry.class))).thenAnswer(inv -> inv.getArgument(0));
 
-            var verifier = new PackIntegrityVerifier();
+            var verifier = new PackIntegrityVerifier(new PackRegistrySecurityProperties());
             var checksumEntry = new PackRegistryEntry(project, "nist-800-53", PackType.CONTROL_PACK, "1.0.0");
             checksumEntry.setPublisher("NIST");
             checksumEntry.setDescription("NIST controls");

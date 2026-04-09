@@ -4,6 +4,7 @@ import com.keplerops.groundcontrol.domain.packregistry.service.InstallPackComman
 import com.keplerops.groundcontrol.domain.packregistry.service.PackInstallOrchestrator;
 import com.keplerops.groundcontrol.domain.packregistry.state.InstallOutcome;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -23,18 +24,24 @@ public class PackInstallRecordController {
 
     private final PackInstallOrchestrator orchestrator;
     private final ProjectService projectService;
+    private final PackRegistryAccessGuard accessGuard;
 
-    public PackInstallRecordController(PackInstallOrchestrator orchestrator, ProjectService projectService) {
+    public PackInstallRecordController(
+            PackInstallOrchestrator orchestrator, ProjectService projectService, PackRegistryAccessGuard accessGuard) {
         this.orchestrator = orchestrator;
         this.projectService = projectService;
+        this.accessGuard = accessGuard;
     }
 
     @PostMapping("/install")
     public ResponseEntity<PackInstallRecordResponse> install(
-            @Valid @RequestBody InstallPackRequest request, @RequestParam(required = false) String project) {
+            @Valid @RequestBody InstallPackRequest request,
+            @RequestParam(required = false) String project,
+            HttpServletRequest httpRequest) {
+        var performedBy = accessGuard.requireAdminActor(httpRequest);
         var projectId = projectService.resolveProjectId(project);
-        var result = orchestrator.installPack(new InstallPackCommand(
-                projectId, request.packId(), request.versionConstraint(), request.performedBy()));
+        var result = orchestrator.installPack(
+                new InstallPackCommand(projectId, request.packId(), request.versionConstraint(), performedBy));
         var response = PackInstallRecordResponse.from(result);
         return ResponseEntity.status(statusForOutcome(response.installOutcome(), HttpStatus.CREATED))
                 .body(response);
@@ -42,10 +49,13 @@ public class PackInstallRecordController {
 
     @PostMapping("/upgrade")
     public ResponseEntity<PackInstallRecordResponse> upgrade(
-            @Valid @RequestBody InstallPackRequest request, @RequestParam(required = false) String project) {
+            @Valid @RequestBody InstallPackRequest request,
+            @RequestParam(required = false) String project,
+            HttpServletRequest httpRequest) {
+        var performedBy = accessGuard.requireAdminActor(httpRequest);
         var projectId = projectService.resolveProjectId(project);
-        var result = orchestrator.upgradePack(new InstallPackCommand(
-                projectId, request.packId(), request.versionConstraint(), request.performedBy()));
+        var result = orchestrator.upgradePack(
+                new InstallPackCommand(projectId, request.packId(), request.versionConstraint(), performedBy));
         var response = PackInstallRecordResponse.from(result);
         return ResponseEntity.status(statusForOutcome(response.installOutcome(), HttpStatus.OK))
                 .body(response);
@@ -53,7 +63,10 @@ public class PackInstallRecordController {
 
     @GetMapping
     public List<PackInstallRecordResponse> list(
-            @RequestParam(required = false) String project, @RequestParam(required = false) String packId) {
+            @RequestParam(required = false) String project,
+            @RequestParam(required = false) String packId,
+            HttpServletRequest httpRequest) {
+        accessGuard.requireAdminActor(httpRequest);
         var projectId = projectService.resolveProjectId(project);
         var records = packId != null
                 ? orchestrator.listInstallRecords(projectId, packId)
@@ -62,7 +75,8 @@ public class PackInstallRecordController {
     }
 
     @GetMapping("/{id}")
-    public PackInstallRecordResponse get(@PathVariable UUID id) {
+    public PackInstallRecordResponse get(@PathVariable UUID id, HttpServletRequest httpRequest) {
+        accessGuard.requireAdminActor(httpRequest);
         return PackInstallRecordResponse.from(orchestrator.getInstallRecord(id));
     }
 

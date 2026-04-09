@@ -4454,7 +4454,7 @@ server.tool(
 
 server.tool(
   "gc_create_trust_policy",
-  "Create a trust policy with declarative rules for evaluating pack trust. Rules match against pack fields (publisher, packId, packType, sourceUrl, checksum, verifiedChecksum, checksumVerified, signatureVerified) using operators (EQUALS, NOT_EQUALS, CONTAINS, MATCHES_PATTERN, IN_LIST).",
+  "Create a trust policy with declarative rules for evaluating pack trust. Rules match against pack fields (publisher, packId, packType, sourceUrl, checksum, verifiedChecksum, checksumVerified, signerTrusted) using bounded operators (EQUALS, NOT_EQUALS, CONTAINS, IN_LIST).",
   {
     name: z.string().max(200).describe("Policy name (unique per project)"),
     description: z.string().optional().describe("Policy description"),
@@ -4558,11 +4558,10 @@ server.tool(
 
 server.tool(
   "gc_install_pack_from_registry",
-  "Install a pack through the registry with trust evaluation. Resolves the version, uses the registry-stored typed content, checks compatibility across the dependency closure, evaluates trust policy, and delegates to the type-specific installer. Produces an auditable install record. Rejected or failed installs return HTTP 422.",
+  "Install a pack through the registry with trust evaluation. Resolves the version, uses the registry-stored typed content, checks compatibility across the dependency closure, evaluates trust policy, and delegates to the type-specific installer. Produces an auditable install record whose actor comes from the configured pack-registry admin token. Rejected or failed installs return HTTP 422.",
   {
     pack_id: z.string().max(200).describe("Pack identity to install"),
     version_constraint: z.string().max(100).optional().describe("Version constraint (exact, ^, ~, >=, <=). Omit for latest."),
-    performed_by: z.string().max(255).optional().describe("Actor performing the installation"),
     project: z.string().optional().describe("Project identifier"),
   },
   async ({ project, ...data }) => {
@@ -4576,11 +4575,10 @@ server.tool(
 
 server.tool(
   "gc_upgrade_pack_from_registry",
-  "Upgrade a pack through the registry with trust evaluation. Same flow as install but uses the newly resolved registry artifact and delegates to the upgrade path. Rejected or failed upgrades return HTTP 422.",
+  "Upgrade a pack through the registry with trust evaluation. Same flow as install but uses the newly resolved registry artifact and delegates to the upgrade path. The audit actor comes from the configured pack-registry admin token. Rejected or failed upgrades return HTTP 422.",
   {
     pack_id: z.string().max(200).describe("Pack identity to upgrade"),
     version_constraint: z.string().max(100).optional().describe("Version constraint for new version"),
-    performed_by: z.string().max(255).optional().describe("Actor performing the upgrade"),
     project: z.string().optional().describe("Project identifier"),
   },
   async ({ project, ...data }) => {

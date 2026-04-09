@@ -75,7 +75,7 @@ class PackInstallOrchestratorTest {
     private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final UUID PACK_ENTITY_ID = UUID.fromString("00000000-0000-0000-0000-000000000099");
     private static final PackIntegrityVerification VERIFIED_INTEGRITY = new PackIntegrityVerification(
-            "sha256:1a4bb65f2acb8f8c8eb81f3904fbac1af467b6510f0dc99fd45a8ed7e2d2f6d5", true, null);
+            "sha256:1a4bb65f2acb8f8c8eb81f3904fbac1af467b6510f0dc99fd45a8ed7e2d2f6d5", true, null, null);
 
     private Project makeProject() {
         var project = new Project("ground-control", "Ground Control");

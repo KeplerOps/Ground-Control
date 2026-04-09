@@ -13,7 +13,8 @@ public enum TrustPolicyField {
     CHECKSUM("checksum"),
     VERIFIED_CHECKSUM("verifiedChecksum"),
     CHECKSUM_VERIFIED("checksumVerified"),
-    SIGNATURE_VERIFIED("signatureVerified");
+    SIGNATURE_VERIFIED("signatureVerified"),
+    SIGNER_TRUSTED("signerTrusted");
 
     private final String wireValue;
 

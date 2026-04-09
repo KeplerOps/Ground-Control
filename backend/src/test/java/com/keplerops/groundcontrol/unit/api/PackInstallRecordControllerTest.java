@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.keplerops.groundcontrol.api.packregistry.PackInstallRecordController;
+import com.keplerops.groundcontrol.api.packregistry.PackRegistryAccessGuard;
 import com.keplerops.groundcontrol.domain.packregistry.model.PackInstallRecord;
 import com.keplerops.groundcontrol.domain.packregistry.service.InstallPackCommand;
 import com.keplerops.groundcontrol.domain.packregistry.service.PackInstallOrchestrator;
@@ -22,6 +23,7 @@ import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -41,8 +43,12 @@ class PackInstallRecordControllerTest {
     @MockitoBean
     private ProjectService projectService;
 
+    @MockitoBean
+    private PackRegistryAccessGuard accessGuard;
+
     private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final UUID RECORD_ID = UUID.fromString("00000000-0000-0000-0000-000000000080");
+    private static final String ADMIN_ACTOR = "pack-admin";
 
     private Project makeProject() {
         var project = new Project("ground-control", "Ground Control");
@@ -58,8 +64,13 @@ class PackInstallRecordControllerTest {
         setField(record, "createdAt", Instant.now());
         setField(record, "updatedAt", Instant.now());
         record.setResolvedVersion("1.0.0");
-        record.setPerformedBy("admin");
+        record.setPerformedBy(ADMIN_ACTOR);
         return record;
+    }
+
+    @BeforeEach
+    void setUp() {
+        when(accessGuard.requireAdminActor(any())).thenReturn(ADMIN_ACTOR);
     }
 
     @Test
@@ -73,8 +84,7 @@ class PackInstallRecordControllerTest {
                                 .content(
                                         """
                 {
-                    "packId":"nist-800-53",
-                    "performedBy":"admin"
+                    "packId":"nist-800-53"
                 }
                 """))
                 .andExpect(status().isCreated())
@@ -96,8 +106,7 @@ class PackInstallRecordControllerTest {
                                         """
                 {
                     "packId":"nist-800-53",
-                    "versionConstraint":"^1.0.0",
-                    "performedBy":"admin"
+                    "versionConstraint":"^1.0.0"
                 }
                 """))
                 .andExpect(status().isOk())
@@ -117,8 +126,7 @@ class PackInstallRecordControllerTest {
                                 .content(
                                         """
                 {
-                    "packId":"nist-800-53",
-                    "performedBy":"admin"
+                    "packId":"nist-800-53"
                 }
                 """))
                 .andExpect(status().isUnprocessableEntity())
@@ -139,8 +147,7 @@ class PackInstallRecordControllerTest {
                                         """
                 {
                     "packId":"nist-800-53",
-                    "versionConstraint":"^1.0.0",
-                    "performedBy":"admin"
+                    "versionConstraint":"^1.0.0"
                 }
                 """))
                 .andExpect(status().isUnprocessableEntity())
