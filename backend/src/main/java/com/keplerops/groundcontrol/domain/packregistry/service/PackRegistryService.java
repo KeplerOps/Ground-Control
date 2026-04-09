@@ -62,9 +62,9 @@ public class PackRegistryService {
         var saved = registryRepository.save(entry);
         log.info(
                 "pack_registry_entry_registered: pack_id={}, version={}, type={}",
-                command.packId(),
-                command.version(),
-                command.packType());
+                saved.getPackId(),
+                saved.getVersion(),
+                saved.getPackType());
         return saved;
     }
 
@@ -104,7 +104,7 @@ public class PackRegistryService {
         var entry = findEntry(projectId, packId, version);
         entry.transitionCatalogStatus(CatalogStatus.WITHDRAWN);
         var saved = registryRepository.save(entry);
-        log.info("pack_registry_entry_withdrawn: pack_id={}, version={}", packId, version);
+        log.info("pack_registry_entry_withdrawn: pack_id={}, version={}", entry.getPackId(), entry.getVersion());
         return saved;
     }
 
@@ -148,8 +148,10 @@ public class PackRegistryService {
 
     public void deleteEntry(UUID projectId, String packId, String version) {
         var entry = findEntry(projectId, packId, version);
+        var entryPackId = entry.getPackId();
+        var entryVersion = entry.getVersion();
         registryRepository.deleteById(entry.getId());
-        log.info("pack_registry_entry_deleted: pack_id={}, version={}", packId, version);
+        log.info("pack_registry_entry_deleted: pack_id={}, version={}", entryPackId, entryVersion);
     }
 
     private void applyIntegrityVerification(PackRegistryEntry entry) {

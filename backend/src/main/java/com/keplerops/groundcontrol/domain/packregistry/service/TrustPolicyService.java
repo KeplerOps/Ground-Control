@@ -1,11 +1,17 @@
 package com.keplerops.groundcontrol.domain.packregistry.service;
 
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.packregistry.model.TrustPolicy;
+import com.keplerops.groundcontrol.domain.packregistry.model.TrustPolicyRule;
 import com.keplerops.groundcontrol.domain.packregistry.repository.TrustPolicyRepository;
+import com.keplerops.groundcontrol.domain.packregistry.state.TrustPolicyField;
+import com.keplerops.groundcontrol.domain.packregistry.state.TrustPolicyRuleOperator;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +40,8 @@ public class TrustPolicyService {
                     String.format("Trust policy '%s' already exists in this project", command.name()));
         }
 
+        validateRules(command.rules());
+
         var policy = new TrustPolicy(project, command.name(), command.defaultOutcome());
         policy.setDescription(command.description());
         policy.setRules(command.rules());
@@ -41,7 +49,7 @@ public class TrustPolicyService {
         policy.setEnabled(command.enabled());
 
         var saved = trustPolicyRepository.save(policy);
-        log.info("trust_policy_created: name={}, priority={}", command.name(), command.priority());
+        log.info("trust_policy_created: name={}, priority={}", saved.getName(), saved.getPriority());
         return saved;
     }
 
@@ -58,7 +66,10 @@ public class TrustPolicyService {
         }
         if (command.description() != null) policy.setDescription(command.description());
         if (command.defaultOutcome() != null) policy.setDefaultOutcome(command.defaultOutcome());
-        if (command.rules() != null) policy.setRules(command.rules());
+        if (command.rules() != null) {
+            validateRules(command.rules());
+            policy.setRules(command.rules());
+        }
         if (command.priority() != null) policy.setPriority(command.priority());
         if (command.enabled() != null) policy.setEnabled(command.enabled());
 
@@ -85,5 +96,29 @@ public class TrustPolicyService {
         }
         trustPolicyRepository.deleteById(id);
         log.info("trust_policy_deleted: id={}", id);
+    }
+
+    private void validateRules(List<TrustPolicyRule> rules) {
+        if (rules == null || rules.isEmpty()) {
+            return;
+        }
+
+        Map<String, String> violations = new LinkedHashMap<>();
+        for (int index = 0; index < rules.size(); index++) {
+            var rule = rules.get(index);
+            if (rule.operator() == TrustPolicyRuleOperator.MATCHES_PATTERN) {
+                violations.put("rules[" + index + "].operator", "MATCHES_PATTERN is disabled for security reasons");
+            }
+            if (rule.field() == TrustPolicyField.SIGNATURE_VERIFIED) {
+                violations.put(
+                        "rules[" + index + "].field",
+                        "signatureVerified is informational only; use signerTrusted for trust policy");
+            }
+        }
+
+        if (!violations.isEmpty()) {
+            throw new DomainValidationException(
+                    "Trust policy contains unsupported rule fields or operators", "validation_error", violations);
+        }
     }
 }

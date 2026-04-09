@@ -24,7 +24,7 @@ public class PackResolver {
     private static final Logger log = LoggerFactory.getLogger(PackResolver.class);
     private static final int MAX_DEPENDENCY_DEPTH = 10;
     private static final Pattern SEMVER_PATTERN = Pattern.compile(
-            "^(\\d+)\\.(\\d+)\\.(\\d+)(?:-([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$");
+            "^(\\d+)\\.(\\d+)\\.(\\d+)(?:-([0-9A-Za-z][0-9A-Za-z.-]*))?(?:\\+[0-9A-Za-z][0-9A-Za-z.]*)?$");
 
     private final PackRegistryEntryRepository registryRepository;
     private final String platformVersion;
