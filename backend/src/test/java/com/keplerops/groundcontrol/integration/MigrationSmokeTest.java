@@ -173,5 +173,6 @@ class MigrationSmokeTest extends BaseIntegrationTest {
         entityManager
                 .createNativeQuery("SELECT 1 FROM control_pack_override_audit LIMIT 1")
                 .getResultList();
+        // V052 audit tables verified
     }
 }
