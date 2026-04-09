@@ -122,7 +122,7 @@ Environment variables use the `GC_` prefix (e.g., `GC_DATABASE_URL`, `GC_SERVER_
 - Production deployment infrastructure (local Docker Compose + EC2 via CDK)
 - Multi-tenancy
 - Search
-- Verification result tracking — future: infrastructure verifier adapters (ADR-014 §6 infrastructure/verifiers/ layer)
+- Concrete verifier adapter implementations in `infrastructure/verifiers/` (ADR-014 §6). The `VerifierAdapter` port interface and request/outcome contracts are defined in the domain layer; future work is implementing adapters for each prover (OpenJML, TLA+/TLC, OPA/Rego, Frama-C, manual review).
 - Traceability Matrix view (`/traceability`) and Audit Timeline view (`/audit`) in the frontend
 - Apache AGE is optional — the app gracefully degrades to JPA-only analysis when AGE is unavailable
 
@@ -130,3 +130,4 @@ Environment variables use the `GC_` prefix (e.g., `GC_DATABASE_URL`, `GC_SERVER_
 
 - `specs/tla/` for design-level verification artifacts and state-machine specs, aligned with ADR-014
 - Verification result storage (VerificationResult entity with eager-loaded target/requirement, enums, CRUD API, MCP tools) — ADR-014 §2 common schema
+- Pluggable verifier adapter interface (`VerifierAdapter`, `VerificationRequest`, `VerificationOutcome`) — ADR-014 §6 port contract for multi-tool integration

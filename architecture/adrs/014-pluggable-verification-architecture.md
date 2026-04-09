@@ -132,7 +132,7 @@ TLA+ is adopted for verifying Ground Control's own design-level properties:
 
 TLA+ specs live in `specs/tla/` at the repository root, versioned with code. TLC model checking runs as part of the verification pipeline.
 
-Implementation is staged. The repository now carries versioned TLA+ specs and policy sync tooling that keeps verification-oriented ADR and quality-gate metadata aligned, while the `VerificationResult` domain entity and verifier adapters remain future implementation work.
+Implementation is staged. The repository now carries versioned TLA+ specs and policy sync tooling that keeps verification-oriented ADR and quality-gate metadata aligned. The common `VerificationResult` domain entity is implemented; verifier execution/orchestration adapters remain future work.
 
 ### 5. Separation of concerns
 
@@ -152,23 +152,31 @@ domain/
     verification/           # New domain area
         model/
             VerificationResult.java
-            VerifierType.java         # Enum of known provers
             VerificationStatus.java   # PROVEN, REFUTED, TIMEOUT, UNKNOWN, ERROR
+            AssuranceLevel.java       # L0-L3
         service/
-            VerificationService.java  # Stores results, queries verification status
+            VerificationResultService.java  # Stores results, resolves target/requirement, queries status
+            VerifierAdapter.java            # Port: execute a verifier and return a common result payload
         repository/
             VerificationResultRepository.java
 
 infrastructure/
     verifiers/              # Adapter layer for external provers
-        VerifierAdapter.java          # Interface: verify(target, property) -> result
-        OpenJmlAdapter.java           # Calls OpenJML ESC on Java source
+        OpenJmlAdapter.java          # Calls OpenJML ESC on Java source
         TlcAdapter.java              # Calls TLC on TLA+ specs
         OpaAdapter.java              # Calls OPA on Rego policies
         # Future: FramaCAdapter, VerusAdapter, DafnyAdapter, KeyAdapter
 ```
 
 The `infrastructure/verifiers/` package follows the ports-and-adapters pattern: `domain/` defines what a verification result looks like; `infrastructure/` knows how to invoke specific provers.
+
+Adapter guardrails:
+
+- The canonical verifier selector is the existing `VerificationResult.prover` string. Do not introduce a `VerifierType` enum or a second registry schema that can drift from persisted data and API/MCP contracts.
+- Adapter implementations are execution boundaries only. They must not depend on controllers or repositories, and they must not persist `VerificationResult` entities directly. Project resolution, target/requirement resolution, and result persistence stay in the domain service layer.
+- Tool-specific output belongs in the existing `evidence` JSONB/TEXT map so the common schema stays stable. Do not add per-verifier tables, nullable columns, or parallel DTO hierarchies unless a shared query or workflow requirement proves the need.
+- Manual review participates through the same adapter contract and common result schema. It is not a special-case bypass around validation, auditing, or persistence.
+- External verifier integrations must follow existing infrastructure patterns: validated configuration, bounded execution, structured logs, and no shell-string command construction or secret-rich log output.
 
 ## Consequences
 
