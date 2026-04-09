@@ -200,7 +200,7 @@ public class ControlPackService {
         var pack = findPackOrThrow(projectId, packId);
         pack.transitionLifecycleState(ControlPackLifecycleState.DEPRECATED);
         pack = controlPackRepository.save(pack);
-        log.info("control_pack_deprecated: packId={}", packId);
+        log.info("control_pack_deprecated: packId={}", pack.getPackId());
         return pack;
     }
 
@@ -208,7 +208,7 @@ public class ControlPackService {
         var pack = findPackOrThrow(projectId, packId);
         pack.transitionLifecycleState(ControlPackLifecycleState.REMOVED);
         controlPackRepository.save(pack);
-        log.info("control_pack_removed: packId={}", packId);
+        log.info("control_pack_removed: packId={}", pack.getPackId());
     }
 
     @Transactional(readOnly = true)
@@ -263,7 +263,10 @@ public class ControlPackService {
         controlRepository.save(control);
 
         log.info(
-                "control_pack_override_created: packId={} entryUid={} field={}", packId, entryUid, command.fieldName());
+                "control_pack_override_created: packId={} entryUid={} field={}",
+                entry.getControlPack().getPackId(),
+                entry.getEntryUid(),
+                override.getFieldName());
         return override;
     }
 
@@ -290,8 +293,8 @@ public class ControlPackService {
         overrideRepository.delete(override);
         log.info(
                 "control_pack_override_deleted: packId={} entryUid={} field={}",
-                packId,
-                entryUid,
+                entry.getControlPack().getPackId(),
+                entry.getEntryUid(),
                 override.getFieldName());
     }
 
