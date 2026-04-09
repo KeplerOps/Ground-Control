@@ -188,4 +188,61 @@ class PackResolverTest {
             assertThat(result.resolvedVersion()).isEqualTo("1.0.0");
         }
     }
+
+    @Nested
+    class Dependencies {
+
+        @Test
+        void resolvesDependencies() {
+            var project = makeProject();
+            var main = new PackRegistryEntry(project, "main-pack", PackType.CONTROL_PACK, "1.0.0");
+            main.setDependencies(List.of(Map.of("packId", "dep-pack", "versionConstraint", "1.0.0")));
+            var dep = new PackRegistryEntry(project, "dep-pack", PackType.CONTROL_PACK, "1.0.0");
+
+            when(registryRepository.findByProjectIdAndPackIdAndCatalogStatusOrderByRegisteredAtDesc(
+                            PROJECT_ID, "main-pack", CatalogStatus.AVAILABLE))
+                    .thenReturn(List.of(main));
+            when(registryRepository.findByProjectIdAndPackIdAndCatalogStatusOrderByRegisteredAtDesc(
+                            PROJECT_ID, "dep-pack", CatalogStatus.AVAILABLE))
+                    .thenReturn(List.of(dep));
+
+            var result = resolver.resolve(PROJECT_ID, "main-pack", null);
+            assertThat(result.resolvedDependencies()).hasSize(1);
+            assertThat(result.resolvedDependencies().getFirst().resolvedVersion())
+                    .isEqualTo("1.0.0");
+        }
+
+        @Test
+        void detectsCircularDependency() {
+            var project = makeProject();
+            var packA = new PackRegistryEntry(project, "pack-a", PackType.CONTROL_PACK, "1.0.0");
+            packA.setDependencies(List.of(Map.of("packId", "pack-b")));
+            var packB = new PackRegistryEntry(project, "pack-b", PackType.CONTROL_PACK, "1.0.0");
+            packB.setDependencies(List.of(Map.of("packId", "pack-a")));
+
+            when(registryRepository.findByProjectIdAndPackIdAndCatalogStatusOrderByRegisteredAtDesc(
+                            PROJECT_ID, "pack-a", CatalogStatus.AVAILABLE))
+                    .thenReturn(List.of(packA));
+            when(registryRepository.findByProjectIdAndPackIdAndCatalogStatusOrderByRegisteredAtDesc(
+                            PROJECT_ID, "pack-b", CatalogStatus.AVAILABLE))
+                    .thenReturn(List.of(packB));
+
+            assertThatThrownBy(() -> resolver.resolve(PROJECT_ID, "pack-a", null))
+                    .isInstanceOf(com.keplerops.groundcontrol.domain.exception.DomainValidationException.class)
+                    .hasMessageContaining("Circular dependency");
+        }
+
+        @Test
+        void noDependenciesReturnsEmpty() {
+            var project = makeProject();
+            var entry = new PackRegistryEntry(project, "no-deps", PackType.CONTROL_PACK, "1.0.0");
+
+            when(registryRepository.findByProjectIdAndPackIdAndCatalogStatusOrderByRegisteredAtDesc(
+                            PROJECT_ID, "no-deps", CatalogStatus.AVAILABLE))
+                    .thenReturn(List.of(entry));
+
+            var result = resolver.resolve(PROJECT_ID, "no-deps", null);
+            assertThat(result.resolvedDependencies()).isEmpty();
+        }
+    }
 }

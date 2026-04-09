@@ -174,5 +174,132 @@ class TrustEvaluatorTest {
             var decision = evaluator.evaluate(PROJECT_ID, makeResolvedPack("NIST"));
             assertThat(decision.outcome()).isEqualTo(TrustOutcome.TRUSTED);
         }
+
+        @Test
+        void matchesPatternOperatorWorks() {
+            var project = makeProject();
+            var policy = new TrustPolicy(project, "pattern-test", TrustOutcome.REJECTED);
+            setField(policy, "id", UUID.randomUUID());
+            policy.setRules(List.of(Map.of(
+                    "field", "publisher", "operator", "MATCHES_PATTERN", "value", "NI.*", "outcome", "TRUSTED")));
+            policy.setPriority(1);
+
+            when(trustPolicyRepository.findByProjectIdAndEnabledOrderByPriorityAsc(PROJECT_ID, true))
+                    .thenReturn(List.of(policy));
+
+            var decision = evaluator.evaluate(PROJECT_ID, makeResolvedPack("NIST"));
+            assertThat(decision.outcome()).isEqualTo(TrustOutcome.TRUSTED);
+        }
+
+        @Test
+        void invalidPatternReturnsFalse() {
+            var project = makeProject();
+            var policy = new TrustPolicy(project, "bad-pattern", TrustOutcome.TRUSTED);
+            setField(policy, "id", UUID.randomUUID());
+            policy.setRules(List.of(Map.of(
+                    "field", "publisher", "operator", "MATCHES_PATTERN", "value", "[invalid", "outcome", "REJECTED")));
+            policy.setPriority(1);
+
+            when(trustPolicyRepository.findByProjectIdAndEnabledOrderByPriorityAsc(PROJECT_ID, true))
+                    .thenReturn(List.of(policy));
+
+            var decision = evaluator.evaluate(PROJECT_ID, makeResolvedPack("NIST"));
+            // Invalid pattern doesn't match, falls through to default
+            assertThat(decision.outcome()).isEqualTo(TrustOutcome.TRUSTED);
+        }
+
+        @Test
+        void invalidOperatorSkipsRule() {
+            var project = makeProject();
+            var policy = new TrustPolicy(project, "bad-operator", TrustOutcome.TRUSTED);
+            setField(policy, "id", UUID.randomUUID());
+            policy.setRules(List.of(
+                    Map.of("field", "publisher", "operator", "INVALID_OP", "value", "NIST", "outcome", "REJECTED")));
+            policy.setPriority(1);
+
+            when(trustPolicyRepository.findByProjectIdAndEnabledOrderByPriorityAsc(PROJECT_ID, true))
+                    .thenReturn(List.of(policy));
+
+            var decision = evaluator.evaluate(PROJECT_ID, makeResolvedPack("NIST"));
+            assertThat(decision.outcome()).isEqualTo(TrustOutcome.TRUSTED);
+        }
+
+        @Test
+        void inListOperatorWorks() {
+            var project = makeProject();
+            var policy = new TrustPolicy(project, "list-test", TrustOutcome.REJECTED);
+            setField(policy, "id", UUID.randomUUID());
+            policy.setRules(List.of(Map.of(
+                    "field", "publisher", "operator", "IN_LIST", "value", "ACME,NIST,ISO", "outcome", "TRUSTED")));
+            policy.setPriority(1);
+
+            when(trustPolicyRepository.findByProjectIdAndEnabledOrderByPriorityAsc(PROJECT_ID, true))
+                    .thenReturn(List.of(policy));
+
+            var decision = evaluator.evaluate(PROJECT_ID, makeResolvedPack("NIST"));
+            assertThat(decision.outcome()).isEqualTo(TrustOutcome.TRUSTED);
+        }
+
+        @Test
+        void notEqualsOperatorWorks() {
+            var project = makeProject();
+            var policy = new TrustPolicy(project, "neq-test", TrustOutcome.REJECTED);
+            setField(policy, "id", UUID.randomUUID());
+            policy.setRules(List.of(Map.of(
+                    "field", "publisher", "operator", "NOT_EQUALS", "value", "evil-corp", "outcome", "TRUSTED")));
+            policy.setPriority(1);
+
+            when(trustPolicyRepository.findByProjectIdAndEnabledOrderByPriorityAsc(PROJECT_ID, true))
+                    .thenReturn(List.of(policy));
+
+            var decision = evaluator.evaluate(PROJECT_ID, makeResolvedPack("NIST"));
+            assertThat(decision.outcome()).isEqualTo(TrustOutcome.TRUSTED);
+        }
+
+        @Test
+        void nullFieldSkipsRule() {
+            var project = makeProject();
+            var policy = new TrustPolicy(project, "null-field", TrustOutcome.TRUSTED);
+            setField(policy, "id", UUID.randomUUID());
+            policy.setRules(List.of(Map.of("operator", "EQUALS", "value", "NIST", "outcome", "REJECTED")));
+            policy.setPriority(1);
+
+            when(trustPolicyRepository.findByProjectIdAndEnabledOrderByPriorityAsc(PROJECT_ID, true))
+                    .thenReturn(List.of(policy));
+
+            var decision = evaluator.evaluate(PROJECT_ID, makeResolvedPack("NIST"));
+            assertThat(decision.outcome()).isEqualTo(TrustOutcome.TRUSTED);
+        }
+
+        @Test
+        void unknownFieldReturnsNull() {
+            var project = makeProject();
+            var policy = new TrustPolicy(project, "unknown-field", TrustOutcome.TRUSTED);
+            setField(policy, "id", UUID.randomUUID());
+            policy.setRules(List.of(
+                    Map.of("field", "nonExistentField", "operator", "EQUALS", "value", "x", "outcome", "REJECTED")));
+            policy.setPriority(1);
+
+            when(trustPolicyRepository.findByProjectIdAndEnabledOrderByPriorityAsc(PROJECT_ID, true))
+                    .thenReturn(List.of(policy));
+
+            var decision = evaluator.evaluate(PROJECT_ID, makeResolvedPack("NIST"));
+            assertThat(decision.outcome()).isEqualTo(TrustOutcome.TRUSTED);
+        }
+
+        @Test
+        void emptyRulesUsesDefaultOutcome() {
+            var project = makeProject();
+            var policy = new TrustPolicy(project, "no-rules", TrustOutcome.REJECTED);
+            setField(policy, "id", UUID.randomUUID());
+            policy.setRules(List.of());
+            policy.setPriority(1);
+
+            when(trustPolicyRepository.findByProjectIdAndEnabledOrderByPriorityAsc(PROJECT_ID, true))
+                    .thenReturn(List.of(policy));
+
+            var decision = evaluator.evaluate(PROJECT_ID, makeResolvedPack("NIST"));
+            assertThat(decision.outcome()).isEqualTo(TrustOutcome.REJECTED);
+        }
     }
 }
