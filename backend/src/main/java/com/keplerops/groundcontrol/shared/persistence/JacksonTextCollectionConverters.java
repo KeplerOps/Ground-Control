@@ -8,6 +8,7 @@ import jakarta.persistence.Converter;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public final class JacksonTextCollectionConverters {
 
@@ -68,6 +69,14 @@ public final class JacksonTextCollectionConverters {
     public static class MapListConverter extends AbstractJsonTextConverter<List<Map<String, Object>>> {
 
         public MapListConverter() {
+            super(new TypeReference<>() {});
+        }
+    }
+
+    @Converter
+    public static class StringSetConverter extends AbstractJsonTextConverter<Set<String>> {
+
+        public StringSetConverter() {
             super(new TypeReference<>() {});
         }
     }

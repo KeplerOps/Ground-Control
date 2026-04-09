@@ -1854,3 +1854,35 @@ export async function updateVerificationResult(id, data, project) {
 export async function deleteVerificationResult(id, project) {
   await request("DELETE", `/api/v1/verification-results/${encodeURIComponent(id)}`, { params: { project } });
 }
+
+// ---------------------------------------------------------------------------
+// Plugins (GC-P005)
+// ---------------------------------------------------------------------------
+
+export const PLUGIN_TYPES = [
+  "PACK_HANDLER",
+  "REGISTRY_BACKEND",
+  "VALIDATOR",
+  "POLICY_HOOK",
+  "VERIFIER",
+  "EMBEDDING_PROVIDER",
+  "GRAPH_CONTRIBUTOR",
+  "CUSTOM",
+];
+export const PLUGIN_LIFECYCLE_STATES = ["CREATED", "INITIALIZED", "STARTED", "STOPPED", "FAILED"];
+
+export async function listPlugins({ type, capability, project } = {}) {
+  return request("GET", "/api/v1/plugins", { params: { type, capability, project } });
+}
+
+export async function getPlugin(name) {
+  return request("GET", `/api/v1/plugins/${encodeURIComponent(name)}`);
+}
+
+export async function registerPlugin(data, project) {
+  return request("POST", "/api/v1/plugins", { body: data, params: { project } });
+}
+
+export async function unregisterPlugin(name, project) {
+  await request("DELETE", `/api/v1/plugins/${encodeURIComponent(name)}`, { params: { project } });
+}
