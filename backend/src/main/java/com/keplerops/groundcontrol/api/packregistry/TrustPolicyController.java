@@ -41,7 +41,7 @@ public class TrustPolicyController {
                 request.name(),
                 request.description(),
                 request.defaultOutcome(),
-                request.rules(),
+                TrustPolicyRuleRequest.toDomainList(request.rules()),
                 request.priority(),
                 request.enabled()));
         return TrustPolicyResponse.from(result);
@@ -68,7 +68,7 @@ public class TrustPolicyController {
                         request.name(),
                         request.description(),
                         request.defaultOutcome(),
-                        request.rules(),
+                        TrustPolicyRuleRequest.toDomainList(request.rules()),
                         request.priority(),
                         request.enabled()));
         return TrustPolicyResponse.from(result);

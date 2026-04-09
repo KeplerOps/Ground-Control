@@ -1,5 +1,10 @@
 package com.keplerops.groundcontrol.api.packregistry;
 
+import com.keplerops.groundcontrol.api.controlpacks.ControlPackEntryDefinitionRequest;
+import com.keplerops.groundcontrol.domain.controlpacks.service.ControlPackEntryDefinition;
+import com.keplerops.groundcontrol.domain.packregistry.service.ControlPackRegistrationContent;
+import com.keplerops.groundcontrol.domain.packregistry.service.EmptyPackRegistrationContent;
+import com.keplerops.groundcontrol.domain.packregistry.service.PackRegistrationContent;
 import com.keplerops.groundcontrol.domain.packregistry.service.PackRegistryService;
 import com.keplerops.groundcontrol.domain.packregistry.service.PackResolver;
 import com.keplerops.groundcontrol.domain.packregistry.service.RegisterPackCommand;
@@ -51,7 +56,8 @@ public class PackRegistryController {
                 request.checksum(),
                 request.signatureInfo(),
                 request.compatibility(),
-                request.dependencies(),
+                PackDependencyRequest.toDomainList(request.dependencies()),
+                toRegistrationContent(request.controlPackEntries()),
                 request.provenance(),
                 request.registryMetadata()));
         return PackRegistryEntryResponse.from(result);
@@ -101,7 +107,10 @@ public class PackRegistryController {
                         request.checksum(),
                         request.signatureInfo(),
                         request.compatibility(),
-                        request.dependencies(),
+                        PackDependencyRequest.toDomainList(request.dependencies()),
+                        request.controlPackEntries() != null
+                                ? toRegistrationContent(request.controlPackEntries())
+                                : null,
                         request.provenance(),
                         request.registryMetadata()));
         return PackRegistryEntryResponse.from(result);
@@ -128,7 +137,7 @@ public class PackRegistryController {
         var projectId = projectService.requireProjectId(project);
         var resolved = packResolver.resolve(projectId, request.packId(), request.versionConstraint());
         var compatible = packResolver.checkCompatibility(resolved);
-        return ResolvedPackResponse.from(resolved, compatible);
+        return ResolvedPackResponse.from(resolved, compatible, packResolver);
     }
 
     @PostMapping("/check-compatibility")
@@ -138,5 +147,32 @@ public class PackRegistryController {
         var resolved = packResolver.resolve(projectId, request.packId(), request.versionConstraint());
         var compatible = packResolver.checkCompatibility(resolved);
         return new CompatibilityCheckResponse(request.packId(), resolved.resolvedVersion(), compatible);
+    }
+
+    private static ControlPackEntryDefinition toControlPackEntryDefinition(ControlPackEntryDefinitionRequest request) {
+        return new ControlPackEntryDefinition(
+                request.uid(),
+                request.title(),
+                request.description(),
+                request.objective(),
+                request.controlFunction(),
+                request.owner(),
+                request.implementationScope(),
+                request.methodologyFactors(),
+                request.effectiveness(),
+                request.category(),
+                request.source(),
+                request.implementationGuidance(),
+                request.expectedEvidence(),
+                request.frameworkMappings());
+    }
+
+    private static PackRegistrationContent toRegistrationContent(List<ControlPackEntryDefinitionRequest> requests) {
+        if (requests == null) {
+            return EmptyPackRegistrationContent.INSTANCE;
+        }
+        return new ControlPackRegistrationContent(requests.stream()
+                .map(PackRegistryController::toControlPackEntryDefinition)
+                .toList());
     }
 }

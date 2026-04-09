@@ -10,15 +10,17 @@ import static org.mockito.Mockito.when;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.packregistry.model.TrustPolicy;
+import com.keplerops.groundcontrol.domain.packregistry.model.TrustPolicyRule;
 import com.keplerops.groundcontrol.domain.packregistry.repository.TrustPolicyRepository;
 import com.keplerops.groundcontrol.domain.packregistry.service.CreateTrustPolicyCommand;
 import com.keplerops.groundcontrol.domain.packregistry.service.TrustPolicyService;
 import com.keplerops.groundcontrol.domain.packregistry.service.UpdateTrustPolicyCommand;
 import com.keplerops.groundcontrol.domain.packregistry.state.TrustOutcome;
+import com.keplerops.groundcontrol.domain.packregistry.state.TrustPolicyField;
+import com.keplerops.groundcontrol.domain.packregistry.state.TrustPolicyRuleOperator;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +49,11 @@ class TrustPolicyServiceTest {
         return project;
     }
 
+    private TrustPolicyRule rule(
+            TrustPolicyField field, TrustPolicyRuleOperator operator, String value, TrustOutcome outcome) {
+        return new TrustPolicyRule(field, operator, value, outcome);
+    }
+
     @BeforeEach
     void setUp() {
         service = new TrustPolicyService(trustPolicyRepository, projectService);
@@ -68,7 +75,8 @@ class TrustPolicyServiceTest {
                     "allow-nist",
                     "Allow NIST packs",
                     TrustOutcome.REJECTED,
-                    List.of(Map.of("field", "publisher", "operator", "EQUALS", "value", "NIST", "outcome", "TRUSTED")),
+                    List.of(rule(
+                            TrustPolicyField.PUBLISHER, TrustPolicyRuleOperator.EQUALS, "NIST", TrustOutcome.TRUSTED)),
                     1,
                     true);
 

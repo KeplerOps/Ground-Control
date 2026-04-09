@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.packregistry.model.PackDependency;
 import com.keplerops.groundcontrol.domain.packregistry.model.PackRegistryEntry;
 import com.keplerops.groundcontrol.domain.packregistry.repository.PackRegistryEntryRepository;
 import com.keplerops.groundcontrol.domain.packregistry.service.PackResolver;
@@ -36,6 +37,14 @@ class PackResolverTest {
         var project = new Project("ground-control", "Ground Control");
         setField(project, "id", PROJECT_ID);
         return project;
+    }
+
+    private PackDependency dependency(String packId) {
+        return new PackDependency(packId, null);
+    }
+
+    private PackDependency dependency(String packId, String versionConstraint) {
+        return new PackDependency(packId, versionConstraint);
     }
 
     @BeforeEach
@@ -157,6 +166,20 @@ class PackResolverTest {
 
             assertThat(resolver.checkCompatibility(resolved)).isFalse();
         }
+
+        @Test
+        void returnsFalseWhenDependencyIsIncompatible() {
+            var project = makeProject();
+            var entry = new PackRegistryEntry(project, "pack", PackType.CONTROL_PACK, "1.0.0");
+            var dependency = new PackRegistryEntry(project, "dep", PackType.CONTROL_PACK, "1.0.0");
+            dependency.setCompatibility(Map.of("minVersion", "99.0.0"));
+            var resolvedDependency = new com.keplerops.groundcontrol.domain.packregistry.service.ResolvedPack(
+                    dependency, "1.0.0", null, null, List.of());
+            var resolved = new com.keplerops.groundcontrol.domain.packregistry.service.ResolvedPack(
+                    entry, "1.0.0", null, null, List.of(resolvedDependency));
+
+            assertThat(resolver.checkCompatibility(resolved)).isFalse();
+        }
     }
 
     @Nested
@@ -196,7 +219,7 @@ class PackResolverTest {
         void resolvesDependencies() {
             var project = makeProject();
             var main = new PackRegistryEntry(project, "main-pack", PackType.CONTROL_PACK, "1.0.0");
-            main.setDependencies(List.of(Map.of("packId", "dep-pack", "versionConstraint", "1.0.0")));
+            main.setDependencies(List.of(dependency("dep-pack", "1.0.0")));
             var dep = new PackRegistryEntry(project, "dep-pack", PackType.CONTROL_PACK, "1.0.0");
 
             when(registryRepository.findByProjectIdAndPackIdAndCatalogStatusOrderByRegisteredAtDesc(
@@ -216,9 +239,9 @@ class PackResolverTest {
         void detectsCircularDependency() {
             var project = makeProject();
             var packA = new PackRegistryEntry(project, "pack-a", PackType.CONTROL_PACK, "1.0.0");
-            packA.setDependencies(List.of(Map.of("packId", "pack-b")));
+            packA.setDependencies(List.of(dependency("pack-b")));
             var packB = new PackRegistryEntry(project, "pack-b", PackType.CONTROL_PACK, "1.0.0");
-            packB.setDependencies(List.of(Map.of("packId", "pack-a")));
+            packB.setDependencies(List.of(dependency("pack-a")));
 
             when(registryRepository.findByProjectIdAndPackIdAndCatalogStatusOrderByRegisteredAtDesc(
                             PROJECT_ID, "pack-a", CatalogStatus.AVAILABLE))
@@ -243,6 +266,57 @@ class PackResolverTest {
 
             var result = resolver.resolve(PROJECT_ID, "no-deps", null);
             assertThat(result.resolvedDependencies()).isEmpty();
+        }
+
+        @Test
+        void allowsSharedTransitiveDependenciesAcrossSiblingBranches() {
+            var project = makeProject();
+            var packA = new PackRegistryEntry(project, "pack-a", PackType.CONTROL_PACK, "1.0.0");
+            packA.setDependencies(List.of(dependency("pack-b"), dependency("pack-c")));
+            var packB = new PackRegistryEntry(project, "pack-b", PackType.CONTROL_PACK, "1.0.0");
+            packB.setDependencies(List.of(dependency("pack-d")));
+            var packC = new PackRegistryEntry(project, "pack-c", PackType.CONTROL_PACK, "1.0.0");
+            packC.setDependencies(List.of(dependency("pack-d")));
+            var packD = new PackRegistryEntry(project, "pack-d", PackType.CONTROL_PACK, "1.0.0");
+
+            when(registryRepository.findByProjectIdAndPackIdAndCatalogStatusOrderByRegisteredAtDesc(
+                            PROJECT_ID, "pack-a", CatalogStatus.AVAILABLE))
+                    .thenReturn(List.of(packA));
+            when(registryRepository.findByProjectIdAndPackIdAndCatalogStatusOrderByRegisteredAtDesc(
+                            PROJECT_ID, "pack-b", CatalogStatus.AVAILABLE))
+                    .thenReturn(List.of(packB));
+            when(registryRepository.findByProjectIdAndPackIdAndCatalogStatusOrderByRegisteredAtDesc(
+                            PROJECT_ID, "pack-c", CatalogStatus.AVAILABLE))
+                    .thenReturn(List.of(packC));
+            when(registryRepository.findByProjectIdAndPackIdAndCatalogStatusOrderByRegisteredAtDesc(
+                            PROJECT_ID, "pack-d", CatalogStatus.AVAILABLE))
+                    .thenReturn(List.of(packD));
+
+            var result = resolver.resolve(PROJECT_ID, "pack-a", null);
+
+            assertThat(result.resolvedDependencies()).hasSize(2);
+            assertThat(result.resolvedDependencies().get(0).resolvedDependencies())
+                    .hasSize(1);
+            assertThat(result.resolvedDependencies().get(1).resolvedDependencies())
+                    .hasSize(1);
+        }
+    }
+
+    @Nested
+    class SemanticVersionPrecedence {
+
+        @Test
+        void prefersStableReleaseOverPrerelease() {
+            var project = makeProject();
+            var prerelease = new PackRegistryEntry(project, "pack", PackType.CONTROL_PACK, "1.0.0-rc.1");
+            var stable = new PackRegistryEntry(project, "pack", PackType.CONTROL_PACK, "1.0.0");
+            when(registryRepository.findByProjectIdAndPackIdAndCatalogStatusOrderByRegisteredAtDesc(
+                            PROJECT_ID, "pack", CatalogStatus.AVAILABLE))
+                    .thenReturn(List.of(prerelease, stable));
+
+            var result = resolver.resolve(PROJECT_ID, "pack", null);
+
+            assertThat(result.resolvedVersion()).isEqualTo("1.0.0");
         }
     }
 }

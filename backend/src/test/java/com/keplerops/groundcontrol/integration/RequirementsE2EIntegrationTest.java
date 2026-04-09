@@ -396,6 +396,7 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "027", "028", "029", "030", "031", "032", "033", "034", "035", "036", "037", "038", "039",
                         "040", "041", "042", "043", "044", "045", "046", "047", "048", "049", "050", "051",
                         "052", // V052: control pack tables
-                        "053"); // V053: pack registry tables
+                        "053", // V053: pack registry tables
+                        "054"); // V054: typed control-pack registry payloads
     }
 }

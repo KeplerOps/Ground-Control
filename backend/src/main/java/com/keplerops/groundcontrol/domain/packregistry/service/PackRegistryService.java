@@ -22,10 +22,18 @@ public class PackRegistryService {
 
     private final PackRegistryEntryRepository registryRepository;
     private final ProjectService projectService;
+    private final PackIntegrityVerifier packIntegrityVerifier;
+    private final PackTypeHandlerRegistry packTypeHandlerRegistry;
 
-    public PackRegistryService(PackRegistryEntryRepository registryRepository, ProjectService projectService) {
+    public PackRegistryService(
+            PackRegistryEntryRepository registryRepository,
+            ProjectService projectService,
+            PackIntegrityVerifier packIntegrityVerifier,
+            PackTypeHandlerRegistry packTypeHandlerRegistry) {
         this.registryRepository = registryRepository;
         this.projectService = projectService;
+        this.packIntegrityVerifier = packIntegrityVerifier;
+        this.packTypeHandlerRegistry = packTypeHandlerRegistry;
     }
 
     public PackRegistryEntry registerEntry(RegisterPackCommand command) {
@@ -42,12 +50,14 @@ public class PackRegistryService {
         entry.setPublisher(command.publisher());
         entry.setDescription(command.description());
         entry.setSourceUrl(command.sourceUrl());
-        entry.setChecksum(command.checksum());
+        entry.setChecksum(normalizeOptionalChecksum(command.checksum()));
         entry.setSignatureInfo(command.signatureInfo());
         entry.setCompatibility(command.compatibility());
         entry.setDependencies(command.dependencies());
+        packTypeHandlerRegistry.get(command.packType()).applyRegistrationContent(entry, command.registrationContent());
         entry.setProvenance(command.provenance());
         entry.setRegistryMetadata(command.registryMetadata());
+        applyIntegrityVerification(entry);
 
         var saved = registryRepository.save(entry);
         log.info(
@@ -66,12 +76,18 @@ public class PackRegistryService {
         if (command.publisher() != null) entry.setPublisher(command.publisher());
         if (command.description() != null) entry.setDescription(command.description());
         if (command.sourceUrl() != null) entry.setSourceUrl(command.sourceUrl());
-        if (command.checksum() != null) entry.setChecksum(command.checksum());
+        if (command.checksum() != null) entry.setChecksum(normalizeOptionalChecksum(command.checksum()));
         if (command.signatureInfo() != null) entry.setSignatureInfo(command.signatureInfo());
         if (command.compatibility() != null) entry.setCompatibility(command.compatibility());
         if (command.dependencies() != null) entry.setDependencies(command.dependencies());
+        if (command.registrationContent() != null) {
+            packTypeHandlerRegistry
+                    .get(entry.getPackType())
+                    .applyRegistrationContent(entry, command.registrationContent());
+        }
         if (command.provenance() != null) entry.setProvenance(command.provenance());
         if (command.registryMetadata() != null) entry.setRegistryMetadata(command.registryMetadata());
+        applyIntegrityVerification(entry);
 
         var saved = registryRepository.save(entry);
         log.info("pack_registry_entry_updated: id={}, pack_id={}", entryId, entry.getPackId());
@@ -134,5 +150,16 @@ public class PackRegistryService {
         var entry = findEntry(projectId, packId, version);
         registryRepository.deleteById(entry.getId());
         log.info("pack_registry_entry_deleted: pack_id={}, version={}", packId, version);
+    }
+
+    private void applyIntegrityVerification(PackRegistryEntry entry) {
+        var verification = packIntegrityVerifier.verify(entry);
+        if (entry.getChecksum() != null && !entry.getChecksum().isBlank()) {
+            entry.setChecksum(verification.verifiedChecksum());
+        }
+    }
+
+    private String normalizeOptionalChecksum(String checksum) {
+        return checksum != null && checksum.isBlank() ? null : checksum;
     }
 }

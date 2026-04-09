@@ -745,10 +745,38 @@ Response wraps results in a Spring Page object with `content`, `totalElements`,
 
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
-| POST | `/pack-install-records/install` | InstallPackRequest | 201 | Install pack via registry with trust evaluation |
-| POST | `/pack-install-records/upgrade` | InstallPackRequest | 200 | Upgrade pack via registry with trust evaluation |
+| POST | `/pack-install-records/install` | InstallPackRequest | 201, 422 | Install pack via registry with trust evaluation |
+| POST | `/pack-install-records/upgrade` | InstallPackRequest | 200, 422 | Upgrade pack via registry with trust evaluation |
 | GET | `/pack-install-records` | — | 200 | List install records (optional `packId` filter) |
 | GET | `/pack-install-records/{id}` | — | 200 | Get install record |
+
+`RegisterPackRequest` and `UpdatePackRegistryEntryRequest` accept
+`controlPackEntries` for `CONTROL_PACK` artifacts. Registry-driven install and
+upgrade now materialize that stored server-side content; `InstallPackRequest`
+contains only `packId`, optional `versionConstraint`, and optional
+`performedBy`.
+
+When a `checksum` is supplied, the server verifies it against the canonical
+pack payload and normalizes the stored value to `sha256:<hex>`. Unsigned packs
+may omit `checksum`; they still produce a computed `verifiedChecksum` during
+trust evaluation and install recording, but they do not become
+`checksumVerified=true` by registry round-trip alone.
+
+`signatureInfo` is optional detached signature metadata with this shape:
+`algorithm` (required, one of `SHA256withRSA`, `SHA384withRSA`,
+`SHA512withRSA`, `SHA256withECDSA`, `SHA384withECDSA`, `SHA512withECDSA`,
+`Ed25519`, or `Ed448`),
+`publicKey` (required, base64 DER or PEM-encoded X.509 public key),
+`signature` (required, base64 detached signature over the canonical pack
+payload), and `keyAlgorithm` (optional when it can be inferred from
+`algorithm`, otherwise required).
+
+Install and upgrade return `422 Unprocessable Entity` when the request is
+accepted syntactically but the resolved pack is rejected or fails to apply.
+
+Trust policy rules may match not only raw pack metadata, but also verified
+integrity fields exposed by the server: `verifiedChecksum`,
+`checksumVerified`, and `signatureVerified`.
 
 ## Interactive Docs
 

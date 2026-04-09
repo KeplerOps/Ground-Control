@@ -1,11 +1,11 @@
 package com.keplerops.groundcontrol.domain.packregistry.service;
 
 import com.keplerops.groundcontrol.domain.packregistry.model.TrustPolicy;
+import com.keplerops.groundcontrol.domain.packregistry.model.TrustPolicyRule;
 import com.keplerops.groundcontrol.domain.packregistry.repository.TrustPolicyRepository;
 import com.keplerops.groundcontrol.domain.packregistry.state.TrustOutcome;
-import com.keplerops.groundcontrol.domain.packregistry.state.TrustPolicyRuleOperator;
+import com.keplerops.groundcontrol.domain.packregistry.state.TrustPolicyField;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -24,7 +24,8 @@ public class TrustEvaluator {
         this.trustPolicyRepository = trustPolicyRepository;
     }
 
-    public TrustDecision evaluate(UUID projectId, ResolvedPack resolvedPack) {
+    public TrustDecision evaluate(
+            UUID projectId, ResolvedPack resolvedPack, PackIntegrityVerification integrityVerification) {
         var policies = trustPolicyRepository.findByProjectIdAndEnabledOrderByPriorityAsc(projectId, true);
 
         if (policies.isEmpty()) {
@@ -35,7 +36,7 @@ public class TrustEvaluator {
         }
 
         for (var policy : policies) {
-            var decision = evaluatePolicy(policy, resolvedPack);
+            var decision = evaluatePolicy(policy, resolvedPack, integrityVerification);
             if (decision != null) {
                 log.info(
                         "trust_evaluation_decided: pack_id={}, outcome={}, policy={}",
@@ -60,90 +61,78 @@ public class TrustEvaluator {
         return defaultDecision;
     }
 
-    private TrustDecision evaluatePolicy(TrustPolicy policy, ResolvedPack resolvedPack) {
+    private TrustDecision evaluatePolicy(
+            TrustPolicy policy, ResolvedPack resolvedPack, PackIntegrityVerification integrityVerification) {
         var rules = policy.getRules();
         if (rules == null || rules.isEmpty()) {
             return null;
         }
 
         for (var rule : rules) {
-            if (evaluateRule(rule, resolvedPack)) {
-                var outcomeStr = String.valueOf(rule.get("outcome"));
-                TrustOutcome outcome;
-                try {
-                    outcome = TrustOutcome.valueOf(outcomeStr);
-                } catch (IllegalArgumentException e) {
-                    log.warn("trust_rule_invalid_outcome: outcome={}", outcomeStr);
-                    continue;
-                }
+            if (evaluateRule(rule, resolvedPack, integrityVerification)) {
                 var reason = String.format(
                         "Rule matched: field='%s', operator='%s', value='%s' in policy '%s'",
-                        rule.get("field"), rule.get("operator"), rule.get("value"), policy.getName());
-                return new TrustDecision(outcome, reason, policy.getId().toString());
+                        rule.field().wireValue(), rule.operator(), rule.value(), policy.getName());
+                return new TrustDecision(rule.outcome(), reason, policy.getId().toString());
             }
         }
 
         return null;
     }
 
-    private boolean evaluateRule(Map<String, Object> rule, ResolvedPack resolvedPack) {
-        var fieldObj = rule.get("field");
-        var operatorObj = rule.get("operator");
-        var valueObj = rule.get("value");
-
-        if (fieldObj == null || operatorObj == null || valueObj == null) {
-            return false;
-        }
-
-        var field = String.valueOf(fieldObj);
-        var operatorStr = String.valueOf(operatorObj);
-        var ruleValue = String.valueOf(valueObj);
-
-        var actualValue = extractField(resolvedPack, field);
+    private boolean evaluateRule(
+            TrustPolicyRule rule, ResolvedPack resolvedPack, PackIntegrityVerification integrityVerification) {
+        var actualValue = extractField(resolvedPack, integrityVerification, rule.field());
         if (actualValue == null) {
             return false;
         }
 
-        TrustPolicyRuleOperator operator;
-        try {
-            operator = TrustPolicyRuleOperator.valueOf(operatorStr);
-        } catch (IllegalArgumentException e) {
-            log.warn("trust_rule_invalid_operator: operator={}", operatorStr);
-            return false;
-        }
-        return switch (operator) {
-            case EQUALS -> actualValue.equals(ruleValue);
-            case NOT_EQUALS -> !actualValue.equals(ruleValue);
-            case CONTAINS -> actualValue.contains(ruleValue);
+        return switch (rule.operator()) {
+            case EQUALS -> actualValue.equals(rule.value());
+            case NOT_EQUALS -> !actualValue.equals(rule.value());
+            case CONTAINS -> actualValue.contains(rule.value());
             case MATCHES_PATTERN -> {
-                if (ruleValue.length() > MAX_PATTERN_LENGTH) {
-                    log.warn("trust_rule_pattern_too_long: length={}", ruleValue.length());
+                if (rule.value().length() > MAX_PATTERN_LENGTH) {
+                    log.warn(
+                            "trust_rule_pattern_too_long: length={}",
+                            rule.value().length());
                     yield false;
                 }
                 try {
-                    yield Pattern.compile(ruleValue).matcher(actualValue).matches();
+                    yield Pattern.compile(rule.value()).matcher(actualValue).matches();
                 } catch (java.util.regex.PatternSyntaxException e) {
-                    log.warn("trust_rule_invalid_pattern: pattern={}", ruleValue);
+                    log.warn("trust_rule_invalid_pattern: pattern={}", rule.value());
                     yield false;
                 }
             }
             case IN_LIST -> {
-                var items = List.of(ruleValue.split(","));
+                var items = List.of(rule.value().split(","));
                 yield items.stream().map(String::trim).anyMatch(actualValue::equals);
             }
         };
     }
 
-    private String extractField(ResolvedPack resolvedPack, String fieldName) {
+    private String extractField(
+            ResolvedPack resolvedPack, PackIntegrityVerification integrityVerification, TrustPolicyField fieldName) {
         var entry = resolvedPack.entry();
         return switch (fieldName) {
-            case "publisher" -> entry.getPublisher();
-            case "packId" -> entry.getPackId();
-            case "packType" -> entry.getPackType() != null ? entry.getPackType().name() : null;
-            case "version" -> entry.getVersion();
-            case "sourceUrl" -> entry.getSourceUrl();
-            case "checksum" -> entry.getChecksum();
-            default -> null;
+            case PUBLISHER -> entry.getPublisher();
+            case PACK_ID -> entry.getPackId();
+            case PACK_TYPE -> entry.getPackType() != null ? entry.getPackType().name() : null;
+            case VERSION -> entry.getVersion();
+            case SOURCE_URL -> entry.getSourceUrl();
+            case CHECKSUM -> entry.getChecksum();
+            case VERIFIED_CHECKSUM -> integrityVerification != null ? integrityVerification.verifiedChecksum() : null;
+            case CHECKSUM_VERIFIED -> integrityVerification != null
+                    ? Boolean.toString(integrityVerification.checksumVerified())
+                    : null;
+            case SIGNATURE_VERIFIED -> integrityVerification != null
+                    ? stringifyNullableBoolean(integrityVerification.signatureVerified())
+                    : null;
         };
+    }
+
+    private String stringifyNullableBoolean(Boolean value) {
+        return value != null ? value.toString() : null;
     }
 }

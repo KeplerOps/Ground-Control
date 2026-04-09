@@ -74,12 +74,7 @@ class PackInstallRecordControllerTest {
                                         """
                 {
                     "packId":"nist-800-53",
-                    "performedBy":"admin",
-                    "entries":[{
-                        "uid":"AC-1",
-                        "title":"Access Control Policy",
-                        "controlFunction":"PREVENTIVE"
-                    }]
+                    "performedBy":"admin"
                 }
                 """))
                 .andExpect(status().isCreated())
@@ -102,16 +97,54 @@ class PackInstallRecordControllerTest {
                 {
                     "packId":"nist-800-53",
                     "versionConstraint":"^1.0.0",
-                    "performedBy":"admin",
-                    "entries":[{
-                        "uid":"AC-1",
-                        "title":"Access Control Policy",
-                        "controlFunction":"PREVENTIVE"
-                    }]
+                    "performedBy":"admin"
                 }
                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.installOutcome", is("UPGRADED")));
+    }
+
+    @Test
+    void installRejectedReturnsUnprocessableEntity() throws Exception {
+        var record = makeRecord();
+        setField(record, "installOutcome", InstallOutcome.REJECTED);
+        when(projectService.resolveProjectId(null)).thenReturn(PROJECT_ID);
+        when(orchestrator.installPack(any(InstallPackCommand.class))).thenReturn(record);
+
+        mockMvc.perform(
+                        post("/api/v1/pack-install-records/install")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                {
+                    "packId":"nist-800-53",
+                    "performedBy":"admin"
+                }
+                """))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.installOutcome", is("REJECTED")));
+    }
+
+    @Test
+    void upgradeFailureReturnsUnprocessableEntity() throws Exception {
+        var record = makeRecord();
+        setField(record, "installOutcome", InstallOutcome.FAILED);
+        when(projectService.resolveProjectId(null)).thenReturn(PROJECT_ID);
+        when(orchestrator.upgradePack(any(InstallPackCommand.class))).thenReturn(record);
+
+        mockMvc.perform(
+                        post("/api/v1/pack-install-records/upgrade")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                {
+                    "packId":"nist-800-53",
+                    "versionConstraint":"^1.0.0",
+                    "performedBy":"admin"
+                }
+                """))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.installOutcome", is("FAILED")));
     }
 
     @Test

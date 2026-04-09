@@ -15,7 +15,6 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.util.List;
-import java.util.Map;
 import org.hibernate.envers.Audited;
 import org.hibernate.envers.NotAudited;
 
@@ -44,9 +43,9 @@ public class TrustPolicy extends BaseEntity {
     @Column(name = "default_outcome", nullable = false, length = 20)
     private TrustOutcome defaultOutcome;
 
-    @Convert(converter = JacksonTextCollectionConverters.MapListConverter.class)
+    @Convert(converter = JacksonTextCollectionConverters.TrustPolicyRuleListConverter.class)
     @Column(columnDefinition = "TEXT")
-    private List<Map<String, Object>> rules;
+    private List<TrustPolicyRule> rules;
 
     @Column(nullable = false)
     private int priority;
@@ -92,11 +91,11 @@ public class TrustPolicy extends BaseEntity {
         this.defaultOutcome = defaultOutcome;
     }
 
-    public List<Map<String, Object>> getRules() {
+    public List<TrustPolicyRule> getRules() {
         return rules;
     }
 
-    public void setRules(List<Map<String, Object>> rules) {
+    public void setRules(List<TrustPolicyRule> rules) {
         this.rules = rules;
     }
 

@@ -1,5 +1,7 @@
 package com.keplerops.groundcontrol.api.packregistry;
 
+import com.keplerops.groundcontrol.api.controlpacks.ControlPackEntryDefinitionRequest;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 import java.util.List;
 import java.util.Map;
@@ -11,6 +13,7 @@ public record UpdatePackRegistryEntryRequest(
         @Size(max = 128) String checksum,
         Map<String, Object> signatureInfo,
         Map<String, Object> compatibility,
-        List<Map<String, Object>> dependencies,
+        @Valid List<PackDependencyRequest> dependencies,
+        @Valid List<ControlPackEntryDefinitionRequest> controlPackEntries,
         Map<String, Object> provenance,
         Map<String, Object> registryMetadata) {}

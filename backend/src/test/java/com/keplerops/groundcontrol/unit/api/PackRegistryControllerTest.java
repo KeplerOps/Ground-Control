@@ -16,6 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.keplerops.groundcontrol.api.packregistry.PackRegistryController;
 import com.keplerops.groundcontrol.domain.packregistry.model.PackRegistryEntry;
+import com.keplerops.groundcontrol.domain.packregistry.model.RegisteredControlPackEntry;
 import com.keplerops.groundcontrol.domain.packregistry.service.PackRegistryService;
 import com.keplerops.groundcontrol.domain.packregistry.service.PackResolver;
 import com.keplerops.groundcontrol.domain.packregistry.service.RegisterPackCommand;
@@ -67,6 +68,21 @@ class PackRegistryControllerTest {
         setField(entry, "updatedAt", Instant.now());
         entry.setPublisher("NIST");
         entry.setDescription("NIST SP 800-53 controls");
+        entry.setControlPackEntries(List.of(new RegisteredControlPackEntry(
+                "AC-1",
+                "Access Control Policy",
+                com.keplerops.groundcontrol.domain.controls.state.ControlFunction.PREVENTIVE,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null)));
         return entry;
     }
 
@@ -85,7 +101,8 @@ class PackRegistryControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.packId", is("nist-800-53")))
                 .andExpect(jsonPath("$.packType", is("CONTROL_PACK")))
-                .andExpect(jsonPath("$.version", is("1.0.0")));
+                .andExpect(jsonPath("$.version", is("1.0.0")))
+                .andExpect(jsonPath("$.controlPackEntries[0].uid", is("AC-1")));
     }
 
     @Test
@@ -160,6 +177,29 @@ class PackRegistryControllerTest {
     }
 
     @Test
+    void resolvePropagatesDependencyCompatibility() throws Exception {
+        var entry = makeEntry();
+        var dependencyEntry = new PackRegistryEntry(makeProject(), "dep-pack", PackType.CONTROL_PACK, "1.0.0");
+        var dependency =
+                new ResolvedPack(dependencyEntry, "1.0.0", "https://registry.example.com/dep", "sha256:def", List.of());
+        var resolved =
+                new ResolvedPack(entry, "1.0.0", "https://registry.example.com", "sha256:abc", List.of(dependency));
+        when(projectService.requireProjectId(null)).thenReturn(PROJECT_ID);
+        when(packResolver.resolve(eq(PROJECT_ID), eq("nist-800-53"), any())).thenReturn(resolved);
+        when(packResolver.checkCompatibility(resolved)).thenReturn(false);
+        when(packResolver.checkCompatibility(dependency)).thenReturn(false);
+
+        mockMvc.perform(post("/api/v1/pack-registry/resolve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                {"packId":"nist-800-53"}
+                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.compatible", is(false)))
+                .andExpect(jsonPath("$.resolvedDependencies[0].compatible", is(false)));
+    }
+
+    @Test
     void checkCompatibilityReturnsResult() throws Exception {
         var entry = makeEntry();
         var resolved = new ResolvedPack(entry, "1.0.0", "https://registry.example.com", "sha256:abc", List.of());
@@ -186,10 +226,12 @@ class PackRegistryControllerTest {
                         eq(PROJECT_ID), eq("nist-800-53"), eq("1.0.0"), any(UpdatePackRegistryEntryCommand.class)))
                 .thenReturn(entry);
 
-        mockMvc.perform(put("/api/v1/pack-registry/nist-800-53/1.0.0")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                {"publisher":"Updated Publisher"}
+        mockMvc.perform(
+                        put("/api/v1/pack-registry/nist-800-53/1.0.0")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                {"publisher":"Updated Publisher","controlPackEntries":[{"uid":"AC-1","title":"Access Control Policy","controlFunction":"PREVENTIVE"}]}
                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.publisher", is("Updated Publisher")));

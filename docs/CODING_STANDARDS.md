@@ -181,7 +181,9 @@ Other `state/` packages contain simple value enums (L0) that are **not** ESC-ver
 - `domain/riskscenarios/state/` — risk scenario link and status enums
 - `domain/plugins/state/` — `PluginType`, `PluginLifecycleState` enums
 - `domain/controlpacks/state/` — `ControlPackLifecycleState`, `ControlPackEntryStatus` enums
-- `domain/packregistry/state/` — `PackType`, `CatalogStatus`, `TrustOutcome`, `InstallOutcome`, `TrustPolicyRuleOperator` enums
+- `domain/packregistry/state/` — `PackType`, `CatalogStatus`, `TrustOutcome`, `InstallOutcome`, `TrustPolicyField`, `TrustPolicyRuleOperator` enums
+
+These pack-registry enums remain L0 typed value surfaces. Use them to remove stringly typed branching and policy fields in the generic registry, but do not expand ESC scope unless they gain real transition logic or invariants.
 
 ### What ESC cannot verify (and why)
 

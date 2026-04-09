@@ -96,6 +96,10 @@ public class PackInstallRecord extends BaseEntity {
         return project;
     }
 
+    public void setProject(Project project) {
+        this.project = project;
+    }
+
     public String getPackId() {
         return packId;
     }

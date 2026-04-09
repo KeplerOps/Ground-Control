@@ -16,15 +16,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.keplerops.groundcontrol.api.packregistry.TrustPolicyController;
 import com.keplerops.groundcontrol.domain.packregistry.model.TrustPolicy;
+import com.keplerops.groundcontrol.domain.packregistry.model.TrustPolicyRule;
 import com.keplerops.groundcontrol.domain.packregistry.service.CreateTrustPolicyCommand;
 import com.keplerops.groundcontrol.domain.packregistry.service.TrustPolicyService;
 import com.keplerops.groundcontrol.domain.packregistry.service.UpdateTrustPolicyCommand;
 import com.keplerops.groundcontrol.domain.packregistry.state.TrustOutcome;
+import com.keplerops.groundcontrol.domain.packregistry.state.TrustPolicyField;
+import com.keplerops.groundcontrol.domain.packregistry.state.TrustPolicyRuleOperator;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -62,8 +64,8 @@ class TrustPolicyControllerTest {
         setField(policy, "updatedAt", Instant.now());
         policy.setDescription("Allow NIST packs");
         policy.setPriority(1);
-        policy.setRules(
-                List.of(Map.of("field", "publisher", "operator", "EQUALS", "value", "NIST", "outcome", "TRUSTED")));
+        policy.setRules(List.of(new TrustPolicyRule(
+                TrustPolicyField.PUBLISHER, TrustPolicyRuleOperator.EQUALS, "NIST", TrustOutcome.TRUSTED)));
         return policy;
     }
 

@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.api.packregistry;
 
+import com.keplerops.groundcontrol.domain.packregistry.service.PackResolver;
 import com.keplerops.groundcontrol.domain.packregistry.service.ResolvedPack;
 import java.util.List;
 
@@ -11,7 +12,7 @@ public record ResolvedPackResponse(
         boolean compatible,
         List<ResolvedPackResponse> resolvedDependencies) {
 
-    public static ResolvedPackResponse from(ResolvedPack resolved, boolean compatible) {
+    public static ResolvedPackResponse from(ResolvedPack resolved, boolean compatible, PackResolver packResolver) {
         return new ResolvedPackResponse(
                 PackRegistryEntryResponse.from(resolved.entry()),
                 resolved.resolvedVersion(),
@@ -20,7 +21,8 @@ public record ResolvedPackResponse(
                 compatible,
                 resolved.resolvedDependencies() != null
                         ? resolved.resolvedDependencies().stream()
-                                .map(d -> ResolvedPackResponse.from(d, true))
+                                .map(d ->
+                                        ResolvedPackResponse.from(d, packResolver.checkCompatibility(d), packResolver))
                                 .toList()
                         : List.of());
     }

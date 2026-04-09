@@ -67,9 +67,13 @@ public class PackRegistryEntry extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private Map<String, Object> compatibility;
 
-    @Convert(converter = JacksonTextCollectionConverters.MapListConverter.class)
+    @Convert(converter = JacksonTextCollectionConverters.PackDependencyListConverter.class)
     @Column(columnDefinition = "TEXT")
-    private List<Map<String, Object>> dependencies;
+    private List<PackDependency> dependencies;
+
+    @Convert(converter = JacksonTextCollectionConverters.RegisteredControlPackEntryListConverter.class)
+    @Column(name = "control_pack_entries", columnDefinition = "TEXT")
+    private List<RegisteredControlPackEntry> controlPackEntries;
 
     @Convert(converter = JacksonTextCollectionConverters.StringObjectMapConverter.class)
     @Column(columnDefinition = "TEXT")
@@ -171,12 +175,20 @@ public class PackRegistryEntry extends BaseEntity {
         this.compatibility = compatibility;
     }
 
-    public List<Map<String, Object>> getDependencies() {
+    public List<PackDependency> getDependencies() {
         return dependencies;
     }
 
-    public void setDependencies(List<Map<String, Object>> dependencies) {
+    public void setDependencies(List<PackDependency> dependencies) {
         this.dependencies = dependencies;
+    }
+
+    public List<RegisteredControlPackEntry> getControlPackEntries() {
+        return controlPackEntries;
+    }
+
+    public void setControlPackEntries(List<RegisteredControlPackEntry> controlPackEntries) {
+        this.controlPackEntries = controlPackEntries;
     }
 
     public Map<String, Object> getProvenance() {

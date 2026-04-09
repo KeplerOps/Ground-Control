@@ -362,6 +362,7 @@ const TO_CAMEL = {
   expected_evidence: "expectedEvidence",
   framework_mappings: "frameworkMappings",
   pack_metadata: "packMetadata",
+  control_pack_entries: "controlPackEntries",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -1974,6 +1975,17 @@ export const PACK_TYPES = ["CONTROL_PACK", "REQUIREMENTS_PACK", "CUSTOM"];
 export const CATALOG_STATUSES = ["AVAILABLE", "WITHDRAWN", "SUPERSEDED"];
 export const TRUST_OUTCOMES = ["TRUSTED", "REJECTED", "UNKNOWN"];
 export const INSTALL_OUTCOMES = ["INSTALLED", "UPGRADED", "REJECTED", "FAILED"];
+export const TRUST_POLICY_FIELDS = [
+  "publisher",
+  "packId",
+  "packType",
+  "version",
+  "sourceUrl",
+  "checksum",
+  "verifiedChecksum",
+  "checksumVerified",
+  "signatureVerified",
+];
 export const TRUST_POLICY_RULE_OPERATORS = ["EQUALS", "NOT_EQUALS", "CONTAINS", "MATCHES_PATTERN", "IN_LIST"];
 
 export async function registerPackRegistryEntry(data, project) {
