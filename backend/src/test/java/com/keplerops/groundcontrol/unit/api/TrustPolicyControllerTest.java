@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.keplerops.groundcontrol.api.packregistry.PackRegistryAccessGuard;
 import com.keplerops.groundcontrol.api.packregistry.TrustPolicyController;
 import com.keplerops.groundcontrol.domain.packregistry.model.TrustPolicy;
 import com.keplerops.groundcontrol.domain.packregistry.model.TrustPolicyRule;
@@ -46,6 +47,9 @@ class TrustPolicyControllerTest {
 
     @MockitoBean
     private ProjectService projectService;
+
+    @MockitoBean
+    private PackRegistryAccessGuard accessGuard;
 
     private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final UUID POLICY_ID = UUID.fromString("00000000-0000-0000-0000-000000000070");
@@ -84,6 +88,23 @@ class TrustPolicyControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.name", is("allow-nist")))
                 .andExpect(jsonPath("$.defaultOutcome", is("REJECTED")));
+    }
+
+    @Test
+    void createWithRulesConvertsCorrectly() throws Exception {
+        when(projectService.resolveProjectId(null)).thenReturn(PROJECT_ID);
+        when(trustPolicyService.create(any(CreateTrustPolicyCommand.class))).thenReturn(makePolicy());
+
+        mockMvc.perform(
+                        post("/api/v1/trust-policies")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                {"name":"allow-nist","defaultOutcome":"REJECTED","priority":1,"enabled":true,
+                 "rules":[{"field":"publisher","operator":"EQUALS","value":"NIST","outcome":"TRUSTED"}]}
+                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.rules[0].field", is("publisher")));
     }
 
     @Test

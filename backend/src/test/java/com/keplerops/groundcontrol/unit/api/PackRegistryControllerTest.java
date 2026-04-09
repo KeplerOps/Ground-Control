@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.keplerops.groundcontrol.api.packregistry.PackRegistryAccessGuard;
 import com.keplerops.groundcontrol.api.packregistry.PackRegistryController;
 import com.keplerops.groundcontrol.domain.packregistry.model.PackRegistryEntry;
 import com.keplerops.groundcontrol.domain.packregistry.model.RegisteredControlPackEntry;
@@ -50,6 +51,9 @@ class PackRegistryControllerTest {
 
     @MockitoBean
     private ProjectService projectService;
+
+    @MockitoBean
+    private PackRegistryAccessGuard accessGuard;
 
     private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final UUID ENTRY_ID = UUID.fromString("00000000-0000-0000-0000-000000000060");
@@ -103,6 +107,22 @@ class PackRegistryControllerTest {
                 .andExpect(jsonPath("$.packType", is("CONTROL_PACK")))
                 .andExpect(jsonPath("$.version", is("1.0.0")))
                 .andExpect(jsonPath("$.controlPackEntries[0].uid", is("AC-1")));
+    }
+
+    @Test
+    void registerWithDependenciesConvertsCorrectly() throws Exception {
+        when(projectService.resolveProjectId(null)).thenReturn(PROJECT_ID);
+        when(registryService.registerEntry(any(RegisterPackCommand.class))).thenReturn(makeEntry());
+
+        mockMvc.perform(
+                        post("/api/v1/pack-registry")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                {"packId":"nist-800-53","packType":"CONTROL_PACK","version":"1.0.0",
+                 "dependencies":[{"packId":"dep-pack","versionConstraint":"^1.0.0"}]}
+                """))
+                .andExpect(status().isCreated());
     }
 
     @Test
