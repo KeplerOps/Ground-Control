@@ -13,6 +13,7 @@ import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -22,9 +23,13 @@ public class PackResolver {
     private static final int MAX_DEPENDENCY_DEPTH = 10;
 
     private final PackRegistryEntryRepository registryRepository;
+    private final String platformVersion;
 
-    public PackResolver(PackRegistryEntryRepository registryRepository) {
+    public PackResolver(
+            PackRegistryEntryRepository registryRepository,
+            @Value("${ground-control.version:0.109.0}") String platformVersion) {
         this.registryRepository = registryRepository;
+        this.platformVersion = platformVersion;
     }
 
     public ResolvedPack resolve(UUID projectId, String packId, String versionConstraint) {
@@ -211,7 +216,6 @@ public class PackResolver {
     }
 
     private String getPlatformVersion() {
-        // Current platform version for compatibility checks
-        return "0.1.0";
+        return platformVersion;
     }
 }

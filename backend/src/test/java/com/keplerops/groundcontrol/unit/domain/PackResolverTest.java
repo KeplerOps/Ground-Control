@@ -40,7 +40,7 @@ class PackResolverTest {
 
     @BeforeEach
     void setUp() {
-        resolver = new PackResolver(registryRepository);
+        resolver = new PackResolver(registryRepository, "0.109.0");
     }
 
     @Nested
