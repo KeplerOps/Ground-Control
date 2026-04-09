@@ -94,6 +94,19 @@ In other words:
 
 These are related but not interchangeable concerns.
 
+### 5. Control Pack Guardrails
+
+GC-P015 must reuse the existing control-domain model where the semantics already match.
+
+- `Control` remains the authoritative project-local runtime aggregate for installed control content. Control pack installation should materialize normal control records rather than inventing a parallel "installed control" API or duplicate control DTO/entity hierarchy.
+- Existing `Control` fields cover the core control definition surface already implemented under GC-I001: title, description, objective, control function, owner, implementation scope, methodology factors, effectiveness, category, and source. Do not duplicate those semantics in pack-specific JSON blobs when the existing control model is sufficient.
+- Framework mappings that are naturally link-shaped should reuse `ControlLink` with `MAPS_TO` and the existing internal/external target rules. Do not introduce a second unrelated mapping mechanism for cases already covered by the link model.
+- Expected evidence patterns are templates or expectations, not observed evidence. They must not be persisted as real `EVIDENCED_BY` links, observations, findings, or other runtime evidence records before concrete evidence exists.
+- Plugin registrations are executable extension metadata. Installed control packs are content-installation state and provenance, not `RegisteredPlugin` rows. Pack handlers, validators, registry backends, and policy hooks may be plugins; pack instances are not.
+- Generic import audit records are not a substitute for pack lifecycle state. Version-aware install, upgrade, deprecation, and provenance need pack-specific durable state rather than overloading ad hoc import records.
+- Local tailoring must stay explicit and minimal. Tailoring is a project-local overlay on installed content, not mutation of the upstream pack definition and not a wholesale cloned fork of the originating catalog by default.
+- Pack-driven changes that create or update controls or control links must stay inside the existing project-scoping, Envers audit, exception-mapping, logging, and graph-projection conventions already used elsewhere in the platform.
+
 ## Consequences
 
 **Positive:**
