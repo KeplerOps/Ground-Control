@@ -4384,7 +4384,7 @@ server.tool(
 
 server.tool(
   "gc_check_pack_compatibility",
-  "Check if a pack version is compatible with the current platform.",
+  "Check if a pack version is compatible with the current platform. Returns packId, resolvedVersion, and compatible boolean.",
   {
     pack_id: z.string().describe("Pack identity"),
     version_constraint: z.string().optional().describe("Version constraint"),

@@ -160,6 +160,24 @@ class PackRegistryControllerTest {
     }
 
     @Test
+    void checkCompatibilityReturnsResult() throws Exception {
+        var entry = makeEntry();
+        var resolved = new ResolvedPack(entry, "1.0.0", "https://registry.example.com", "sha256:abc", List.of());
+        when(projectService.requireProjectId(null)).thenReturn(PROJECT_ID);
+        when(packResolver.resolve(eq(PROJECT_ID), eq("nist-800-53"), any())).thenReturn(resolved);
+        when(packResolver.checkCompatibility(resolved)).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/pack-registry/check-compatibility")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                {"packId":"nist-800-53"}
+                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.packId", is("nist-800-53")))
+                .andExpect(jsonPath("$.compatible", is(true)));
+    }
+
+    @Test
     void updateReturnsUpdatedEntry() throws Exception {
         when(projectService.requireProjectId(null)).thenReturn(PROJECT_ID);
         var entry = makeEntry();

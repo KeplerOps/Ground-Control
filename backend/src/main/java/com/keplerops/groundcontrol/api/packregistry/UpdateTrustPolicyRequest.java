@@ -10,5 +10,5 @@ public record UpdateTrustPolicyRequest(
         String description,
         TrustOutcome defaultOutcome,
         List<Map<String, Object>> rules,
-        int priority,
-        boolean enabled) {}
+        Integer priority,
+        Boolean enabled) {}

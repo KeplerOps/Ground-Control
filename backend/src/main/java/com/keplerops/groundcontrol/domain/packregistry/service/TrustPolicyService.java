@@ -59,8 +59,8 @@ public class TrustPolicyService {
         if (command.description() != null) policy.setDescription(command.description());
         if (command.defaultOutcome() != null) policy.setDefaultOutcome(command.defaultOutcome());
         if (command.rules() != null) policy.setRules(command.rules());
-        policy.setPriority(command.priority());
-        policy.setEnabled(command.enabled());
+        if (command.priority() != null) policy.setPriority(command.priority());
+        if (command.enabled() != null) policy.setEnabled(command.enabled());
 
         var saved = trustPolicyRepository.save(policy);
         log.info("trust_policy_updated: id={}, name={}", id, policy.getName());

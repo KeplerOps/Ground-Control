@@ -132,11 +132,11 @@ public class PackRegistryController {
     }
 
     @PostMapping("/check-compatibility")
-    public ResolvedPackResponse checkCompatibility(
+    public CompatibilityCheckResponse checkCompatibility(
             @Valid @RequestBody ResolvePackRequest request, @RequestParam(required = false) String project) {
         var projectId = projectService.requireProjectId(project);
         var resolved = packResolver.resolve(projectId, request.packId(), request.versionConstraint());
         var compatible = packResolver.checkCompatibility(resolved);
-        return ResolvedPackResponse.from(resolved, compatible);
+        return new CompatibilityCheckResponse(request.packId(), resolved.resolvedVersion(), compatible);
     }
 }

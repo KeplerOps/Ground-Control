@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 public class TrustEvaluator {
 
     private static final Logger log = LoggerFactory.getLogger(TrustEvaluator.class);
+    private static final int MAX_PATTERN_LENGTH = 500;
 
     private final TrustPolicyRepository trustPolicyRepository;
 
@@ -67,8 +68,14 @@ public class TrustEvaluator {
 
         for (var rule : rules) {
             if (evaluateRule(rule, resolvedPack)) {
-                var outcomeStr = (String) rule.get("outcome");
-                var outcome = TrustOutcome.valueOf(outcomeStr);
+                var outcomeStr = String.valueOf(rule.get("outcome"));
+                TrustOutcome outcome;
+                try {
+                    outcome = TrustOutcome.valueOf(outcomeStr);
+                } catch (IllegalArgumentException e) {
+                    log.warn("trust_rule_invalid_outcome: outcome={}", outcomeStr);
+                    continue;
+                }
                 var reason = String.format(
                         "Rule matched: field='%s', operator='%s', value='%s' in policy '%s'",
                         rule.get("field"), rule.get("operator"), rule.get("value"), policy.getName());
@@ -80,25 +87,39 @@ public class TrustEvaluator {
     }
 
     private boolean evaluateRule(Map<String, Object> rule, ResolvedPack resolvedPack) {
-        var field = (String) rule.get("field");
-        var operatorStr = (String) rule.get("operator");
-        var ruleValue = (String) rule.get("value");
+        var fieldObj = rule.get("field");
+        var operatorObj = rule.get("operator");
+        var valueObj = rule.get("value");
 
-        if (field == null || operatorStr == null || ruleValue == null) {
+        if (fieldObj == null || operatorObj == null || valueObj == null) {
             return false;
         }
+
+        var field = String.valueOf(fieldObj);
+        var operatorStr = String.valueOf(operatorObj);
+        var ruleValue = String.valueOf(valueObj);
 
         var actualValue = extractField(resolvedPack, field);
         if (actualValue == null) {
             return false;
         }
 
-        var operator = TrustPolicyRuleOperator.valueOf(operatorStr);
+        TrustPolicyRuleOperator operator;
+        try {
+            operator = TrustPolicyRuleOperator.valueOf(operatorStr);
+        } catch (IllegalArgumentException e) {
+            log.warn("trust_rule_invalid_operator: operator={}", operatorStr);
+            return false;
+        }
         return switch (operator) {
             case EQUALS -> actualValue.equals(ruleValue);
             case NOT_EQUALS -> !actualValue.equals(ruleValue);
             case CONTAINS -> actualValue.contains(ruleValue);
             case MATCHES_PATTERN -> {
+                if (ruleValue.length() > MAX_PATTERN_LENGTH) {
+                    log.warn("trust_rule_pattern_too_long: length={}", ruleValue.length());
+                    yield false;
+                }
                 try {
                     yield Pattern.compile(ruleValue).matcher(actualValue).matches();
                 } catch (java.util.regex.PatternSyntaxException e) {

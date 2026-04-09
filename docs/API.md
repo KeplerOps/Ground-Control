@@ -729,7 +729,7 @@ Response wraps results in a Spring Page object with `content`, `totalElements`,
 | PUT | `/pack-registry/{packId}/{version}/withdraw` | — | 200 | Withdraw pack version |
 | DELETE | `/pack-registry/{packId}/{version}` | — | 204 | Delete pack version |
 | POST | `/pack-registry/resolve` | ResolvePackRequest | 200 | Resolve version from registry |
-| POST | `/pack-registry/check-compatibility` | ResolvePackRequest | 200 | Check pack compatibility |
+| POST | `/pack-registry/check-compatibility` | ResolvePackRequest | 200 | Check pack compatibility (returns boolean) |
 
 ### Trust Policies
 

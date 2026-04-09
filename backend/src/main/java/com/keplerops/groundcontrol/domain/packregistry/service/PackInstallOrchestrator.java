@@ -26,6 +26,11 @@ public class PackInstallOrchestrator {
 
     private static final Logger log = LoggerFactory.getLogger(PackInstallOrchestrator.class);
 
+    private static String sanitizeForLog(String input) {
+        if (input == null) return null;
+        return input.replaceAll("[\\r\\n\\t]", "_");
+    }
+
     private final PackResolver packResolver;
     private final TrustEvaluator trustEvaluator;
     private final PackInstallRecordRepository installRecordRepository;
@@ -49,8 +54,8 @@ public class PackInstallOrchestrator {
         var project = projectService.getById(command.projectId());
         log.info(
                 "pack_install_orchestration_started: pack_id={}, version_constraint={}",
-                command.packId(),
-                command.versionConstraint());
+                sanitizeForLog(command.packId()),
+                sanitizeForLog(command.versionConstraint()));
 
         var gate = resolveAndEvaluateTrust(command, project);
         if (gate.rejectionRecord() != null) {
@@ -77,7 +82,7 @@ public class PackInstallOrchestrator {
             var saved = installRecordRepository.save(record);
             log.info(
                     "pack_install_completed: pack_id={}, version={}, controls_created={}",
-                    command.packId(),
+                    gate.entry().getPackId(),
                     gate.resolved().resolvedVersion(),
                     result.controlsCreated());
             return saved;
@@ -85,7 +90,7 @@ public class PackInstallOrchestrator {
             var record =
                     buildRecord(project, command, gate.entry(), gate.resolved(), gate.trust(), InstallOutcome.FAILED);
             record.setErrorDetail("Installation failed: " + e.getMessage());
-            log.info("pack_install_failed: pack_id={}, error={}", command.packId(), e.getMessage());
+            log.info("pack_install_failed: pack_id={}, error={}", gate.entry().getPackId(), e.getMessage());
             return installRecordRepository.save(record);
         }
     }
@@ -94,8 +99,8 @@ public class PackInstallOrchestrator {
         var project = projectService.getById(command.projectId());
         log.info(
                 "pack_upgrade_orchestration_started: pack_id={}, version_constraint={}",
-                command.packId(),
-                command.versionConstraint());
+                sanitizeForLog(command.packId()),
+                sanitizeForLog(command.versionConstraint()));
 
         var gate = resolveAndEvaluateTrust(command, project);
         if (gate.rejectionRecord() != null) {
@@ -122,7 +127,7 @@ public class PackInstallOrchestrator {
             var saved = installRecordRepository.save(record);
             log.info(
                     "pack_upgrade_completed: pack_id={}, version={}, previous_version={}",
-                    command.packId(),
+                    gate.entry().getPackId(),
                     gate.resolved().resolvedVersion(),
                     result.previousVersion());
             return saved;
@@ -130,7 +135,7 @@ public class PackInstallOrchestrator {
             var record =
                     buildRecord(project, command, gate.entry(), gate.resolved(), gate.trust(), InstallOutcome.FAILED);
             record.setErrorDetail("Upgrade failed: " + e.getMessage());
-            log.info("pack_upgrade_failed: pack_id={}, error={}", command.packId(), e.getMessage());
+            log.info("pack_upgrade_failed: pack_id={}, error={}", gate.entry().getPackId(), e.getMessage());
             return installRecordRepository.save(record);
         }
     }
@@ -165,7 +170,7 @@ public class PackInstallOrchestrator {
             record.setRequestedVersion(command.versionConstraint());
             record.setPerformedBy(command.performedBy());
             record.setErrorDetail("Resolution failed: " + e.getMessage());
-            log.info("pack_install_failed: pack_id={}, reason=resolution_failed", command.packId());
+            log.info("pack_install_failed: pack_id={}, reason=resolution_failed", sanitizeForLog(command.packId()));
             return new GateResult(null, null, null, installRecordRepository.save(record));
         }
 
@@ -175,14 +180,14 @@ public class PackInstallOrchestrator {
             var trust = new TrustDecision(TrustOutcome.UNKNOWN, null, null);
             var record = buildRecord(project, command, entry, resolvedPack, trust, InstallOutcome.REJECTED);
             record.setErrorDetail("Pack is not compatible with the current platform version");
-            log.info("pack_install_rejected: pack_id={}, reason=incompatible", command.packId());
+            log.info("pack_install_rejected: pack_id={}, reason=incompatible", entry.getPackId());
             return new GateResult(resolvedPack, entry, trust, installRecordRepository.save(record));
         }
 
         var trustDecision = trustEvaluator.evaluate(command.projectId(), resolvedPack);
         if (trustDecision.outcome() == TrustOutcome.REJECTED) {
             var record = buildRecord(project, command, entry, resolvedPack, trustDecision, InstallOutcome.REJECTED);
-            log.info("pack_install_trust_rejected: pack_id={}, policy={}", command.packId(), trustDecision.policyId());
+            log.info("pack_install_trust_rejected: pack_id={}, policy={}", entry.getPackId(), trustDecision.policyId());
             return new GateResult(resolvedPack, entry, trustDecision, installRecordRepository.save(record));
         }
 

@@ -7,7 +7,9 @@ import com.keplerops.groundcontrol.domain.packregistry.repository.PackRegistryEn
 import com.keplerops.groundcontrol.domain.packregistry.state.CatalogStatus;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,6 +19,7 @@ import org.springframework.stereotype.Service;
 public class PackResolver {
 
     private static final Logger log = LoggerFactory.getLogger(PackResolver.class);
+    private static final int MAX_DEPENDENCY_DEPTH = 10;
 
     private final PackRegistryEntryRepository registryRepository;
 
@@ -44,7 +47,7 @@ public class PackResolver {
                     "No version matching constraint '%s' found for pack '%s'", versionConstraint, packId));
         }
 
-        var resolvedDeps = resolveDependencies(projectId, selected);
+        var resolvedDeps = resolveDependencies(projectId, selected, new HashSet<>(), 0);
         log.info(
                 "pack_resolved: pack_id={}, version={}, dependencies={}",
                 packId,
@@ -83,10 +86,15 @@ public class PackResolver {
         return true;
     }
 
-    List<ResolvedPack> resolveDependencies(UUID projectId, PackRegistryEntry entry) {
+    List<ResolvedPack> resolveDependencies(UUID projectId, PackRegistryEntry entry, Set<String> visited, int depth) {
         var deps = entry.getDependencies();
         if (deps == null || deps.isEmpty()) {
             return List.of();
+        }
+
+        if (depth > MAX_DEPENDENCY_DEPTH) {
+            throw new DomainValidationException("Dependency depth exceeds maximum of " + MAX_DEPENDENCY_DEPTH
+                    + " for pack '" + entry.getPackId() + "'");
         }
 
         List<ResolvedPack> resolved = new ArrayList<>();
@@ -99,7 +107,32 @@ public class PackResolver {
                         "Invalid dependency: missing packId in pack '" + entry.getPackId() + "'");
             }
 
-            resolved.add(resolve(projectId, depPackId, depConstraint));
+            if (!visited.add(depPackId)) {
+                throw new DomainValidationException(
+                        "Circular dependency detected: pack '" + depPackId + "' already in resolution chain");
+            }
+
+            var depVersions = registryRepository.findByProjectIdAndPackIdAndCatalogStatusOrderByRegisteredAtDesc(
+                    projectId, depPackId, CatalogStatus.AVAILABLE);
+            if (depVersions.isEmpty()) {
+                throw new NotFoundException(
+                        String.format("Dependency pack '%s' not found for pack '%s'", depPackId, entry.getPackId()));
+            }
+
+            PackRegistryEntry selected;
+            if (depConstraint == null || depConstraint.isBlank()) {
+                selected = selectLatest(depVersions);
+            } else {
+                selected = selectByConstraint(depVersions, depConstraint);
+            }
+            if (selected == null) {
+                throw new NotFoundException(
+                        String.format("No version matching '%s' for dependency '%s'", depConstraint, depPackId));
+            }
+
+            var nestedDeps = resolveDependencies(projectId, selected, visited, depth + 1);
+            resolved.add(new ResolvedPack(
+                    selected, selected.getVersion(), selected.getSourceUrl(), selected.getChecksum(), nestedDeps));
         }
         return resolved;
     }
