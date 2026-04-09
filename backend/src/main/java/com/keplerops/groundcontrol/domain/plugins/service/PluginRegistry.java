@@ -141,7 +141,7 @@ public class PluginRegistry {
                 .orElseThrow(() -> new NotFoundException("Dynamic plugin not found: " + name));
 
         registeredPluginRepository.delete(entity);
-        log.info("plugin_unregistered: name={} projectId={}", name, projectId);
+        log.info("plugin_unregistered: name={} projectId={}", entity.getName(), projectId);
     }
 
     private ManagedPlugin runLifecycle(ManagedPlugin managed) {
