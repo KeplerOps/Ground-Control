@@ -98,7 +98,14 @@ public class TrustEvaluator {
             case EQUALS -> actualValue.equals(ruleValue);
             case NOT_EQUALS -> !actualValue.equals(ruleValue);
             case CONTAINS -> actualValue.contains(ruleValue);
-            case MATCHES_PATTERN -> Pattern.matches(ruleValue, actualValue);
+            case MATCHES_PATTERN -> {
+                try {
+                    yield Pattern.compile(ruleValue).matcher(actualValue).matches();
+                } catch (java.util.regex.PatternSyntaxException e) {
+                    log.warn("trust_rule_invalid_pattern: pattern={}", ruleValue);
+                    yield false;
+                }
+            }
             case IN_LIST -> {
                 var items = List.of(ruleValue.split(","));
                 yield items.stream().map(String::trim).anyMatch(actualValue::equals);

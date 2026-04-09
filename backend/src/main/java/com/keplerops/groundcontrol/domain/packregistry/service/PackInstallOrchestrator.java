@@ -6,10 +6,12 @@ import com.keplerops.groundcontrol.domain.controlpacks.service.UpgradeControlPac
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.packregistry.model.PackInstallRecord;
+import com.keplerops.groundcontrol.domain.packregistry.model.PackRegistryEntry;
 import com.keplerops.groundcontrol.domain.packregistry.repository.PackInstallRecordRepository;
 import com.keplerops.groundcontrol.domain.packregistry.state.InstallOutcome;
 import com.keplerops.groundcontrol.domain.packregistry.state.PackType;
 import com.keplerops.groundcontrol.domain.packregistry.state.TrustOutcome;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import java.util.List;
 import java.util.UUID;
@@ -50,73 +52,41 @@ public class PackInstallOrchestrator {
                 command.packId(),
                 command.versionConstraint());
 
-        // Step 1: Resolve from registry
-        ResolvedPack resolvedPack;
+        var gate = resolveAndEvaluateTrust(command, project);
+        if (gate.rejectionRecord() != null) {
+            return gate.rejectionRecord();
+        }
+
         try {
-            resolvedPack = packResolver.resolve(command.projectId(), command.packId(), command.versionConstraint());
-        } catch (NotFoundException e) {
-            var record = new PackInstallRecord(
-                    project, command.packId(), PackType.CONTROL_PACK, TrustOutcome.UNKNOWN, InstallOutcome.FAILED);
-            record.setRequestedVersion(command.versionConstraint());
-            record.setPerformedBy(command.performedBy());
-            record.setErrorDetail("Resolution failed: " + e.getMessage());
+            validateControlPackEntries(gate.entry(), command, "installation");
+            var installCommand = new InstallControlPackCommand(
+                    command.projectId(),
+                    gate.entry().getPackId(),
+                    gate.resolved().resolvedVersion(),
+                    gate.entry().getPublisher(),
+                    gate.entry().getDescription(),
+                    gate.entry().getSourceUrl(),
+                    gate.resolved().resolvedChecksum(),
+                    gate.entry().getCompatibility(),
+                    gate.entry().getRegistryMetadata(),
+                    command.entries());
+            var result = controlPackService.install(installCommand);
+            var record = buildRecord(
+                    project, command, gate.entry(), gate.resolved(), gate.trust(), InstallOutcome.INSTALLED);
+            record.setInstalledEntityId(result.controlPack().getId());
             var saved = installRecordRepository.save(record);
-            log.info("pack_install_failed: pack_id={}, reason=resolution_failed", command.packId());
+            log.info(
+                    "pack_install_completed: pack_id={}, version={}, controls_created={}",
+                    command.packId(),
+                    gate.resolved().resolvedVersion(),
+                    result.controlsCreated());
             return saved;
-        }
-
-        var entry = resolvedPack.entry();
-
-        // Step 2: Check compatibility
-        if (!packResolver.checkCompatibility(resolvedPack)) {
-            var record = new PackInstallRecord(
-                    project, command.packId(), entry.getPackType(), TrustOutcome.UNKNOWN, InstallOutcome.REJECTED);
-            record.setRequestedVersion(command.versionConstraint());
-            record.setResolvedVersion(resolvedPack.resolvedVersion());
-            record.setResolvedSource(resolvedPack.resolvedSource());
-            record.setResolvedChecksum(resolvedPack.resolvedChecksum());
-            record.setPerformedBy(command.performedBy());
-            record.setErrorDetail("Pack is not compatible with the current platform version");
-            var saved = installRecordRepository.save(record);
-            log.info("pack_install_rejected: pack_id={}, reason=incompatible", command.packId());
-            return saved;
-        }
-
-        // Step 3: Evaluate trust
-        var trustDecision = trustEvaluator.evaluate(command.projectId(), resolvedPack);
-
-        if (trustDecision.outcome() == TrustOutcome.REJECTED) {
-            var record = new PackInstallRecord(
-                    project, command.packId(), entry.getPackType(), TrustOutcome.REJECTED, InstallOutcome.REJECTED);
-            record.setRequestedVersion(command.versionConstraint());
-            record.setResolvedVersion(resolvedPack.resolvedVersion());
-            record.setResolvedSource(resolvedPack.resolvedSource());
-            record.setResolvedChecksum(resolvedPack.resolvedChecksum());
-            record.setTrustPolicyId(trustDecision.policyId());
-            record.setTrustReason(trustDecision.reason());
-            record.setPerformedBy(command.performedBy());
-            var saved = installRecordRepository.save(record);
-            log.info("pack_install_trust_rejected: pack_id={}, policy={}", command.packId(), trustDecision.policyId());
-            return saved;
-        }
-
-        // Step 4: Delegate to type-specific installer
-        try {
-            return executeInstall(command, project, entry, resolvedPack, trustDecision);
         } catch (Exception e) {
-            var record = new PackInstallRecord(
-                    project, command.packId(), entry.getPackType(), trustDecision.outcome(), InstallOutcome.FAILED);
-            record.setRequestedVersion(command.versionConstraint());
-            record.setResolvedVersion(resolvedPack.resolvedVersion());
-            record.setResolvedSource(resolvedPack.resolvedSource());
-            record.setResolvedChecksum(resolvedPack.resolvedChecksum());
-            record.setTrustPolicyId(trustDecision.policyId());
-            record.setTrustReason(trustDecision.reason());
-            record.setPerformedBy(command.performedBy());
+            var record =
+                    buildRecord(project, command, gate.entry(), gate.resolved(), gate.trust(), InstallOutcome.FAILED);
             record.setErrorDetail("Installation failed: " + e.getMessage());
-            var saved = installRecordRepository.save(record);
             log.info("pack_install_failed: pack_id={}, error={}", command.packId(), e.getMessage());
-            return saved;
+            return installRecordRepository.save(record);
         }
     }
 
@@ -127,64 +97,40 @@ public class PackInstallOrchestrator {
                 command.packId(),
                 command.versionConstraint());
 
-        // Step 1: Resolve from registry
-        ResolvedPack resolvedPack;
+        var gate = resolveAndEvaluateTrust(command, project);
+        if (gate.rejectionRecord() != null) {
+            return gate.rejectionRecord();
+        }
+
         try {
-            resolvedPack = packResolver.resolve(command.projectId(), command.packId(), command.versionConstraint());
-        } catch (NotFoundException e) {
-            var record = new PackInstallRecord(
-                    project, command.packId(), PackType.CONTROL_PACK, TrustOutcome.UNKNOWN, InstallOutcome.FAILED);
-            record.setRequestedVersion(command.versionConstraint());
-            record.setPerformedBy(command.performedBy());
-            record.setErrorDetail("Resolution failed: " + e.getMessage());
-            return installRecordRepository.save(record);
-        }
-
-        var entry = resolvedPack.entry();
-
-        // Step 2: Check compatibility
-        if (!packResolver.checkCompatibility(resolvedPack)) {
-            var record = new PackInstallRecord(
-                    project, command.packId(), entry.getPackType(), TrustOutcome.UNKNOWN, InstallOutcome.REJECTED);
-            record.setRequestedVersion(command.versionConstraint());
-            record.setResolvedVersion(resolvedPack.resolvedVersion());
-            record.setResolvedSource(resolvedPack.resolvedSource());
-            record.setResolvedChecksum(resolvedPack.resolvedChecksum());
-            record.setPerformedBy(command.performedBy());
-            record.setErrorDetail("Pack is not compatible with the current platform version");
-            return installRecordRepository.save(record);
-        }
-
-        // Step 3: Evaluate trust
-        var trustDecision = trustEvaluator.evaluate(command.projectId(), resolvedPack);
-
-        if (trustDecision.outcome() == TrustOutcome.REJECTED) {
-            var record = new PackInstallRecord(
-                    project, command.packId(), entry.getPackType(), TrustOutcome.REJECTED, InstallOutcome.REJECTED);
-            record.setRequestedVersion(command.versionConstraint());
-            record.setResolvedVersion(resolvedPack.resolvedVersion());
-            record.setResolvedSource(resolvedPack.resolvedSource());
-            record.setResolvedChecksum(resolvedPack.resolvedChecksum());
-            record.setTrustPolicyId(trustDecision.policyId());
-            record.setTrustReason(trustDecision.reason());
-            record.setPerformedBy(command.performedBy());
-            return installRecordRepository.save(record);
-        }
-
-        // Step 4: Delegate to type-specific upgrader
-        try {
-            return executeUpgrade(command, project, entry, resolvedPack, trustDecision);
+            validateControlPackEntries(gate.entry(), command, "upgrade");
+            var upgradeCommand = new UpgradeControlPackCommand(
+                    command.projectId(),
+                    gate.entry().getPackId(),
+                    gate.resolved().resolvedVersion(),
+                    gate.entry().getPublisher(),
+                    gate.entry().getDescription(),
+                    gate.entry().getSourceUrl(),
+                    gate.resolved().resolvedChecksum(),
+                    gate.entry().getCompatibility(),
+                    gate.entry().getRegistryMetadata(),
+                    command.entries());
+            var result = controlPackService.upgrade(upgradeCommand);
+            var record =
+                    buildRecord(project, command, gate.entry(), gate.resolved(), gate.trust(), InstallOutcome.UPGRADED);
+            record.setInstalledEntityId(result.controlPack().getId());
+            var saved = installRecordRepository.save(record);
+            log.info(
+                    "pack_upgrade_completed: pack_id={}, version={}, previous_version={}",
+                    command.packId(),
+                    gate.resolved().resolvedVersion(),
+                    result.previousVersion());
+            return saved;
         } catch (Exception e) {
-            var record = new PackInstallRecord(
-                    project, command.packId(), entry.getPackType(), trustDecision.outcome(), InstallOutcome.FAILED);
-            record.setRequestedVersion(command.versionConstraint());
-            record.setResolvedVersion(resolvedPack.resolvedVersion());
-            record.setResolvedSource(resolvedPack.resolvedSource());
-            record.setResolvedChecksum(resolvedPack.resolvedChecksum());
-            record.setTrustPolicyId(trustDecision.policyId());
-            record.setTrustReason(trustDecision.reason());
-            record.setPerformedBy(command.performedBy());
+            var record =
+                    buildRecord(project, command, gate.entry(), gate.resolved(), gate.trust(), InstallOutcome.FAILED);
             record.setErrorDetail("Upgrade failed: " + e.getMessage());
+            log.info("pack_upgrade_failed: pack_id={}, error={}", command.packId(), e.getMessage());
             return installRecordRepository.save(record);
         }
     }
@@ -206,86 +152,52 @@ public class PackInstallOrchestrator {
                 .orElseThrow(() -> new NotFoundException("Install record not found: " + recordId));
     }
 
-    private PackInstallRecord executeInstall(
-            InstallPackCommand command,
-            com.keplerops.groundcontrol.domain.projects.model.Project project,
-            com.keplerops.groundcontrol.domain.packregistry.model.PackRegistryEntry entry,
-            ResolvedPack resolvedPack,
-            TrustDecision trustDecision) {
+    private record GateResult(
+            ResolvedPack resolved, PackRegistryEntry entry, TrustDecision trust, PackInstallRecord rejectionRecord) {}
 
-        if (entry.getPackType() != PackType.CONTROL_PACK) {
-            throw new DomainValidationException("Only CONTROL_PACK installation is currently supported");
+    private GateResult resolveAndEvaluateTrust(InstallPackCommand command, Project project) {
+        ResolvedPack resolvedPack;
+        try {
+            resolvedPack = packResolver.resolve(command.projectId(), command.packId(), command.versionConstraint());
+        } catch (NotFoundException e) {
+            var record = new PackInstallRecord(
+                    project, command.packId(), PackType.CONTROL_PACK, TrustOutcome.UNKNOWN, InstallOutcome.FAILED);
+            record.setRequestedVersion(command.versionConstraint());
+            record.setPerformedBy(command.performedBy());
+            record.setErrorDetail("Resolution failed: " + e.getMessage());
+            log.info("pack_install_failed: pack_id={}, reason=resolution_failed", command.packId());
+            return new GateResult(null, null, null, installRecordRepository.save(record));
         }
 
-        if (command.entries() == null || command.entries().isEmpty()) {
-            throw new DomainValidationException("Control pack entries must be provided for installation");
+        var entry = resolvedPack.entry();
+
+        if (!packResolver.checkCompatibility(resolvedPack)) {
+            var trust = new TrustDecision(TrustOutcome.UNKNOWN, null, null);
+            var record = buildRecord(project, command, entry, resolvedPack, trust, InstallOutcome.REJECTED);
+            record.setErrorDetail("Pack is not compatible with the current platform version");
+            log.info("pack_install_rejected: pack_id={}, reason=incompatible", command.packId());
+            return new GateResult(resolvedPack, entry, trust, installRecordRepository.save(record));
         }
 
-        var installCommand = new InstallControlPackCommand(
-                command.projectId(),
-                entry.getPackId(),
-                resolvedPack.resolvedVersion(),
-                entry.getPublisher(),
-                entry.getDescription(),
-                entry.getSourceUrl(),
-                resolvedPack.resolvedChecksum(),
-                entry.getCompatibility(),
-                entry.getRegistryMetadata(),
-                command.entries());
+        var trustDecision = trustEvaluator.evaluate(command.projectId(), resolvedPack);
+        if (trustDecision.outcome() == TrustOutcome.REJECTED) {
+            var record = buildRecord(project, command, entry, resolvedPack, trustDecision, InstallOutcome.REJECTED);
+            log.info("pack_install_trust_rejected: pack_id={}, policy={}", command.packId(), trustDecision.policyId());
+            return new GateResult(resolvedPack, entry, trustDecision, installRecordRepository.save(record));
+        }
 
-        var result = controlPackService.install(installCommand);
-
-        var record = new PackInstallRecord(
-                project, command.packId(), entry.getPackType(), trustDecision.outcome(), InstallOutcome.INSTALLED);
-        record.setRequestedVersion(command.versionConstraint());
-        record.setResolvedVersion(resolvedPack.resolvedVersion());
-        record.setResolvedSource(resolvedPack.resolvedSource());
-        record.setResolvedChecksum(resolvedPack.resolvedChecksum());
-        record.setTrustPolicyId(trustDecision.policyId());
-        record.setTrustReason(trustDecision.reason());
-        record.setPerformedBy(command.performedBy());
-        record.setInstalledEntityId(result.controlPack().getId());
-
-        var saved = installRecordRepository.save(record);
-        log.info(
-                "pack_install_completed: pack_id={}, version={}, controls_created={}",
-                command.packId(),
-                resolvedPack.resolvedVersion(),
-                result.controlsCreated());
-        return saved;
+        return new GateResult(resolvedPack, entry, trustDecision, null);
     }
 
-    private PackInstallRecord executeUpgrade(
+    private PackInstallRecord buildRecord(
+            Project project,
             InstallPackCommand command,
-            com.keplerops.groundcontrol.domain.projects.model.Project project,
-            com.keplerops.groundcontrol.domain.packregistry.model.PackRegistryEntry entry,
+            PackRegistryEntry entry,
             ResolvedPack resolvedPack,
-            TrustDecision trustDecision) {
-
-        if (entry.getPackType() != PackType.CONTROL_PACK) {
-            throw new DomainValidationException("Only CONTROL_PACK upgrade is currently supported");
-        }
-
-        if (command.entries() == null || command.entries().isEmpty()) {
-            throw new DomainValidationException("Control pack entries must be provided for upgrade");
-        }
-
-        var upgradeCommand = new UpgradeControlPackCommand(
-                command.projectId(),
-                entry.getPackId(),
-                resolvedPack.resolvedVersion(),
-                entry.getPublisher(),
-                entry.getDescription(),
-                entry.getSourceUrl(),
-                resolvedPack.resolvedChecksum(),
-                entry.getCompatibility(),
-                entry.getRegistryMetadata(),
-                command.entries());
-
-        var result = controlPackService.upgrade(upgradeCommand);
-
-        var record = new PackInstallRecord(
-                project, command.packId(), entry.getPackType(), trustDecision.outcome(), InstallOutcome.UPGRADED);
+            TrustDecision trustDecision,
+            InstallOutcome outcome) {
+        var record =
+                new PackInstallRecord(project, command.packId(), entry.getPackType(), trustDecision.outcome(), outcome);
         record.setRequestedVersion(command.versionConstraint());
         record.setResolvedVersion(resolvedPack.resolvedVersion());
         record.setResolvedSource(resolvedPack.resolvedSource());
@@ -293,14 +205,15 @@ public class PackInstallOrchestrator {
         record.setTrustPolicyId(trustDecision.policyId());
         record.setTrustReason(trustDecision.reason());
         record.setPerformedBy(command.performedBy());
-        record.setInstalledEntityId(result.controlPack().getId());
+        return record;
+    }
 
-        var saved = installRecordRepository.save(record);
-        log.info(
-                "pack_upgrade_completed: pack_id={}, version={}, previous_version={}",
-                command.packId(),
-                resolvedPack.resolvedVersion(),
-                result.previousVersion());
-        return saved;
+    private void validateControlPackEntries(PackRegistryEntry entry, InstallPackCommand command, String operation) {
+        if (entry.getPackType() != PackType.CONTROL_PACK) {
+            throw new DomainValidationException("Only CONTROL_PACK " + operation + " is currently supported");
+        }
+        if (command.entries() == null || command.entries().isEmpty()) {
+            throw new DomainValidationException("Control pack entries must be provided for " + operation);
+        }
     }
 }
