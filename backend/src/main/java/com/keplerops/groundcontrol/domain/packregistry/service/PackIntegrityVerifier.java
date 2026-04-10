@@ -381,5 +381,27 @@ public class PackIntegrityVerifier {
 
     private record SignatureVerificationResult(Boolean signatureVerified, Boolean signerTrusted) {}
 
-    private record SignatureMaterial(String algorithm, String keyAlgorithm, String signature, byte[] publicKeyBytes) {}
+    private record SignatureMaterial(String algorithm, String keyAlgorithm, String signature, byte[] publicKeyBytes) {
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof SignatureMaterial that)) return false;
+            return java.util.Objects.equals(algorithm, that.algorithm)
+                    && java.util.Objects.equals(keyAlgorithm, that.keyAlgorithm)
+                    && java.util.Objects.equals(signature, that.signature)
+                    && java.util.Arrays.equals(publicKeyBytes, that.publicKeyBytes);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = java.util.Objects.hash(algorithm, keyAlgorithm, signature);
+            result = 31 * result + java.util.Arrays.hashCode(publicKeyBytes);
+            return result;
+        }
+
+        @Override
+        public String toString() {
+            return "SignatureMaterial[algorithm=" + algorithm + ", keyAlgorithm=" + keyAlgorithm + "]";
+        }
+    }
 }
