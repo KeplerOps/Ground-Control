@@ -436,6 +436,37 @@ class RequirementControllerTest {
             mockMvc.perform(delete("/api/v1/requirements/" + reqId + "/traceability/" + linkId))
                     .andExpect(status().isNoContent());
         }
+
+        @Test
+        void findByArtifact_returnsMatchingLinks() throws Exception {
+            var req = createRequirement("REQ-001");
+            var link = new TraceabilityLink(req, ArtifactType.CODE_FILE, "backend/src/Main.java", LinkType.IMPLEMENTS);
+            setField(link, "id", UUID.randomUUID());
+            setField(link, "createdAt", Instant.now());
+            setField(link, "updatedAt", Instant.now());
+            when(traceabilityService.findByArtifact(ArtifactType.CODE_FILE, "backend/src/Main.java"))
+                    .thenReturn(List.of(link));
+
+            mockMvc.perform(get("/api/v1/requirements/traceability/by-artifact")
+                            .param("artifactType", "CODE_FILE")
+                            .param("artifactIdentifier", "backend/src/Main.java"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[0].artifactType", is("CODE_FILE")))
+                    .andExpect(jsonPath("$[0].artifactIdentifier", is("backend/src/Main.java")))
+                    .andExpect(jsonPath("$[0].linkType", is("IMPLEMENTS")));
+        }
+
+        @Test
+        void findByArtifact_returnsEmptyWhenNoMatch() throws Exception {
+            when(traceabilityService.findByArtifact(ArtifactType.CODE_FILE, "nonexistent.java"))
+                    .thenReturn(List.of());
+
+            mockMvc.perform(get("/api/v1/requirements/traceability/by-artifact")
+                            .param("artifactType", "CODE_FILE")
+                            .param("artifactIdentifier", "nonexistent.java"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()", is(0)));
+        }
     }
 
     @Nested

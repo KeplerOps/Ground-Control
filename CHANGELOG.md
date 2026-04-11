@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.110.0] - 2026-04-10
+
+### Added
+
+- Reverse traceability lookup: `GET /api/v1/requirements/traceability/by-artifact`
+  endpoint and `gc_get_traceability_by_artifact` MCP tool for querying which
+  requirements link to a given artifact (GC-O002)
+- Self-referential traceability enforcement in `check_live_policy.mjs`: automated
+  reverse traceability check that verifies substantive code files are linked to
+  requirements, with baseline regression prevention
+
 ## [0.109.0] - 2026-04-09
 
 ### Added

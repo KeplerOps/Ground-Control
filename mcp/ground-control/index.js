@@ -17,6 +17,7 @@ import {
   createRelation,
   getRelations,
   getTraceabilityLinks,
+  getTraceabilityByArtifact,
   createTraceabilityLink,
   detectCycles,
   findOrphans,
@@ -550,6 +551,24 @@ server.tool(
     try {
       const links = await getTraceabilityLinks(id);
       if (Array.isArray(links) && links.length === 0) return ok("No traceability links found.");
+      return ok(JSON.stringify(links, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_traceability_by_artifact",
+  "Find all traceability links for a given artifact (reverse lookup: from code/test/ADR to requirements).",
+  {
+    artifact_type: z.enum(ARTIFACT_TYPES).describe("Type of artifact"),
+    artifact_identifier: z.string().describe("Artifact identifier (e.g. file path, issue number)"),
+  },
+  async ({ artifact_type, artifact_identifier }) => {
+    try {
+      const links = await getTraceabilityByArtifact(artifact_type, artifact_identifier);
+      if (Array.isArray(links) && links.length === 0) return ok("No traceability links found for this artifact.");
       return ok(JSON.stringify(links, null, 2));
     } catch (e) {
       return err(e);

@@ -38,7 +38,15 @@ http://localhost:8000/api/v1/
 |--------|------|------|--------|---------|
 | POST | `/requirements/{id}/traceability` | TraceabilityLinkRequest | 201 | Create traceability link |
 | GET | `/requirements/{id}/traceability` | — | 200 | List traceability links |
+| GET | `/requirements/traceability/by-artifact` | — | 200 | Reverse lookup: find links by artifact |
 | DELETE | `/requirements/{id}/traceability/{linkId}` | — | 204 | Delete traceability link |
+
+`GET /requirements/traceability/by-artifact` accepts query parameters:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `artifactType` | enum | GITHUB_ISSUE, PULL_REQUEST, CODE_FILE, ADR, CONFIG, POLICY, TEST, SPEC, PROOF, DOCUMENTATION, RISK_SCENARIO, CONTROL |
+| `artifactIdentifier` | string | Artifact identifier (e.g. repo-relative path, issue number, ADR UID) |
 
 ### Audit History
 
