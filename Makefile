@@ -1,6 +1,6 @@
 .PHONY: rapid build test test-cov format lint check integration verify policy policy-tests policy-live \
        ground-control-mcp-install sync-ground-control-policy scaffold-controller scaffold-audited-entity \
-       scaffold-l2-state-machine dev clean up down docker-build smoke frontend-install frontend-dev \
+       scaffold-l2-state-machine sync-packs trigger-pack-sync dev clean up down docker-build smoke frontend-install frontend-dev \
        frontend-build frontend-lint frontend-format frontend-test deploy deploy-infra
 
 # --- Rapid dev loop (< 5s) ---
@@ -51,6 +51,12 @@ policy-live: ground-control-mcp-install ## Run live Ground Control policy checks
 
 sync-ground-control-policy: ground-control-mcp-install ## Sync repo policy expectations into Ground Control
 	node tools/ground_control/sync_policy.mjs --apply
+
+sync-packs: ## Import and install cataloged packs into Ground Control (requires GC_BASE_URL and pack-registry token)
+	node tools/packs/sync_packs.mjs
+
+trigger-pack-sync: ## Dispatch the remote pack sync workflow (PROJECT=<id> PACK_IDS=id1,id2 REF=<branch>)
+	./scripts/pack-sync.sh $(if $(PROJECT),--project $(PROJECT),) $(if $(PACK_IDS),--pack-ids $(PACK_IDS),) $(if $(REF),--ref $(REF),)
 
 scaffold-controller: ## Create a controller + WebMvcTest scaffold (NAME=Foo FEATURE=bar)
 	python3 bin/scaffold-controller "$(FEATURE)" "$(NAME)"
