@@ -30,6 +30,16 @@ export GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN="..."
 node tools/packs/sync_packs.mjs
 ```
 
+To dispatch the GitHub-hosted pack sync workflow from your local checkout:
+
+```sh
+./scripts/pack-sync.sh --ref "$(git rev-parse --abbrev-ref HEAD)"
+```
+
+That path requires the `pack-registry-sync.yml` workflow to already exist on the
+repository default branch, because GitHub does not expose new
+`workflow_dispatch` workflows until they are registered there.
+
 Requirements:
 
 - The target instance must expose the pack-registry APIs.
