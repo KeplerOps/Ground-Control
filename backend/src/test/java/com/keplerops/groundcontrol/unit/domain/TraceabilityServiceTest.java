@@ -182,6 +182,35 @@ class TraceabilityServiceTest {
     }
 
     @Nested
+    class FindByArtifact {
+
+        @Test
+        void returnsMatchingLinks() {
+            var req = makeRequirement("REQ-001");
+            var link = new TraceabilityLink(req, ArtifactType.CODE_FILE, "backend/src/Main.java", LinkType.IMPLEMENTS);
+            setField(link, "id", UUID.randomUUID());
+            when(traceabilityLinkRepository.findByArtifactTypeAndArtifactIdentifierWithRequirement(
+                            ArtifactType.CODE_FILE, "backend/src/Main.java"))
+                    .thenReturn(List.of(link));
+
+            var result = service.findByArtifact(ArtifactType.CODE_FILE, "backend/src/Main.java");
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getArtifactIdentifier()).isEqualTo("backend/src/Main.java");
+            assertThat(result.get(0).getLinkType()).isEqualTo(LinkType.IMPLEMENTS);
+        }
+
+        @Test
+        void returnsEmptyWhenNoMatch() {
+            when(traceabilityLinkRepository.findByArtifactTypeAndArtifactIdentifierWithRequirement(
+                            ArtifactType.CODE_FILE, "nonexistent.java"))
+                    .thenReturn(List.of());
+
+            var result = service.findByArtifact(ArtifactType.CODE_FILE, "nonexistent.java");
+            assertThat(result).isEmpty();
+        }
+    }
+
+    @Nested
     class DeleteLink {
 
         @Test
