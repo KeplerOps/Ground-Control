@@ -64,6 +64,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: repo-policy
+        name: repo policy guardrails
+        entry: python3 bin/policy --skip-pr-body --staged
+        language: system
+        files: ^(AGENTS\.md|\.claude/|\.github/|architecture/|backend/|docs/|mcp/|specs/|tools/)
+        pass_filenames: false
+
       - id: gradle-check
         name: gradle check (build + test + static analysis + coverage)
         entry: bash -c 'cd backend && ./gradlew check -q'

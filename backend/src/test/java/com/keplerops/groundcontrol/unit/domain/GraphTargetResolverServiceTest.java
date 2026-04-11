@@ -86,7 +86,8 @@ class GraphTargetResolverServiceTest {
     @ParameterizedTest
     @EnumSource(
             value = AssetLinkTargetType.class,
-            names = {"THREAT_MODEL_ENTRY", "FINDING", "EVIDENCE", "AUDIT", "EXTERNAL"})
+            names = {"THREAT_MODEL_ENTRY", "FINDING", "EVIDENCE", "AUDIT", "ISSUE", "CODE", "CONFIGURATION", "EXTERNAL"
+            })
     void validateAssetTargetAcceptsExternalTargets(AssetLinkTargetType targetType) {
         var validated = graphTargetResolverService.validateAssetTarget(projectId, targetType, null, "EXT-1");
 
@@ -201,8 +202,14 @@ class GraphTargetResolverServiceTest {
                                     : java.util.Optional.empty());
             case CONTROL -> when(controlRepository.existsByIdAndProjectId(targetId, projectId))
                     .thenReturn(exists);
-            case THREAT_MODEL_ENTRY, FINDING, EVIDENCE, AUDIT, EXTERNAL -> throw new IllegalArgumentException(
-                    "Not an internal target type");
+            case THREAT_MODEL_ENTRY,
+                    FINDING,
+                    EVIDENCE,
+                    AUDIT,
+                    ISSUE,
+                    CODE,
+                    CONFIGURATION,
+                    EXTERNAL -> throw new IllegalArgumentException("Not an internal target type");
         }
     }
 

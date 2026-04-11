@@ -47,6 +47,12 @@
         <Bug pattern="CT_CONSTRUCTOR_THROW" />
     </Match>
 
+    <!-- Spring-managed service that validates wiring at construction time -->
+    <Match>
+        <Class name="com.keplerops.groundcontrol.domain.packregistry.service.PackTypeHandlerRegistry" />
+        <Bug pattern="CT_CONSTRUCTOR_THROW" />
+    </Match>
+
     <!-- Envers revision entity inherits correct equals from DefaultRevisionEntity -->
     <Match>
         <Class name="com.keplerops.groundcontrol.domain.audit.GroundControlRevisionEntity" />

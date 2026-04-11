@@ -132,6 +132,8 @@ TLA+ is adopted for verifying Ground Control's own design-level properties:
 
 TLA+ specs live in `specs/tla/` at the repository root, versioned with code. TLC model checking runs as part of the verification pipeline.
 
+Implementation is staged. The repository now carries versioned TLA+ specs and policy sync tooling that keeps verification-oriented ADR and quality-gate metadata aligned. The common `VerificationResult` domain entity is implemented; verifier execution/orchestration adapters remain future work.
+
 ### 5. Separation of concerns
 
 | Concern | Scope | Tools |
@@ -150,17 +152,17 @@ domain/
     verification/           # New domain area
         model/
             VerificationResult.java
-            VerifierType.java         # Enum of known provers
             VerificationStatus.java   # PROVEN, REFUTED, TIMEOUT, UNKNOWN, ERROR
+            AssuranceLevel.java       # L0-L3
         service/
-            VerificationService.java  # Stores results, queries verification status
+            VerificationResultService.java  # Stores results, resolves target/requirement, queries status
+            VerifierAdapter.java            # Port: execute a verifier and return a common result payload
         repository/
             VerificationResultRepository.java
 
 infrastructure/
     verifiers/              # Adapter layer for external provers
-        VerifierAdapter.java          # Interface: verify(target, property) -> result
-        OpenJmlAdapter.java           # Calls OpenJML ESC on Java source
+        OpenJmlAdapter.java          # Calls OpenJML ESC on Java source
         TlcAdapter.java              # Calls TLC on TLA+ specs
         OpaAdapter.java              # Calls OPA on Rego policies
         # Future: FramaCAdapter, VerusAdapter, DafnyAdapter, KeyAdapter
@@ -168,12 +170,21 @@ infrastructure/
 
 The `infrastructure/verifiers/` package follows the ports-and-adapters pattern: `domain/` defines what a verification result looks like; `infrastructure/` knows how to invoke specific provers.
 
+Adapter guardrails:
+
+- The canonical verifier selector is the existing `VerificationResult.prover` string. Do not introduce a `VerifierType` enum or a second registry schema that can drift from persisted data and API/MCP contracts.
+- Adapter implementations are execution boundaries only. They must not depend on controllers or repositories, and they must not persist `VerificationResult` entities directly. Project resolution, target/requirement resolution, and result persistence stay in the domain service layer.
+- Tool-specific output belongs in the existing `evidence` JSONB/TEXT map so the common schema stays stable. Do not add per-verifier tables, nullable columns, or parallel DTO hierarchies unless a shared query or workflow requirement proves the need.
+- Manual review participates through the same adapter contract and common result schema. It is not a special-case bypass around validation, auditing, or persistence.
+- External verifier integrations must follow existing infrastructure patterns: validated configuration, bounded execution, structured logs, and no shell-string command construction or secret-rich log output.
+
 ## Consequences
 
 ### Positive
 
 - Platform can verify software in any language — not limited to Java
 - Graph-based traceability works across verification tools: the differentiator is preserved and strengthened
+- Reverse traceability lookup (`GET /requirements/traceability/by-artifact`) enables automated enforcement that code is linked to requirements, closing the bidirectional traceability loop and supporting self-referential validation (GC-O002). Lookup errors are tracked separately from untraced files for operational debuggability.
 - Security use case is viable: threat model -> security requirement -> formal property -> language-specific proof -> graph-stored evidence
 - Design-level verification via TLA+ is immediately actionable, high-ROI, and proven at AWS scale
 - No rearchitecting needed when adding new prover backends
@@ -196,6 +207,11 @@ The `infrastructure/verifiers/` package follows the ports-and-adapters pattern: 
 | Prover-agnostic result schema loses prover-specific nuance | The `evidence` JSONB field stores raw prover output. The schema captures universal properties (proven/refuted/timeout); JSONB preserves prover-specific details (counterexamples, proof terms, coverage metrics). |
 | Too many verification tools to maintain | Ground Control orchestrates — it doesn't maintain the provers themselves. Each backend is a thin adapter (~100-200 lines) calling an external tool's CLI or API. |
 | VerificationResult expiry/staleness is hard to track | `expiresAt` field combined with TraceabilityLink's `syncStatus` flag stale results when source artifacts change. Graph queries surface "verification gaps" — requirements with expired or missing results. |
+
+## Implementation Status
+
+- **§2 VerificationResult entity** — Implemented (GC-F001). Domain: `domain/verification/`, API: `api/verification/`, Migrations: V049-V050, MCP: 5 tools. Target and requirement FKs use eager fetch.
+- **§6 infrastructure/verifiers/ adapters** — Not yet implemented. Future work per individual prover requirements.
 
 ## Related ADRs
 

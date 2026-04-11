@@ -9,6 +9,7 @@ This is a Java 21 / Spring Boot 3.4 / Gradle project.
 
 - Rapid dev loop: `make rapid` (format + compile, ~3-5s)
 - Test: `make test` (unit tests, no static analysis)
+- Policy: `make policy` (repo-native ADR/workflow guardrails shared by Claude and Codex)
 - Format: `cd backend && ./gradlew spotlessApply`
 - Lint: `cd backend && ./gradlew spotlessCheck`
 - Full check: `make check` (CI-equivalent: build + tests + all static analysis)
@@ -16,6 +17,7 @@ This is a Java 21 / Spring Boot 3.4 / Gradle project.
 - Run: `cd backend && ./gradlew bootRun`
 
 Use `make rapid` for the inner dev loop. Use `make check` before pushing.
+If you touched workflow, ADR, controller, migration, or MCP surfaces, run `make policy` as well.
 
 ## Frontend
 

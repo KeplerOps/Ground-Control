@@ -57,11 +57,15 @@ backend/src/main/java/com/keplerops/groundcontrol/
 │   ├── requirements/             # RequirementController, request/response records
 │   ├── baselines/                # BaselineController, request/response records
 │   ├── admin/                    # ImportController, SweepController, AnalysisController, GraphController, EmbeddingController
+│   ├── verification/             # VerificationResultController, request/response records
+│   ├── plugins/                  # PluginController, request/response records
 │   └── GlobalExceptionHandler.java
 ├── domain/                       # Business logic (Spring-web-free)
 │   ├── exception/                # Domain exception hierarchy
 │   ├── projects/                 # Project entity, repository, service
 │   ├── baselines/                # Baseline entity, repository, service
+│   ├── verification/             # VerificationResult entity, VerificationStatus/AssuranceLevel enums, repository, service
+│   ├── plugins/                  # Plugin interface, PluginRegistry, RegisteredPlugin entity, PluginType/PluginLifecycleState enums
 │   └── requirements/
 │       ├── model/                # JPA entities (Requirement, RequirementRelation, TraceabilityLink, RequirementEmbedding, etc.)
 │       ├── repository/           # Spring Data JPA repository interfaces
@@ -105,7 +109,7 @@ Environment variables use the `GC_` prefix (e.g., `GC_DATABASE_URL`, `GC_SERVER_
 
 **Domain entities:** Requirement, RequirementRelation, TraceabilityLink, GitHubIssueSync, RequirementImport — all JPA with Envers auditing.
 
-**Services:** RequirementService (9 methods), TraceabilityService, ImportService (StrictDoc parser + idempotent import), GitHubIssueSyncService (CLI-based GitHub sync), AnalysisService (cycle/orphan/coverage/impact/cross-wave), AgeGraphService (Apache AGE graph materialization + Cypher queries).
+**Services:** RequirementService (9 methods), TraceabilityService (forward and reverse artifact lookup), ImportService (StrictDoc parser + idempotent import), GitHubIssueSyncService (CLI-based GitHub sync), AnalysisService (cycle/orphan/coverage/impact/cross-wave), AgeGraphService (Apache AGE graph materialization + Cypher queries).
 
 **API:** RequirementController (9 REST endpoints), AnalysisController (5 endpoints), ImportController, SyncController, GraphController. GlobalExceptionHandler maps domain exceptions to HTTP error envelopes.
 
@@ -120,6 +124,13 @@ Environment variables use the `GC_` prefix (e.g., `GC_DATABASE_URL`, `GC_SERVER_
 - Production deployment infrastructure (local Docker Compose + EC2 via CDK)
 - Multi-tenancy
 - Search
-- Verification result tracking (VerificationResult entity from ADR-014 not yet implemented)
+- Concrete verifier adapter implementations in `infrastructure/verifiers/` (ADR-014 §6). The `VerifierAdapter` port interface and request/outcome contracts are defined in the domain layer; future work is implementing adapters for each prover (OpenJML, TLA+/TLC, OPA/Rego, Frama-C, manual review).
 - Traceability Matrix view (`/traceability`) and Audit Timeline view (`/audit`) in the frontend
 - Apache AGE is optional — the app gracefully degrades to JPA-only analysis when AGE is unavailable
+
+### Exists now
+
+- `specs/tla/` for design-level verification artifacts and state-machine specs, aligned with ADR-014
+- Verification result storage (VerificationResult entity with eager-loaded target/requirement, enums, CRUD API, MCP tools) — ADR-014 §2 common schema
+- Pluggable verifier adapter interface (`VerifierAdapter`, `VerificationRequest`, `VerificationOutcome`) — ADR-014 §6 port contract for multi-tool integration
+- Self-referential traceability enforcement — `check_live_policy.mjs` verifies substantive code files have reverse traceability links to requirements (GC-O002), using the `GET /requirements/traceability/by-artifact` reverse lookup endpoint. Lookup errors are tracked separately for debuggability when the endpoint is unavailable.

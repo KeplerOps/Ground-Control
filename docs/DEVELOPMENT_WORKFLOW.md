@@ -66,7 +66,7 @@ Everything between these two checkpoints is automated.
 
 ### Phase B: Quality Gate
 10. Run `pre-commit run --all-files`
-11. Completion gate: `make check`, CHANGELOG, traceability, requirement status
+11. Completion gate: `make policy`, `make check`, CHANGELOG, traceability, requirement status
 
 ### Phase C: Stage, Commit, Push
 12. Stage files, pre-commit loop (fix failures, max 5 iterations)
@@ -120,8 +120,14 @@ Universal checks (all repos):
 - `/security-review` skill was not invoked after the last `/implement`
 
 Project-specific checks (`.claude/hooks/verify-extra.sh`, sourced if present):
-- API docs not updated (when controllers added)
-- MCP tools not updated (when controllers added)
+- shared repo-native policy script (`bin/policy`) over the changed-file set
+
+### Repo-Native Policy Layer
+
+- `architecture/policies/adr-policy.json` defines machine-readable ADR guardrails
+- `python3 bin/policy` enforces ADR/workflow, controller/MCP/docs, migration, and PR-body policy
+- `make policy` is the common path for Claude, Codex, pre-commit, and CI
+- `make sync-ground-control-policy` and `make policy-live` keep Ground Control quality gates and ADR metadata aligned when a live GC instance is available
 
 ### Skill Call Logging (`~/.claude/hooks/log-skill-call.sh`) — User Level
 PostToolUse hook on `Skill` — writes JSONL to `/tmp/claude-skill-log/<PID>.jsonl` (per-session, not per-branch). The Stop hook reads this log to verify reviews were actually invoked (not just claimed). Stale logs (>24h) are auto-pruned.
@@ -145,3 +151,4 @@ PreToolUse hook on `Bash` — blocks `git merge`, `git push --force`, `git reset
 - **Add `@NotAudited` to `@ManyToOne` references** to non-audited entities when using `@Audited`.
 - **Add `_audit` table migration** when adding `@Audited` entities.
 - **Default durable mutable entities to `BaseEntity`**. Only keep standalone lifecycle fields for intentionally append-only, snapshot, cache, or import/audit records.
+- **Use the scaffold commands** (`make scaffold-controller`, `make scaffold-audited-entity`, `make scaffold-l2-state-machine`) to start from a compliant shape.

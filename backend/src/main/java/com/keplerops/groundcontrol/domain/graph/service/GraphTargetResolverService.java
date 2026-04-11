@@ -88,7 +88,8 @@ public class GraphTargetResolverService {
                     "Methodology profile");
             case CONTROL -> internalTarget(
                     targetEntityId, controlRepository.existsByIdAndProjectId(targetEntityId, projectId), "Control");
-            case THREAT_MODEL_ENTRY, FINDING, EVIDENCE, AUDIT, EXTERNAL -> externalTarget(targetIdentifier);
+            case THREAT_MODEL_ENTRY, FINDING, EVIDENCE, AUDIT, ISSUE, CODE, CONFIGURATION, EXTERNAL -> externalTarget(
+                    targetIdentifier);
         };
     }
 

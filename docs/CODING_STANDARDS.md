@@ -12,6 +12,7 @@ Ground Control uses a phased approach to formal methods rigor. During **pre-alph
 2. **Add JML contracts where they prevent silent corruption** — state transitions, security boundaries, cross-field invariants. Not on every method.
 3. **Write one test per significant behavior.** No two-tests-per-contract requirement. No mandatory violation tests for simple CRUD.
 4. **Run `make rapid`.** Format + compile in ~3-5s. Tests run in CI.
+5. **Run `make policy`** when you changed workflow, ADR, controller, migration, MCP, or PR-policy surfaces.
 
 ### Assurance levels
 
@@ -90,6 +91,14 @@ Add a new `@ArchTest` rule to `ArchitectureTest.java` whenever you:
 
 ArchUnit rules are JUnit 5 tests. They run with `./gradlew test`. No separate tooling.
 
+## Repo Policy Guardrails
+
+The repository also enforces ADR-aligned workflow policy outside Java:
+
+- `architecture/policies/adr-policy.json` defines machine-readable guardrails
+- `python3 bin/policy` enforces changed-file policies for ADR sync, controller/MCP/docs parity, migration companion updates, and PR body structure
+- `make policy` is required before completion for both Claude and Codex work in this repo
+
 ## Package Structure
 
 ```
@@ -163,7 +172,19 @@ OpenJML Extended Static Checking (ESC) runs the Z3 SMT solver to formally prove 
 
 ESC runs on **pure logic classes** with no String constructor parameters and no framework annotations:
 - `domain/requirements/state/` — enums, state machines, transition tables
+- `domain/verification/state/` — `VerificationStatus`, `AssuranceLevel` enums (simple value enums, L0)
 - Future pure domain logic classes that follow the same pattern
+
+Other `state/` packages contain simple value enums (L0) that are **not** ESC-verified:
+- `domain/assets/state/` — `AssetType`, `AssetLinkTargetType`, `AssetLinkType`, `AssetRelationType`, `ObservationCategory`
+- `domain/controls/state/` — `ControlFunction`, `ControlStatus`, `ControlLinkTargetType`, `ControlLinkType`
+- `domain/riskscenarios/state/` — risk scenario link and status enums
+- `domain/plugins/state/` — `PluginType`, `PluginLifecycleState` enums
+- `domain/controlpacks/state/` — `ControlPackLifecycleState`, `ControlPackEntryStatus` enums
+- `domain/packregistry/state/` — `PackType`, `CatalogStatus`, `TrustOutcome`, `InstallOutcome`, `TrustPolicyField`, `TrustPolicyRuleOperator` enums
+
+These pack-registry enums remain L0 typed value surfaces. Use them to remove stringly typed branching and policy fields in the generic registry, but do not expand ESC scope unless they gain real transition logic or invariants.
+`TrustPolicyField` includes both informational fields (for example `signatureVerified`) and trust-safe fields (for example `signerTrusted`); validation that rejects unsupported trust-policy rules belongs in domain services, not in the value enum.
 
 ### What ESC cannot verify (and why)
 

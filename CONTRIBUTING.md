@@ -120,5 +120,6 @@ backend/src/test/java/com/keplerops/groundcontrol/
 - **jqwik** for property-based testing (state machines, enums) — tagged `@Tag("slow")`
 - **Testcontainers** for integration tests (PostgreSQL 16, Apache AGE)
 - **ArchUnit** for architecture rule enforcement
+- **Repo policy checks** via `make policy` for ADR/workflow parity, controller docs/MCP parity, migration companion updates, and PR body requirements
 - Test names describe behavior: `archiveFromDraftFails`, not `testArchiveMethod`
 - Tests are independent — no shared mutable state (except ordered E2E tests using `@TestInstance(PER_CLASS)`)

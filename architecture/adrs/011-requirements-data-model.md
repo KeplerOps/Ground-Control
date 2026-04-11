@@ -11,6 +11,7 @@ Accepted
 ## Revision
 
 2026-03-09 — Implementation details updated to reflect ADR-013 (Java/Spring Boot rewrite). Core decisions unchanged.
+2026-04-10 — Traceability identifier conventions updated to match the implemented service, ADR reverse-lookup, and GitHub sync contracts.
 
 ## Context
 
@@ -143,22 +144,24 @@ See also [ADR-014](014-pluggable-verification-architecture.md) for `Verification
 **Unique constraint**: `(source_id, target_id, relation_type)`
 **Validation**: `source != target` (no self-loops, enforced in service layer). Cycle detection is an analysis-time check, not a save-time constraint.
 
-#### TraceabilityLink (planned)
+#### TraceabilityLink
 
-Connects requirements to external artifacts. The `artifactIdentifier` uses a typed prefix convention:
-- `github:#42` — GitHub issue
-- `file:backend/src/.../Requirement.java` — code file
-- `adr:011` — architecture decision record
-- `test:backend/src/test/.../RequirementTest.java` — test file
-- `tla:specs/tla/RequirementStateMachine.tla` — TLA+ specification
-- `proof:verification/results/access-control.json` — verification result
+Connects requirements to external artifacts. `artifactIdentifier` is interpreted in the context of `artifactType`; it is not a globally-prefixed mini-schema.
+
+Canonical conventions:
+- `GITHUB_ISSUE`, `PULL_REQUEST` — raw decimal number stored as a string (for example `"42"`), so sync services can parse and refresh URL/title/state
+- `ADR`, `RISK_SCENARIO`, `CONTROL` — the Ground Control UID (for example `"ADR-021"`, `"RS-001"`, `"CTRL-001"`), so reverse lookup resolves by domain UID
+- `CODE_FILE`, `TEST`, `CONFIG`, `POLICY`, `SPEC`, `PROOF`, `DOCUMENTATION` — repo-relative path or other stable repo-local identifier
+- `artifactUrl` and `artifactTitle` are denormalized display/sync fields, not identity keys
+
+Do not introduce alternate encodings for the same artifact (`#42`, `owner/repo#42`, `file:...`, `adr:021`) in new data. Self-referential dogfooding must reuse this existing link model rather than adding a GC-specific traceability abstraction.
 
 | Field | Type | Constraints | Notes |
 |-------|------|-------------|-------|
 | id | UUID | PK, generated | |
 | requirement | FK -> Requirement | Not null | |
 | artifactType | Enum (ArtifactType) | Not null | github_issue, code_file, adr, config, policy, test, spec, proof, documentation |
-| artifactIdentifier | String(500) | Not null | Typed prefix convention |
+| artifactIdentifier | String(500) | Not null | Stable identifier scoped by `artifactType` |
 | artifactUrl | String(2000) | Default "" | |
 | artifactTitle | String(255) | Default "" | |
 | linkType | Enum (LinkType) | Not null | implements, tests, documents, constrains, verifies |
@@ -209,7 +212,7 @@ Audit trail for each import/sync operation.
 - AGE-as-query-layer avoids consistency issues while enabling powerful graph queries
 - Envers provides automatic audit trail with minimal configuration
 - Service-layer write ownership prevents mutation spaghetti without premature package splitting
-- TraceabilityLink's typed prefix convention accommodates verification artifacts (TLA+ specs, proof results) alongside code and documentation
+- Artifact-type-scoped identifiers keep reverse lookup and sync flows simple while accommodating code, docs, ADRs, and verification artifacts without a second schema layer
 
 ### Negative
 
@@ -222,6 +225,7 @@ Audit trail for each import/sync operation.
 - AGE extension availability varies across PostgreSQL hosting providers (mitigated: core analysis works without AGE via JPA)
 - StrictDoc format may have edge cases not covered by the parser (mitigated: import is a one-time migration)
 - DAG traversal via JPA adjacency list is O(depth x branching_factor) per query (mitigated: AGE provides O(1)-ish traversal for production use)
+- Multiple textual encodings for the same artifact fragment uniqueness and break sync or reverse lookup (mitigated: keep canonical identifier conventions per `artifactType` and route writes through the existing service layer)
 
 ## Related ADRs
 

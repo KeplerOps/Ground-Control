@@ -34,7 +34,7 @@ public class RiskScenarioLink extends BaseEntity {
     private RiskScenario riskScenario;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "target_type", nullable = false, length = 20)
+    @Column(name = "target_type", nullable = false, length = 40)
     private RiskScenarioLinkTargetType targetType;
 
     @Column(name = "target_entity_id")

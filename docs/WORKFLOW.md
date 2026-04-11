@@ -156,6 +156,12 @@ gc_create_quality_gate(
 
 Available metrics: `COVERAGE` (% of requirements with a link type), `ORPHAN_COUNT`, `COMPLETENESS`. Gates evaluate in CI via `gc_evaluate_quality_gates`.
 
+For this repository, the human-maintained policy entrypoints are:
+
+- `make policy` for repo-native guardrails shared by Claude and Codex
+- `make sync-ground-control-policy` to sync ADR metadata and quality-gate definitions into Ground Control
+- `make policy-live` to validate live Ground Control gates and non-regression sweep baselines when a reachable GC instance is available
+
 ## Phase 3: Implement
 
 ### The Development Loop
@@ -176,6 +182,8 @@ Pick the next unblocked requirement from the work order and implement it. Ground
    - `TESTS` → test files that verify the requirement
    - `DOCUMENTS` → ADRs or design docs that explain the approach
 7. **Transition to ACTIVE** once implemented and verified
+
+Before you stop, run `make policy` alongside the feature-specific verification commands. This catches ADR drift, missing controller/MCP/doc parity, migration companion updates, and PR body omissions before review.
 
 ### Record Architectural Decisions
 

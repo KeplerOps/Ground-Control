@@ -49,7 +49,7 @@ The core development loop for all L1+ code is:
 2. **Spec** — Write JML contracts (`requires`, `ensures`, `invariant`) that express the behavioral intent.
 3. **Test** — Write a failing test that exercises the contract (both happy-path and contract-violation).
 4. **Code** — Implement the method body to satisfy the contracts and pass the test.
-5. **Verify** — Run `./gradlew check` (compilation + OpenJML + tests + Spotless + ArchUnit).
+5. **Verify** — Run `make policy` and `./gradlew check` (repo guardrails + compilation + OpenJML + tests + Spotless + ArchUnit).
 
 This is "TDD for invariants": contracts are the failing specification, implementation satisfies them. Contracts and tests are complementary — contracts define *what must always hold*, tests verify *specific scenarios*.
 
@@ -111,7 +111,9 @@ When in doubt, use L0 during pre-alpha. The bar rises at beta.
 - Version: OpenJML 21-0.21 (JDK 21 series)
 - Gradle tasks: `./gradlew downloadOpenJml` (fetches binary), `./gradlew openjmlEsc` (runs Z3 prover)
 - Defined in: `backend/gradle/openjml.gradle.kts`, applied from `build.gradle.kts`
-- Scope: `domain/requirements/state/` only (pure enums with no framework annotations)
+- Scope: `domain/requirements/state/` and `domain/verification/state/` only (pure enums with no framework annotations). Other `state/` packages (`assets`, `controls`, `riskscenarios`, `plugins`, `controlpacks`, `packregistry`) contain L0 value enums not covered by ESC.
+- `domain/packregistry/state/` now includes generic-registry value enums such as `PackType`, `CatalogStatus`, `TrustOutcome`, `InstallOutcome`, `TrustPolicyField`, and `TrustPolicyRuleOperator`. They improve schema clarity and policy typing, but remain L0 because they contain no transition logic or non-trivial invariants.
+- `TrustPolicyField` distinguishes informational integrity facts such as `signatureVerified` from policy-safe trust anchors such as `signerTrusted`; enforcement of unsupported fields/operators remains in `TrustPolicyService` rather than the enum itself.
 - Gradle up-to-date checking: skips when source files haven't changed (~1s no-op)
 - **Known limitations**: OpenJML's bundled `CharSequence.jml` spec has invariant bugs that cause false positives on classes with `String` constructor parameters. JPA entities fail due to Hibernate's no-arg constructor leaving fields `null`. These classes remain at L1 (contract + test pairs). See `docs/CODING_STANDARDS.md` "OpenJML ESC Scoping" for design guidelines.
 
@@ -140,6 +142,8 @@ During pre-alpha, the drift detection bar is relaxed:
 3. **L2 property tests** (jqwik) run in CI, tagged `@Tag("slow")` so they can be skipped locally for fast iteration.
 
 Existing JML contracts without tests are acceptable during pre-alpha — they still serve as documentation. The post-alpha process will require test coverage for all contracts.
+
+Repo-native guardrails complement the formal-methods toolchain. They enforce that workflow, migration, controller, and ADR changes stay synchronized with the documents and policy artifacts that make the methodology legible to both humans and agents.
 
 ### Relationship to TDD
 
@@ -171,6 +175,12 @@ SDD extends TDD by adding contracts as a specification layer:
 
 - OpenJML + Hibernate proxies: JPA entity proxies may interfere with JML runtime checks. Mitigated by scoping RAC to domain logic methods, not framework-generated code.
 - Over-contracting L0 code: enthusiasm may lead to contracts on configuration or DTOs. Mitigated by explicit L0 classification in the decision table — if it matches an L0 rule, do not contract it.
+
+## Implementation Status
+
+- Assurance levels L0-L3 are codified as the `AssuranceLevel` enum in `domain/verification/state/AssuranceLevel.java`.
+- Verification outcomes are codified as the `VerificationStatus` enum in `domain/verification/state/VerificationStatus.java`.
+- Both enums are used by the `VerificationResult` entity (ADR-014 §2, GC-F001).
 
 ## Related ADRs
 

@@ -5,6 +5,166 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.110.1] - 2026-04-10
+
+### Added
+
+- Architecture model artifacts design note documenting how C4 models,
+  architecture tests, and fitness functions are supported as traceable
+  artifacts using existing TraceabilityLink and VerificationResult
+  infrastructure (GC-J002)
+
+## [0.110.0] - 2026-04-10
+
+### Added
+
+- Reverse traceability lookup: `GET /api/v1/requirements/traceability/by-artifact`
+  endpoint and `gc_get_traceability_by_artifact` MCP tool for querying which
+  requirements link to a given artifact (GC-O002)
+- Self-referential traceability enforcement in `check_live_policy.mjs`: automated
+  reverse traceability check that verifies substantive code files are linked to
+  requirements, with baseline regression prevention
+
+## [0.109.0] - 2026-04-09
+
+### Added
+
+- Pack registry, resolution, and trust model (GC-P016, ADR-022 Section 6): registry
+  catalog for discoverable packs, semver-aware version resolution with dependency
+  tracking, configurable trust policy evaluation, and auditable install records
+- `pack_registry_entry`, `pack_install_record`, `trust_policy` tables with Envers
+  audit trails (V053)
+- `PackType` (CONTROL_PACK, REQUIREMENTS_PACK, CUSTOM), `CatalogStatus` (AVAILABLE,
+  WITHDRAWN, SUPERSEDED), `TrustOutcome` (TRUSTED, REJECTED, UNKNOWN), `InstallOutcome`
+  (INSTALLED, UPGRADED, REJECTED, FAILED), `TrustPolicyRuleOperator` enums
+- `PackRegistryService` for registry catalog CRUD, `PackResolver` for semver resolution
+  with caret/tilde/range constraints and dependency resolution, `TrustEvaluator` for
+  declarative rule-based trust policy evaluation, `TrustPolicyService` for trust policy
+  CRUD, `PackInstallOrchestrator` that wraps existing ControlPackService with registry
+  lookup, compatibility check, and trust gate
+- REST API: `POST/GET /api/v1/pack-registry`, `GET /api/v1/pack-registry/{packId}`,
+  `GET/PUT/DELETE /api/v1/pack-registry/{packId}/{version}`,
+  `PUT /api/v1/pack-registry/{packId}/{version}/withdraw`,
+  `POST /api/v1/pack-registry/resolve`, `POST /api/v1/pack-registry/check-compatibility`,
+  `POST/GET /api/v1/trust-policies`, `GET/PUT/DELETE /api/v1/trust-policies/{id}`,
+  `POST /api/v1/pack-install-records/install`, `POST /api/v1/pack-install-records/upgrade`,
+  `GET /api/v1/pack-install-records`, `GET /api/v1/pack-install-records/{id}`
+- MCP tools: `gc_register_pack_registry_entry`, `gc_list_pack_registry_entries`,
+  `gc_get_pack_registry_entry`, `gc_list_pack_versions`, `gc_update_pack_registry_entry`,
+  `gc_withdraw_pack_registry_entry`, `gc_delete_pack_registry_entry`,
+  `gc_resolve_pack`, `gc_check_pack_compatibility`, `gc_create_trust_policy`,
+  `gc_list_trust_policies`, `gc_get_trust_policy`, `gc_update_trust_policy`,
+  `gc_delete_trust_policy`, `gc_install_pack_from_registry`,
+  `gc_upgrade_pack_from_registry`, `gc_list_pack_install_records`,
+  `gc_get_pack_install_record`
+
+## [0.108.0] - 2026-04-08
+
+### Added
+
+- Control pack distribution and installation (GC-P015, ADR-022): versioned control
+  packs as installable content bundles with idempotent installation, version-aware
+  upgrades, source provenance tracking, and field-level local tailoring
+- `control_pack`, `control_pack_entry`, `control_pack_override` tables with Envers
+  audit trails (V052)
+- `ControlPackLifecycleState` enum (INSTALLED, UPGRADED, DEPRECATED, REMOVED) with
+  validated state transitions
+- `ControlPackService` with install (idempotent, materializes `Control` records and
+  `ControlLink` MAPS_TO framework mappings), upgrade (applies upstream changes while
+  preserving local overrides), deprecate, and remove operations
+- REST API: `POST /api/v1/control-packs/install`, `POST /api/v1/control-packs/upgrade`,
+  `GET /api/v1/control-packs`, `GET /api/v1/control-packs/{packId}`,
+  `PUT /api/v1/control-packs/{packId}/deprecate`, `DELETE /api/v1/control-packs/{packId}`,
+  entry and override sub-resource endpoints
+- MCP tools: `gc_install_control_pack`, `gc_upgrade_control_pack`,
+  `gc_list_control_packs`, `gc_get_control_pack`, `gc_deprecate_control_pack`,
+  `gc_remove_control_pack`, `gc_list_control_pack_entries`, `gc_get_control_pack_entry`,
+  `gc_create_control_pack_override`, `gc_list_control_pack_overrides`,
+  `gc_delete_control_pack_override`
+
+## [0.107.0] - 2026-04-09
+
+### Added
+
+- Plugin architecture with dual-source registry for built-in and dynamic plugins
+  (GC-P005, ADR-023): `Plugin` interface with lifecycle management, `PluginDescriptor`
+  metadata record, `PluginRegistry` service with classpath discovery and DB persistence,
+  typed plugin categories (pack handler, registry backend, validator, policy hook,
+  verifier, embedding provider, graph contributor, custom)
+- `registered_plugin` database table (V051) for dynamic plugin registrations that
+  survive application restarts
+- REST API: `GET /api/v1/plugins`, `GET /api/v1/plugins/{name}`,
+  `POST /api/v1/plugins`, `DELETE /api/v1/plugins/{name}` with type/capability filtering
+- MCP tools: `gc_list_plugins`, `gc_register_plugin`, `gc_unregister_plugin`
+- `StringSetConverter` in `JacksonTextCollectionConverters` for JSON-serialized
+  `Set<String>` JPA columns
+
+## [0.106.0] - 2026-04-08
+
+### Added
+
+- Pluggable verifier adapter interface (`VerifierAdapter`, `VerificationRequest`,
+  `VerificationOutcome`) enabling integration with OpenJML, TLA+/TLC, OPA/Rego,
+  Frama-C, and manual review processes (GC-F005, ADR-014 §6)
+
+## [0.105.1] - 2026-04-08
+
+### Fixed
+
+- Zod update broke GC mcp
+
+## [0.105.0] - 2026-04-06
+
+### Added
+
+- Asset-centric traceability target types: ISSUE, CODE, CONFIGURATION added
+  to AssetLinkTargetType for first-class traceability from assets to issues,
+  code files, and configuration artifacts (GC-M017)
+- ControlGraphProjectionContributor: projects Control entities as graph nodes
+  and ControlLink edges into the mixed-entity graph
+
+### Fixed
+
+- CONTROL asset links now produce graph edges in AssetGraphProjectionContributor
+  (previously silently dropped)
+- CONTROL risk-scenario links now produce graph edges in
+  RiskGraphProjectionContributor (same fix)
+- Stale JPA @Column(length=20) annotations on AssetLink.targetType and
+  RiskScenarioLink.targetType corrected to length=40 (matching V043 migration)
+
+## [0.104.0] - 2026-04-06
+
+### Added
+
+- Verification result storage (GC-F001): prover-agnostic schema for storing
+  verification results from any verifier (OpenJML, TLA+, OPA, manual review)
+- VerificationResult entity with VerificationStatus and AssuranceLevel enums
+- REST API: CRUD endpoints at `/api/v1/verification-results` with filtering
+  by requirement, prover, and result status
+- MCP tools: `gc_create_verification_result`, `gc_list_verification_results`,
+  `gc_get_verification_result`, `gc_update_verification_result`,
+  `gc_delete_verification_result`
+- Flyway migrations V049-V050 for verification_result and audit tables
+- Unit tests for VerificationResultController and VerificationResultService
+
+## [0.103.0] - 2026-04-06
+
+### Added
+
+- ADR conformance enforcement via `make policy` guardrails shared by
+  Claude and Codex agents
+- Policy checks: controller naming, migration auditing, MCP tool
+  registration, ADR drift detection, and live policy sync
+- Scaffolding scripts for audited entities, controllers, and L2 state
+  machines (`bin/scaffold-*`)
+- CODEOWNERS file and PR template for GitHub workflow
+- `ControllerPolicyTest` ArchUnit test enforcing controller conventions
+- `EmbeddingControllerTest` unit tests
+- TLA+ specification for requirement status machine
+- `adr-policy.json` and `policy.json` for machine-readable policy rules
+- `check_adr_drift.mjs` and `check_live_policy.mjs` tooling for
+  continuous ADR/policy validation
+
 ## [0.102.2] - 2026-04-06
 
 ### Fixed

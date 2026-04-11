@@ -139,7 +139,8 @@ public class AssetGraphProjectionContributor implements GraphProjectionContribut
                     case RISK_ASSESSMENT_RESULT -> GraphEntityType.RISK_ASSESSMENT_RESULT;
                     case TREATMENT_PLAN -> GraphEntityType.TREATMENT_PLAN;
                     case METHODOLOGY_PROFILE -> GraphEntityType.METHODOLOGY_PROFILE;
-                    case CONTROL, THREAT_MODEL_ENTRY, FINDING, EVIDENCE, AUDIT, EXTERNAL -> null;
+                    case CONTROL -> GraphEntityType.CONTROL;
+                    case THREAT_MODEL_ENTRY, FINDING, EVIDENCE, AUDIT, ISSUE, CODE, CONFIGURATION, EXTERNAL -> null;
                 };
         if (targetEntityType == null) {
             return null;

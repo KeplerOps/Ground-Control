@@ -38,7 +38,15 @@ http://localhost:8000/api/v1/
 |--------|------|------|--------|---------|
 | POST | `/requirements/{id}/traceability` | TraceabilityLinkRequest | 201 | Create traceability link |
 | GET | `/requirements/{id}/traceability` | — | 200 | List traceability links |
+| GET | `/requirements/traceability/by-artifact` | — | 200 | Reverse lookup: find links by artifact |
 | DELETE | `/requirements/{id}/traceability/{linkId}` | — | 204 | Delete traceability link |
+
+`GET /requirements/traceability/by-artifact` accepts query parameters:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `artifactType` | enum | GITHUB_ISSUE, PULL_REQUEST, CODE_FILE, ADR, CONFIG, POLICY, TEST, SPEC, PROOF, DOCUMENTATION, RISK_SCENARIO, CONTROL |
+| `artifactIdentifier` | string | Artifact identifier (e.g. repo-relative path, issue number, ADR UID) |
 
 ### Audit History
 
@@ -598,6 +606,75 @@ document structure (document, sections, text blocks). The response includes all 
 `relationsSkipped`, `traceabilityLinksCreated`, `traceabilityLinksSkipped`,
 `documentsCreated`, `sectionsCreated`, `sectionContentsCreated`, `errors`.
 
+### Verification Results
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/verification-results` | VerificationResultRequest | 201 | Create verification result |
+| GET | `/verification-results` | — | 200 | List verification results |
+| GET | `/verification-results/{id}` | — | 200 | Get verification result by UUID |
+| PUT | `/verification-results/{id}` | UpdateVerificationResultRequest | 200 | Update verification result |
+| DELETE | `/verification-results/{id}` | — | 204 | Delete verification result |
+
+All endpoints accept an optional `project` query parameter.
+
+**Filters on GET list:**
+- `requirement_id` (UUID) — filter by requirement
+- `prover` (string) — filter by verifier tool identifier
+- `result` (enum) — PROVEN, REFUTED, TIMEOUT, UNKNOWN, ERROR
+
+**VerificationResultRequest fields:** `prover` (required), `result` (required),
+`assuranceLevel` (required, L0-L3), `verifiedAt` (required, ISO 8601), `targetId`
+(optional, traceability link UUID), `requirementId` (optional), `property` (optional),
+`evidence` (optional, JSON object), `expiresAt` (optional, ISO 8601).
+
+### Plugins
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| GET | `/plugins` | — | 200 | List all registered plugins |
+| GET | `/plugins/{name}` | — | 200 | Get plugin by name |
+| POST | `/plugins` | RegisterPluginRequest | 201 | Register a dynamic plugin |
+| DELETE | `/plugins/{name}` | — | 204 | Unregister a dynamic plugin |
+
+All endpoints accept an optional `project` query parameter.
+
+**Filters on GET list:**
+- `type` (enum) — PACK_HANDLER, REGISTRY_BACKEND, VALIDATOR, POLICY_HOOK, VERIFIER, EMBEDDING_PROVIDER, GRAPH_CONTRIBUTOR, CUSTOM
+- `capability` (string) — filter by capability tag
+- `project` (string) — filter dynamic plugins by project
+
+**RegisterPluginRequest fields:** `name` (required, max 100), `version` (required, max 50),
+`type` (required, PluginType enum), `description` (optional), `capabilities` (optional, string set),
+`metadata` (optional, JSON object).
+
+### Control Packs
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| GET | `/control-packs` | — | 200 | List installed packs |
+| GET | `/control-packs/{packId}` | — | 200 | Get pack by identifier |
+| PUT | `/control-packs/{packId}/deprecate` | — | 200 | Deprecate a pack |
+| DELETE | `/control-packs/{packId}` | — | 204 | Remove a pack |
+| GET | `/control-packs/{packId}/entries` | — | 200 | List pack entries |
+| GET | `/control-packs/{packId}/entries/{entryUid}` | — | 200 | Get a pack entry |
+| POST | `/control-packs/{packId}/entries/{entryUid}/overrides` | CreateControlPackOverrideRequest | 201 | Create field override |
+| GET | `/control-packs/{packId}/entries/{entryUid}/overrides` | — | 200 | List overrides |
+| DELETE | `/control-packs/{packId}/entries/{entryUid}/overrides/{id}` | — | 204 | Delete override |
+
+All endpoints accept an optional `project` query parameter.
+
+Control-pack installation and upgrade are registry-backed operations only. Register
+or import a `CONTROL_PACK` in `/pack-registry`, then use `/pack-install-records/install`
+or `/pack-install-records/upgrade` so resolution, trust evaluation, and audit recording
+cannot be bypassed.
+
+**CreateControlPackOverrideRequest fields:** `fieldName` (required — title, description, objective,
+controlFunction, owner, implementationScope, or category), `overrideValue` (optional; title
+must be non-blank), `reason` (optional, max 500).
+
+**Lifecycle states:** INSTALLED → UPGRADED → DEPRECATED → REMOVED.
+
 ## Request / Response Format
 
 JSON. Error responses use a nested envelope:
@@ -641,6 +718,107 @@ Standard Spring Page parameters:
 
 Response wraps results in a Spring Page object with `content`, `totalElements`,
 `totalPages`, `number`, `size`.
+
+### Pack Registry
+
+All pack registry, trust policy, and pack install record routes require a pack
+registry admin token: `Authorization: Bearer <token>`. Tokens and their audit
+principal names are configured with
+`ground-control.pack-registry.security.admin-credentials`. The repo-local MCP
+helper forwards `GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN` when set.
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/pack-registry` | RegisterPackRequest | 201 | Register pack version in catalog |
+| POST | `/pack-registry/import` | multipart/form-data | 201 | Import and register a pack from uploaded JSON |
+| GET | `/pack-registry` | — | 200 | List registry entries (optional `packType` filter) |
+| GET | `/pack-registry/{packId}` | — | 200 | List versions of a pack |
+| GET | `/pack-registry/{packId}/{version}` | — | 200 | Get specific pack version |
+| PUT | `/pack-registry/{packId}/{version}` | UpdatePackRegistryEntryRequest | 200 | Update pack metadata |
+| PUT | `/pack-registry/{packId}/{version}/withdraw` | — | 200 | Withdraw pack version |
+| DELETE | `/pack-registry/{packId}/{version}` | — | 204 | Delete pack version |
+| POST | `/pack-registry/resolve` | ResolvePackRequest | 200 | Resolve version from registry |
+| POST | `/pack-registry/check-compatibility` | ResolvePackRequest | 200 | Check pack compatibility (returns boolean) |
+
+For large catalogs, use `POST /pack-registry/import` instead of hand-authoring a
+giant JSON request body. The endpoint accepts a multipart `file` part plus an
+optional JSON `options` part. Supported formats are:
+
+- `AUTO` — detect OSCAL catalog JSON vs Ground Control manifest JSON
+- `OSCAL_JSON` — treat the file as an OSCAL catalog and flatten controls into a `CONTROL_PACK`
+- `GC_MANIFEST` — treat the file as a Ground Control pack manifest and register it directly
+
+`options` may override pack metadata such as `packId`, `version`, `publisher`,
+`description`, `sourceUrl`, `checksum`, `signatureInfo`, `compatibility`,
+`dependencies`, `provenance`, `registryMetadata`, and
+`defaultControlFunction` for imported control entries.
+
+Example multipart call:
+
+```sh
+curl -X POST "http://localhost:8000/api/v1/pack-registry/import?project=ground-control" \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@/path/to/catalog.json;type=application/json" \
+  -F 'options={"format":"OSCAL_JSON","packId":"nist-sp800-53-rev5","version":"5.1.0","publisher":"NIST"};type=application/json'
+```
+
+### Trust Policies
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/trust-policies` | CreateTrustPolicyRequest | 201 | Create trust policy |
+| GET | `/trust-policies` | — | 200 | List trust policies |
+| GET | `/trust-policies/{id}` | — | 200 | Get trust policy |
+| PUT | `/trust-policies/{id}` | UpdateTrustPolicyRequest | 200 | Update trust policy |
+| DELETE | `/trust-policies/{id}` | — | 204 | Delete trust policy |
+
+### Pack Install Records
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/pack-install-records/install` | InstallPackRequest | 201, 422 | Install pack via registry with trust evaluation |
+| POST | `/pack-install-records/upgrade` | InstallPackRequest | 200, 422 | Upgrade pack via registry with trust evaluation |
+| GET | `/pack-install-records` | — | 200 | List install records (optional `packId` filter) |
+| GET | `/pack-install-records/{id}` | — | 200 | Get install record |
+
+For control packs, use `/pack-registry/import` or `/pack-registry` to persist the
+pack definition first, then call one of these routes with the `packId` and optional
+version constraint.
+
+`RegisterPackRequest` and `UpdatePackRegistryEntryRequest` accept
+`controlPackEntries` for `CONTROL_PACK` artifacts. Registry-driven install and
+upgrade now materialize that stored server-side content; `InstallPackRequest`
+contains only `packId` and optional `versionConstraint`. The install record
+`performedBy` value is derived server-side from the authenticated admin token,
+not request JSON.
+
+When a `checksum` is supplied, the server verifies it against the canonical
+pack payload and normalizes the stored value to `sha256:<hex>`. Unsigned packs
+may omit `checksum`; they still produce a computed `verifiedChecksum` during
+trust evaluation and install recording, but they do not become
+`checksumVerified=true` by registry round-trip alone.
+
+`signatureInfo` is optional detached signature metadata with this shape:
+`algorithm` (required, one of `SHA256withRSA`, `SHA384withRSA`,
+`SHA512withRSA`, `SHA256withECDSA`, `SHA384withECDSA`, `SHA512withECDSA`,
+`Ed25519`, or `Ed448`),
+`publicKey` (required, base64 DER or PEM-encoded X.509 public key),
+`signature` (required, base64 detached signature over the canonical pack
+payload), and `keyAlgorithm` (optional when it can be inferred from
+`algorithm`, otherwise required). A valid signature is cryptographic evidence
+only. Trust policy must use `signerTrusted`, which becomes `true` only when the
+signature public key matches a configured trusted signer under
+`ground-control.pack-registry.security.trusted-signers`.
+
+Install and upgrade return `422 Unprocessable Entity` when the request is
+accepted syntactically but the resolved pack is rejected or fails to apply.
+
+Trust policy rules may match not only raw pack metadata, but also verified
+integrity fields exposed by the server: `verifiedChecksum`,
+`checksumVerified`, and `signerTrusted`. The `signatureVerified` field is
+informational and is rejected in trust policy rules. Regex policy rules are also
+disabled; use bounded operators `EQUALS`, `NOT_EQUALS`, `CONTAINS`, and
+`IN_LIST`.
 
 ## Interactive Docs
 

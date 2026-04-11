@@ -1,6 +1,7 @@
-.PHONY: rapid build test test-cov format lint check integration verify dev clean up down docker-build smoke \
-       frontend-install frontend-dev frontend-build frontend-lint frontend-format frontend-test \
-       deploy deploy-infra
+.PHONY: rapid build test test-cov format lint check integration verify policy policy-tests policy-live \
+       ground-control-mcp-install sync-ground-control-policy scaffold-controller scaffold-audited-entity \
+       scaffold-l2-state-machine dev clean up down docker-build smoke frontend-install frontend-dev \
+       frontend-build frontend-lint frontend-format frontend-test deploy deploy-infra
 
 # --- Rapid dev loop (< 5s) ---
 
@@ -34,6 +35,31 @@ integration: ## Integration tests (Testcontainers)
 
 verify: ## Full CI-equivalent verification
 	cd backend && ./gradlew check integrationTest openjmlEsc
+
+policy-tests: ## Run unit tests for repo policy tooling
+	python3 -m unittest discover -s tools/tests -p 'test_*.py'
+
+policy: policy-tests ## Run repo-native policy checks shared by Claude and Codex
+	python3 bin/policy --skip-pr-body
+
+ground-control-mcp-install: ## Install dependencies for the repo-local Ground Control MCP helpers
+	npm --prefix mcp/ground-control ci
+
+policy-live: ground-control-mcp-install ## Run live Ground Control policy checks (requires GC_BASE_URL)
+	node tools/ground_control/check_adr_drift.mjs
+	node tools/ground_control/check_live_policy.mjs
+
+sync-ground-control-policy: ground-control-mcp-install ## Sync repo policy expectations into Ground Control
+	node tools/ground_control/sync_policy.mjs --apply
+
+scaffold-controller: ## Create a controller + WebMvcTest scaffold (NAME=Foo FEATURE=bar)
+	python3 bin/scaffold-controller "$(FEATURE)" "$(NAME)"
+
+scaffold-audited-entity: ## Create an audited entity scaffold (NAME=Foo AREA=bar)
+	python3 bin/scaffold-audited-entity "$(AREA)" "$(NAME)"
+
+scaffold-l2-state-machine: ## Create an L2 state-machine scaffold (NAME=Foo AREA=bar)
+	python3 bin/scaffold-l2-state-machine "$(AREA)" "$(NAME)"
 
 # --- Frontend ---
 

@@ -23,38 +23,72 @@ import {
 // ---------------------------------------------------------------------------
 
 describe("buildUrl", () => {
+  const originalBaseUrl = process.env.GC_BASE_URL;
+
+  function withBaseUrl(baseUrl, fn) {
+    if (baseUrl === undefined) {
+      delete process.env.GC_BASE_URL;
+    } else {
+      process.env.GC_BASE_URL = baseUrl;
+    }
+    try {
+      fn();
+    } finally {
+      if (originalBaseUrl === undefined) {
+        delete process.env.GC_BASE_URL;
+      } else {
+        process.env.GC_BASE_URL = originalBaseUrl;
+      }
+    }
+  }
+
   it("builds a simple path", () => {
-    const url = buildUrl("/api/v1/requirements");
-    assert.ok(url.endsWith("/api/v1/requirements"));
+    withBaseUrl("http://gc-dev:8000", () => {
+      const url = buildUrl("/api/v1/requirements");
+      assert.ok(url.endsWith("/api/v1/requirements"));
+    });
   });
 
   it("appends query params", () => {
-    const url = buildUrl("/api/v1/requirements", { status: "DRAFT", page: 0 });
-    const parsed = new URL(url);
-    assert.equal(parsed.searchParams.get("status"), "DRAFT");
-    assert.equal(parsed.searchParams.get("page"), "0");
+    withBaseUrl("http://gc-dev:8000", () => {
+      const url = buildUrl("/api/v1/requirements", { status: "DRAFT", page: 0 });
+      const parsed = new URL(url);
+      assert.equal(parsed.searchParams.get("status"), "DRAFT");
+      assert.equal(parsed.searchParams.get("page"), "0");
+    });
   });
 
   it("skips undefined and null params", () => {
-    const url = buildUrl("/api/v1/requirements", {
-      status: undefined,
-      type: null,
-      wave: "",
-      search: "hello",
+    withBaseUrl("http://gc-dev:8000", () => {
+      const url = buildUrl("/api/v1/requirements", {
+        status: undefined,
+        type: null,
+        wave: "",
+        search: "hello",
+      });
+      const parsed = new URL(url);
+      assert.equal(parsed.searchParams.get("status"), null);
+      assert.equal(parsed.searchParams.get("type"), null);
+      assert.equal(parsed.searchParams.get("wave"), null);
+      assert.equal(parsed.searchParams.get("search"), "hello");
     });
-    const parsed = new URL(url);
-    assert.equal(parsed.searchParams.get("status"), null);
-    assert.equal(parsed.searchParams.get("type"), null);
-    assert.equal(parsed.searchParams.get("wave"), null);
-    assert.equal(parsed.searchParams.get("search"), "hello");
   });
 
   it("uses GC_BASE_URL from env", () => {
-    // buildUrl uses the module-level BASE_URL captured at import time,
-    // so we just verify the default produces a valid URL
-    const url = buildUrl("/api/v1/analysis/cycles");
-    assert.ok(url.startsWith("http"));
-    assert.ok(url.includes("/api/v1/analysis/cycles"));
+    withBaseUrl("http://gc-dev:8000", () => {
+      const url = buildUrl("/api/v1/analysis/cycles");
+      assert.ok(url.startsWith("http://gc-dev:8000"));
+      assert.ok(url.includes("/api/v1/analysis/cycles"));
+    });
+  });
+
+  it("fails fast when GC_BASE_URL is unset", () => {
+    withBaseUrl(undefined, () => {
+      assert.throws(
+        () => buildUrl("/api/v1/analysis/cycles"),
+        /GC_BASE_URL must be set/,
+      );
+    });
   });
 });
 
@@ -289,11 +323,20 @@ describe("constants", () => {
   });
 
   it("ARTIFACT_TYPES matches Java ArtifactType enum", () => {
-    assert.equal(ARTIFACT_TYPES.length, 10);
-    assert.ok(ARTIFACT_TYPES.includes("GITHUB_ISSUE"));
-    assert.ok(ARTIFACT_TYPES.includes("CODE_FILE"));
-    assert.ok(ARTIFACT_TYPES.includes("ADR"));
-    assert.ok(ARTIFACT_TYPES.includes("RISK_SCENARIO"));
+    assert.deepEqual(ARTIFACT_TYPES, [
+      "GITHUB_ISSUE",
+      "PULL_REQUEST",
+      "CODE_FILE",
+      "ADR",
+      "CONFIG",
+      "POLICY",
+      "TEST",
+      "SPEC",
+      "PROOF",
+      "DOCUMENTATION",
+      "RISK_SCENARIO",
+      "CONTROL",
+    ]);
   });
 
   it("LINK_TYPES matches Java LinkType enum", () => {
