@@ -26,6 +26,12 @@ public class PackRegistryImportService {
 
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
     private static final TypeReference<List<Map<String, Object>>> LIST_OF_MAPS_TYPE = new TypeReference<>() {};
+    private static final String FIELD_CATALOG = "catalog";
+    private static final String FIELD_CONTROLS = "controls";
+    private static final String FIELD_GROUPS = "groups";
+    private static final String FIELD_PACK_ID = "packId";
+    private static final String FIELD_PARTS = "parts";
+    private static final String FIELD_TITLE = "title";
 
     private final ObjectMapper objectMapper;
     private final PackRegistryService packRegistryService;
@@ -63,10 +69,10 @@ public class PackRegistryImportService {
         if (requestedFormat != null && requestedFormat != PackRegistryImportFormat.AUTO) {
             return requestedFormat;
         }
-        if (root.has("catalog") && root.path("catalog").isObject()) {
+        if (root.has(FIELD_CATALOG) && root.path(FIELD_CATALOG).isObject()) {
             return PackRegistryImportFormat.OSCAL_JSON;
         }
-        if (root.has("packId") && root.has("packType")) {
+        if (root.has(FIELD_PACK_ID) && root.has("packType")) {
             return PackRegistryImportFormat.GC_MANIFEST;
         }
         throw new DomainValidationException(
@@ -75,7 +81,7 @@ public class PackRegistryImportService {
 
     private RegisterPackCommand toManifestRegisterCommand(
             UUID projectId, JsonNode root, PackRegistryImportOptions options) {
-        var packId = firstNonBlank(options.packId(), text(root, "packId"));
+        var packId = firstNonBlank(options.packId(), text(root, FIELD_PACK_ID));
         var packType = parsePackType(firstNonBlank(null, text(root, "packType")));
         var version = firstNonBlank(options.version(), text(root, "version"));
         var publisher = firstNonBlank(options.publisher(), text(root, "publisher"));
@@ -115,32 +121,37 @@ public class PackRegistryImportService {
 
     private RegisterPackCommand toOscalRegisterCommand(
             UUID projectId, String filename, JsonNode root, PackRegistryImportOptions options) {
-        var catalog = root.path("catalog");
+        var catalog = root.path(FIELD_CATALOG);
         if (!catalog.isObject()) {
             throw new DomainValidationException("OSCAL import requires a top-level catalog object");
         }
 
         var metadata = catalog.path("metadata");
-        var frameworkTitle = firstNonBlank(text(metadata, "title"), "OSCAL Catalog");
+        var frameworkTitle = firstNonBlank(text(metadata, FIELD_TITLE), "OSCAL Catalog");
         var version = firstNonBlank(options.version(), text(metadata, "version"));
         if (version == null) {
             throw new DomainValidationException("OSCAL catalog is missing metadata.version; provide an override.");
         }
 
         var packId = firstNonBlank(
-                options.packId(), slugify(firstNonBlank(text(metadata, "title"), stripExtension(filename))));
+                options.packId(), slugify(firstNonBlank(text(metadata, FIELD_TITLE), stripExtension(filename))));
         var publisher = firstNonBlank(options.publisher(), inferPublisher(metadata));
         var description = firstNonBlank(options.description(), frameworkTitle);
         var sourceUrl = firstNonBlank(options.sourceUrl(), inferSourceUrl(metadata));
         var entries = new ArrayList<ControlPackEntryDefinition>();
 
-        if (catalog.has("groups")) {
+        if (catalog.has(FIELD_GROUPS)) {
             collectGroupControls(
-                    catalog.path("groups"), frameworkTitle, null, null, options.defaultControlFunction(), entries);
+                    catalog.path(FIELD_GROUPS), frameworkTitle, null, null, options.defaultControlFunction(), entries);
         }
-        if (catalog.has("controls")) {
+        if (catalog.has(FIELD_CONTROLS)) {
             collectControls(
-                    catalog.path("controls"), frameworkTitle, null, null, options.defaultControlFunction(), entries);
+                    catalog.path(FIELD_CONTROLS),
+                    frameworkTitle,
+                    null,
+                    null,
+                    options.defaultControlFunction(),
+                    entries);
         }
         if (entries.isEmpty()) {
             throw new DomainValidationException("OSCAL catalog does not contain any controls");
@@ -183,11 +194,21 @@ public class PackRegistryImportService {
             List<ControlPackEntryDefinition> accumulator) {
         for (var group : iterable(groups)) {
             var familyId = firstNonBlank(text(group, "id"), inheritedFamilyId);
-            var familyTitle = firstNonBlank(text(group, "title"), inheritedFamilyTitle);
+            var familyTitle = firstNonBlank(text(group, FIELD_TITLE), inheritedFamilyTitle);
             collectControls(
-                    group.path("controls"), frameworkTitle, familyId, familyTitle, defaultControlFunction, accumulator);
+                    group.path(FIELD_CONTROLS),
+                    frameworkTitle,
+                    familyId,
+                    familyTitle,
+                    defaultControlFunction,
+                    accumulator);
             collectGroupControls(
-                    group.path("groups"), frameworkTitle, familyId, familyTitle, defaultControlFunction, accumulator);
+                    group.path(FIELD_GROUPS),
+                    frameworkTitle,
+                    familyId,
+                    familyTitle,
+                    defaultControlFunction,
+                    accumulator);
         }
     }
 
@@ -201,7 +222,7 @@ public class PackRegistryImportService {
         for (var control : iterable(controls)) {
             accumulator.add(toControlPackEntry(control, frameworkTitle, familyId, familyTitle, defaultControlFunction));
             collectControls(
-                    control.path("controls"),
+                    control.path(FIELD_CONTROLS),
                     frameworkTitle,
                     familyId,
                     familyTitle,
@@ -218,14 +239,14 @@ public class PackRegistryImportService {
             ControlFunction defaultControlFunction) {
         var label = findPropValue(control.path("props"), "label");
         var identifier = firstNonBlank(label, text(control, "id"));
-        var uid = sanitizeUid(firstNonBlank(identifier, text(control, "title"), "UNNAMED-CONTROL"));
-        var title = firstNonBlank(text(control, "title"), uid);
+        var uid = sanitizeUid(firstNonBlank(identifier, text(control, FIELD_TITLE), "UNNAMED-CONTROL"));
+        var title = firstNonBlank(text(control, FIELD_TITLE), uid);
 
         return new ControlPackEntryDefinition(
                 uid,
                 title,
-                joinPartText(control.path("parts"), Set.of("statement")),
-                joinPartText(control.path("parts"), Set.of("objective", "assessment-objective")),
+                joinPartText(control.path(FIELD_PARTS), Set.of("statement")),
+                joinPartText(control.path(FIELD_PARTS), Set.of("objective", "assessment-objective")),
                 defaultControlFunction,
                 null,
                 null,
@@ -233,7 +254,7 @@ public class PackRegistryImportService {
                 null,
                 firstNonBlank(familyTitle, familyId),
                 frameworkTitle,
-                joinPartText(control.path("parts"), Set.of("guidance")),
+                joinPartText(control.path(FIELD_PARTS), Set.of("guidance")),
                 null,
                 List.of(frameworkMapping(frameworkTitle, firstNonBlank(identifier, uid), title)));
     }
@@ -242,7 +263,7 @@ public class PackRegistryImportService {
         var mapping = new LinkedHashMap<String, Object>();
         putIfPresent(mapping, "framework", framework);
         putIfPresent(mapping, "identifier", identifier);
-        putIfPresent(mapping, "title", title);
+        putIfPresent(mapping, FIELD_TITLE, title);
         return mapping;
     }
 
@@ -263,7 +284,7 @@ public class PackRegistryImportService {
             if (matches && prose != null) {
                 values.add(prose);
             }
-            collectPartText(part.path("parts"), names, matches, values);
+            collectPartText(part.path(FIELD_PARTS), names, matches, values);
         }
     }
 
@@ -314,7 +335,7 @@ public class PackRegistryImportService {
         var entries = new ArrayList<ControlPackEntryDefinition>();
         for (var entry : controlPackEntriesNode) {
             var uid = text(entry, "uid");
-            var title = text(entry, "title");
+            var title = text(entry, FIELD_TITLE);
             var controlFunction =
                     parseControlFunction(firstNonBlank(text(entry, "controlFunction"), null), defaultControlFunction);
             if (uid == null || title == null) {
@@ -370,7 +391,7 @@ public class PackRegistryImportService {
         }
         var dependencies = new ArrayList<PackDependency>();
         for (var dependency : dependenciesNode) {
-            var packId = text(dependency, "packId");
+            var packId = text(dependency, FIELD_PACK_ID);
             if (packId == null) {
                 throw new DomainValidationException("Each dependency must include packId");
             }
@@ -442,8 +463,8 @@ public class PackRegistryImportService {
         if (value == null) {
             return null;
         }
-        var normalized =
-                value.replace("\r\n", "\n").replaceAll("[ \\t]+\\n", "\n").trim();
+        var normalized = trimTrailingHorizontalWhitespaceBeforeNewlines(value.replace("\r\n", "\n"))
+                .trim();
         return normalized.isEmpty() ? null : normalized;
     }
 
@@ -461,9 +482,9 @@ public class PackRegistryImportService {
                 .replaceAll("\\p{M}+", "")
                 .toLowerCase(Locale.ROOT)
                 .replaceAll("[^a-z0-9]+", "-")
-                .replaceAll("^-+|-+$", "")
                 .replaceAll("-{2,}", "-");
-        return normalized.isBlank() ? "imported-pack" : normalized;
+        var trimmed = trimBoundaryDashes(normalized);
+        return trimmed.isBlank() ? "imported-pack" : trimmed;
     }
 
     private Map<String, Object> mergeMaps(Map<String, Object> base, Map<String, Object> overrides) {
@@ -484,5 +505,42 @@ public class PackRegistryImportService {
         if (value != null && !value.isBlank()) {
             map.put(key, value);
         }
+    }
+
+    private String trimTrailingHorizontalWhitespaceBeforeNewlines(String value) {
+        var normalized = new StringBuilder(value.length());
+        int index = 0;
+        while (index < value.length()) {
+            char current = value.charAt(index);
+            if (!isHorizontalWhitespace(current)) {
+                normalized.append(current);
+                index++;
+            } else {
+                int whitespaceStart = index;
+                while (index < value.length() && isHorizontalWhitespace(value.charAt(index))) {
+                    index++;
+                }
+                if (index >= value.length() || value.charAt(index) != '\n') {
+                    normalized.append(value, whitespaceStart, index);
+                }
+            }
+        }
+        return normalized.toString();
+    }
+
+    private String trimBoundaryDashes(String value) {
+        int start = 0;
+        int end = value.length();
+        while (start < end && value.charAt(start) == '-') {
+            start++;
+        }
+        while (end > start && value.charAt(end - 1) == '-') {
+            end--;
+        }
+        return value.substring(start, end);
+    }
+
+    private boolean isHorizontalWhitespace(char value) {
+        return value == ' ' || value == '\t';
     }
 }
