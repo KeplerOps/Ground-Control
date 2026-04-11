@@ -392,10 +392,16 @@ function toSnakeCase(obj) {
 // HTTP client
 // ---------------------------------------------------------------------------
 
-const BASE_URL = process.env.GC_BASE_URL || "http://localhost:8000";
+function getBaseUrl() {
+  const baseUrl = process.env.GC_BASE_URL?.trim();
+  if (!baseUrl) {
+    throw new Error("GC_BASE_URL must be set for Ground Control MCP requests");
+  }
+  return baseUrl;
+}
 
 export function buildUrl(path, params) {
-  const url = new URL(path, BASE_URL);
+  const url = new URL(path, getBaseUrl());
   if (params) {
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== null && v !== "") {

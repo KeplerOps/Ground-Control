@@ -16,20 +16,21 @@ Add to your Claude Code MCP config (`.claude/settings.json` or project
       "command": "node",
       "args": ["/path/to/Ground-Control/mcp/ground-control/index.js"],
       "env": {
-        "GC_BASE_URL": "http://localhost:8000"
+        "GC_BASE_URL": "http://gc-dev:8000"
       }
     }
   }
 }
 ```
 
-Requires a running Ground Control instance:
+Requires a reachable Ground Control instance. For local backend development:
 
 ```sh
 make up && make dev
 ```
 
-`GC_BASE_URL` defaults to `http://localhost:8000` if not set.
+`GC_BASE_URL` is required. The repo does not provide a committed default host.
+Set it in your user-local MCP config or shell environment.
 
 Codex-backed workflow tools additionally require the Codex CLI to be installed
 and available on `PATH`.
