@@ -18,9 +18,7 @@ import com.keplerops.groundcontrol.api.controlpacks.ControlPackController;
 import com.keplerops.groundcontrol.domain.controlpacks.model.ControlPack;
 import com.keplerops.groundcontrol.domain.controlpacks.model.ControlPackEntry;
 import com.keplerops.groundcontrol.domain.controlpacks.model.ControlPackOverride;
-import com.keplerops.groundcontrol.domain.controlpacks.service.ControlPackInstallResult;
 import com.keplerops.groundcontrol.domain.controlpacks.service.ControlPackService;
-import com.keplerops.groundcontrol.domain.controlpacks.service.ControlPackUpgradeResult;
 import com.keplerops.groundcontrol.domain.controlpacks.state.ControlPackLifecycleState;
 import com.keplerops.groundcontrol.domain.controls.model.Control;
 import com.keplerops.groundcontrol.domain.controls.state.ControlFunction;
@@ -98,47 +96,19 @@ class ControlPackControllerTest {
     }
 
     @Test
-    void installReturns201() throws Exception {
-        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
-        var result = new ControlPackInstallResult(makePack(), 2, 0, 2, 1, 0, false);
-        when(controlPackService.install(any())).thenReturn(result);
-
-        mockMvc.perform(
-                        post("/api/v1/control-packs/install")
-                                .param("project", "ground-control")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content(
-                                        """
-                {"packId":"nist-sp800-53","version":"1.0.0","publisher":"NIST",
-                 "entries":[{"uid":"AC-1","title":"Access Control Policy","controlFunction":"PREVENTIVE"}]}
-                """))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.controlPack.packId", is("nist-sp800-53")))
-                .andExpect(jsonPath("$.controlsCreated", is(2)))
-                .andExpect(jsonPath("$.wasIdempotent", is(false)));
+    void installEndpointIsNotExposed() throws Exception {
+        mockMvc.perform(post("/api/v1/control-packs/install")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isMethodNotAllowed());
     }
 
     @Test
-    void upgradeReturns200() throws Exception {
-        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
-        var pack = makePack();
-        pack.setVersion("2.0.0");
-        setField(pack, "lifecycleState", ControlPackLifecycleState.UPGRADED);
-        var result = new ControlPackUpgradeResult(pack, "1.0.0", 1, 1, 0, 1, 1, 0);
-        when(controlPackService.upgrade(any())).thenReturn(result);
-
-        mockMvc.perform(
-                        post("/api/v1/control-packs/upgrade")
-                                .param("project", "ground-control")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content(
-                                        """
-                {"packId":"nist-sp800-53","newVersion":"2.0.0",
-                 "entries":[{"uid":"AC-1","title":"Access Control Policy v2","controlFunction":"PREVENTIVE"}]}
-                """))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.controlPack.version", is("2.0.0")))
-                .andExpect(jsonPath("$.previousVersion", is("1.0.0")));
+    void upgradeEndpointIsNotExposed() throws Exception {
+        mockMvc.perform(post("/api/v1/control-packs/upgrade")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isMethodNotAllowed());
     }
 
     @Test

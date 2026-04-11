@@ -644,8 +644,6 @@ All endpoints accept an optional `project` query parameter.
 
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
-| POST | `/control-packs/install` | InstallControlPackRequest | 201 | Install a control pack (idempotent) |
-| POST | `/control-packs/upgrade` | UpgradeControlPackRequest | 200 | Upgrade to a new version |
 | GET | `/control-packs` | — | 200 | List installed packs |
 | GET | `/control-packs/{packId}` | — | 200 | Get pack by identifier |
 | PUT | `/control-packs/{packId}/deprecate` | — | 200 | Deprecate a pack |
@@ -658,14 +656,10 @@ All endpoints accept an optional `project` query parameter.
 
 All endpoints accept an optional `project` query parameter.
 
-**InstallControlPackRequest fields:** `packId` (required, max 200), `version` (required, max 50),
-`publisher` (optional), `description` (optional), `sourceUrl` (optional), `checksum` (optional),
-`compatibility` (optional, JSON object), `packMetadata` (optional, JSON object),
-`entries` (required, array of control definitions with `uid`, `title`, `controlFunction`, plus optional
-`description`, `objective`, `owner`, `implementationScope`, `methodologyFactors`, `effectiveness`,
-`category`, `source`, `implementationGuidance`, `expectedEvidence`, `frameworkMappings`).
-
-**UpgradeControlPackRequest fields:** Same as install, but uses `newVersion` instead of `version`.
+Control-pack installation and upgrade are registry-backed operations only. Register
+or import a `CONTROL_PACK` in `/pack-registry`, then use `/pack-install-records/install`
+or `/pack-install-records/upgrade` so resolution, trust evaluation, and audit recording
+cannot be bypassed.
 
 **CreateControlPackOverrideRequest fields:** `fieldName` (required — title, description, objective,
 controlFunction, owner, implementationScope, or category), `overrideValue` (optional; title
@@ -716,6 +710,107 @@ Standard Spring Page parameters:
 
 Response wraps results in a Spring Page object with `content`, `totalElements`,
 `totalPages`, `number`, `size`.
+
+### Pack Registry
+
+All pack registry, trust policy, and pack install record routes require a pack
+registry admin token: `Authorization: Bearer <token>`. Tokens and their audit
+principal names are configured with
+`ground-control.pack-registry.security.admin-credentials`. The repo-local MCP
+helper forwards `GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN` when set.
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/pack-registry` | RegisterPackRequest | 201 | Register pack version in catalog |
+| POST | `/pack-registry/import` | multipart/form-data | 201 | Import and register a pack from uploaded JSON |
+| GET | `/pack-registry` | — | 200 | List registry entries (optional `packType` filter) |
+| GET | `/pack-registry/{packId}` | — | 200 | List versions of a pack |
+| GET | `/pack-registry/{packId}/{version}` | — | 200 | Get specific pack version |
+| PUT | `/pack-registry/{packId}/{version}` | UpdatePackRegistryEntryRequest | 200 | Update pack metadata |
+| PUT | `/pack-registry/{packId}/{version}/withdraw` | — | 200 | Withdraw pack version |
+| DELETE | `/pack-registry/{packId}/{version}` | — | 204 | Delete pack version |
+| POST | `/pack-registry/resolve` | ResolvePackRequest | 200 | Resolve version from registry |
+| POST | `/pack-registry/check-compatibility` | ResolvePackRequest | 200 | Check pack compatibility (returns boolean) |
+
+For large catalogs, use `POST /pack-registry/import` instead of hand-authoring a
+giant JSON request body. The endpoint accepts a multipart `file` part plus an
+optional JSON `options` part. Supported formats are:
+
+- `AUTO` — detect OSCAL catalog JSON vs Ground Control manifest JSON
+- `OSCAL_JSON` — treat the file as an OSCAL catalog and flatten controls into a `CONTROL_PACK`
+- `GC_MANIFEST` — treat the file as a Ground Control pack manifest and register it directly
+
+`options` may override pack metadata such as `packId`, `version`, `publisher`,
+`description`, `sourceUrl`, `checksum`, `signatureInfo`, `compatibility`,
+`dependencies`, `provenance`, `registryMetadata`, and
+`defaultControlFunction` for imported control entries.
+
+Example multipart call:
+
+```sh
+curl -X POST "http://localhost:8000/api/v1/pack-registry/import?project=ground-control" \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@/path/to/catalog.json;type=application/json" \
+  -F 'options={"format":"OSCAL_JSON","packId":"nist-sp800-53-rev5","version":"5.1.0","publisher":"NIST"};type=application/json'
+```
+
+### Trust Policies
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/trust-policies` | CreateTrustPolicyRequest | 201 | Create trust policy |
+| GET | `/trust-policies` | — | 200 | List trust policies |
+| GET | `/trust-policies/{id}` | — | 200 | Get trust policy |
+| PUT | `/trust-policies/{id}` | UpdateTrustPolicyRequest | 200 | Update trust policy |
+| DELETE | `/trust-policies/{id}` | — | 204 | Delete trust policy |
+
+### Pack Install Records
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/pack-install-records/install` | InstallPackRequest | 201, 422 | Install pack via registry with trust evaluation |
+| POST | `/pack-install-records/upgrade` | InstallPackRequest | 200, 422 | Upgrade pack via registry with trust evaluation |
+| GET | `/pack-install-records` | — | 200 | List install records (optional `packId` filter) |
+| GET | `/pack-install-records/{id}` | — | 200 | Get install record |
+
+For control packs, use `/pack-registry/import` or `/pack-registry` to persist the
+pack definition first, then call one of these routes with the `packId` and optional
+version constraint.
+
+`RegisterPackRequest` and `UpdatePackRegistryEntryRequest` accept
+`controlPackEntries` for `CONTROL_PACK` artifacts. Registry-driven install and
+upgrade now materialize that stored server-side content; `InstallPackRequest`
+contains only `packId` and optional `versionConstraint`. The install record
+`performedBy` value is derived server-side from the authenticated admin token,
+not request JSON.
+
+When a `checksum` is supplied, the server verifies it against the canonical
+pack payload and normalizes the stored value to `sha256:<hex>`. Unsigned packs
+may omit `checksum`; they still produce a computed `verifiedChecksum` during
+trust evaluation and install recording, but they do not become
+`checksumVerified=true` by registry round-trip alone.
+
+`signatureInfo` is optional detached signature metadata with this shape:
+`algorithm` (required, one of `SHA256withRSA`, `SHA384withRSA`,
+`SHA512withRSA`, `SHA256withECDSA`, `SHA384withECDSA`, `SHA512withECDSA`,
+`Ed25519`, or `Ed448`),
+`publicKey` (required, base64 DER or PEM-encoded X.509 public key),
+`signature` (required, base64 detached signature over the canonical pack
+payload), and `keyAlgorithm` (optional when it can be inferred from
+`algorithm`, otherwise required). A valid signature is cryptographic evidence
+only. Trust policy must use `signerTrusted`, which becomes `true` only when the
+signature public key matches a configured trusted signer under
+`ground-control.pack-registry.security.trusted-signers`.
+
+Install and upgrade return `422 Unprocessable Entity` when the request is
+accepted syntactically but the resolved pack is rejected or fails to apply.
+
+Trust policy rules may match not only raw pack metadata, but also verified
+integrity fields exposed by the server: `verifiedChecksum`,
+`checksumVerified`, and `signerTrusted`. The `signatureVerified` field is
+informational and is rejected in trust policy rules. Regex policy rules are also
+disabled; use bounded operators `EQUALS`, `NOT_EQUALS`, `CONTAINS`, and
+`IN_LIST`.
 
 ## Interactive Docs
 

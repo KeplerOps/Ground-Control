@@ -7,12 +7,18 @@ import { useToast } from "@/components/ui/toast";
 import { useProjectContext } from "@/contexts/project-context";
 import { apiFetch, apiUpload } from "@/lib/api-client";
 import type {
+  ControlFunction,
   GitHubIssueResponse,
   ImportResultResponse,
+  PackRegistryEntryResponse,
+  PackRegistryImportFormat,
   SyncResultResponse,
 } from "@/types/api";
+import { CONTROL_FUNCTIONS, PACK_REGISTRY_IMPORT_FORMATS } from "@/types/api";
 import { Database, Download, GitBranch, Settings, Upload } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+const PACK_REGISTRY_TOKEN_KEY = "gc.packRegistryAdminToken";
 
 export function Admin() {
   const { activeProject } = useProjectContext();
@@ -33,11 +39,227 @@ export function Admin() {
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Admin</h1>
       <div className="grid gap-6 lg:grid-cols-2">
+        <PackRegistryImport />
         <StrictDocImport />
         <GitHubSync />
         <GitHubIssueCreation />
         <GraphMaterialization />
       </div>
+    </div>
+  );
+}
+
+function PackRegistryImport() {
+  const { activeProject } = useProjectContext();
+  const { toast } = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<PackRegistryEntryResponse | null>(null);
+  const [format, setFormat] = useState<PackRegistryImportFormat>("AUTO");
+  const [packId, setPackId] = useState("");
+  const [version, setVersion] = useState("");
+  const [publisher, setPublisher] = useState("");
+  const [description, setDescription] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [defaultControlFunction, setDefaultControlFunction] =
+    useState<ControlFunction>("PREVENTIVE");
+  const [adminToken, setAdminToken] = useState(
+    () => sessionStorage.getItem(PACK_REGISTRY_TOKEN_KEY) ?? "",
+  );
+  const [rememberToken, setRememberToken] = useState(
+    () => sessionStorage.getItem(PACK_REGISTRY_TOKEN_KEY) !== null,
+  );
+
+  useEffect(() => {
+    if (!rememberToken || !adminToken) {
+      sessionStorage.removeItem(PACK_REGISTRY_TOKEN_KEY);
+      return;
+    }
+    sessionStorage.setItem(PACK_REGISTRY_TOKEN_KEY, adminToken);
+  }, [adminToken, rememberToken]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const file = fileRef.current?.files?.[0];
+    if (!file) return;
+    if (!adminToken.trim()) {
+      toast({
+        title: "Admin token required",
+        description: "Pack registry import needs the configured admin token.",
+        variant: "error",
+      });
+      return;
+    }
+
+    setLoading(true);
+    setResult(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const options = {
+        format,
+        packId: packId || undefined,
+        version: version || undefined,
+        publisher: publisher || undefined,
+        description: description || undefined,
+        sourceUrl: sourceUrl || undefined,
+        defaultControlFunction,
+      };
+      formData.append(
+        "options",
+        new Blob([JSON.stringify(options)], { type: "application/json" }),
+      );
+
+      const data = await apiUpload<PackRegistryEntryResponse>(
+        "/pack-registry/import",
+        formData,
+        {
+          params: { project: activeProject?.identifier },
+          headers: {
+            Authorization: `Bearer ${adminToken.trim()}`,
+          },
+        },
+      );
+      setResult(data);
+      toast({ title: "Pack imported", variant: "success" });
+    } catch (err) {
+      toast({
+        title: "Pack import failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "error",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-5">
+      <h3 className="mb-4 flex items-center gap-2 text-base font-medium">
+        <Upload className="h-5 w-5 text-primary" /> Pack Registry Import
+      </h3>
+      <p className="mb-4 text-sm text-muted-foreground">
+        Upload OSCAL catalog JSON or a Ground Control pack manifest and register
+        it directly in the pack registry for the active project.
+      </p>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <FormField label="Registry Admin Token">
+          <input
+            className={inputClass}
+            type="password"
+            value={adminToken}
+            onChange={(e) => setAdminToken(e.target.value)}
+            placeholder="Bearer token value"
+            required
+          />
+        </FormField>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={rememberToken}
+            onChange={(e) => setRememberToken(e.target.checked)}
+          />
+          Remember token for this browser session
+        </label>
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField label="Source File (.json)">
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".json,application/json"
+              className={inputClass}
+              required
+            />
+          </FormField>
+          <FormField label="Format">
+            <select
+              className={inputClass}
+              value={format}
+              onChange={(e) =>
+                setFormat(e.target.value as PackRegistryImportFormat)
+              }
+            >
+              {PACK_REGISTRY_IMPORT_FORMATS.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </FormField>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField label="Pack ID Override">
+            <input
+              className={inputClass}
+              value={packId}
+              onChange={(e) => setPackId(e.target.value)}
+              placeholder="nist-sp800-53-rev5"
+            />
+          </FormField>
+          <FormField label="Version Override">
+            <input
+              className={inputClass}
+              value={version}
+              onChange={(e) => setVersion(e.target.value)}
+              placeholder="5.1.0"
+            />
+          </FormField>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField label="Publisher Override">
+            <input
+              className={inputClass}
+              value={publisher}
+              onChange={(e) => setPublisher(e.target.value)}
+              placeholder="NIST"
+            />
+          </FormField>
+          <FormField label="Default Control Function">
+            <select
+              className={inputClass}
+              value={defaultControlFunction}
+              onChange={(e) =>
+                setDefaultControlFunction(e.target.value as ControlFunction)
+              }
+            >
+              {CONTROL_FUNCTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </FormField>
+        </div>
+        <FormField label="Description Override">
+          <input
+            className={inputClass}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Optional description override"
+          />
+        </FormField>
+        <FormField label="Source URL Override">
+          <input
+            className={inputClass}
+            value={sourceUrl}
+            onChange={(e) => setSourceUrl(e.target.value)}
+            placeholder="https://example.com/catalog.json"
+          />
+        </FormField>
+        <button type="submit" className={primaryButton} disabled={loading}>
+          {loading ? "Importing..." : "Import Pack"}
+        </button>
+      </form>
+      {result && (
+        <div className="mt-4 space-y-1 rounded bg-accent p-3 text-xs">
+          <p>
+            Registered: {result.packId}@{result.version}
+          </p>
+          <p>Type: {result.packType}</p>
+          <p>Status: {result.catalogStatus}</p>
+          <p>Control entries: {result.controlPackEntries?.length ?? 0}</p>
+        </div>
+      )}
     </div>
   );
 }

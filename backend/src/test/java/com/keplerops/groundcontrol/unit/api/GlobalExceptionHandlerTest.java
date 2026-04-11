@@ -7,6 +7,7 @@ import com.keplerops.groundcontrol.api.GlobalExceptionHandler;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
@@ -37,6 +38,18 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().error().code()).isEqualTo("bad_request");
         assertThat(response.getBody().error().message()).isEqualTo("Invalid value for parameter 'id'");
+    }
+
+    @Test
+    void handleMethodNotSupported_returnsMethodNotAllowed() {
+        var ex = new HttpRequestMethodNotSupportedException("POST");
+
+        var response = handler.handleMethodNotSupported(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error().code()).isEqualTo("method_not_allowed");
+        assertThat(response.getBody().error().message()).isEqualTo("Request method 'POST' is not supported");
     }
 
     @Test
