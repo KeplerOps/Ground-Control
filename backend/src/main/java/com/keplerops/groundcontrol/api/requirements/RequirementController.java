@@ -10,6 +10,7 @@ import com.keplerops.groundcontrol.domain.requirements.service.RequirementFilter
 import com.keplerops.groundcontrol.domain.requirements.service.RequirementService;
 import com.keplerops.groundcontrol.domain.requirements.service.TraceabilityService;
 import com.keplerops.groundcontrol.domain.requirements.service.UpdateRequirementCommand;
+import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.ChangeCategory;
 import com.keplerops.groundcontrol.domain.requirements.state.Priority;
 import com.keplerops.groundcontrol.domain.requirements.state.RequirementType;
@@ -191,6 +192,14 @@ public class RequirementController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteRelation(@PathVariable UUID id, @PathVariable UUID relationId) {
         requirementService.deleteRelation(id, relationId);
+    }
+
+    @GetMapping("/traceability/by-artifact")
+    public List<TraceabilityLinkResponse> findTraceabilityByArtifact(
+            @RequestParam ArtifactType artifactType, @RequestParam String artifactIdentifier) {
+        return traceabilityService.findByArtifact(artifactType, artifactIdentifier).stream()
+                .map(TraceabilityLinkResponse::from)
+                .toList();
     }
 
     @GetMapping("/{id}/traceability")

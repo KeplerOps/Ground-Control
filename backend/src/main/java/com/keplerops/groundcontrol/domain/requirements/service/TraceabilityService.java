@@ -5,6 +5,7 @@ import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
+import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
 import java.util.List;
@@ -80,6 +81,12 @@ public class TraceabilityService {
             throw new NotFoundException("Requirement not found: " + requirementId);
         }
         return traceabilityLinkRepository.findByRequirementId(requirementId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<TraceabilityLink> findByArtifact(ArtifactType artifactType, String artifactIdentifier) {
+        return traceabilityLinkRepository.findByArtifactTypeAndArtifactIdentifierWithRequirement(
+                artifactType, artifactIdentifier);
     }
 
     public void deleteLink(UUID linkId) {

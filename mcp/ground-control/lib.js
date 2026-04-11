@@ -745,6 +745,12 @@ export async function deleteTraceabilityLink(reqId, linkId) {
   await request("DELETE", `/api/v1/requirements/${encodeURIComponent(reqId)}/traceability/${encodeURIComponent(linkId)}`);
 }
 
+export async function getTraceabilityByArtifact(artifactType, artifactIdentifier) {
+  return request("GET", "/api/v1/requirements/traceability/by-artifact", {
+    params: { artifactType, artifactIdentifier },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Graph functions
 // ---------------------------------------------------------------------------
