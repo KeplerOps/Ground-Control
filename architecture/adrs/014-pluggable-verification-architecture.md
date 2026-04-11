@@ -184,7 +184,7 @@ Adapter guardrails:
 
 - Platform can verify software in any language — not limited to Java
 - Graph-based traceability works across verification tools: the differentiator is preserved and strengthened
-- Reverse traceability lookup (`GET /requirements/traceability/by-artifact`) enables automated enforcement that code is linked to requirements, closing the bidirectional traceability loop and supporting self-referential validation (GC-O002)
+- Reverse traceability lookup (`GET /requirements/traceability/by-artifact`) enables automated enforcement that code is linked to requirements, closing the bidirectional traceability loop and supporting self-referential validation (GC-O002). Lookup errors are tracked separately from untraced files for operational debuggability.
 - Security use case is viable: threat model -> security requirement -> formal property -> language-specific proof -> graph-stored evidence
 - Design-level verification via TLA+ is immediately actionable, high-ROI, and proven at AWS scale
 - No rearchitecting needed when adding new prover backends

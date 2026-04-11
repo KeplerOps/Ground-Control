@@ -61,6 +61,7 @@ try {
   const substantiveFiles = allFiles.filter((f) => TRACKED_PATTERNS.some((p) => p.test(f)));
 
   let untracedCount = 0;
+  let errorCount = 0;
   for (const file of substantiveFiles) {
     try {
       const links = await getTraceabilityByArtifact("CODE_FILE", file);
@@ -69,6 +70,7 @@ try {
       }
     } catch {
       untracedCount += 1;
+      errorCount += 1;
     }
   }
 
@@ -77,9 +79,9 @@ try {
     regressions.push(`untraced files regressed: baseline=${untracedBaseline} current=${untracedCount}`);
   }
 
-  console.log(
-    `Reverse traceability: ${substantiveFiles.length - untracedCount}/${substantiveFiles.length} files traced.`,
-  );
+  const traced = substantiveFiles.length - untracedCount;
+  const errorNote = errorCount > 0 ? ` (${errorCount} lookup errors)` : "";
+  console.log(`Reverse traceability: ${traced}/${substantiveFiles.length} files traced.${errorNote}`);
 } catch (e) {
   console.warn(`Reverse traceability check skipped: ${e.message}`);
 }
