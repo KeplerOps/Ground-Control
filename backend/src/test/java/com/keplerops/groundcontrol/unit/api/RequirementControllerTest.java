@@ -431,10 +431,23 @@ class RequirementControllerTest {
         void deleteLink_returns204() throws Exception {
             var reqId = UUID.randomUUID();
             var linkId = UUID.randomUUID();
-            doNothing().when(traceabilityService).deleteLink(linkId);
+            doNothing().when(traceabilityService).deleteLink(reqId, linkId);
 
             mockMvc.perform(delete("/api/v1/requirements/" + reqId + "/traceability/" + linkId))
                     .andExpect(status().isNoContent());
+        }
+
+        @Test
+        void deleteLink_mismatchedRequirement_returns404() throws Exception {
+            var wrongReqId = UUID.randomUUID();
+            var linkId = UUID.randomUUID();
+            doThrow(new NotFoundException("Traceability link not found: " + linkId))
+                    .when(traceabilityService)
+                    .deleteLink(wrongReqId, linkId);
+
+            mockMvc.perform(delete("/api/v1/requirements/" + wrongReqId + "/traceability/" + linkId))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.error.code", is("not_found")));
         }
     }
 
@@ -577,7 +590,7 @@ class RequirementControllerTest {
             var target = createRequirement("REQ-002");
             var rel = createRelation(source, target);
             var revision = new RelationRevision(1, Instant.now(), "ADD", "test-user", null, rel);
-            when(auditService.getRelationHistory(rel.getId())).thenReturn(List.of(revision));
+            when(auditService.getRelationHistory(source.getId(), rel.getId())).thenReturn(List.of(revision));
 
             mockMvc.perform(get("/api/v1/requirements/" + source.getId() + "/relations/" + rel.getId() + "/history"))
                     .andExpect(status().isOk())
@@ -591,9 +604,21 @@ class RequirementControllerTest {
         void notFound_returns404() throws Exception {
             var reqId = UUID.randomUUID();
             var relId = UUID.randomUUID();
-            when(auditService.getRelationHistory(relId)).thenThrow(new NotFoundException("Not found"));
+            when(auditService.getRelationHistory(reqId, relId)).thenThrow(new NotFoundException("Not found"));
 
             mockMvc.perform(get("/api/v1/requirements/" + reqId + "/relations/" + relId + "/history"))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.error.code", is("not_found")));
+        }
+
+        @Test
+        void mismatchedRequirement_returns404() throws Exception {
+            var wrongReqId = UUID.randomUUID();
+            var relId = UUID.randomUUID();
+            when(auditService.getRelationHistory(wrongReqId, relId))
+                    .thenThrow(new NotFoundException("Relation not found: " + relId));
+
+            mockMvc.perform(get("/api/v1/requirements/" + wrongReqId + "/relations/" + relId + "/history"))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.error.code", is("not_found")));
         }
@@ -788,7 +813,8 @@ class RequirementControllerTest {
             var req = createRequirement("REQ-001");
             var link = createLink(req);
             var revision = new TraceabilityLinkRevision(1, Instant.now(), "ADD", "test-user", null, link);
-            when(auditService.getTraceabilityLinkHistory(link.getId())).thenReturn(List.of(revision));
+            when(auditService.getTraceabilityLinkHistory(req.getId(), link.getId()))
+                    .thenReturn(List.of(revision));
 
             mockMvc.perform(get("/api/v1/requirements/" + req.getId() + "/traceability/" + link.getId() + "/history"))
                     .andExpect(status().isOk())
@@ -803,9 +829,21 @@ class RequirementControllerTest {
         void notFound_returns404() throws Exception {
             var reqId = UUID.randomUUID();
             var linkId = UUID.randomUUID();
-            when(auditService.getTraceabilityLinkHistory(linkId)).thenThrow(new NotFoundException("Not found"));
+            when(auditService.getTraceabilityLinkHistory(reqId, linkId)).thenThrow(new NotFoundException("Not found"));
 
             mockMvc.perform(get("/api/v1/requirements/" + reqId + "/traceability/" + linkId + "/history"))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.error.code", is("not_found")));
+        }
+
+        @Test
+        void mismatchedRequirement_returns404() throws Exception {
+            var wrongReqId = UUID.randomUUID();
+            var linkId = UUID.randomUUID();
+            when(auditService.getTraceabilityLinkHistory(wrongReqId, linkId))
+                    .thenThrow(new NotFoundException("Traceability link not found: " + linkId));
+
+            mockMvc.perform(get("/api/v1/requirements/" + wrongReqId + "/traceability/" + linkId + "/history"))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.error.code", is("not_found")));
         }

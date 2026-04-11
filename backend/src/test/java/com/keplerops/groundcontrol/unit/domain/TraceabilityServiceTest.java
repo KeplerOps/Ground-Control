@@ -186,13 +186,12 @@ class TraceabilityServiceTest {
 
         @Test
         void deletesLinkSuccessfully() {
-            var linkId = UUID.randomUUID();
             var req = makeRequirement("REQ-001");
             var link = makeLink(req);
-            setField(link, "id", linkId);
+            var linkId = link.getId();
             when(traceabilityLinkRepository.findById(linkId)).thenReturn(Optional.of(link));
 
-            service.deleteLink(linkId);
+            service.deleteLink(req.getId(), linkId);
             verify(traceabilityLinkRepository).delete(link);
         }
 
@@ -201,7 +200,19 @@ class TraceabilityServiceTest {
             var linkId = UUID.randomUUID();
             when(traceabilityLinkRepository.findById(linkId)).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> service.deleteLink(linkId)).isInstanceOf(NotFoundException.class);
+            assertThatThrownBy(() -> service.deleteLink(UUID.randomUUID(), linkId))
+                    .isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void throwsNotFoundForMismatchedRequirement() {
+            var req = makeRequirement("REQ-001");
+            var link = makeLink(req);
+            var linkId = link.getId();
+            var wrongReqId = UUID.randomUUID();
+            when(traceabilityLinkRepository.findById(linkId)).thenReturn(Optional.of(link));
+
+            assertThatThrownBy(() -> service.deleteLink(wrongReqId, linkId)).isInstanceOf(NotFoundException.class);
         }
     }
 }
