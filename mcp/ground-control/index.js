@@ -214,8 +214,6 @@ import {
   unregisterPlugin,
   PLUGIN_TYPES,
   PLUGIN_LIFECYCLE_STATES,
-  installControlPack,
-  upgradeControlPack,
   listControlPacks,
   getControlPack,
   deprecateControlPack,
@@ -228,6 +226,7 @@ import {
   CONTROL_PACK_LIFECYCLE_STATES,
   CONTROL_PACK_ENTRY_STATUSES,
   registerPackRegistryEntry,
+  importPackRegistryEntry,
   listPackRegistryEntries,
   listPackVersions,
   getPackRegistryEntry,
@@ -246,6 +245,7 @@ import {
   listPackInstallRecords,
   getPackInstallRecord,
   PACK_TYPES,
+  PACK_IMPORT_FORMATS,
   CATALOG_STATUSES,
   TRUST_OUTCOMES,
   INSTALL_OUTCOMES,
@@ -3915,150 +3915,6 @@ server.tool(
   },
 );
 
-// ==========================================================================
-// Control Pack tools
-// ==========================================================================
-
-server.tool(
-  "gc_install_control_pack",
-  "Install a versioned control pack into a project. Creates control records, framework mapping links, and pack entries idempotently.",
-  {
-    pack_id: z.string().max(200).describe("Stable pack identity (e.g. 'nist-sp800-53-rev5', 'iso-27001-annex-a')"),
-    version: z.string().max(50).describe("Semantic version of the pack (e.g. '1.0.0')"),
-    publisher: z.string().max(200).optional().describe("Organization or author who published the pack"),
-    description: z.string().optional().describe("Human-readable pack description"),
-    source_url: z.string().max(2000).optional().describe("Origin URL (registry, git repo, etc.)"),
-    checksum: z.string().max(128).optional().describe("SHA-256 content hash for integrity verification"),
-    compatibility: z.record(z.string(), z.unknown()).optional().describe("Compatibility constraints (e.g. min GC version)"),
-    pack_metadata: z.record(z.string(), z.unknown()).optional().describe("Arbitrary pack-level metadata"),
-    entries: z.array(z.object({
-      uid: z.string().max(50).describe("Control UID within the pack"),
-      title: z.string().max(200).describe("Control title"),
-      control_function: z.enum(CONTROL_FUNCTIONS).describe("Control function"),
-      description: z.string().optional().describe("Control description"),
-      objective: z.string().optional().describe("Control objective"),
-      owner: z.string().max(200).optional().describe("Control owner"),
-      implementation_scope: z.string().optional().describe("Implementation scope"),
-      methodology_factors: z.record(z.string(), z.unknown()).optional().describe("Methodology factor mappings"),
-      effectiveness: z.record(z.string(), z.unknown()).optional().describe("Effectiveness metrics"),
-      category: z.string().max(100).optional().describe("Control category"),
-      source: z.string().max(200).optional().describe("Framework source"),
-      implementation_guidance: z.string().optional().describe("How to implement this control"),
-      expected_evidence: z.array(z.record(z.string(), z.unknown())).optional().describe("Evidence pattern templates (not real evidence)"),
-      framework_mappings: z.array(z.object({
-        framework: z.string().optional().describe("Framework name (e.g. 'NIST CSF')"),
-        identifier: z.string().describe("Framework control identifier (e.g. 'PR.AC-1')"),
-        title: z.string().optional().describe("Mapping title"),
-        url: z.string().optional().describe("Reference URL"),
-      })).optional().describe("Framework mappings (materialized as MAPS_TO control links)"),
-    })).min(1).describe("Control definitions to install"),
-    project: z.string().optional().describe("Project identifier"),
-  },
-  async ({ pack_id, version, publisher, description, source_url, checksum, compatibility, pack_metadata, entries, project }) => {
-    try {
-      const body = {
-        packId: pack_id,
-        version,
-        entries: entries.map(e => ({
-          uid: e.uid,
-          title: e.title,
-          controlFunction: e.control_function,
-          description: e.description,
-          objective: e.objective,
-          owner: e.owner,
-          implementationScope: e.implementation_scope,
-          methodologyFactors: e.methodology_factors,
-          effectiveness: e.effectiveness,
-          category: e.category,
-          source: e.source,
-          implementationGuidance: e.implementation_guidance,
-          expectedEvidence: e.expected_evidence,
-          frameworkMappings: e.framework_mappings,
-        })),
-      };
-      if (publisher !== undefined) body.publisher = publisher;
-      if (description !== undefined) body.description = description;
-      if (source_url !== undefined) body.sourceUrl = source_url;
-      if (checksum !== undefined) body.checksum = checksum;
-      if (compatibility !== undefined) body.compatibility = compatibility;
-      if (pack_metadata !== undefined) body.packMetadata = pack_metadata;
-      return ok(JSON.stringify(await installControlPack(body, project), null, 2));
-    } catch (e) {
-      return err(e);
-    }
-  },
-);
-
-server.tool(
-  "gc_upgrade_control_pack",
-  "Upgrade an installed control pack to a new version. Applies upstream changes to non-overridden fields and preserves local tailoring.",
-  {
-    pack_id: z.string().max(200).describe("Pack identity to upgrade"),
-    new_version: z.string().max(50).describe("New semantic version"),
-    publisher: z.string().max(200).optional().describe("Publisher"),
-    description: z.string().optional().describe("Updated description"),
-    source_url: z.string().max(2000).optional().describe("Updated origin URL"),
-    checksum: z.string().max(128).optional().describe("Updated content hash"),
-    compatibility: z.record(z.string(), z.unknown()).optional().describe("Updated compatibility constraints"),
-    pack_metadata: z.record(z.string(), z.unknown()).optional().describe("Updated pack metadata"),
-    entries: z.array(z.object({
-      uid: z.string().max(50).describe("Control UID within the pack"),
-      title: z.string().max(200).describe("Control title"),
-      control_function: z.enum(CONTROL_FUNCTIONS).describe("Control function"),
-      description: z.string().optional().describe("Control description"),
-      objective: z.string().optional().describe("Control objective"),
-      owner: z.string().max(200).optional().describe("Control owner"),
-      implementation_scope: z.string().optional().describe("Implementation scope"),
-      methodology_factors: z.record(z.string(), z.unknown()).optional().describe("Methodology factor mappings"),
-      effectiveness: z.record(z.string(), z.unknown()).optional().describe("Effectiveness metrics"),
-      category: z.string().max(100).optional().describe("Control category"),
-      source: z.string().max(200).optional().describe("Framework source"),
-      implementation_guidance: z.string().optional().describe("Implementation guidance"),
-      expected_evidence: z.array(z.record(z.string(), z.unknown())).optional().describe("Evidence pattern templates"),
-      framework_mappings: z.array(z.object({
-        framework: z.string().optional().describe("Framework name"),
-        identifier: z.string().describe("Framework control identifier"),
-        title: z.string().optional().describe("Mapping title"),
-        url: z.string().optional().describe("Reference URL"),
-      })).optional().describe("Framework mappings"),
-    })).min(1).describe("Updated control definitions"),
-    project: z.string().optional().describe("Project identifier"),
-  },
-  async ({ pack_id, new_version, publisher, description, source_url, checksum, compatibility, pack_metadata, entries, project }) => {
-    try {
-      const body = {
-        packId: pack_id,
-        newVersion: new_version,
-        entries: entries.map(e => ({
-          uid: e.uid,
-          title: e.title,
-          controlFunction: e.control_function,
-          description: e.description,
-          objective: e.objective,
-          owner: e.owner,
-          implementationScope: e.implementation_scope,
-          methodologyFactors: e.methodology_factors,
-          effectiveness: e.effectiveness,
-          category: e.category,
-          source: e.source,
-          implementationGuidance: e.implementation_guidance,
-          expectedEvidence: e.expected_evidence,
-          frameworkMappings: e.framework_mappings,
-        })),
-      };
-      if (publisher !== undefined) body.publisher = publisher;
-      if (description !== undefined) body.description = description;
-      if (source_url !== undefined) body.sourceUrl = source_url;
-      if (checksum !== undefined) body.checksum = checksum;
-      if (compatibility !== undefined) body.compatibility = compatibility;
-      if (pack_metadata !== undefined) body.packMetadata = pack_metadata;
-      return ok(JSON.stringify(await upgradeControlPack(body, project), null, 2));
-    } catch (e) {
-      return err(e);
-    }
-  },
-);
-
 server.tool(
   "gc_list_control_packs",
   "List installed control packs for a project.",
@@ -4270,6 +4126,38 @@ server.tool(
   async ({ project, ...data }) => {
     try {
       return ok(JSON.stringify(await registerPackRegistryEntry(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_import_pack_registry_entry",
+  "Import a pack registry entry from a local JSON file. Supports Ground Control manifests and OSCAL JSON catalogs, then registers the resulting pack version in the catalog.",
+  {
+    file_path: z.string().describe("Absolute path to the source JSON file"),
+    format: z.enum(PACK_IMPORT_FORMATS).optional().describe("Input format. AUTO detects OSCAL vs Ground Control manifest."),
+    pack_id: z.string().max(200).optional().describe("Optional pack ID override"),
+    version: z.string().max(50).optional().describe("Optional version override"),
+    publisher: z.string().max(200).optional().describe("Optional publisher override"),
+    description: z.string().optional().describe("Optional description override"),
+    source_url: z.string().max(2000).optional().describe("Optional source URL override"),
+    checksum: z.string().max(128).optional().describe("Optional publisher-declared checksum override"),
+    signature_info: z.record(z.string(), z.unknown()).optional().describe("Optional detached signature metadata override"),
+    compatibility: z.record(z.string(), z.unknown()).optional().describe("Optional compatibility override"),
+    dependencies: z.array(z.object({
+      pack_id: z.string().max(200).describe("Dependency pack identity"),
+      version_constraint: z.string().max(100).optional().describe("Optional semantic version constraint"),
+    })).optional().describe("Optional dependency override list"),
+    provenance: z.record(z.string(), z.unknown()).optional().describe("Optional provenance merge override"),
+    registry_metadata: z.record(z.string(), z.unknown()).optional().describe("Optional registry metadata merge override"),
+    default_control_function: z.enum(CONTROL_FUNCTIONS).optional().describe("Default control function used when imported content omits it"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ file_path, project, ...data }) => {
+    try {
+      return ok(JSON.stringify(await importPackRegistryEntry(file_path, data, project), null, 2));
     } catch (e) {
       return err(e);
     }

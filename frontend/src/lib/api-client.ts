@@ -25,6 +25,7 @@ export async function apiFetch<T>(
     params?: Record<string, string | undefined>;
     method?: string;
     body?: unknown;
+    headers?: Record<string, string>;
   },
 ): Promise<T> {
   const url = new URL(`${API_BASE}${path}`, window.location.origin);
@@ -39,13 +40,22 @@ export async function apiFetch<T>(
 
   const init: RequestInit = {
     method: options?.method ?? "GET",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: {},
   };
 
   if (options?.body) {
+    init.headers = {
+      ...init.headers,
+      "Content-Type": "application/json",
+    };
     init.body = JSON.stringify(options.body);
+  }
+
+  if (options?.headers) {
+    init.headers = {
+      ...init.headers,
+      ...options.headers,
+    };
   }
 
   const response = await fetch(url.toString(), init);
@@ -83,7 +93,10 @@ export async function apiDelete(
 export async function apiUpload<T>(
   path: string,
   formData: FormData,
-  options?: { params?: Record<string, string | undefined> },
+  options?: {
+    params?: Record<string, string | undefined>;
+    headers?: Record<string, string>;
+  },
 ): Promise<T> {
   const url = new URL(`${API_BASE}${path}`, window.location.origin);
 
@@ -97,6 +110,7 @@ export async function apiUpload<T>(
 
   const response = await fetch(url.toString(), {
     method: "POST",
+    headers: options?.headers,
     body: formData,
   });
 

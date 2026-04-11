@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -18,6 +19,7 @@ import com.keplerops.groundcontrol.api.packregistry.PackRegistryAccessGuard;
 import com.keplerops.groundcontrol.api.packregistry.PackRegistryController;
 import com.keplerops.groundcontrol.domain.packregistry.model.PackRegistryEntry;
 import com.keplerops.groundcontrol.domain.packregistry.model.RegisteredControlPackEntry;
+import com.keplerops.groundcontrol.domain.packregistry.service.PackRegistryImportService;
 import com.keplerops.groundcontrol.domain.packregistry.service.PackRegistryService;
 import com.keplerops.groundcontrol.domain.packregistry.service.PackResolver;
 import com.keplerops.groundcontrol.domain.packregistry.service.RegisterPackCommand;
@@ -27,6 +29,7 @@ import com.keplerops.groundcontrol.domain.packregistry.state.CatalogStatus;
 import com.keplerops.groundcontrol.domain.packregistry.state.PackType;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -34,6 +37,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -45,6 +49,9 @@ class PackRegistryControllerTest {
 
     @MockitoBean
     private PackRegistryService registryService;
+
+    @MockitoBean
+    private PackRegistryImportService importService;
 
     @MockitoBean
     private PackResolver packResolver;
@@ -128,6 +135,32 @@ class PackRegistryControllerTest {
                  "dependencies":[{"packId":"dep-pack","versionConstraint":"^1.0.0"}]}
                 """))
                 .andExpect(status().isCreated());
+    }
+
+    @Test
+    void importReturnsCreated() throws Exception {
+        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(importService.importEntry(eq(PROJECT_ID), eq("catalog.json"), any(), any()))
+                .thenReturn(makeEntry());
+
+        var file = new MockMultipartFile(
+                "file", "catalog.json", "application/json", "{\"catalog\":{}}".getBytes(StandardCharsets.UTF_8));
+        var options = new MockMultipartFile(
+                "options",
+                "",
+                MediaType.APPLICATION_JSON_VALUE,
+                """
+                {"format":"OSCAL_JSON","packId":"nist-sp800-53-rev5","version":"5.1.0"}
+                """
+                        .getBytes(StandardCharsets.UTF_8));
+
+        mockMvc.perform(multipart("/api/v1/pack-registry/import")
+                        .file(file)
+                        .file(options)
+                        .param("project", "ground-control"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.packId", is("nist-800-53")))
+                .andExpect(jsonPath("$.controlPackEntries[0].uid", is("AC-1")));
     }
 
     @Test

@@ -1936,14 +1936,6 @@ export async function unregisterPlugin(name, project) {
 export const CONTROL_PACK_LIFECYCLE_STATES = ["INSTALLED", "UPGRADED", "DEPRECATED", "REMOVED"];
 export const CONTROL_PACK_ENTRY_STATUSES = ["ACTIVE", "DEPRECATED", "REMOVED"];
 
-export async function installControlPack(data, project) {
-  return request("POST", "/api/v1/control-packs/install", { body: data, params: { project } });
-}
-
-export async function upgradeControlPack(data, project) {
-  return request("POST", "/api/v1/control-packs/upgrade", { body: data, params: { project } });
-}
-
 export async function listControlPacks(project) {
   return request("GET", "/api/v1/control-packs", { params: { project } });
 }
@@ -1987,6 +1979,7 @@ export async function deleteControlPackOverride(packId, entryUid, overrideId, pr
 // ---------------------------------------------------------------------------
 
 export const PACK_TYPES = ["CONTROL_PACK", "REQUIREMENTS_PACK", "CUSTOM"];
+export const PACK_IMPORT_FORMATS = ["AUTO", "OSCAL_JSON", "GC_MANIFEST"];
 export const CATALOG_STATUSES = ["AVAILABLE", "WITHDRAWN", "SUPERSEDED"];
 export const TRUST_OUTCOMES = ["TRUSTED", "REJECTED", "UNKNOWN"];
 export const INSTALL_OUTCOMES = ["INSTALLED", "UPGRADED", "REJECTED", "FAILED"];
@@ -2005,6 +1998,20 @@ export const TRUST_POLICY_RULE_OPERATORS = ["EQUALS", "NOT_EQUALS", "CONTAINS", 
 
 export async function registerPackRegistryEntry(data, project) {
   return request("POST", "/api/v1/pack-registry", { body: data, params: { project } });
+}
+
+export async function importPackRegistryEntry(filePath, data, project) {
+  const content = readOperatorSuppliedFile(filePath);
+  const form = new FormData();
+  form.append("file", new Blob([content]), basename(filePath));
+  if (data && Object.keys(data).length > 0) {
+    form.append(
+      "options",
+      new Blob([JSON.stringify(toCamelCase(data))], { type: "application/json" }),
+      "options.json",
+    );
+  }
+  return request("POST", "/api/v1/pack-registry/import", { formData: form, params: { project } });
 }
 
 export async function listPackRegistryEntries(project, { packType } = {}) {

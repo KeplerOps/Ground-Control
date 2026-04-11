@@ -644,8 +644,6 @@ All endpoints accept an optional `project` query parameter.
 
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
-| POST | `/control-packs/install` | InstallControlPackRequest | 201 | Install a control pack (idempotent) |
-| POST | `/control-packs/upgrade` | UpgradeControlPackRequest | 200 | Upgrade to a new version |
 | GET | `/control-packs` | — | 200 | List installed packs |
 | GET | `/control-packs/{packId}` | — | 200 | Get pack by identifier |
 | PUT | `/control-packs/{packId}/deprecate` | — | 200 | Deprecate a pack |
@@ -658,14 +656,10 @@ All endpoints accept an optional `project` query parameter.
 
 All endpoints accept an optional `project` query parameter.
 
-**InstallControlPackRequest fields:** `packId` (required, max 200), `version` (required, max 50),
-`publisher` (optional), `description` (optional), `sourceUrl` (optional), `checksum` (optional),
-`compatibility` (optional, JSON object), `packMetadata` (optional, JSON object),
-`entries` (required, array of control definitions with `uid`, `title`, `controlFunction`, plus optional
-`description`, `objective`, `owner`, `implementationScope`, `methodologyFactors`, `effectiveness`,
-`category`, `source`, `implementationGuidance`, `expectedEvidence`, `frameworkMappings`).
-
-**UpgradeControlPackRequest fields:** Same as install, but uses `newVersion` instead of `version`.
+Control-pack installation and upgrade are registry-backed operations only. Register
+or import a `CONTROL_PACK` in `/pack-registry`, then use `/pack-install-records/install`
+or `/pack-install-records/upgrade` so resolution, trust evaluation, and audit recording
+cannot be bypassed.
 
 **CreateControlPackOverrideRequest fields:** `fieldName` (required — title, description, objective,
 controlFunction, owner, implementationScope, or category), `overrideValue` (optional; title
@@ -728,6 +722,7 @@ helper forwards `GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN` when set.
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
 | POST | `/pack-registry` | RegisterPackRequest | 201 | Register pack version in catalog |
+| POST | `/pack-registry/import` | multipart/form-data | 201 | Import and register a pack from uploaded JSON |
 | GET | `/pack-registry` | — | 200 | List registry entries (optional `packType` filter) |
 | GET | `/pack-registry/{packId}` | — | 200 | List versions of a pack |
 | GET | `/pack-registry/{packId}/{version}` | — | 200 | Get specific pack version |
@@ -736,6 +731,28 @@ helper forwards `GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN` when set.
 | DELETE | `/pack-registry/{packId}/{version}` | — | 204 | Delete pack version |
 | POST | `/pack-registry/resolve` | ResolvePackRequest | 200 | Resolve version from registry |
 | POST | `/pack-registry/check-compatibility` | ResolvePackRequest | 200 | Check pack compatibility (returns boolean) |
+
+For large catalogs, use `POST /pack-registry/import` instead of hand-authoring a
+giant JSON request body. The endpoint accepts a multipart `file` part plus an
+optional JSON `options` part. Supported formats are:
+
+- `AUTO` — detect OSCAL catalog JSON vs Ground Control manifest JSON
+- `OSCAL_JSON` — treat the file as an OSCAL catalog and flatten controls into a `CONTROL_PACK`
+- `GC_MANIFEST` — treat the file as a Ground Control pack manifest and register it directly
+
+`options` may override pack metadata such as `packId`, `version`, `publisher`,
+`description`, `sourceUrl`, `checksum`, `signatureInfo`, `compatibility`,
+`dependencies`, `provenance`, `registryMetadata`, and
+`defaultControlFunction` for imported control entries.
+
+Example multipart call:
+
+```sh
+curl -X POST "http://localhost:8000/api/v1/pack-registry/import?project=ground-control" \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@/path/to/catalog.json;type=application/json" \
+  -F 'options={"format":"OSCAL_JSON","packId":"nist-sp800-53-rev5","version":"5.1.0","publisher":"NIST"};type=application/json'
+```
 
 ### Trust Policies
 
@@ -755,6 +772,10 @@ helper forwards `GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN` when set.
 | POST | `/pack-install-records/upgrade` | InstallPackRequest | 200, 422 | Upgrade pack via registry with trust evaluation |
 | GET | `/pack-install-records` | — | 200 | List install records (optional `packId` filter) |
 | GET | `/pack-install-records/{id}` | — | 200 | Get install record |
+
+For control packs, use `/pack-registry/import` or `/pack-registry` to persist the
+pack definition first, then call one of these routes with the `packId` and optional
+version constraint.
 
 `RegisterPackRequest` and `UpdatePackRegistryEntryRequest` accept
 `controlPackEntries` for `CONTROL_PACK` artifacts. Registry-driven install and

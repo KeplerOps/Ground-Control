@@ -2,8 +2,6 @@ package com.keplerops.groundcontrol.api.controlpacks;
 
 import com.keplerops.groundcontrol.domain.controlpacks.service.ControlPackService;
 import com.keplerops.groundcontrol.domain.controlpacks.service.CreateControlPackOverrideCommand;
-import com.keplerops.groundcontrol.domain.controlpacks.service.InstallControlPackCommand;
-import com.keplerops.groundcontrol.domain.controlpacks.service.UpgradeControlPackCommand;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -30,47 +28,6 @@ public class ControlPackController {
     public ControlPackController(ControlPackService controlPackService, ProjectService projectService) {
         this.controlPackService = controlPackService;
         this.projectService = projectService;
-    }
-
-    @PostMapping("/install")
-    @ResponseStatus(HttpStatus.CREATED)
-    public ControlPackInstallResultResponse install(
-            @Valid @RequestBody InstallControlPackRequest request, @RequestParam(required = false) String project) {
-        var projectId = projectService.resolveProjectId(project);
-        var result = controlPackService.install(new InstallControlPackCommand(
-                projectId,
-                request.packId(),
-                request.version(),
-                request.publisher(),
-                request.description(),
-                request.sourceUrl(),
-                request.checksum(),
-                request.compatibility(),
-                request.packMetadata(),
-                request.entries().stream()
-                        .map(ControlPackController::toEntryDefinition)
-                        .toList()));
-        return ControlPackInstallResultResponse.from(result);
-    }
-
-    @PostMapping("/upgrade")
-    public ControlPackUpgradeResultResponse upgrade(
-            @Valid @RequestBody UpgradeControlPackRequest request, @RequestParam(required = false) String project) {
-        var projectId = projectService.resolveProjectId(project);
-        var result = controlPackService.upgrade(new UpgradeControlPackCommand(
-                projectId,
-                request.packId(),
-                request.newVersion(),
-                request.publisher(),
-                request.description(),
-                request.sourceUrl(),
-                request.checksum(),
-                request.compatibility(),
-                request.packMetadata(),
-                request.entries().stream()
-                        .map(ControlPackController::toEntryDefinition)
-                        .toList()));
-        return ControlPackUpgradeResultResponse.from(result);
     }
 
     @GetMapping
@@ -154,24 +111,5 @@ public class ControlPackController {
             @RequestParam(required = false) String project) {
         var projectId = projectService.requireProjectId(project);
         controlPackService.deleteOverride(projectId, packId, entryUid, overrideId);
-    }
-
-    private static com.keplerops.groundcontrol.domain.controlpacks.service.ControlPackEntryDefinition toEntryDefinition(
-            ControlPackEntryDefinitionRequest r) {
-        return new com.keplerops.groundcontrol.domain.controlpacks.service.ControlPackEntryDefinition(
-                r.uid(),
-                r.title(),
-                r.description(),
-                r.objective(),
-                r.controlFunction(),
-                r.owner(),
-                r.implementationScope(),
-                r.methodologyFactors(),
-                r.effectiveness(),
-                r.category(),
-                r.source(),
-                r.implementationGuidance(),
-                r.expectedEvidence(),
-                r.frameworkMappings());
     }
 }

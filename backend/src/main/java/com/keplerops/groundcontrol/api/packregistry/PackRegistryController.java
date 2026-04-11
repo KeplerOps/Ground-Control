@@ -5,6 +5,8 @@ import com.keplerops.groundcontrol.domain.controlpacks.service.ControlPackEntryD
 import com.keplerops.groundcontrol.domain.packregistry.service.ControlPackRegistrationContent;
 import com.keplerops.groundcontrol.domain.packregistry.service.EmptyPackRegistrationContent;
 import com.keplerops.groundcontrol.domain.packregistry.service.PackRegistrationContent;
+import com.keplerops.groundcontrol.domain.packregistry.service.PackRegistryImportOptions;
+import com.keplerops.groundcontrol.domain.packregistry.service.PackRegistryImportService;
 import com.keplerops.groundcontrol.domain.packregistry.service.PackRegistryService;
 import com.keplerops.groundcontrol.domain.packregistry.service.PackResolver;
 import com.keplerops.groundcontrol.domain.packregistry.service.RegisterPackCommand;
@@ -13,8 +15,10 @@ import com.keplerops.groundcontrol.domain.packregistry.state.PackType;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import java.io.IOException;
 import java.util.List;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,24 +27,29 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/v1/pack-registry")
 public class PackRegistryController {
 
     private final PackRegistryService registryService;
+    private final PackRegistryImportService importService;
     private final PackResolver packResolver;
     private final ProjectService projectService;
     private final PackRegistryAccessGuard accessGuard;
 
     public PackRegistryController(
             PackRegistryService registryService,
+            PackRegistryImportService importService,
             PackResolver packResolver,
             ProjectService projectService,
             PackRegistryAccessGuard accessGuard) {
         this.registryService = registryService;
+        this.importService = importService;
         this.packResolver = packResolver;
         this.projectService = projectService;
         this.accessGuard = accessGuard;
@@ -69,6 +78,28 @@ public class PackRegistryController {
                 toRegistrationContent(request.controlPackEntries()),
                 request.provenance(),
                 request.registryMetadata()));
+        return PackRegistryEntryResponse.from(result);
+    }
+
+    @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @ResponseStatus(HttpStatus.CREATED)
+    public PackRegistryEntryResponse importEntry(
+            @RequestPart("file") MultipartFile file,
+            @Valid @RequestPart(value = "options", required = false) PackRegistryImportRequest request,
+            @RequestParam(required = false) String project,
+            HttpServletRequest httpRequest) {
+        accessGuard.requireAdminActor(httpRequest);
+        var projectId = projectService.resolveProjectId(project);
+        var bytes = readFileBytes(file);
+        var filename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "import.json";
+        var result = importService.importEntry(
+                projectId,
+                filename,
+                bytes,
+                request != null
+                        ? request.toOptions()
+                        : new PackRegistryImportOptions(
+                                null, null, null, null, null, null, null, null, null, null, null, null, null));
         return PackRegistryEntryResponse.from(result);
     }
 
@@ -209,5 +240,14 @@ public class PackRegistryController {
         return new ControlPackRegistrationContent(requests.stream()
                 .map(PackRegistryController::toControlPackEntryDefinition)
                 .toList());
+    }
+
+    private static byte[] readFileBytes(MultipartFile file) {
+        try {
+            return file.getBytes();
+        } catch (IOException e) {
+            throw new com.keplerops.groundcontrol.domain.exception.GroundControlException(
+                    "Failed to read uploaded file: " + e.getMessage(), "file_read_error", e);
+        }
     }
 }

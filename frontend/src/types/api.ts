@@ -1,6 +1,17 @@
 // Enums
 export type Status = "DRAFT" | "ACTIVE" | "DEPRECATED" | "ARCHIVED";
 export type Priority = "MUST" | "SHOULD" | "COULD" | "WONT";
+export type ControlFunction =
+  | "PREVENTIVE"
+  | "DETECTIVE"
+  | "CORRECTIVE"
+  | "COMPENSATING";
+export const CONTROL_FUNCTIONS: ControlFunction[] = [
+  "PREVENTIVE",
+  "DETECTIVE",
+  "CORRECTIVE",
+  "COMPENSATING",
+];
 export type RequirementType =
   | "FUNCTIONAL"
   | "NON_FUNCTIONAL"
@@ -55,6 +66,14 @@ export const LINK_TYPES: LinkType[] = [
 ];
 export type SyncStatus = "SYNCED" | "NOT_SYNCED" | "ERROR";
 export type RevisionType = "ADD" | "MOD" | "DEL";
+export type PackType = "CONTROL_PACK" | "REQUIREMENTS_PACK" | "CUSTOM";
+export type CatalogStatus = "AVAILABLE" | "WITHDRAWN" | "SUPERSEDED";
+export type PackRegistryImportFormat = "AUTO" | "OSCAL_JSON" | "GC_MANIFEST";
+export const PACK_REGISTRY_IMPORT_FORMATS: PackRegistryImportFormat[] = [
+  "AUTO",
+  "OSCAL_JSON",
+  "GC_MANIFEST",
+];
 export type GraphEntityType =
   | "REQUIREMENT"
   | "OPERATIONAL_ASSET"
@@ -136,6 +155,50 @@ export interface GraphNeighborhoodResponse extends GraphVisualizationResponse {
 export interface GraphPathResponse {
   nodeIds: string[];
   edgeTypes: string[];
+}
+
+export interface PackDependencyResponse {
+  packId: string;
+  versionConstraint: string | null;
+}
+
+export interface RegisteredControlPackEntryResponse {
+  uid: string;
+  title: string;
+  controlFunction: ControlFunction;
+  description?: string | null;
+  objective?: string | null;
+  owner?: string | null;
+  implementationScope?: string | null;
+  methodologyFactors?: Record<string, unknown> | null;
+  effectiveness?: Record<string, unknown> | null;
+  category?: string | null;
+  source?: string | null;
+  implementationGuidance?: string | null;
+  expectedEvidence?: Record<string, unknown>[] | null;
+  frameworkMappings?: Record<string, unknown>[] | null;
+}
+
+export interface PackRegistryEntryResponse {
+  id: string;
+  projectIdentifier: string;
+  packId: string;
+  packType: PackType;
+  publisher: string | null;
+  version: string;
+  description: string | null;
+  sourceUrl: string | null;
+  checksum: string | null;
+  signatureInfo: Record<string, unknown> | null;
+  compatibility: Record<string, unknown> | null;
+  dependencies: PackDependencyResponse[] | null;
+  controlPackEntries: RegisteredControlPackEntryResponse[] | null;
+  provenance: Record<string, unknown> | null;
+  registryMetadata: Record<string, unknown> | null;
+  catalogStatus: CatalogStatus;
+  registeredAt: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface TraceabilityLinkResponse {
