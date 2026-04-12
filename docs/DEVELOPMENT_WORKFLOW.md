@@ -153,9 +153,11 @@ No Co-Authored-By, no "Generated with Claude Code", no AI attribution anywhere.
 
 ### Workflow Hooks (source of truth: `.claude/hooks/`)
 
-The three user-level workflow hooks listed below are **checked into this repo** under `.claude/hooks/` and then symlinked into `~/.claude/hooks/<name>` by `scripts/bootstrap-claude-workflow.sh` (see **Tooling** below). Edit the file in the repo, commit, and the change takes effect on the next session. The user-level `~/.claude/settings.json` registers the hooks via `~/.claude/hooks/<name>` paths, which resolve transparently through the symlinks.
+The three user-level workflow hooks listed below are **checked into this repo** under `.claude/hooks/` and installed as **real file copies** at `~/.claude/hooks/<name>` by `scripts/bootstrap-claude-workflow.sh` (see **Tooling** below). Unlike skills — which are symlinked so edits in the repo take effect on the next session — hooks are copied because the harness execs them on every Bash tool call in every Claude Code session on the host. If the runtime path were a symlink into this repo's working tree, any `git checkout` in this repo would silently break hooks for every concurrent Claude window on the machine. Real copies decouple runtime from worktree state.
 
-One user-level hook is deliberately NOT in the repo: `~/.claude/hooks/block-break-system-packages.sh`. It's a generic pip/apt safety gate unrelated to the Ground-Control workflow, so it stays host-local.
+After editing a hook file under `.claude/hooks/` in the repo, re-run `scripts/bootstrap-claude-workflow.sh` (no arguments, idempotent) to copy the new version into `~/.claude/hooks/`. The `~/.claude/settings.json` hook registrations point at the stable `~/.claude/hooks/<name>` path and work regardless of what this repo is checked out to.
+
+One user-level hook is deliberately NOT in the repo: `~/.claude/hooks/block-break-system-packages.sh`. It's a generic pip/apt safety gate unrelated to the Ground-Control workflow, so it stays host-local and `bootstrap-claude-workflow.sh` leaves it alone.
 
 #### Stop Hook — `verify-implementation.sh`
 Blocks Claude from completing, but **only when `/implement` was invoked in the current session**. Scoped by process ID (`$PPID`) so concurrent Claude windows on the same branch don't interfere.
@@ -200,7 +202,7 @@ Repo-local scripts live under `scripts/` (bash) and `bin/` (Python). The ones yo
 
 | Command | Purpose |
 |---------|---------|
-| `scripts/bootstrap-claude-workflow.sh` | Symlink `~/.claude/skills/<name>` and `~/.claude/hooks/<workflow-hook>` into the repo copies under `.claude/` so every session uses the checked-in version. Idempotent; safe to re-run. Pass `--dry-run` to preview, `--force` to clobber non-matching host copies. The hook allowlist is explicit, so generic host-local hooks (e.g. `block-break-system-packages.sh`) are left alone. |
+| `scripts/bootstrap-claude-workflow.sh` | Install the workflow surfaces Claude Code loads from `~/.claude/`. Skills are symlinked into `.claude/skills/<name>` (edit takes effect live). Hooks are **copied** from `.claude/hooks/` as real files so runtime does not depend on which branch this repo is checked out to. Idempotent; safe to re-run. Pass `--dry-run` to preview, `--force` to clobber non-matching host copies. The hook allowlist is explicit, so generic host-local hooks (e.g. `block-break-system-packages.sh`) are left alone. Re-run after editing a hook file in the repo to push the new version into `~/.claude/hooks/`. |
 | `scripts/pack-sync.sh` | Trigger the `pack-registry-sync` GitHub workflow against this repo. |
 | `bin/policy` | Run the repo-native policy guardrails (ADR sync, controller/MCP/docs parity, migration policy, PR-body checks). Invoked by `make policy`, pre-commit, and CI. |
 | `bin/adr-guard` | ADR-specific policy checks run standalone. |
@@ -216,10 +218,10 @@ scripts/bootstrap-claude-workflow.sh
 ```
 
 It walks:
-- `.claude/skills/*/` — every skill directory gets a matching `~/.claude/skills/<name>` symlink.
-- `.claude/hooks/` — only the hooks listed in the script's `WORKFLOW_HOOKS` allowlist (`git-merge-guard.py`, `log-skill-call.sh`, `verify-implementation.sh`) get symlinked to `~/.claude/hooks/<name>`. Repo-scoped hooks (`protect_files.sh`, `verify-extra.sh`) stay where they are because they're wired via `$CLAUDE_PROJECT_DIR` in `.claude/settings.json`, not via `~/.claude/`.
+- `.claude/skills/*/` — every skill directory gets a matching `~/.claude/skills/<name>` **symlink**. Editing a skill in the repo takes effect immediately in the next session.
+- `.claude/hooks/` — only the hooks listed in the script's `WORKFLOW_HOOKS` allowlist (`git-merge-guard.py`, `log-skill-call.sh`, `verify-implementation.sh`) are installed as **real file copies** at `~/.claude/hooks/<name>`. Editing a hook in the repo requires re-running this script to push the new version out. Repo-scoped hooks (`protect_files.sh`, `verify-extra.sh`) stay where they are because they're wired via `$CLAUDE_PROJECT_DIR` in `.claude/settings.json`, not via `~/.claude/`.
 
-If a pre-existing host file or directory has local changes that are NOT in the repo, the script refuses to clobber it and exits non-zero — re-run with `--force` only after you've confirmed the repo copy is the version you want. Already-correct symlinks are left alone.
+If a pre-existing host file or directory has local changes that are NOT in the repo, the script refuses to clobber it and exits non-zero — re-run with `--force` only after you've confirmed the repo copy is the version you want. Already-correct entries are left alone.
 
 ## Key Lessons (from GC-J001 first run)
 

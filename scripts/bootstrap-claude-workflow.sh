@@ -1,35 +1,51 @@
 #!/usr/bin/env bash
 #
-# bootstrap-claude-workflow.sh — make ~/.claude/{skills,hooks}/<name> point at
-# the copies checked into this repo, so this repo is the source of truth for
-# the workflow surfaces Claude Code actually loads at runtime.
+# bootstrap-claude-workflow.sh — wire the Claude Code runtime at
+# ~/.claude/{skills,hooks}/ to the workflow surfaces checked into this repo.
 #
-# What gets symlinked:
+# Skills use a DIFFERENT install mode than hooks on purpose:
 #
-#   skills/ — every directory under .claude/skills/ in this repo becomes a
-#   symlink at ~/.claude/skills/<name>. Full directory symlink so the runtime
-#   picks up any sibling files the skill owner adds later (assets, prompts,
-#   etc.), not just SKILL.md.
+#   skills/ — symlinked. ~/.claude/skills/<name> is a directory symlink into
+#   .claude/skills/<name> in this repo. Editing a SKILL.md in the repo takes
+#   effect in the next Claude Code session on the same host, no re-run.
+#   Skills are only read at session start, so cross-session weirdness is low.
 #
-#   hooks/ — only the user-level workflow hooks listed in WORKFLOW_HOOKS
-#   below. Repo-scoped hooks (protect_files.sh, verify-extra.sh) are wired
-#   via $CLAUDE_PROJECT_DIR in .claude/settings.json and must NOT be linked
-#   into ~/.claude/hooks/, so the allowlist is explicit.
+#   hooks/ — copied. ~/.claude/hooks/<name> is a real file copied out of
+#   .claude/hooks/<name>. Hooks are execed by the harness on every tool call
+#   in every session on the host, so the runtime path must NOT depend on
+#   which branch a specific repo happens to be checked out to. Symlinking
+#   hooks into a working tree means every git checkout in that tree silently
+#   breaks Bash for every concurrent Claude window on the machine. Copies
+#   decouple runtime from worktree state at the cost of requiring a re-run
+#   whenever the repo-side hook file changes.
 #
-# Pre-existing host state:
+# Only hooks listed in WORKFLOW_HOOKS below are touched. Repo-scoped hooks
+# (protect_files.sh, verify-extra.sh) are wired via $CLAUDE_PROJECT_DIR in
+# .claude/settings.json and must NEVER land under ~/.claude/hooks/, so the
+# allowlist is explicit.
 #
-#   - If ~/.claude/<kind>/<name> is already the desired symlink, it's left
-#     alone.
-#   - If it's a plain file/directory whose content is byte-identical to the
-#     repo copy, it's replaced with a symlink automatically.
-#   - If it differs from the repo copy, the script refuses to touch it and
-#     exits non-zero. Re-run with --force to clobber.
-#   - Entries that exist user-level but not in the repo are never touched.
+# Host-state semantics:
+#
+#   skills — if ~/.claude/skills/<name> is already the desired symlink, it's
+#   left alone. If it's a plain directory byte-identical to the repo copy,
+#   it's replaced with a symlink. If it differs, the script refuses to touch
+#   it; re-run with --force to clobber.
+#
+#   hooks  — if ~/.claude/hooks/<name> is already a copy byte-identical to
+#   the repo version, it's left alone. If it's a stale copy or a symlink
+#   (common after the earlier design that symlinked hooks), it's replaced
+#   with a fresh copy from the repo. If it differs and isn't a symlink, the
+#   script refuses to touch it; re-run with --force to clobber.
+#
+#   Entries that exist at the user level but not in the repo are never
+#   touched regardless.
 #
 # Usage:
 #   scripts/bootstrap-claude-workflow.sh [--force] [--dry-run]
 #
-# Run once per host after cloning Ground-Control. Safe to re-run.
+# Safe to re-run. Run after cloning Ground-Control on a new host, after any
+# edit to a hook under .claude/hooks/, or after any host-level reset that
+# wipes ~/.claude/skills or ~/.claude/hooks.
 
 set -euo pipefail
 
@@ -40,9 +56,6 @@ SKILLS_DST="${HOME}/.claude/skills"
 HOOKS_SRC="$REPO_ROOT/.claude/hooks"
 HOOKS_DST="${HOME}/.claude/hooks"
 
-# User-level hooks that live in this repo. Only these are symlinked.
-# Repo-scoped hooks (protect_files.sh, verify-extra.sh) are NOT in this list
-# because settings.json references them via $CLAUDE_PROJECT_DIR, not ~/.claude.
 WORKFLOW_HOOKS=(
   "git-merge-guard.py"
   "log-skill-call.sh"
@@ -56,7 +69,7 @@ for arg in "$@"; do
     --force) force=1 ;;
     --dry-run) dry_run=1 ;;
     -h|--help)
-      sed -n '2,33p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '2,58p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -75,15 +88,14 @@ run() {
 }
 
 linked=0
+copied=0
 clobbered=0
 already_correct=0
 
-# Link a single source -> destination, with the refuse-unless-identical-or-force
-# safety rule. $1 source path, $2 destination path, $3 "dir"|"file".
-link_one() {
+# Symlink a skill directory from src → dst, with the safety rail.
+link_skill() {
   local src="$1"
   local dst="$2"
-  local kind="$3"
 
   if [[ -L "$dst" ]]; then
     local current
@@ -92,39 +104,67 @@ link_one() {
       already_correct=$((already_correct + 1))
       return 0
     fi
-    echo "updating symlink $dst: $current -> $src"
+    echo "updating skill symlink $dst: $current -> $src"
     run "rm -f \"$dst\" && ln -s \"$src\" \"$dst\""
     linked=$((linked + 1))
     return 0
   fi
 
   if [[ -e "$dst" ]]; then
-    local identical=0
-    if [[ "$kind" == "dir" ]]; then
-      [[ -d "$dst" ]] && diff -qr "$src" "$dst" > /dev/null 2>&1 && identical=1
-    else
-      [[ -f "$dst" ]] && diff -q "$src" "$dst" > /dev/null 2>&1 && identical=1
-    fi
-
-    if [[ "$identical" -eq 1 ]]; then
-      echo "replacing identical $kind $dst with symlink -> $src"
+    if [[ -d "$dst" ]] && diff -qr "$src" "$dst" > /dev/null 2>&1; then
+      echo "replacing identical skill directory $dst with symlink -> $src"
       run "rm -rf \"$dst\" && ln -s \"$src\" \"$dst\""
       clobbered=$((clobbered + 1))
       return 0
     fi
     if [[ "$force" -eq 1 ]]; then
-      echo "FORCE: replacing $dst with symlink -> $src"
+      echo "FORCE: replacing skill $dst with symlink -> $src"
       run "rm -rf \"$dst\" && ln -s \"$src\" \"$dst\""
       clobbered=$((clobbered + 1))
       return 0
     fi
-    echo "refusing to replace $dst (differs from repo copy). Re-run with --force to overwrite." >&2
+    echo "refusing to replace skill $dst (differs from repo copy). Re-run with --force to overwrite." >&2
     exit 3
   fi
 
-  echo "linking $dst -> $src"
+  echo "linking skill $dst -> $src"
   run "ln -s \"$src\" \"$dst\""
   linked=$((linked + 1))
+}
+
+# Copy a hook file from src → dst, with the safety rail. A pre-existing
+# symlink at dst is treated as "stale, replace with a real copy" because the
+# earlier design symlinked hooks into the worktree and we're migrating away
+# from that.
+copy_hook() {
+  local src="$1"
+  local dst="$2"
+
+  if [[ -L "$dst" ]]; then
+    echo "replacing stale hook symlink $dst with a real copy from $src"
+    run "rm -f \"$dst\" && cp \"$src\" \"$dst\" && chmod +x \"$dst\""
+    copied=$((copied + 1))
+    return 0
+  fi
+
+  if [[ -e "$dst" ]]; then
+    if [[ -f "$dst" ]] && diff -q "$src" "$dst" > /dev/null 2>&1; then
+      already_correct=$((already_correct + 1))
+      return 0
+    fi
+    if [[ "$force" -eq 1 ]]; then
+      echo "FORCE: overwriting hook $dst with repo copy"
+      run "cp \"$src\" \"$dst\" && chmod +x \"$dst\""
+      clobbered=$((clobbered + 1))
+      return 0
+    fi
+    echo "refusing to overwrite hook $dst (differs from repo copy). Re-run with --force to overwrite." >&2
+    exit 3
+  fi
+
+  echo "installing hook $dst (copy of $src)"
+  run "cp \"$src\" \"$dst\" && chmod +x \"$dst\""
+  copied=$((copied + 1))
 }
 
 # --- skills ---
@@ -137,7 +177,7 @@ mkdir -p "$SKILLS_DST"
 shopt -s nullglob
 for skill_dir in "$SKILLS_SRC"/*/; do
   name="$(basename "$skill_dir")"
-  link_one "$SKILLS_SRC/$name" "$SKILLS_DST/$name" "dir"
+  link_skill "$SKILLS_SRC/$name" "$SKILLS_DST/$name"
 done
 shopt -u nullglob
 
@@ -154,8 +194,8 @@ for hook_name in "${WORKFLOW_HOOKS[@]}"; do
     echo "warning: $src is declared in WORKFLOW_HOOKS but missing from the repo" >&2
     continue
   fi
-  link_one "$src" "$HOOKS_DST/$hook_name" "file"
+  copy_hook "$src" "$HOOKS_DST/$hook_name"
 done
 
 echo
-echo "bootstrap-claude-workflow: linked=$linked clobbered=$clobbered already-correct=$already_correct"
+echo "bootstrap-claude-workflow: linked=$linked copied=$copied clobbered=$clobbered already-correct=$already_correct"
