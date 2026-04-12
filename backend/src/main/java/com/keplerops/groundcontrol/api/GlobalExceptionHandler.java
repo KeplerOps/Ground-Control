@@ -34,8 +34,15 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DomainValidationException.class)
     public ResponseEntity<ErrorResponse> handleValidation(DomainValidationException ex) {
-        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
-                .body(ErrorResponse.of(ex.getErrorCode(), ex.getMessage(), ex.getDetail()));
+        // Same envelope contract as handleConflict: only include the detail block
+        // when it has content. Otherwise legacy single-arg DomainValidationException
+        // throws (~30 sites across the codebase) would serialize `detail: {}`,
+        // which is observable wire-format noise for every existing 422 response.
+        var detail = ex.getDetail();
+        var body = detail.isEmpty()
+                ? ErrorResponse.of(ex.getErrorCode(), ex.getMessage())
+                : ErrorResponse.of(ex.getErrorCode(), ex.getMessage(), detail);
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(body);
     }
 
     @ExceptionHandler(AuthenticationException.class)

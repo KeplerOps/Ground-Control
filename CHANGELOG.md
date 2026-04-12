@@ -86,6 +86,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer regress to serializing `detail: {}`. The cycle-2 envelope upgrade is
   preserved for the threat-model `threat_model_referenced` path which always
   carries detail.
+- `GlobalExceptionHandler.handleValidation` applies the same empty-detail
+  guard so legacy single-arg `DomainValidationException` throws across the
+  ~30 422 sites no longer serialize `detail: {}` either.
+- `ErrorResponse.of(code, message, detail)` now treats `null`/empty detail
+  identically to the 2-arg overload, preventing both an `NPE` from
+  `Map.copyOf(null)` and accidental `detail: {}` serialization at the type
+  boundary. Direct unit tests for `handleConflict` and `handleValidation`
+  cover both the empty- and populated-detail branches.
 
 ## [0.111.1] - 2026-04-11
 
