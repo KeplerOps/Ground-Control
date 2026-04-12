@@ -352,6 +352,8 @@ const TO_CAMEL = {
   observation_id: "observationId",
   threat_source: "threatSource",
   threat_event: "threatEvent",
+  clear_stride: "clearStride",
+  clear_narrative: "clearNarrative",
   affected_object: "affectedObject",
   time_horizon: "timeHorizon",
   observation_refs: "observationRefs",

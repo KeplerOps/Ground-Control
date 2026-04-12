@@ -3069,7 +3069,7 @@ server.tool(
 
 server.tool(
   "gc_update_threat_model",
-  "Update mutable fields of a threat model entry. Only provided fields are updated.",
+  "Update mutable fields of a threat model entry. Only provided fields are updated. Required fields (title, threat_source, threat_event, effect) reject blank strings server-side. To explicitly clear an optional field, set clear_stride=true or clear_narrative=true (passing the value field as null/undefined alone means 'no change'). When a clear flag is true any value supplied in the corresponding field is ignored.",
   {
     id: z.string().uuid().describe("Threat model UUID"),
     title: z.string().max(200).optional().describe("Updated title"),
@@ -3078,9 +3078,22 @@ server.tool(
     effect: z.string().optional().describe("Updated effect"),
     stride: z.enum(STRIDE_CATEGORIES).optional().describe("Updated STRIDE category"),
     narrative: z.string().optional().describe("Updated narrative"),
+    clear_stride: z.boolean().optional().describe("If true, sets stride to null on the entity"),
+    clear_narrative: z.boolean().optional().describe("If true, sets narrative to null on the entity"),
     project: z.string().optional().describe("Project identifier"),
   },
-  async ({ id, title, threat_source, threat_event, effect, stride, narrative, project }) => {
+  async ({
+    id,
+    title,
+    threat_source,
+    threat_event,
+    effect,
+    stride,
+    narrative,
+    clear_stride,
+    clear_narrative,
+    project,
+  }) => {
     try {
       const data = {};
       if (title !== undefined) data.title = title;
@@ -3089,6 +3102,8 @@ server.tool(
       if (effect !== undefined) data.effect = effect;
       if (stride !== undefined) data.stride = stride;
       if (narrative !== undefined) data.narrative = narrative;
+      if (clear_stride !== undefined) data.clear_stride = clear_stride;
+      if (clear_narrative !== undefined) data.clear_narrative = clear_narrative;
       return ok(JSON.stringify(await updateThreatModel(id, data, project), null, 2));
     } catch (e) {
       return err(e);

@@ -53,6 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP `gc_delete_threat_model` and other tools now surface the structured error
   envelope (`code` + `detail`) returned by the API via the new `RequestError`
   class in `mcp/ground-control/lib.js`.
+- `ThreatModelGraphProjectionContributor.contributeEdges` now skips edges to
+  archived `ASSET`, `REQUIREMENT`, and `RISK_SCENARIO` targets so the projection
+  never produces dangling edges relative to the peer contributors that omit
+  archived nodes from the graph.
+- MCP `gc_update_threat_model` exposes `clear_stride` and `clear_narrative`
+  boolean flags so callers can explicitly null those optional fields (the
+  backend tri-state convention is now reachable from the MCP surface).
 
 ## [0.111.1] - 2026-04-11
 
