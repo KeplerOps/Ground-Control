@@ -74,10 +74,10 @@ The issue body was cached in Step 1, but re-read it carefully now for labels, co
 
 1. Reuse the absolute repository root from Step 1.
 2. Call the `gc_codex_architecture_preflight` MCP tool with:
-   - `issue_number`: the issue number from Step 1
+   - `issue_number`: the issue number from Step 1 (always supplied — it is the authoritative anchor for preflight in both UID-first and issue-first runs)
    - `repo_path`: absolute path from Step 1
    - `project`: the repo-local Ground Control project from Step 1
-   - `requirement_uid`: the first UID in `in_scope_requirements[]` if non-empty, otherwise omit this field.
+   - `requirement_uid`: the first UID in `in_scope_requirements[]` when that list is non-empty; omit this field entirely when the list is empty (requirement-free bug/refactor/maintenance runs). The tool accepts either `requirement_uid` or `issue_number` alone and requires at least one; since Step 1 always produced an issue number, the issue-number-only call is the guaranteed fallback.
 3. Read any ADRs, design notes, or workflow guidance that Codex created or updated.
 4. Treat the returned guardrails, cross-cutting concerns, and non-goals as binding unless they are clearly wrong.
 5. Do NOT revert or ignore Codex-added design guidance just because implementation looks possible without it.
@@ -304,7 +304,14 @@ Now that CI and all reviews are green, reconcile the Ground Control traceability
 
 **Reconciliation is not the same as "create links for the in-scope requirements"**. Even runs with zero in-scope requirements (pure bug fixes, refactors, maintenance) must reconcile, because the diff may have touched files that were already linked to OTHER requirements and those links may now be stale.
 
-1. **Compute the touched file set.** Run `git diff --name-status origin/dev...HEAD` to get every added (`A`), modified (`M`), deleted (`D`), renamed (`R`), and copied (`C`) file in this branch. Cache the full list.
+1. **Compute the touched file set.** Run `git diff --name-status <base-ref>...HEAD` to get every added (`A`), modified (`M`), deleted (`D`), renamed (`R`), and copied (`C`) file in this branch. Cache the full list.
+
+   Resolve `<base-ref>` in the same order the codex review already uses so reconciliation works in fully-hydrated GitHub clones, local-only checkouts, and disconnected workstations:
+   1. `origin/dev` — the canonical remote-tracking ref. Verify it exists with `git rev-parse --verify origin/dev` before using.
+   2. `dev` — the local branch. Verify with `git rev-parse --verify dev`.
+   3. `origin/main` — fallback for repos whose default base is not `dev`.
+   4. `main` — fallback for local-only clones of main-based repos.
+   5. If none of the above resolve, run `git fetch origin dev` and retry the list. If the fetch itself fails (no network, no remote), STOP and surface a clear error — reconciliation cannot run without a base ref, and silently falling back to an empty diff would under-report drift.
 
 2. **Process deleted and renamed files first.**
    For every deleted file `path`:
@@ -334,10 +341,13 @@ Now that CI and all reviews are green, reconcile the Ground Control traceability
    - Call `gc_get_traceability` on the requirement's UUID. Confirm there is at least one IMPLEMENTS link pointing at code introduced or touched by this diff, and at least one TESTS link pointing at a test touched by this diff.
    - If either is missing, go back and add the link.
 
-6. **Reconcile the issue → requirement links.**
-   - For each UID in `in_scope_requirements[]`, ensure there is a traceability link with `artifact_type: GITHUB_ISSUE` and `artifact_identifier: <issue-number>` on the requirement, pointing at this run's issue. Create it via `gc_create_traceability_link` if missing.
+6. **Reconcile the issue → requirement links (both directions).**
+   The `## Requirements` section of the issue body is the source of truth for which requirements this issue covers. Reconciliation must make the Ground Control graph match that list exactly — which means both adding missing links AND deleting stale ones.
+   - **Add missing links.** For each UID in `in_scope_requirements[]`, ensure there is a traceability link with `artifact_type: GITHUB_ISSUE` and `artifact_identifier: <issue-number>` on the requirement, pointing at this run's issue. Create it via `gc_create_traceability_link` if missing.
+   - **Delete stale links.** Call `gc_get_traceability_by_artifact` with `artifact_type: GITHUB_ISSUE` and `artifact_identifier: <issue-number>` to list every requirement currently linked to this issue. For each returned link, if the requirement UID is NOT in `in_scope_requirements[]`, delete the link via `gc_delete_traceability_link`. This catches the case where an issue was narrowed from `[GC-A, GC-B]` down to `[GC-A]` and leaves no orphan pointers from GC-B.
+   - Stale links from the current issue to requirements in `in_scope_requirements[]` (a no-op) are fine; duplicate-create is intentionally rejected by `gc_create_traceability_link`, so re-adding is safe.
 
-Reconciliation is idempotent: running it on a branch where the GC graph is already correct is a no-op. Running it on a branch where the graph has drifted fixes the drift.
+Reconciliation is idempotent: running it on a branch where the GC graph is already correct is a no-op. Running it on a branch where the graph has drifted fixes the drift in both directions.
 
 ### Step 16: Transition In-Scope Requirements to ACTIVE
 
