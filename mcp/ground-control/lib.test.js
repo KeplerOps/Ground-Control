@@ -445,31 +445,35 @@ describe("buildCodexArchitectureExecArgs", () => {
 });
 
 describe("buildCodexReviewPrompt", () => {
-  it("demands an exhaustive non-triaged review", () => {
-    const prompt = buildCodexReviewPrompt("dev");
-    assert.ok(prompt.includes("Review the changes against dev."));
+  it("demands an exhaustive non-triaged review against the base branch", () => {
+    const prompt = buildCodexReviewPrompt({ baseBranch: "dev", uncommitted: false });
+    assert.ok(prompt.includes("against `dev`"));
+    assert.ok(prompt.includes("git diff dev...HEAD"));
     assert.ok(prompt.includes("Enumerate all material issues"));
     assert.ok(prompt.includes("Do not prioritize"));
     assert.ok(prompt.includes("The caller intends to fix everything now."));
     assert.ok(prompt.includes("precise file and line references"));
   });
+
+  it("switches to a working-tree review when uncommitted is set", () => {
+    const prompt = buildCodexReviewPrompt({ baseBranch: "dev", uncommitted: true });
+    assert.ok(prompt.includes("staged, unstaged, and untracked changes"));
+    assert.ok(!prompt.includes("git diff dev...HEAD"));
+    assert.ok(prompt.includes("Enumerate all material issues"));
+  });
 });
 
 describe("buildCodexReviewArgs", () => {
-  it("builds args for a committed branch review", () => {
-    const args = buildCodexReviewArgs({
-      baseBranch: "dev",
-      uncommitted: false,
-    });
-    assert.deepEqual(args, ["review", "--base", "dev", "-"]);
+  it("builds args for a committed branch review without --base", () => {
+    // --base <BRANCH> is mutually exclusive with [PROMPT] in codex review,
+    // so the baseBranch is communicated via the prompt text instead.
+    const args = buildCodexReviewArgs({ uncommitted: false });
+    assert.deepEqual(args, ["review", "-"]);
   });
 
   it("adds the uncommitted flag when requested", () => {
-    const args = buildCodexReviewArgs({
-      baseBranch: "main",
-      uncommitted: true,
-    });
-    assert.deepEqual(args, ["review", "--base", "main", "--uncommitted", "-"]);
+    const args = buildCodexReviewArgs({ uncommitted: true });
+    assert.deepEqual(args, ["review", "--uncommitted", "-"]);
   });
 });
 

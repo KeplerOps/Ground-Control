@@ -238,3 +238,5 @@ tickets
 archive/
 
 .codex
+
+.claude/scheduled_tasks.lock

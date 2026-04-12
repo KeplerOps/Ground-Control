@@ -1382,9 +1382,12 @@ export async function runCodexArchitecturePreflight({
   }
 }
 
-export function buildCodexReviewPrompt(baseBranch) {
+export function buildCodexReviewPrompt({ baseBranch, uncommitted }) {
+  const scopeLine = uncommitted
+    ? "Review the staged, unstaged, and untracked changes in the working tree of this repository."
+    : `Review the changes on the current branch against \`${baseBranch}\`. Run \`git diff ${baseBranch}...HEAD\` (or \`origin/${baseBranch}...HEAD\` if the remote-tracking ref is more current) to produce the authoritative diff before analyzing. If neither ref exists locally, fall back to \`git fetch origin ${baseBranch}\` first.`;
   return [
-    `Review the changes against ${baseBranch}.`,
+    scopeLine,
     "",
     "Hold the code to a top-tier production engineering bar for maintainability, reliability, security, consistency, validation, logging, exception handling, schema reuse, reuse of existing cross-cutting concerns, and avoidance of abstraction or concept confusion.",
     "",
@@ -1397,8 +1400,12 @@ export function buildCodexReviewPrompt(baseBranch) {
   ].join("\n");
 }
 
-export function buildCodexReviewArgs({ baseBranch, uncommitted }) {
-  const args = ["review", "--base", baseBranch];
+export function buildCodexReviewArgs({ uncommitted }) {
+  // Note: codex review's `--base <BRANCH>` is mutually exclusive with `[PROMPT]`
+  // in the CLI, so we cannot pass both. We drop `--base` and instead instruct
+  // codex to run the diff itself via the prompt. `--uncommitted` is still
+  // compatible with a custom prompt.
+  const args = ["review"];
   if (uncommitted) {
     args.push("--uncommitted");
   }
@@ -1408,8 +1415,8 @@ export function buildCodexReviewArgs({ baseBranch, uncommitted }) {
 
 export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted = false }) {
   const repoRoot = await ensureGitRepo(repoPath);
-  const prompt = buildCodexReviewPrompt(baseBranch);
-  const args = buildCodexReviewArgs({ baseBranch, uncommitted });
+  const prompt = buildCodexReviewPrompt({ baseBranch, uncommitted });
+  const args = buildCodexReviewArgs({ uncommitted });
   let stdout;
 
   try {
