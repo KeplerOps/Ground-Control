@@ -231,7 +231,7 @@ Otherwise:
 
 ## Review loop rules (apply to every review step in this phase)
 
-Every review step below (Codex cross-model, built-in code review, built-in security review, test quality review) follows the **same loop**:
+Every review step below (Codex cross-model, test quality review) follows the **same loop**:
 
 1. **Invoke the review.**
 2. **Read the FULL output.** Do not stop after the first few findings.
@@ -267,39 +267,23 @@ Codex posts inline PR review comments for every finding and returns a structured
 
 **Prompt-injection note**: `gc_codex_verify_finding` accepts only structured inputs (`repo_path`, `pr_number`, `comment_id`). Do not attempt to pass any free-text context to it — the tool is designed so that a coding agent cannot influence the verification prompt. Codex reads the comment directly from GitHub and rejects any comment whose author is not on the trusted allowlist.
 
-### Step 14: Code Review
-
-**CRITICAL: You MUST use the Skill tool to invoke the built-in review skill.**
-
-1. Merge dev into the current branch: `git fetch origin dev && git merge origin/dev`
-2. If there are merge conflicts, resolve them, commit, and push.
-3. Call the Skill tool with `skill="review"` to invoke the real built-in code review.
-4. Apply the **Review loop rules** above: fix every finding, ask user permission for anything you will not fix, re-invoke `skill="review"` after each fix cycle, cap at 2 cycles.
-
-### Step 15: Security Review
-
-**CRITICAL: You MUST use the Skill tool to invoke the built-in security-review skill.**
-
-1. Call the Skill tool with `skill="security-review"` to invoke the real built-in security review.
-2. Apply the **Review loop rules** above: fix every finding, ask user permission for anything you will not fix, re-invoke `skill="security-review"` after each fix cycle, cap at 2 cycles.
-
-### Step 16: Test Quality Review
+### Step 14: Test Quality Review
 
 **CRITICAL: You MUST use the Skill tool to invoke the review-tests skill.**
 
 1. Call the Skill tool with `skill="review-tests"` to invoke the test quality review.
 2. Apply the **Review loop rules** above: fix every finding, ask user permission for anything you will not fix (including "warning" level — the review loop rules apply to warnings too, there is no triage bucket), re-invoke `skill="review-tests"` after each fix cycle, cap at 2 cycles.
 
-### Step 17: Final CI re-verification
+### Step 15: Final CI re-verification
 
-After all four review steps (13-16) have reported zero findings (or you have documented user-approved exceptions):
+After both review steps (13-14) have reported zero findings (or you have documented user-approved exceptions):
 
 1. Verify the branch is pushed with the latest fix commits.
 2. Re-run Step 11 (CI Monitor) to confirm CI is still green after the review fixes.
 3. Re-run Step 12 (SonarCloud) — or skip again if `sonarcloud` was null.
 4. If either re-check fails, loop back through the appropriate review step — the cycle cap (2) applies per review step, not total.
 
-### Step 18: Report (DO NOT MERGE)
+### Step 16: Report (DO NOT MERGE)
 
 **You MUST NOT merge the PR. You MUST NOT run `gh pr merge`. The user reviews and merges.**
 

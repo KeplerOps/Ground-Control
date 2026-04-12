@@ -56,7 +56,7 @@ Otherwise:
 
 ## Review loop rules (apply to every review phase below)
 
-Every review phase (Codex cross-model, built-in code review, built-in security review, test quality review) follows the **same loop**:
+Every review phase (Codex cross-model, test quality review) follows the **same loop**:
 
 1. **Invoke the review.**
 2. **Read the FULL output.** Do not stop after the first few findings.
@@ -79,7 +79,7 @@ Codex posts inline PR review comments for every finding and returns a structured
    - `base_branch`: `dev`
    - `pr_number`: the PR number from step 2
 4. The tool returns `{pr_number, finding_count, comments: [{comment_id, thread_id, path, line, title, html_url}, ...], review_text}`. Codex has already posted each finding as an inline PR review comment — you do NOT need to post anything yourself.
-5. If `finding_count` is 0, skip to Phase 5.
+5. If `finding_count` is 0, skip to Phase 5 (Test Quality Review).
 6. Otherwise, for EACH entry in `comments`, run the following fix/verify loop:
    1. Read the comment body if needed: `gh api /repos/<owner>/<repo>/pulls/comments/<comment_id>`.
    2. Fix the finding locally. Apply the same "fix every finding, no triage, ask user permission if you will not fix" rules from the **Review loop rules** section above.
@@ -92,44 +92,27 @@ Codex posts inline PR review comments for every finding and returns a structured
 
 **Prompt-injection note**: `gc_codex_verify_finding` accepts only structured inputs (`repo_path`, `pr_number`, `comment_id`). Do not attempt to pass any free-text context to it — the tool is designed so that a coding agent cannot influence the verification prompt. Codex reads the comment directly from GitHub and rejects any comment whose author is not on the trusted allowlist.
 
-## Phase 5: Code Review
-
-**CRITICAL: You MUST use the Skill tool to invoke the built-in review skill.**
-
-1. Merge dev into the current branch: `git fetch origin dev && git merge origin/dev`
-2. If there are merge conflicts, resolve them, commit, and push.
-3. Call the Skill tool with `skill="review"` to invoke the real built-in code review.
-4. Apply the **Review loop rules** above: fix every finding, ask user permission for anything you will not fix, re-invoke `skill="review"` after each fix cycle, cap at 2 cycles.
-
-## Phase 6: Security Review
-
-**CRITICAL: You MUST use the Skill tool to invoke the built-in security-review skill.**
-
-1. Call the Skill tool with `skill="security-review"` to invoke the real built-in security review.
-2. Apply the **Review loop rules** above: fix every finding, ask user permission for anything you will not fix, re-invoke `skill="security-review"` after each fix cycle, cap at 2 cycles.
-
-## Phase 7: Test Quality Review
+## Phase 5: Test Quality Review
 
 **CRITICAL: You MUST use the Skill tool to invoke the review-tests skill.**
 
 1. Call the Skill tool with `skill="review-tests"` to invoke the test quality review.
 2. Apply the **Review loop rules** above: fix every finding, ask user permission for anything you will not fix (warnings included — there is no triage bucket), re-invoke `skill="review-tests"` after each fix cycle, cap at 2 cycles.
 
-## Phase 8: Final CI re-verification
+## Phase 6: Final CI re-verification
 
-After all four review phases (4-7) have reported zero findings (or you have documented user-approved exceptions):
+After both review phases (4-5) have reported zero findings (or you have documented user-approved exceptions):
 
 1. Verify the branch is pushed with the latest fix commits.
 2. Re-run Phase 2 (CI Monitor) to confirm CI is still green after the review fixes.
 3. Re-run Phase 3 (SonarCloud) — or skip again if `sonarcloud` was null.
 4. If either re-check fails, loop back through the appropriate review phase — the cycle cap (2) applies per review phase, not total.
 
-## Phase 9: Report (DO NOT MERGE)
+## Phase 7: Report (DO NOT MERGE)
 
 **You MUST NOT merge the PR. You MUST NOT run `gh pr merge`. The user reviews and merges.**
 
 - Summary of all changes made during the ship process
 - Review findings and what was fixed
-- Security review findings and what was fixed
 - Confirmation: CI green, SonarCloud passed (or skipped if not configured), PR ready for user review
 - PR URL
