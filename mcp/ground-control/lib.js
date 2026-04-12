@@ -948,7 +948,17 @@ export function formatIssueBody(req, extraBody) {
   // created from a Ground Control requirement must seed this section so the
   // round-trip "create issue from requirement → /implement → reconcile"
   // works without a manual body edit.
-  const requirementsLine = req.title ? `- ${req.uid} — ${req.title}` : `- ${req.uid}`;
+  //
+  // The title is untrusted input — it can contain newlines, leading `- `
+  // sequences, or markdown that would produce extra bullets and trick the
+  // parser into picking up an unrelated UID. Collapse all whitespace runs
+  // to a single space so the bullet is guaranteed to be a single line.
+  const sanitizedTitle = req.title
+    ? req.title.replace(/\s+/g, " ").trim()
+    : null;
+  const requirementsLine = sanitizedTitle
+    ? `- ${req.uid} — ${sanitizedTitle}`
+    : `- ${req.uid}`;
   let body =
     `> ${headerParts.join(" | ")}` +
     `\n\n## Requirements\n\n${requirementsLine}` +
@@ -1485,7 +1495,7 @@ async function ensureGitRepo(repoPath) {
   }
 }
 
-async function getIssueContext(issueNumber, repo) {
+async function getIssueContext(issueNumber, repo, { cwd } = {}) {
   if (issueNumber == null) return null;
 
   const args = ["issue", "view", String(issueNumber), "--json", "number,title,body"];
@@ -1494,8 +1504,14 @@ async function getIssueContext(issueNumber, repo) {
     args.push("--repo", targetRepo);
   }
 
+  // Binding cwd to the target repository lets `gh` auto-detect the repo from
+  // git config when no explicit `--repo` was supplied, and prevents the
+  // lookup from picking up a neighboring checkout's remotes when the MCP
+  // server is running from a different working directory.
+  const execOptions = cwd ? { cwd } : {};
+
   try {
-    const { stdout } = await execFile("gh", args);
+    const { stdout } = await execFile("gh", args, execOptions);
     return JSON.parse(stdout);
   } catch (error) {
     return {
@@ -1654,7 +1670,29 @@ export async function runCodexArchitecturePreflight({
     traceabilityLinks = await getTraceabilityLinks(requirement.id);
   }
 
-  const issueContext = await getIssueContext(issueNumber, repo);
+  // `getIssueContext` is bound to `repoRoot` so `gh` resolves the target
+  // repository from the checkout's git config even when `GH_REPO` is unset
+  // and no explicit `repo` was supplied. This prevents the MCP server's own
+  // working directory from leaking into the lookup.
+  const issueContext = await getIssueContext(issueNumber, repo, { cwd: repoRoot });
+
+  // Issue-first runs treat the GitHub issue as the authoritative contract.
+  // If the issue body could not be loaded (wrong repo, missing scope, gh
+  // CLI not authenticated, etc.), there is nothing for codex to reason about
+  // and no way for the caller to catch silent drift. Fail fast with a
+  // specific error that names the issue number and the underlying reason.
+  if (requirement == null) {
+    if (!issueContext || issueContext.warning || !issueContext.body) {
+      const detail = issueContext?.warning
+        ?? (issueContext == null
+          ? "getIssueContext returned null"
+          : "issue context has no body field");
+      throw new Error(
+        `gc_codex_architecture_preflight: issue-only run requires a loadable GitHub issue body but failed to fetch issue #${issueNumber}: ${detail}`,
+      );
+    }
+  }
+
   const preexistingChangedFiles = await listWorkingTreeChanges(repoRoot);
 
   const tempDir = mkdtempSync(join(tmpdir(), "gc-codex-preflight-"));

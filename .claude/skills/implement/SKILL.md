@@ -336,10 +336,18 @@ Now that CI and all reviews are green, reconcile the Ground Control traceability
    - Determine which requirement(s) this file satisfies. If the file is part of the work described by an in-scope requirement, link it there. If the file is incidental (test helper, fixture, generated file), it may have no requirement link — that is fine.
    - Create an IMPLEMENTS link (for production code) or TESTS link (for test files) via `gc_create_traceability_link` for each requirement the file satisfies.
 
-5. **Ensure every in-scope requirement has coverage.**
+5. **Ensure every in-scope requirement has coverage appropriate to its nature.**
    For each UID in `in_scope_requirements[]`:
-   - Call `gc_get_traceability` on the requirement's UUID. Confirm there is at least one IMPLEMENTS link pointing at code introduced or touched by this diff, and at least one TESTS link pointing at a test touched by this diff.
-   - If either is missing, go back and add the link.
+   - Call `gc_get_traceability` on the requirement's UUID.
+   - **IMPLEMENTS coverage is always required.** Every in-scope requirement must have at least one IMPLEMENTS link pointing at a file touched by this diff. The shape of "implementation" depends on what the requirement demands:
+     - **Code requirements** (functional behavior, new endpoints, new entities, services, migrations) — IMPLEMENTS points at the production code file(s) that realize the behavior.
+     - **Documentation requirements** (invariants, conventions, schemas, ADR-recorded decisions) — IMPLEMENTS points at the authoritative documentation file (ADR, `SCHEMA.md`, `docs/*.md`) where the invariant or convention is declared.
+     - **Configuration requirements** (repo config, workflow config, policy files, ground-control.yaml sections) — IMPLEMENTS points at the config file or schema file that encodes the requirement.
+     - **Workflow requirements** (CI steps, hooks, policy rules) — IMPLEMENTS points at the workflow file, hook script, or policy script.
+     If the diff does not touch any file that implements a given in-scope requirement, either add the implementation (go back to Step 4) or the requirement is not actually in scope and should be removed from the issue body before reconciliation proceeds.
+   - **TESTS coverage is conditional.** Add a TESTS link when the diff introduces or touches an automated test that verifies the requirement — unit test, integration test, `@WebMvcTest`, policy test, property test, or any other form of executable verification. TESTS is NOT required when the requirement is satisfied purely by documentation, configuration, or structural invariants that have no executable behavior to test (for example: "SCHEMA.md shall document the source-citation rule", "the repo shall declare its knowledge base location in `.ground-control.yaml`"). In that case the IMPLEMENTS link alone is the complete coverage record.
+   - **Do not fabricate test links** just to satisfy this step. If a requirement has testable behavior and no test was added, go back to Step 4.4 (TDD) and add the missing test; do not paper over the gap with a link to an unrelated file.
+   - **Never link the diff to a requirement it does not satisfy** just to satisfy this step. Ripping out real coverage and linking a plausible-looking neighbor is worse than leaving a gap — STOP and surface the mismatch to the user instead.
 
 6. **Reconcile the issue → requirement links (both directions).**
    The `## Requirements` section of the issue body is the source of truth for which requirements this issue covers. Reconciliation must make the Ground Control graph match that list exactly — which means both adding missing links AND deleting stale ones.

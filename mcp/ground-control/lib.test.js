@@ -236,6 +236,48 @@ describe("formatIssueBody", () => {
     const body = formatIssueBody(req);
     assert.match(body, /## Requirements\n\n- GC-T002\n/);
   });
+
+  it("collapses newlines in the title so they cannot inject extra Requirements bullets", () => {
+    // Requirement titles are untrusted user input. A malicious or
+    // accidentally-pasted multiline title must not produce a second
+    // list item — the parser at the `/implement` side would otherwise
+    // treat the second line as a second UID entry in
+    // `in_scope_requirements[]` and link/transition an unrelated
+    // requirement. See code comment in formatIssueBody for the rule.
+    const req = {
+      uid: "GC-INJ001",
+      title: "Original title\n- GC-X999 — fake injected requirement",
+      statement: "The system shall be resistant to title injection.",
+    };
+    const body = formatIssueBody(req);
+    assert.ok(body.includes("## Requirements"));
+    const reqSection = body.slice(body.indexOf("## Requirements"));
+    const nextHeader = reqSection.indexOf("## Statement");
+    const reqBody = reqSection.slice(0, nextHeader);
+    // Exactly one bullet in the Requirements section.
+    const bullets = reqBody.split("\n").filter((line) => line.startsWith("- "));
+    assert.equal(
+      bullets.length,
+      1,
+      `expected exactly one requirement bullet, got ${bullets.length}: ${JSON.stringify(bullets)}`,
+    );
+    assert.equal(
+      bullets[0],
+      "- GC-INJ001 — Original title - GC-X999 — fake injected requirement",
+    );
+    // And the injected GC-X999 UID must not appear as a standalone bullet.
+    assert.ok(!reqBody.includes("\n- GC-X999"));
+  });
+
+  it("collapses tabs and runs of whitespace in the title", () => {
+    const req = {
+      uid: "GC-T003",
+      title: "Multiple\t\twhitespace    runs",
+      statement: "Ok.",
+    };
+    const body = formatIssueBody(req);
+    assert.match(body, /## Requirements\n\n- GC-T003 — Multiple whitespace runs\n/);
+  });
 });
 
 // ---------------------------------------------------------------------------
