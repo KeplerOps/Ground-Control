@@ -240,3 +240,5 @@ archive/
 .codex
 
 .claude/scheduled_tasks.lock
+
+docs/notes
