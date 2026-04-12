@@ -14,9 +14,11 @@ import {
   getRepoGroundControlContext,
   buildCodexArchitecturePreflightPrompt,
   buildCodexArchitectureExecArgs,
-  buildCodexReviewPrompt,
+  buildCodexReviewCorePrompt,
+  buildCodexSecurityReviewPrompt,
   buildCodexReviewArgs,
   parseCodexReviewTail,
+  dedupFindings,
   buildCodexVerifyPrompt,
   parseCodexVerifyTail,
   STATUSES,
@@ -478,40 +480,178 @@ describe("buildCodexArchitectureExecArgs", () => {
   });
 });
 
-describe("buildCodexReviewPrompt", () => {
-  it("demands an exhaustive production-readiness review against the base branch", () => {
-    const prompt = buildCodexReviewPrompt({ baseBranch: "dev", uncommitted: false, prNumber: 520 });
+describe("buildCodexReviewCorePrompt", () => {
+  const diff = "diff --git a/Foo.java b/Foo.java\n+public class Foo {}";
+
+  it("demands an exhaustive production-readiness review of the provided diff", () => {
+    const prompt = buildCodexReviewCorePrompt({
+      baseBranch: "dev",
+      uncommitted: false,
+      prNumber: 520,
+      diffText: diff,
+    });
     assert.ok(prompt.includes("against `dev`"));
-    assert.ok(prompt.includes("git diff dev...HEAD"));
     assert.ok(prompt.includes("production-readiness"));
     assert.ok(prompt.includes("Fitness for purpose"));
     assert.ok(prompt.includes("Architectural soundness"));
+    assert.ok(prompt.includes("Maintainability"));
     assert.ok(prompt.includes("Enumerate EVERY material issue"));
     assert.ok(prompt.includes("No triage"));
     assert.ok(prompt.includes("The caller intends to fix everything now."));
     assert.ok(prompt.includes("precise file and line reference"));
   });
 
-  it("instructs codex to post inline PR comments and emit COMMENT_IDS tail when a PR number is provided", () => {
-    const prompt = buildCodexReviewPrompt({ baseBranch: "dev", uncommitted: false, prNumber: 520 });
-    assert.ok(prompt.includes("/repos/{owner}/{repo}/pulls/520/comments"));
-    assert.ok(prompt.includes("commit_id"));
-    assert.ok(prompt.includes("COMMENT_IDS=["));
-    assert.ok(prompt.includes("Do NOT post a summary comment"));
+  it("tells codex not to re-derive the diff and embeds it inside delimiters", () => {
+    const prompt = buildCodexReviewCorePrompt({
+      baseBranch: "dev",
+      uncommitted: false,
+      prNumber: 520,
+      diffText: diff,
+    });
+    assert.ok(prompt.includes("do not re-derive it from git yourself"));
+    assert.ok(prompt.includes("<<<DIFF"));
+    assert.ok(prompt.includes("DIFF>>>"));
+    assert.ok(prompt.includes("public class Foo {}"));
   });
 
-  it("falls back to inline-only findings and an empty COMMENT_IDS tail when no PR number is provided", () => {
-    const prompt = buildCodexReviewPrompt({ baseBranch: "dev", uncommitted: false, prNumber: null });
+  it("defers security concerns to the dedicated security reviewer", () => {
+    const prompt = buildCodexReviewCorePrompt({
+      baseBranch: "dev",
+      uncommitted: false,
+      prNumber: 520,
+      diffText: diff,
+    });
+    assert.ok(prompt.includes("dedicated security reviewer"));
+    assert.ok(!/- Security —/.test(prompt));
+  });
+
+  it("instructs codex to post inline PR comments with a [core] title prefix", () => {
+    const prompt = buildCodexReviewCorePrompt({
+      baseBranch: "dev",
+      uncommitted: false,
+      prNumber: 520,
+      diffText: diff,
+    });
+    assert.ok(prompt.includes("/repos/{owner}/{repo}/pulls/520/comments"));
+    assert.ok(prompt.includes("[core]"));
+    assert.ok(prompt.includes("COMMENT_IDS=["));
+  });
+
+  it("falls back to inline-only findings when no PR number is provided", () => {
+    const prompt = buildCodexReviewCorePrompt({
+      baseBranch: "dev",
+      uncommitted: false,
+      prNumber: null,
+      diffText: diff,
+    });
     assert.ok(!prompt.includes("/repos/{owner}/{repo}/pulls/"));
     assert.ok(prompt.includes("did not supply a pull request number"));
     assert.ok(prompt.includes("COMMENT_IDS=[]"));
   });
 
-  it("switches to a working-tree review when uncommitted is set", () => {
-    const prompt = buildCodexReviewPrompt({ baseBranch: "dev", uncommitted: true, prNumber: 520 });
+  it("switches the preamble for uncommitted reviews", () => {
+    const prompt = buildCodexReviewCorePrompt({
+      baseBranch: "dev",
+      uncommitted: true,
+      prNumber: 520,
+      diffText: diff,
+    });
     assert.ok(prompt.includes("staged, unstaged, and untracked changes"));
-    assert.ok(!prompt.includes("git diff dev...HEAD"));
-    assert.ok(prompt.includes("Enumerate EVERY material issue"));
+    assert.ok(!prompt.includes("against `dev`"));
+  });
+
+  it("emits an explicit empty-diff marker when the diff is empty", () => {
+    const prompt = buildCodexReviewCorePrompt({
+      baseBranch: "dev",
+      uncommitted: false,
+      prNumber: 520,
+      diffText: "",
+    });
+    assert.ok(prompt.includes("empty diff"));
+  });
+});
+
+describe("buildCodexSecurityReviewPrompt", () => {
+  const diff = "diff --git a/Auth.java b/Auth.java\n+if (token == null) { allow(); }";
+
+  it("restricts scope to concrete exploitable security issues", () => {
+    const prompt = buildCodexSecurityReviewPrompt({
+      baseBranch: "dev",
+      uncommitted: false,
+      prNumber: 520,
+      diffText: diff,
+    });
+    assert.ok(prompt.includes("senior application-security engineer"));
+    assert.ok(prompt.includes("concrete, exploitable security issues"));
+    assert.ok(prompt.includes("Do not comment on maintainability"));
+    assert.ok(prompt.includes("attacker model"));
+  });
+
+  it("enumerates the security categories to examine", () => {
+    const prompt = buildCodexSecurityReviewPrompt({
+      baseBranch: "dev",
+      uncommitted: false,
+      prNumber: 520,
+      diffText: diff,
+    });
+    assert.ok(prompt.includes("Input validation"));
+    assert.ok(prompt.includes("AuthN / AuthZ"));
+    assert.ok(prompt.includes("Secrets and crypto"));
+    assert.ok(prompt.includes("Data exposure"));
+  });
+
+  it("lists noise categories to ignore so the report stays high-signal", () => {
+    const prompt = buildCodexSecurityReviewPrompt({
+      baseBranch: "dev",
+      uncommitted: false,
+      prNumber: 520,
+      diffText: diff,
+    });
+    assert.ok(prompt.includes("What NOT to flag"));
+    assert.ok(prompt.includes("Rate limiting"));
+    assert.ok(prompt.includes("Generic best-practice hardening"));
+  });
+
+  it("tags findings with a [security] prefix and embeds the diff", () => {
+    const prompt = buildCodexSecurityReviewPrompt({
+      baseBranch: "dev",
+      uncommitted: false,
+      prNumber: 520,
+      diffText: diff,
+    });
+    assert.ok(prompt.includes("[security]"));
+    assert.ok(prompt.includes("<<<DIFF"));
+    assert.ok(prompt.includes("if (token == null)"));
+  });
+});
+
+describe("dedupFindings", () => {
+  it("collapses findings with the same path, line, and title prefix", () => {
+    const a = { comment_id: 1, path: "Foo.java", line: 42, title: "[core] Missing validation on input", reviewer: "core" };
+    const b = { comment_id: 2, path: "Foo.java", line: 42, title: "[core] Missing validation on input", reviewer: "core" };
+    const c = { comment_id: 3, path: "Foo.java", line: 42, title: "[security] Injection risk on input", reviewer: "security" };
+    const out = dedupFindings([a, b, c]);
+    assert.equal(out.length, 2);
+    assert.equal(out[0].comment_id, 1); // first wins
+    assert.equal(out[1].comment_id, 3);
+  });
+
+  it("treats different lines on the same file as distinct findings", () => {
+    const a = { comment_id: 1, path: "Foo.java", line: 42, title: "[core] issue" };
+    const b = { comment_id: 2, path: "Foo.java", line: 43, title: "[core] issue" };
+    const out = dedupFindings([a, b]);
+    assert.equal(out.length, 2);
+  });
+
+  it("is case-insensitive on the title prefix", () => {
+    const a = { comment_id: 1, path: "Foo.java", line: 42, title: "[core] Missing Validation" };
+    const b = { comment_id: 2, path: "Foo.java", line: 42, title: "[core] missing validation" };
+    const out = dedupFindings([a, b]);
+    assert.equal(out.length, 1);
+  });
+
+  it("returns an empty array for an empty input", () => {
+    assert.deepEqual(dedupFindings([]), []);
   });
 });
 

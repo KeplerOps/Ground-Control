@@ -89,29 +89,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GlobalExceptionHandler.handleValidation` applies the same empty-detail
   guard so legacy single-arg `DomainValidationException` throws across the
   ~30 422 sites no longer serialize `detail: {}` either.
-- MCP `gc_codex_review` now posts each finding as an inline PR review comment
-  via `gh api` and returns a structured list `{comment_id, thread_id, path,
-  line, title, html_url}` enriched with GraphQL review-thread ids via a
-  single `reviewThreads` query. The prompt is rewritten to demand
-  production-readiness ("accept nothing less") across fitness-for-purpose,
-  architectural soundness, maintainability, extensibility, security, and
-  consistency with the larger codebase. PR number auto-detects via
-  `gh pr view --json number` when not supplied. The structured tail
-  `COMMENT_IDS=[...]` is parsed by `parseCodexReviewTail`; missing or
-  malformed tails throw rather than silently returning zero findings.
-- New MCP tool `gc_codex_verify_finding` drives per-finding fix/verify loops
-  out of the coding-agent prompt stream. Accepts ONLY structured inputs
-  (`repo_path`, `pr_number`, `comment_id`) — no free-text fields — so the
-  caller cannot influence the verification prompt. Fetches the original
-  comment, rejects it if the author is not on the trusted allowlist
-  (closes a drive-by prompt-injection channel), assembles a fixed prompt
-  with the finding and current file fenced as DATA inside
-  `<<<FINDING…FINDING>>>` / `<<<FILE…FILE>>>` delimiters, runs `codex exec
-  --sandbox read-only`, and parses a `===VERIFY===` decision block. On
-  RESOLVED the review thread is marked resolved via the GraphQL
-  `resolveReviewThread` mutation. On UNRESOLVED a threaded reply with
-  codex's new directions is posted via
-  `/repos/:o/:r/pulls/:pr/comments/:id/replies` and returned to the agent.
+- MCP `gc_codex_review` now fans out two focused codex reviewers in parallel
+  against a single pre-computed diff: a core production-readiness reviewer
+  (fitness for purpose, architectural soundness, maintainability,
+  extensibility, established patterns, codebase consistency) and a dedicated
+  application-security reviewer (input validation, AuthN/AuthZ, secrets and
+  crypto, data exposure, request handling, supply chain). Each reviewer
+  posts its own findings as inline PR review comments tagged `[core]` or
+  `[security]` in the title. The tool returns a single deduplicated
+  `comments` list with a `reviewer` field per entry, enriched with GraphQL
+  review-thread ids via one `reviewThreads` query, plus a `reviewers`
+  summary and per-reviewer `review_text`. PR number auto-detects via
+  `gh pr view --json number` when not supplied. `parseCodexReviewTail`
+  parses each reviewer's `COMMENT_IDS=[...]` tail; missing or malformed
+  tails throw rather than silently returning zero findings. New
+  `dedupFindings` helper collapses same-location findings by
+  `(path, line, title-prefix)` so cross-reviewer overlaps produce a
+  single entry in the returned list.
+- New MCP tool `gc_codex_verify_finding` takes `repo_path`, `pr_number`, and
+  the REST `comment_id` returned from `gc_codex_review`, fetches the
+  original comment from GitHub (only allowlisted authors are accepted),
+  reads the anchored file, and runs `codex exec --sandbox read-only` to
+  decide whether the finding is resolved. On RESOLVED the review thread
+  is marked resolved via the GraphQL `resolveReviewThread` mutation. On
+  UNRESOLVED a threaded reply with codex's new directions is posted via
+  `/repos/:o/:r/pulls/:pr/comments/:id/replies` and returned to the caller
+  so the coding agent can drive the next fix cycle without re-fetching.
 - Skills `implement` (Step 13) and `ship` (Phase 4) updated to drive the new
   fix/verify loop: call `gc_codex_review` with `pr_number`, iterate over the
   returned `comments` list, fix each one locally, then call

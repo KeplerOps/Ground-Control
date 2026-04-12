@@ -70,7 +70,7 @@ For every cycle, after applying fixes, commit and push BEFORE re-running the rev
 
 ## Phase 4: Codex Cross-Model Review
 
-Codex posts inline PR review comments for every finding and returns a structured list. You drive a per-finding fix/verify loop via `gc_codex_verify_finding`, which keeps the mechanistic parts of the loop out of your prompt stream.
+`gc_codex_review` runs two focused codex reviewers in parallel — a core production-readiness reviewer and a dedicated application-security reviewer — against a single pre-computed diff. Both post their findings as inline PR review comments with a reviewer-tagged title (`[core]` or `[security]`). The tool returns a single deduplicated list; you then drive a per-finding fix/verify loop via `gc_codex_verify_finding`, which handles the GitHub API bookkeeping for you.
 
 1. Run `pwd` to capture the absolute repository root.
 2. Determine the pull request number for the current branch: `gh pr view --json number`. Cache it.
@@ -78,7 +78,7 @@ Codex posts inline PR review comments for every finding and returns a structured
    - `repo_path`: absolute path from `pwd`
    - `base_branch`: `dev`
    - `pr_number`: the PR number from step 2
-4. The tool returns `{pr_number, finding_count, comments: [{comment_id, thread_id, path, line, title, html_url}, ...], review_text}`. Codex has already posted each finding as an inline PR review comment — you do NOT need to post anything yourself.
+4. The tool returns `{pr_number, finding_count, comments: [{comment_id, thread_id, reviewer, path, line, title, html_url}, ...], reviewers, core_review_text, security_review_text}`. Each comment carries a `reviewer` field (`core` or `security`) so you can triage attention, but the fix/verify loop below is the same regardless. Codex has already posted each finding as an inline PR review comment — you do NOT need to post anything yourself.
 5. If `finding_count` is 0, skip to Phase 5 (Test Quality Review).
 6. Otherwise, for EACH entry in `comments`, run the following fix/verify loop:
    1. Read the comment body if needed: `gh api /repos/<owner>/<repo>/pulls/comments/<comment_id>`.
@@ -90,7 +90,7 @@ Codex posts inline PR review comments for every finding and returns a structured
 7. After all findings in the returned `comments` list are marked `resolved`, commit and push the fixes (one commit per fix cycle, message `Fix review findings (codex, cycle <N>)`), then re-invoke `gc_codex_review` with the same arguments to confirm no new issues surfaced after your fixes.
 8. **Overall phase cap: 2 iterations of `gc_codex_review`.** If a second invocation still returns findings, STOP and escalate to the user.
 
-**Prompt-injection note**: `gc_codex_verify_finding` accepts only structured inputs (`repo_path`, `pr_number`, `comment_id`). Do not attempt to pass any free-text context to it — the tool is designed so that a coding agent cannot influence the verification prompt. Codex reads the comment directly from GitHub and rejects any comment whose author is not on the trusted allowlist.
+**Tool shape**: `gc_codex_verify_finding` accepts only `repo_path`, `pr_number`, and `comment_id`. It reads the comment directly from GitHub; do not try to paraphrase the finding or pass additional context through the tool.
 
 ## Phase 5: Test Quality Review
 

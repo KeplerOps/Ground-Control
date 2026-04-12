@@ -763,7 +763,7 @@ server.tool(
 
 server.tool(
   "gc_codex_verify_finding",
-  "Ask Codex to verify whether a specific PR review finding has been resolved in the local working tree. Accepts ONLY structured inputs (repo_path, pr_number, comment_id) — no free-text fields — so the coding agent cannot influence the verification prompt. Codex reads the original comment (rejected if not authored by a trusted login), reads the anchored file, and decides RESOLVED or UNRESOLVED. If RESOLVED, the review thread is marked resolved via GraphQL. If UNRESOLVED, a threaded reply with concrete new directions is posted to the original comment and returned to the caller.",
+  "Ask Codex to verify whether a specific PR review finding has been resolved in the local working tree. Takes repo_path, pr_number, and the REST comment_id returned from gc_codex_review. Codex reads the original comment directly from GitHub (only comments from allowlisted authors are accepted), reads the anchored file, and decides RESOLVED or UNRESOLVED. If RESOLVED, the review thread is marked resolved via GraphQL. If UNRESOLVED, a threaded reply with concrete new directions is posted to the original comment and returned to the caller.",
   {
     repo_path: z.string().describe("Absolute path to the target Git repository"),
     pr_number: z.number().int().positive().describe("Pull request number the comment belongs to"),

@@ -1413,12 +1413,45 @@ export async function runCodexArchitecturePreflight({
   }
 }
 
-export function buildCodexReviewPrompt({ baseBranch, uncommitted, prNumber }) {
-  const scopeLine = uncommitted
-    ? "Review the staged, unstaged, and untracked changes in the working tree of this repository."
-    : `Review the changes on the current branch against \`${baseBranch}\`. Run \`git diff ${baseBranch}...HEAD\` (or \`origin/${baseBranch}...HEAD\` if the remote-tracking ref is more current) to produce the authoritative diff before analyzing. If neither ref exists locally, fall back to \`git fetch origin ${baseBranch}\` first.`;
+function buildCommonReviewPreamble({ baseBranch, uncommitted }) {
+  if (uncommitted) {
+    return "Review the staged, unstaged, and untracked changes in the working tree of this repository. The authoritative diff is provided below inside <<<DIFF…DIFF>>> delimiters — do not re-derive it from git yourself.";
+  }
+  return `Review the changes on the current branch against \`${baseBranch}\`. The authoritative diff is provided below inside <<<DIFF…DIFF>>> delimiters — do not re-derive it from git yourself.`;
+}
+
+function buildPostingInstructions({ prNumber, reviewerLabel }) {
+  if (prNumber == null) {
+    return [
+      "The caller did not supply a pull request number, so do not post any comments. Instead, write each finding inline in your response with a precise file and line reference, and at the end emit exactly one line `COMMENT_IDS=[]` (literal) so the caller can still parse your output.",
+    ];
+  }
+  return [
+    "Posting findings to the pull request:",
+    `- For EACH finding, post an inline PR review comment anchored to the exact file and line by calling \`gh api --method POST /repos/{owner}/{repo}/pulls/${prNumber}/comments\` with a JSON body containing \`commit_id\` (the head SHA from \`git rev-parse HEAD\`), \`path\`, \`line\`, \`side\` = \`"RIGHT"\`, and \`body\`. Use \`gh repo view --json nameWithOwner\` if you need the owner/repo slug.`,
+    `- The comment body MUST start with a one-line title prefixed by \`[${reviewerLabel}]\` so readers can tell which reviewer surfaced it. After the title, include a blank line and the detailed explanation. Keep the body self-contained.`,
+    "- Capture the numeric `.id` field from each POST response (that is the REST comment ID).",
+    "- After posting every finding, emit exactly one structured tail line as the very last line of your output, in this exact format (no surrounding prose, no code fences, no trailing text):",
+    "",
+    "    COMMENT_IDS=[<id1>,<id2>,<id3>]",
+    "",
+    "  The square brackets and commas are literal. Use a bare JSON array of integers. If you found zero issues, emit `COMMENT_IDS=[]` and nothing else on that line.",
+    "- If you cannot post a comment for some reason (for example the anchored line is not in the diff), still emit the COMMENT_IDS tail line containing the IDs that were successfully posted, and mention the skipped findings in prose above the tail.",
+    "",
+    "Do NOT post a summary comment, a review object, or anything besides the individual inline comments. The caller parses the COMMENT_IDS tail and reads each comment back via the REST API.",
+  ];
+}
+
+function buildDiffBlock(diffText) {
+  if (!diffText || diffText.trim() === "") {
+    return ["<<<DIFF", "(empty diff — nothing changed against the base branch)", "DIFF>>>"];
+  }
+  return ["<<<DIFF", diffText, "DIFF>>>"];
+}
+
+export function buildCodexReviewCorePrompt({ baseBranch, uncommitted, prNumber, diffText }) {
   const lines = [
-    scopeLine,
+    buildCommonReviewPreamble({ baseBranch, uncommitted }),
     "",
     "Review the code in this PR for production-readiness. Accept nothing less.",
     "",
@@ -1427,9 +1460,10 @@ export function buildCodexReviewPrompt({ baseBranch, uncommitted, prNumber }) {
     "- Architectural soundness — correct layering, appropriate coupling, no concept confusion.",
     "- Maintainability — readable, minimal surprises, tests that pin real behavior.",
     "- Extensibility — room for near-future needs without speculative abstraction.",
-    "- Security — input validation, authz, secrets handling, injection surfaces, data exposure.",
     "- Use of well-known, established architecture patterns over ad hoc inventions.",
     "- Consistency with the larger codebase — reuses existing cross-cutting concerns, validation, error envelopes, DTOs, repositories, and observability hooks rather than reinventing them.",
+    "",
+    "A dedicated security reviewer runs against the same diff in parallel — do NOT spend effort on OWASP-style security findings here. Focus on the dimensions above. If you notice something security-relevant, a one-line mention is enough; the other reviewer will catch it.",
     "",
     "Review rules:",
     "- Do not rush. Read the whole diff before forming conclusions.",
@@ -1438,29 +1472,49 @@ export function buildCodexReviewPrompt({ baseBranch, uncommitted, prNumber }) {
     "- Call out cases where the change reinvents existing infrastructure, bypasses existing validation or error handling, duplicates schemas or DTOs, weakens observability, or introduces brittle abstractions.",
     "- Each finding must have a precise file and line reference.",
     "",
+    ...buildPostingInstructions({ prNumber, reviewerLabel: "core" }),
+    "",
+    ...buildDiffBlock(diffText),
   ];
+  return lines.join("\n");
+}
 
-  if (prNumber != null) {
-    lines.push(
-      "Posting findings to the pull request:",
-      `- For EACH finding, post an inline PR review comment anchored to the exact file and line by calling \`gh api --method POST /repos/{owner}/{repo}/pulls/${prNumber}/comments\` with a JSON body containing \`commit_id\` (the head SHA from \`git rev-parse HEAD\`), \`path\`, \`line\`, \`side\` = \`"RIGHT"\`, and \`body\`. Use \`gh repo view --json nameWithOwner\` if you need the owner/repo slug.`,
-      "- The comment body should start with a short title on the first line, followed by a blank line and the detailed explanation. Keep the body self-contained — the coding agent will not have other context when reading it.",
-      '- Capture the numeric `.id` field from each POST response (that is the REST comment ID).',
-      "- After posting every finding, emit exactly one structured tail line as the very last line of your output, in this exact format (no surrounding prose, no code fences, no trailing text):",
-      "",
-      "    COMMENT_IDS=[<id1>,<id2>,<id3>]",
-      "",
-      "  The square brackets and commas are literal. Use a bare JSON array of integers. If you found zero issues, emit `COMMENT_IDS=[]` and nothing else on that line.",
-      "- If you cannot post a comment for some reason (for example the anchored line is not in the diff), still emit the COMMENT_IDS tail line containing the IDs that were successfully posted, and mention the skipped findings in prose above the tail.",
-      "",
-      "Do NOT post a summary comment, a review object, or anything besides the individual inline comments. The caller parses the COMMENT_IDS tail and reads each comment back via the REST API.",
-    );
-  } else {
-    lines.push(
-      "The caller did not supply a pull request number, so do not post any comments. Instead, write each finding inline in your response with a precise file and line reference, and at the end emit exactly one line `COMMENT_IDS=[]` (literal) so the caller can still parse your output.",
-    );
-  }
-
+export function buildCodexSecurityReviewPrompt({ baseBranch, uncommitted, prNumber, diffText }) {
+  const lines = [
+    buildCommonReviewPreamble({ baseBranch, uncommitted }),
+    "",
+    "You are a senior application-security engineer reviewing this PR. Focus exclusively on concrete, exploitable security issues introduced by the diff. Do not comment on maintainability, style, performance, or architecture except where they directly enable a security flaw.",
+    "",
+    "Categories to examine:",
+    "- Input validation: SQL injection (JPQL/JDBC string concat), command injection, path traversal, XXE, template injection, open-redirect, deserialization, unsafe file uploads.",
+    "- AuthN / AuthZ: missing project-scoping on repository queries, cross-tenant reads or writes, privilege escalation paths, session/JWT handling flaws, authorization bypass in controller → service calls.",
+    "- Secrets and crypto: hardcoded credentials or tokens in source, weak or homegrown crypto, insecure RNG for security-sensitive values, certificate validation bypasses, plaintext secrets in logs or error responses.",
+    "- Data exposure: PII or credentials in logs, detail fields, error envelopes, or graph projections; overly permissive error messages leaking internals; accidental disclosure through serialization.",
+    "- Request handling: missing authentication on public endpoints, CSRF on state-changing non-API endpoints, unsafe CORS, HTTP verb confusion, mass-assignment in request DTOs.",
+    "- Supply chain: unsafe dynamic imports / eval, executing untrusted network content, reading files from user-controlled paths.",
+    "",
+    "What to flag:",
+    "- Concrete, exploitable issues with a realistic attack path. Be specific about the attacker model (anonymous / authenticated tenant / another tenant / privileged user).",
+    "- Issues where the PR removes or weakens an existing security control.",
+    "- Issues where the PR bypasses an existing validated/scoped repository in favor of a raw query.",
+    "",
+    "What NOT to flag (to keep signal high):",
+    "- Generic best-practice hardening without a concrete attack path.",
+    "- Rate limiting or availability concerns.",
+    "- Theoretical race conditions without a demonstrated exploit.",
+    "- Logging of non-secret, non-PII data.",
+    "- Framework-level guarantees (e.g. JPA parameter binding already prevents SQL injection on bound parameters — only flag actual string concatenation).",
+    "- Existing issues unchanged by this diff.",
+    "",
+    "Review rules:",
+    "- Read the whole diff before forming conclusions.",
+    "- Enumerate every issue that meets the 'concrete, exploitable' bar. The caller fixes them all; there is no triage bucket.",
+    "- Each finding must have a precise file and line reference and must name the attacker model and the attack path in the body.",
+    "",
+    ...buildPostingInstructions({ prNumber, reviewerLabel: "security" }),
+    "",
+    ...buildDiffBlock(diffText),
+  ];
   return lines.join("\n");
 }
 
@@ -1590,79 +1644,173 @@ export async function enrichCommentsWithThreadIds({ repoRoot, owner, name, prNum
   return result;
 }
 
+async function computeReviewDiff(repoRoot, baseBranch, uncommitted) {
+  if (uncommitted) {
+    // Concatenate staged + unstaged + untracked so codex sees everything.
+    const staged = await execFile("git", ["-C", repoRoot, "diff", "--staged"], { maxBuffer: 50 * 1024 * 1024 });
+    const unstaged = await execFile("git", ["-C", repoRoot, "diff"], { maxBuffer: 50 * 1024 * 1024 });
+    return `${staged.stdout}\n${unstaged.stdout}`.trim();
+  }
+  // Prefer the remote-tracking ref when it exists and is ahead of the local
+  // ref, otherwise fall back to the local base ref, and finally to main.
+  const candidates = [`origin/${baseBranch}`, baseBranch, "origin/main", "main"];
+  for (const ref of candidates) {
+    try {
+      await execFile("git", ["-C", repoRoot, "rev-parse", "--verify", ref]);
+      const { stdout } = await execFile(
+        "git",
+        ["-C", repoRoot, "diff", `${ref}...HEAD`],
+        { maxBuffer: 50 * 1024 * 1024 },
+      );
+      return stdout;
+    } catch {
+      continue;
+    }
+  }
+  throw new Error(`Unable to compute review diff: none of ${candidates.join(", ")} exist in ${repoRoot}`);
+}
+
+async function runSingleCodexReview({ repoRoot, prompt, args }) {
+  const { stdout } = await execFileWithInput("codex", args, {
+    input: prompt,
+    cwd: repoRoot,
+    maxBuffer: 10 * 1024 * 1024,
+    env: { ...process.env, NO_COLOR: "1" },
+  });
+  return stdout;
+}
+
+// Dedup key combines path, line, and a short prefix of the body so two
+// reviewers flagging the same underlying issue at the same location produce
+// a single comment in the returned list (the underlying PR comments remain
+// on GitHub — this is only a display-layer dedup for the coding agent).
+export function dedupFindings(comments) {
+  const seen = new Map();
+  for (const c of comments) {
+    const titlePrefix = String(c.title || "").slice(0, 80).toLowerCase().trim();
+    const key = `${c.path || ""}:${c.line ?? ""}:${titlePrefix}`;
+    if (!seen.has(key)) {
+      seen.set(key, c);
+    }
+  }
+  return Array.from(seen.values());
+}
+
+async function enrichCommentsList({ repoRoot, owner, name, prNumber, commentIds, reviewer }) {
+  if (commentIds.length === 0) return [];
+  const threadMap = await enrichCommentsWithThreadIds({
+    repoRoot,
+    owner,
+    name,
+    prNumber,
+    commentIds,
+  });
+  const comments = [];
+  for (const id of commentIds) {
+    try {
+      const c = await fetchReviewCommentById(repoRoot, owner, name, id);
+      const firstLine = String(c.body || "").split("\n", 1)[0].trim();
+      comments.push({
+        comment_id: id,
+        thread_id: threadMap.get(id) || null,
+        reviewer,
+        path: c.path || null,
+        line: c.line ?? c.original_line ?? null,
+        title: firstLine.slice(0, 200),
+        html_url: c.html_url || null,
+      });
+    } catch (error) {
+      comments.push({
+        comment_id: id,
+        thread_id: threadMap.get(id) || null,
+        reviewer,
+        path: null,
+        line: null,
+        title: `<failed to fetch comment ${id}: ${error.message}>`,
+        html_url: null,
+      });
+    }
+  }
+  return comments;
+}
+
 export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted = false, prNumber = null }) {
   const repoRoot = await ensureGitRepo(repoPath);
 
-  // Auto-detect the PR number when the caller did not supply one. We need it
-  // in the prompt so codex can address `gh api` at the right endpoint.
   let effectivePr = prNumber;
   if (effectivePr == null && !uncommitted) {
     effectivePr = await autoDetectPrNumber(repoRoot);
   }
 
-  const prompt = buildCodexReviewPrompt({ baseBranch, uncommitted, prNumber: effectivePr });
-  const args = buildCodexReviewArgs({ uncommitted });
-  let stdout;
+  // Compute the diff once and reuse it across both reviewers.
+  const diffText = await computeReviewDiff(repoRoot, baseBranch, uncommitted);
 
+  const corePrompt = buildCodexReviewCorePrompt({
+    baseBranch,
+    uncommitted,
+    prNumber: effectivePr,
+    diffText,
+  });
+  const securityPrompt = buildCodexSecurityReviewPrompt({
+    baseBranch,
+    uncommitted,
+    prNumber: effectivePr,
+    diffText,
+  });
+  const args = buildCodexReviewArgs({ uncommitted });
+
+  let coreStdout;
+  let securityStdout;
   try {
-    ({ stdout } = await execFileWithInput("codex", args, {
-      input: prompt,
-      cwd: repoRoot,
-      maxBuffer: 10 * 1024 * 1024,
-      env: { ...process.env, NO_COLOR: "1" },
-    }));
+    [coreStdout, securityStdout] = await Promise.all([
+      runSingleCodexReview({ repoRoot, prompt: corePrompt, args }),
+      runSingleCodexReview({ repoRoot, prompt: securityPrompt, args }),
+    ]);
   } catch (error) {
     throw new Error(`Codex review failed: ${formatCommandFailure("codex", error)}`);
   }
 
-  const { commentIds, body } = parseCodexReviewTail(stdout);
+  const core = parseCodexReviewTail(coreStdout);
+  const security = parseCodexReviewTail(securityStdout);
 
-  // Enrich each REST comment id with its GraphQL review-thread id and a small
-  // preview (file/line/title) so the coding agent can drive fix-verify loops
-  // without re-fetching every comment.
-  let comments = [];
-  if (effectivePr != null && commentIds.length > 0) {
-    const { owner, name } = await getOwnerRepo(repoRoot);
-    const threadMap = await enrichCommentsWithThreadIds({
-      repoRoot,
-      owner,
-      name,
-      prNumber: effectivePr,
-      commentIds,
-    });
-    for (const id of commentIds) {
-      try {
-        const c = await fetchReviewCommentById(repoRoot, owner, name, id);
-        const firstLine = String(c.body || "").split("\n", 1)[0].trim();
-        comments.push({
-          comment_id: id,
-          thread_id: threadMap.get(id) || null,
-          path: c.path || null,
-          line: c.line ?? c.original_line ?? null,
-          title: firstLine.slice(0, 200),
-          html_url: c.html_url || null,
-        });
-      } catch (error) {
-        comments.push({
-          comment_id: id,
-          thread_id: threadMap.get(id) || null,
-          path: null,
-          line: null,
-          title: `<failed to fetch comment ${id}: ${error.message}>`,
-          html_url: null,
-        });
-      }
-    }
+  let owner = null;
+  let name = null;
+  if (effectivePr != null && (core.commentIds.length > 0 || security.commentIds.length > 0)) {
+    ({ owner, name } = await getOwnerRepo(repoRoot));
   }
+
+  const coreComments = await enrichCommentsList({
+    repoRoot,
+    owner,
+    name,
+    prNumber: effectivePr,
+    commentIds: core.commentIds,
+    reviewer: "core",
+  });
+  const securityComments = await enrichCommentsList({
+    repoRoot,
+    owner,
+    name,
+    prNumber: effectivePr,
+    commentIds: security.commentIds,
+    reviewer: "security",
+  });
+
+  const comments = dedupFindings([...coreComments, ...securityComments]);
 
   return {
     repo_path: repoRoot,
     base_branch: baseBranch,
     uncommitted,
     pr_number: effectivePr,
-    finding_count: commentIds.length,
+    finding_count: comments.length,
     comments,
-    review_text: body,
+    core_review_text: core.body,
+    security_review_text: security.body,
+    reviewers: [
+      { name: "core", finding_count: core.commentIds.length },
+      { name: "security", finding_count: security.commentIds.length },
+    ],
   };
 }
 
@@ -1670,12 +1818,9 @@ export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted
 // Codex finding verification — gc_codex_verify_finding
 // ---------------------------------------------------------------------------
 
-// Usernames allowed to author a PR review comment that gc_codex_verify_finding
-// will accept as input. This closes a second-order injection channel where a
-// hostile drive-by commenter could post a malicious "finding" and then the
-// coding agent could be tricked into passing that comment's id to the verify
-// tool. Only comments authored by the codex bot (i.e. comments that originated
-// from a prior gc_codex_review run) are accepted.
+// Allowlist of authors whose PR review comments gc_codex_verify_finding will
+// accept as input. Only comments originating from a prior gc_codex_review run
+// are considered trustworthy review findings.
 export const VERIFY_FINDING_ALLOWED_AUTHORS = new Set([
   "app/github-actions",
   "github-actions[bot]",
@@ -1815,8 +1960,7 @@ export async function runCodexVerifyFinding({ repoPath, prNumber, commentId }) {
 
   const comment = await fetchReviewCommentById(repoRoot, owner, name, commentId);
 
-  // Author allowlist check: reject comments that did not come from a trusted
-  // source. This closes the drive-by prompt-injection channel.
+  // Only accept comments authored by the allowlisted set or the PR author.
   const author = comment?.user?.login;
   const allowed = getRuntimeAllowedAuthors();
   // Also accept the PR author — in a local dev workflow gc_codex_review posts
