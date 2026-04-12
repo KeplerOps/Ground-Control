@@ -34,8 +34,15 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DomainValidationException.class)
     public ResponseEntity<ErrorResponse> handleValidation(DomainValidationException ex) {
-        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
-                .body(ErrorResponse.of(ex.getErrorCode(), ex.getMessage(), ex.getDetail()));
+        // Same envelope contract as handleConflict: only include the detail block
+        // when it has content. Otherwise legacy single-arg DomainValidationException
+        // throws (~30 sites across the codebase) would serialize `detail: {}`,
+        // which is observable wire-format noise for every existing 422 response.
+        var detail = ex.getDetail();
+        var body = detail.isEmpty()
+                ? ErrorResponse.of(ex.getErrorCode(), ex.getMessage())
+                : ErrorResponse.of(ex.getErrorCode(), ex.getMessage(), detail);
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(body);
     }
 
     @ExceptionHandler(AuthenticationException.class)
@@ -51,7 +58,15 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ErrorResponse> handleConflict(ConflictException ex) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of(ex.getErrorCode(), ex.getMessage()));
+        // Only include the detail block when it has content; otherwise call the
+        // 2-arg overload so @JsonInclude(NON_NULL) omits the field. Without this
+        // guard every legacy single-arg ConflictException would start serializing
+        // `detail: {}` after the cycle-2 envelope upgrade.
+        var detail = ex.getDetail();
+        var body = (detail == null || detail.isEmpty())
+                ? ErrorResponse.of(ex.getErrorCode(), ex.getMessage())
+                : ErrorResponse.of(ex.getErrorCode(), ex.getMessage(), detail);
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

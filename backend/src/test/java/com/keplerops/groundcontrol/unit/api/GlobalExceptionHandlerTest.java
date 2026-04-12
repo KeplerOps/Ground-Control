@@ -4,6 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.keplerops.groundcontrol.api.ErrorResponse;
 import com.keplerops.groundcontrol.api.GlobalExceptionHandler;
+import com.keplerops.groundcontrol.domain.exception.ConflictException;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import java.io.Serializable;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -100,5 +106,63 @@ class GlobalExceptionHandlerTest {
         assertThat(r2.error().code()).isNotBlank();
         assertThat(r1.error().message()).isNotBlank();
         assertThat(r2.error().message()).isNotBlank();
+    }
+
+    @Test
+    void handleConflict_omitsDetailWhenExceptionDetailIsEmpty() {
+        var ex = new ConflictException("Already exists");
+
+        var response = handler.handleConflict(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody()).isNotNull();
+        // Empty detail must be omitted from the wire envelope, not serialized as `{}`,
+        // so legacy single-arg ConflictException sites do not regress after the
+        // detail-aware envelope was added.
+        assertThat(response.getBody().error().detail()).isNull();
+    }
+
+    @Test
+    void handleConflict_includesDetailWhenExceptionCarriesDetail() {
+        Map<String, Serializable> detail = new LinkedHashMap<>();
+        detail.put("threatModelUid", "TM-001");
+        detail.put("assetUids", new java.util.ArrayList<>(List.of("ASSET-001")));
+        var ex = new ConflictException("Threat model referenced", "threat_model_referenced", detail);
+
+        var response = handler.handleConflict(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error().code()).isEqualTo("threat_model_referenced");
+        assertThat(response.getBody().error().detail()).containsEntry("threatModelUid", "TM-001");
+        assertThat(response.getBody().error().detail()).containsKey("assetUids");
+    }
+
+    @Test
+    void handleValidation_omitsDetailWhenExceptionDetailIsEmpty() {
+        var ex = new DomainValidationException("Title must not be blank");
+
+        var response = handler.handleValidation(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(response.getBody()).isNotNull();
+        // Same envelope contract as handleConflict: empty detail must be omitted
+        // so legacy single-arg DomainValidationException sites do not serialize
+        // `detail: {}` for the much larger 422 surface.
+        assertThat(response.getBody().error().detail()).isNull();
+    }
+
+    @Test
+    void handleValidation_includesDetailWhenExceptionCarriesDetail() {
+        Map<String, Serializable> detail = new LinkedHashMap<>();
+        detail.put("field", "title");
+        var ex = new DomainValidationException("Title must not be blank", "validation_error", detail);
+
+        var response = handler.handleValidation(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error().code()).isEqualTo("validation_error");
+        assertThat(response.getBody().error().detail()).containsEntry("field", "title");
     }
 }

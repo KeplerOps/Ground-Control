@@ -39,5 +39,7 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | [020](020-asset-cross-entity-linking.md) | Asset Cross-Entity Linking | Accepted |
 | [021](021-gated-agentic-development-loop.md) | Gated Agentic Development Loop | Accepted |
 | [022](022-content-pack-distribution-architecture.md) | Content Pack Distribution Architecture | Accepted |
+| [023](023-plugin-architecture.md) | Plugin Architecture | Accepted |
+| [024](024-threat-model-entry-boundary.md) | Threat Model Entry Boundary | Accepted |
 
 Prior ADRs from the old project frame are archived in `archive/architecture/adrs/`.
