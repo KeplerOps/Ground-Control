@@ -52,6 +52,84 @@ project: aces-sdl
 
 Everything between these two checkpoints is automated.
 
+### High-level flow
+
+```mermaid
+flowchart TD
+  Start([User runs /implement UID])
+
+  subgraph PhaseA[Phase A — Plan & Implement]
+    A1[Resolve repo Ground Control config<br/>gc_get_repo_ground_control_context]
+    A2[Fetch requirement + ensure GitHub issue<br/>gc_get_requirement, gh issue develop]
+    A3[Codex architecture preflight<br/>gc_codex_architecture_preflight]
+    A4[Explore codebase for existing coverage]
+    PlanApproval{{User approves plan}}
+    A5[TDD implementation<br/>red → green → refactor, clause by clause]
+    A6[Traceability links<br/>IMPLEMENTS, TESTS]
+  end
+
+  subgraph PhaseB[Phase B — Quality Gate]
+    B1[pre-commit run --all-files]
+    B2[Completion gate<br/>make policy, make check, CHANGELOG, status]
+  end
+
+  subgraph PhaseC[Phase C — Stage, Commit, Push]
+    C1[Stage + pre-commit loop]
+    C2[Commit no-attribution + push]
+  end
+
+  subgraph PhaseD[Phase D — Ship]
+    D1[Create PR to dev]
+    D2[CI monitor loop<br/>gh run watch]
+    D3[SonarCloud sweep<br/>quality gate + open issues + hotspots<br/>cap 2]
+    D4[Codex review — parallel fan-out<br/>gc_codex_review]
+    subgraph FanOut[core + security reviewers, concurrent]
+      direction LR
+      D4a[core: fitness, architecture,<br/>maintainability, extensibility,<br/>patterns, consistency]
+      D4b[security: input validation,<br/>authZ, secrets, data exposure]
+    end
+    D4 --> FanOut
+    D5[Per-finding fix/verify loop<br/>gc_codex_verify_finding<br/>per-finding cap 2, overall cap 2]
+    D6[Test-quality review<br/>/review-tests skill, cap 2]
+    D7[Final CI re-verify]
+    D8[Report to user — DO NOT MERGE]
+  end
+
+  End([User reviews PR and merges])
+
+  Start --> A1 --> A2 --> A3 --> A4 --> PlanApproval
+  PlanApproval -- approved --> A5 --> A6
+  A6 --> B1 --> B2
+  B2 -- pass --> C1 --> C2
+  C2 --> D1 --> D2
+  D2 -- green --> D3
+  D2 -- red --> C1
+  D3 -- clean --> D4
+  D3 -- findings --> C1
+  FanOut --> D5
+  D5 --> D6
+  D5 -- unresolved after cap --> End
+  D6 -- green --> D7
+  D6 -- findings --> C1
+  D7 -- green --> D8
+  D7 -- red --> C1
+  D8 --> End
+
+  classDef user fill:#fff7cc,stroke:#c9a900,color:#000
+  classDef gate fill:#e0f0ff,stroke:#4a90d9,color:#000
+  classDef review fill:#ffe0e0,stroke:#d94a4a,color:#000
+  class PlanApproval,End user
+  class B1,B2,D2,D3,D7 gate
+  class A3,D4,D4a,D4b,D5,D6 review
+```
+
+**Reading the diagram:**
+
+- **Yellow** = user touchpoints. The loop halts at plan approval and at the final report; everything else is automated.
+- **Blue** = gates (pre-commit, completion gate, CI, SonarCloud, final CI re-verify). Any gate failure loops back to Phase C (stage + commit + push) and re-runs downstream.
+- **Red** = reviewers. Three stages: architecture preflight before coding, parallel codex core + security review after CI, test-quality review last. Each review step has a 2-cycle cap; escalation returns control to the user.
+- **D4 → FanOut** is the one concurrency point: `gc_codex_review` computes the diff once, runs the core and security reviewers in parallel against the same diff, and merges the findings with cross-reviewer dedup before returning a unified list to the coding agent.
+
 ### Phase A: Plan & Implement
 1. Resolve repo-local Ground Control context via `gc_get_repo_ground_control_context`
 2. Fetch requirement from Ground Control, create GitHub issue if needed
