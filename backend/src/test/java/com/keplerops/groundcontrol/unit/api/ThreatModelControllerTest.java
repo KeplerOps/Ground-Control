@@ -20,6 +20,7 @@ import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.threatmodels.model.ThreatModel;
+import com.keplerops.groundcontrol.domain.threatmodels.service.CreateThreatModelCommand;
 import com.keplerops.groundcontrol.domain.threatmodels.service.ThreatModelService;
 import com.keplerops.groundcontrol.domain.threatmodels.service.UpdateThreatModelCommand;
 import com.keplerops.groundcontrol.domain.threatmodels.state.StrideCategory;
@@ -100,6 +101,23 @@ class ThreatModelControllerTest {
                 .andExpect(jsonPath("$.effect", is("Account takeover and customer data exposure")))
                 .andExpect(jsonPath("$.stride", is("SPOOFING")))
                 .andExpect(jsonPath("$.status", is("DRAFT")));
+
+        // Lock in the request→command mapping: without this capture, the test
+        // would still pass if the controller silently dropped or swapped fields
+        // because the mocked service returns a canned fixture regardless of input.
+        var captor = ArgumentCaptor.forClass(CreateThreatModelCommand.class);
+        verify(threatModelService).create(captor.capture());
+        var command = captor.getValue();
+        org.junit.jupiter.api.Assertions.assertEquals(PROJECT_ID, command.projectId());
+        org.junit.jupiter.api.Assertions.assertEquals("TM-001", command.uid());
+        org.junit.jupiter.api.Assertions.assertEquals("Credential stuffing on login portal", command.title());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "External threat actor using leaked credentials", command.threatSource());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "Automated credential replay against /login", command.threatEvent());
+        org.junit.jupiter.api.Assertions.assertEquals("Account takeover and customer data exposure", command.effect());
+        org.junit.jupiter.api.Assertions.assertEquals(StrideCategory.SPOOFING, command.stride());
+        org.junit.jupiter.api.Assertions.assertEquals("Observed surge after breach dump.", command.narrative());
     }
 
     @Test

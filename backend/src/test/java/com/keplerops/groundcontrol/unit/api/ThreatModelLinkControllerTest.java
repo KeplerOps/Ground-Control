@@ -18,6 +18,7 @@ import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.threatmodels.model.ThreatModel;
 import com.keplerops.groundcontrol.domain.threatmodels.model.ThreatModelLink;
+import com.keplerops.groundcontrol.domain.threatmodels.service.CreateThreatModelLinkCommand;
 import com.keplerops.groundcontrol.domain.threatmodels.service.ThreatModelLinkService;
 import com.keplerops.groundcontrol.domain.threatmodels.state.ThreatModelLinkTargetType;
 import com.keplerops.groundcontrol.domain.threatmodels.state.ThreatModelLinkType;
@@ -25,6 +26,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.MediaType;
@@ -105,6 +107,19 @@ class ThreatModelLinkControllerTest {
                 .andExpect(jsonPath("$.targetType", is("ASSET")))
                 .andExpect(jsonPath("$.targetEntityId", is(ASSET_ID.toString())))
                 .andExpect(jsonPath("$.linkType", is("AFFECTS")));
+
+        // Lock in the request→command mapping for the internal-target branch.
+        // Without this capture the test would still pass if the controller
+        // swapped targetEntityId ↔ targetIdentifier or dropped targetTitle,
+        // because the mock returns the canned link regardless of input.
+        var captor = ArgumentCaptor.forClass(CreateThreatModelLinkCommand.class);
+        verify(linkService).create(eq(PROJECT_ID), eq(TM_ID), captor.capture());
+        var command = captor.getValue();
+        org.junit.jupiter.api.Assertions.assertEquals(ThreatModelLinkTargetType.ASSET, command.targetType());
+        org.junit.jupiter.api.Assertions.assertEquals(ASSET_ID, command.targetEntityId());
+        org.junit.jupiter.api.Assertions.assertNull(command.targetIdentifier());
+        org.junit.jupiter.api.Assertions.assertEquals(ThreatModelLinkType.AFFECTS, command.linkType());
+        org.junit.jupiter.api.Assertions.assertEquals("Customer portal", command.targetTitle());
     }
 
     @Test
@@ -128,6 +143,15 @@ class ThreatModelLinkControllerTest {
                 .andExpect(jsonPath("$.targetType", is("CODE")))
                 .andExpect(jsonPath("$.targetIdentifier", is("backend/src/main/java/Auth.java")))
                 .andExpect(jsonPath("$.linkType", is("DOCUMENTED_IN")));
+
+        // Lock in the request→command mapping for the external-identifier branch.
+        var captor = ArgumentCaptor.forClass(CreateThreatModelLinkCommand.class);
+        verify(linkService).create(eq(PROJECT_ID), eq(TM_ID), captor.capture());
+        var command = captor.getValue();
+        org.junit.jupiter.api.Assertions.assertEquals(ThreatModelLinkTargetType.CODE, command.targetType());
+        org.junit.jupiter.api.Assertions.assertNull(command.targetEntityId());
+        org.junit.jupiter.api.Assertions.assertEquals("backend/src/main/java/Auth.java", command.targetIdentifier());
+        org.junit.jupiter.api.Assertions.assertEquals(ThreatModelLinkType.DOCUMENTED_IN, command.linkType());
     }
 
     @Test
