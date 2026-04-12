@@ -55,79 +55,72 @@ Everything between these two checkpoints is automated.
 ### High-level flow
 
 ```mermaid
-flowchart TD
-  Start([User runs /implement UID])
-
-  subgraph PhaseA[Phase A — Plan & Implement]
-    A1[Resolve repo Ground Control config<br/>gc_get_repo_ground_control_context]
-    A2[Fetch requirement + ensure GitHub issue<br/>gc_get_requirement, gh issue develop]
-    A3[Codex architecture preflight<br/>gc_codex_architecture_preflight]
-    A4[Explore codebase for existing coverage]
-    PlanApproval{{User approves plan}}
-    A5[TDD implementation<br/>red → green → refactor, clause by clause]
-    A6[Traceability links<br/>IMPLEMENTS, TESTS]
-  end
-
-  subgraph PhaseB[Phase B — Quality Gate]
-    B1[pre-commit run --all-files]
-    B2[Completion gate<br/>make policy, make check, CHANGELOG, status]
-  end
-
-  subgraph PhaseC[Phase C — Stage, Commit, Push]
-    C1[Stage + pre-commit loop]
-    C2[Commit no-attribution + push]
-  end
-
-  subgraph PhaseD[Phase D — Ship]
-    D1[Create PR to dev]
-    D2[CI monitor loop<br/>gh run watch]
-    D3[SonarCloud sweep<br/>quality gate + open issues + hotspots<br/>cap 2]
-    D4[Codex review — parallel fan-out<br/>gc_codex_review]
-    subgraph FanOut[core + security reviewers, concurrent]
-      direction LR
-      D4a[core: fitness, architecture,<br/>maintainability, extensibility,<br/>patterns, consistency]
-      D4b[security: input validation,<br/>authZ, secrets, data exposure]
-    end
-    D4 --> FanOut
-    D5[Per-finding fix/verify loop<br/>gc_codex_verify_finding<br/>per-finding cap 2, overall cap 2]
-    D6[Test-quality review<br/>/review-tests skill, cap 2]
-    D7[Final CI re-verify]
-    D8[Report to user — DO NOT MERGE]
-  end
-
+flowchart TB
+  Start([/implement UID])
+  S1[1 · Resolve repo GC config]
+  S2[2 · Fetch requirement + ensure GitHub issue]
+  S3[3 · Codex architecture preflight]
+  S4[4 · Explore codebase for existing coverage]
+  S5{{5 · User approves plan}}
+  S6[6 · TDD implementation]
+  S7[7 · Create traceability links · IMPLEMENTS + TESTS]
+  S8[8 · Transition requirement DRAFT → ACTIVE]
+  S9[9 · pre-commit run]
+  S10[10 · Completion gate · make policy + make check + CHANGELOG]
+  S11[11 · Re-verify GC state · traceability + status]
+  S12[12 · Stage + commit + push]
+  S13[13 · Create PR to dev]
+  S14[14 · CI monitor]
+  S15[15 · SonarCloud sweep]
+  S16[16 · gc_codex_review · core + security in parallel]
+  S17[17 · Per-finding fix + gc_codex_verify_finding]
+  S18[18 · /review-tests]
+  S19[19 · Final CI re-verify]
+  S20[20 · Report — DO NOT MERGE]
   End([User reviews PR and merges])
 
-  Start --> A1 --> A2 --> A3 --> A4 --> PlanApproval
-  PlanApproval -- approved --> A5 --> A6
-  A6 --> B1 --> B2
-  B2 -- pass --> C1 --> C2
-  C2 --> D1 --> D2
-  D2 -- green --> D3
-  D2 -- red --> C1
-  D3 -- clean --> D4
-  D3 -- findings --> C1
-  FanOut --> D5
-  D5 --> D6
-  D5 -- unresolved after cap --> End
-  D6 -- green --> D7
-  D6 -- findings --> C1
-  D7 -- green --> D8
-  D7 -- red --> C1
-  D8 --> End
+  Start --> S1
+  S1 --> S2
+  S2 --> S3
+  S3 --> S4
+  S4 --> S5
+  S5 -->|approved| S6
+  S6 --> S7
+  S7 --> S8
+  S8 --> S9
+  S9 --> S10
+  S10 --> S11
+  S11 --> S12
+  S12 --> S13
+  S13 --> S14
+  S14 --> S15
+  S15 --> S16
+  S16 --> S17
+  S17 --> S18
+  S18 --> S19
+  S19 --> S20
+  S20 --> End
+
+  S10 -->|fail| S9
+  S11 -->|missing| S7
+  S14 -->|red| S12
+  S15 -->|findings| S12
+  S17 -->|re-run, cap 2| S16
+  S18 -->|findings| S12
+  S19 -->|red| S12
 
   classDef user fill:#fff7cc,stroke:#c9a900,color:#000
-  classDef gate fill:#e0f0ff,stroke:#4a90d9,color:#000
-  classDef review fill:#ffe0e0,stroke:#d94a4a,color:#000
-  class PlanApproval,End user
-  class B1,B2,D2,D3,D7 gate
-  class A3,D4,D4a,D4b,D5,D6 review
+  class S5,Start,End user
+
+  linkStyle 21,22,23,24,25,26,27 stroke:#d94a4a,stroke-width:2px,color:#d94a4a
 ```
 
 **Reading the diagram:**
 
 - **Yellow** = user touchpoints. The loop halts at plan approval and at the final report; everything else is automated.
-- **Blue** = gates (pre-commit, completion gate, CI, SonarCloud, final CI re-verify). Any gate failure loops back to Phase C (stage + commit + push) and re-runs downstream.
+- **Blue** = gates (pre-commit, local completion gate, Ground Control re-verify, CI, SonarCloud, final CI re-verify). Any gate failure loops back to the relevant upstream phase and re-runs downstream.
 - **Red** = reviewers. Three stages: architecture preflight before coding, parallel codex core + security review after CI, test-quality review last. Each review step has a 2-cycle cap; escalation returns control to the user.
+- **A6 + A7** are the Ground Control link-and-transition steps. `IMPLEMENTS` links land for every substantive code file the change introduces or modifies, `TESTS` links land for every new test file, and the requirement itself transitions `DRAFT → ACTIVE`. These are not optional — **B3 blocks the commit** until `gc_get_traceability` and `gc_get_requirement` confirm the state landed, looping back to A6 if anything is missing.
 - **D4 → FanOut** is the one concurrency point: `gc_codex_review` computes the diff once, runs the core and security reviewers in parallel against the same diff, and merges the findings with cross-reviewer dedup before returning a unified list to the coding agent.
 
 ### Phase A: Plan & Implement
