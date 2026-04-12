@@ -3087,10 +3087,10 @@ server.tool(
 
 server.tool(
   "gc_delete_threat_model",
-  "Delete a threat model entry. Cascades to all threat model links.",
+  "Delete a threat model entry. Cascades to all owned ThreatModelLink rows. Returns 409 threat_model_referenced (with `assetUids` and `scenarioUids` in the error detail) if any AssetLink THREAT_MODEL_ENTRY or RiskScenarioLink THREAT_MODEL row still references this threat model — clean those up before retrying.",
   {
     id: z.string().uuid().describe("Threat model UUID"),
-    project: z.string().optional().describe("Project identifier"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },
   async ({ id, project }) => {
     try {

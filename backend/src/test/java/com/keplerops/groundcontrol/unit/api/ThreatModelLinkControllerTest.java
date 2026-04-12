@@ -84,7 +84,7 @@ class ThreatModelLinkControllerTest {
 
     @Test
     void createInternalLinkReturns201() throws Exception {
-        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
         when(linkService.create(eq(PROJECT_ID), eq(TM_ID), any())).thenReturn(makeInternalLink());
 
         mockMvc.perform(post("/api/v1/threat-models/{threatModelId}/links", TM_ID)
@@ -109,7 +109,7 @@ class ThreatModelLinkControllerTest {
 
     @Test
     void createExternalLinkReturns201() throws Exception {
-        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
         when(linkService.create(eq(PROJECT_ID), eq(TM_ID), any())).thenReturn(makeExternalLink());
 
         mockMvc.perform(
@@ -147,7 +147,7 @@ class ThreatModelLinkControllerTest {
 
     @Test
     void listReturnsLinks() throws Exception {
-        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
         when(linkService.listByThreatModel(PROJECT_ID, TM_ID)).thenReturn(List.of(makeInternalLink()));
 
         mockMvc.perform(get("/api/v1/threat-models/{threatModelId}/links", TM_ID)
@@ -159,7 +159,7 @@ class ThreatModelLinkControllerTest {
 
     @Test
     void deleteReturns204() throws Exception {
-        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
 
         mockMvc.perform(delete("/api/v1/threat-models/{threatModelId}/links/{linkId}", TM_ID, LINK_ID)
                         .param("project", "ground-control"))

@@ -690,11 +690,19 @@ must be non-blank), `reason` (optional, max 500).
 | GET | `/threat-models/{id}/links` | — | 200 | List links for a threat model |
 | DELETE | `/threat-models/{id}/links/{linkId}` | — | 204 | Delete threat-model link |
 
-All endpoints accept an optional `project` query parameter.
+All endpoints accept an optional `project` query parameter. When omitted, the request
+auto-resolves to the single project in single-project deployments. In multi-project
+deployments the parameter is required and the request returns 422 `project_required`
+if absent.
 
 Threat models are a separate aggregate from risk scenarios per ADR-024. They capture
 upstream security analysis (source, event, effect) and do not carry quantified risk,
 treatment, or governance state.
+
+`DELETE /threat-models/{id}` is rejected with 409 `threat_model_referenced` while any
+`AssetLink` (`THREAT_MODEL_ENTRY` target) or `RiskScenarioLink` (`THREAT_MODEL` target)
+still references the threat model. The conflict envelope's `detail` block lists the
+referencing asset and scenario UIDs so callers can clean them up before retrying.
 
 **ThreatModelRequest fields:** `uid` (required, max 30), `title` (required, max 200),
 `threatSource` (required), `threatEvent` (required), `effect` (required), `stride`

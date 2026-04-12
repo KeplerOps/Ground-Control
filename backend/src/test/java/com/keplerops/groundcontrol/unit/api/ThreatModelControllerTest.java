@@ -151,7 +151,7 @@ class ThreatModelControllerTest {
 
     @Test
     void getByIdReturnsThreatModel() throws Exception {
-        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
         when(threatModelService.getById(PROJECT_ID, TM_ID)).thenReturn(makeThreatModel());
 
         mockMvc.perform(get("/api/v1/threat-models/{id}", TM_ID).param("project", "ground-control"))
@@ -162,7 +162,7 @@ class ThreatModelControllerTest {
 
     @Test
     void getByIdReturns404WhenMissing() throws Exception {
-        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
         when(threatModelService.getById(PROJECT_ID, TM_ID)).thenThrow(new NotFoundException("Not found"));
 
         mockMvc.perform(get("/api/v1/threat-models/{id}", TM_ID).param("project", "ground-control"))
@@ -183,7 +183,7 @@ class ThreatModelControllerTest {
     void updateReturnsUpdatedThreatModel() throws Exception {
         var updated = makeThreatModel();
         updated.setTitle("Updated title");
-        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
         when(threatModelService.update(eq(PROJECT_ID), eq(TM_ID), any())).thenReturn(updated);
 
         mockMvc.perform(
@@ -200,7 +200,7 @@ class ThreatModelControllerTest {
 
     @Test
     void deleteReturns204() throws Exception {
-        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
 
         mockMvc.perform(delete("/api/v1/threat-models/{id}", TM_ID).param("project", "ground-control"))
                 .andExpect(status().isNoContent());
@@ -212,7 +212,7 @@ class ThreatModelControllerTest {
     void transitionStatusReturnsUpdatedThreatModel() throws Exception {
         var tm = makeThreatModel();
         setField(tm, "status", ThreatModelStatus.ACTIVE);
-        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
         when(threatModelService.transitionStatus(PROJECT_ID, TM_ID, ThreatModelStatus.ACTIVE))
                 .thenReturn(tm);
 

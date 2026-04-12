@@ -37,7 +37,7 @@ class ThreatModelGraphProjectionContributorTest {
     private ThreatModelGraphProjectionContributor contributor;
 
     @Test
-    void contributesNodesForActiveAndDraftButNotArchived() {
+    void contributesNodesForAllStatusesIncludingArchived() {
         var project = new Project("ground-control", "Ground Control");
         var projectId = UUID.randomUUID();
         setField(project, "id", projectId);
@@ -59,9 +59,12 @@ class ThreatModelGraphProjectionContributorTest {
 
         var nodes = contributor.contributeNodes(projectId);
 
-        assertThat(nodes).hasSize(2);
+        // Archived threat models stay in the graph as historical evidence so
+        // incoming AssetLink/RiskScenarioLink edges to them remain valid.
+        assertThat(nodes).hasSize(3);
         assertThat(nodes).allMatch(node -> node.entityType() == GraphEntityType.THREAT_MODEL);
-        assertThat(nodes.stream().map(n -> n.properties().get("status"))).containsExactlyInAnyOrder("DRAFT", "ACTIVE");
+        assertThat(nodes.stream().map(n -> n.properties().get("status")))
+                .containsExactlyInAnyOrder("DRAFT", "ACTIVE", "ARCHIVED");
         assertThat(nodes.get(0).id()).isEqualTo(GraphIds.nodeId(GraphEntityType.THREAT_MODEL, draft.getId()));
         assertThat(nodes.get(0).properties().get("stride")).isEqualTo("SPOOFING");
     }

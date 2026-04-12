@@ -1,14 +1,24 @@
 package com.keplerops.groundcontrol.domain.threatmodels.service;
 
+import com.keplerops.groundcontrol.domain.assets.model.AssetLink;
+import com.keplerops.groundcontrol.domain.assets.repository.AssetLinkRepository;
+import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.audit.ActorHolder;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
+import com.keplerops.groundcontrol.domain.riskscenarios.model.RiskScenarioLink;
+import com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskScenarioLinkRepository;
+import com.keplerops.groundcontrol.domain.riskscenarios.state.RiskScenarioLinkTargetType;
 import com.keplerops.groundcontrol.domain.threatmodels.model.ThreatModel;
 import com.keplerops.groundcontrol.domain.threatmodels.repository.ThreatModelRepository;
 import com.keplerops.groundcontrol.domain.threatmodels.state.ThreatModelStatus;
+import java.io.Serializable;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -22,10 +32,18 @@ public class ThreatModelService {
 
     private final ThreatModelRepository threatModelRepository;
     private final ProjectService projectService;
+    private final AssetLinkRepository assetLinkRepository;
+    private final RiskScenarioLinkRepository riskScenarioLinkRepository;
 
-    public ThreatModelService(ThreatModelRepository threatModelRepository, ProjectService projectService) {
+    public ThreatModelService(
+            ThreatModelRepository threatModelRepository,
+            ProjectService projectService,
+            AssetLinkRepository assetLinkRepository,
+            RiskScenarioLinkRepository riskScenarioLinkRepository) {
         this.threatModelRepository = threatModelRepository;
         this.projectService = projectService;
+        this.assetLinkRepository = assetLinkRepository;
+        this.riskScenarioLinkRepository = riskScenarioLinkRepository;
     }
 
     public ThreatModel create(CreateThreatModelCommand command) {
@@ -115,6 +133,34 @@ public class ThreatModelService {
 
     public void delete(UUID projectId, UUID id) {
         var threatModel = findByIdOrThrow(projectId, id);
+
+        var assetLinks = assetLinkRepository.findByTargetTypeAndTargetEntityIdAndProjectId(
+                AssetLinkTargetType.THREAT_MODEL_ENTRY, id, projectId);
+        var scenarioLinks = riskScenarioLinkRepository.findByTargetTypeAndTargetEntityIdAndProjectId(
+                RiskScenarioLinkTargetType.THREAT_MODEL, id, projectId);
+        if (!assetLinks.isEmpty() || !scenarioLinks.isEmpty()) {
+            var assetUids = assetLinks.stream()
+                    .map(AssetLink::getAsset)
+                    .map(asset -> asset.getUid())
+                    .collect(Collectors.toCollection(java.util.ArrayList::new));
+            var scenarioUids = scenarioLinks.stream()
+                    .map(RiskScenarioLink::getRiskScenario)
+                    .map(scenario -> scenario.getUid())
+                    .collect(Collectors.toCollection(java.util.ArrayList::new));
+            Map<String, Serializable> detail = new LinkedHashMap<>();
+            detail.put("threatModelUid", threatModel.getUid());
+            detail.put("assetCount", assetLinks.size());
+            detail.put("scenarioCount", scenarioLinks.size());
+            detail.put("assetUids", assetUids);
+            detail.put("scenarioUids", scenarioUids);
+            throw new ConflictException(
+                    "Threat model " + threatModel.getUid()
+                            + " cannot be deleted while reverse links exist. Remove the AssetLink and"
+                            + " RiskScenarioLink references first, then retry.",
+                    "threat_model_referenced",
+                    detail);
+        }
+
         threatModelRepository.delete(threatModel);
         log.info("threat_model_deleted: id={} uid={}", threatModel.getId(), threatModel.getUid());
     }

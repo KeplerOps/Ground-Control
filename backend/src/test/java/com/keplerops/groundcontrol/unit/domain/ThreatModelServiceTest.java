@@ -7,11 +7,21 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.keplerops.groundcontrol.domain.assets.model.AssetLink;
+import com.keplerops.groundcontrol.domain.assets.model.OperationalAsset;
+import com.keplerops.groundcontrol.domain.assets.repository.AssetLinkRepository;
+import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
+import com.keplerops.groundcontrol.domain.assets.state.AssetLinkType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
+import com.keplerops.groundcontrol.domain.riskscenarios.model.RiskScenario;
+import com.keplerops.groundcontrol.domain.riskscenarios.model.RiskScenarioLink;
+import com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskScenarioLinkRepository;
+import com.keplerops.groundcontrol.domain.riskscenarios.state.RiskScenarioLinkTargetType;
+import com.keplerops.groundcontrol.domain.riskscenarios.state.RiskScenarioLinkType;
 import com.keplerops.groundcontrol.domain.threatmodels.model.ThreatModel;
 import com.keplerops.groundcontrol.domain.threatmodels.repository.ThreatModelRepository;
 import com.keplerops.groundcontrol.domain.threatmodels.service.CreateThreatModelCommand;
@@ -39,6 +49,12 @@ class ThreatModelServiceTest {
 
     @Mock
     private ProjectService projectService;
+
+    @Mock
+    private AssetLinkRepository assetLinkRepository;
+
+    @Mock
+    private RiskScenarioLinkRepository riskScenarioLinkRepository;
 
     @InjectMocks
     private ThreatModelService threatModelService;
@@ -266,10 +282,16 @@ class ThreatModelServiceTest {
     class Delete {
 
         @Test
-        void deletesThreatModel() {
+        void deletesThreatModelWhenNoReverseLinks() {
             var tm = makeThreatModel();
             when(threatModelRepository.findByIdAndProjectId(tm.getId(), projectId))
                     .thenReturn(Optional.of(tm));
+            when(assetLinkRepository.findByTargetTypeAndTargetEntityIdAndProjectId(
+                            AssetLinkTargetType.THREAT_MODEL_ENTRY, tm.getId(), projectId))
+                    .thenReturn(List.of());
+            when(riskScenarioLinkRepository.findByTargetTypeAndTargetEntityIdAndProjectId(
+                            RiskScenarioLinkTargetType.THREAT_MODEL, tm.getId(), projectId))
+                    .thenReturn(List.of());
 
             threatModelService.delete(projectId, tm.getId());
 
@@ -282,6 +304,56 @@ class ThreatModelServiceTest {
             when(threatModelRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> threatModelService.delete(projectId, id)).isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void rejectsDeleteWhenAssetLinkReferencesThreatModel() {
+            var tm = makeThreatModel();
+            when(threatModelRepository.findByIdAndProjectId(tm.getId(), projectId))
+                    .thenReturn(Optional.of(tm));
+            var asset = new OperationalAsset(project, "ASSET-001", "Customer portal");
+            setField(asset, "id", UUID.randomUUID());
+            var assetLink = new AssetLink(
+                    asset, AssetLinkTargetType.THREAT_MODEL_ENTRY, tm.getId(), null, AssetLinkType.SUBJECT_OF);
+            setField(assetLink, "id", UUID.randomUUID());
+            when(assetLinkRepository.findByTargetTypeAndTargetEntityIdAndProjectId(
+                            AssetLinkTargetType.THREAT_MODEL_ENTRY, tm.getId(), projectId))
+                    .thenReturn(List.of(assetLink));
+            when(riskScenarioLinkRepository.findByTargetTypeAndTargetEntityIdAndProjectId(
+                            RiskScenarioLinkTargetType.THREAT_MODEL, tm.getId(), projectId))
+                    .thenReturn(List.of());
+
+            assertThatThrownBy(() -> threatModelService.delete(projectId, tm.getId()))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessageContaining("reverse links");
+        }
+
+        @Test
+        void rejectsDeleteWhenRiskScenarioLinkReferencesThreatModel() {
+            var tm = makeThreatModel();
+            when(threatModelRepository.findByIdAndProjectId(tm.getId(), projectId))
+                    .thenReturn(Optional.of(tm));
+            var scenario =
+                    new RiskScenario(project, "RS-001", "Account takeover", "actor", "event", "object", "consequence");
+            scenario.setTimeHorizon("12 months");
+            setField(scenario, "id", UUID.randomUUID());
+            var scenarioLink = new RiskScenarioLink(
+                    scenario,
+                    RiskScenarioLinkTargetType.THREAT_MODEL,
+                    tm.getId(),
+                    null,
+                    RiskScenarioLinkType.ASSESSED_IN);
+            setField(scenarioLink, "id", UUID.randomUUID());
+            when(assetLinkRepository.findByTargetTypeAndTargetEntityIdAndProjectId(
+                            AssetLinkTargetType.THREAT_MODEL_ENTRY, tm.getId(), projectId))
+                    .thenReturn(List.of());
+            when(riskScenarioLinkRepository.findByTargetTypeAndTargetEntityIdAndProjectId(
+                            RiskScenarioLinkTargetType.THREAT_MODEL, tm.getId(), projectId))
+                    .thenReturn(List.of(scenarioLink));
+
+            assertThatThrownBy(() -> threatModelService.delete(projectId, tm.getId()))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessageContaining("reverse links");
         }
     }
 }

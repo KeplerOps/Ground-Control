@@ -1878,6 +1878,13 @@ export async function deleteRiskScenarioLink(riskScenarioId, linkId, project) {
 
 // ---------------------------------------------------------------------------
 // Threat Model API functions (GC-H001)
+//
+// All threat-model routes accept `project` as optional. The backend
+// auto-resolves to the single project in single-project deployments and
+// returns 422 `project_required` in multi-project deployments when the
+// parameter is missing. `deleteThreatModel` returns 409
+// `threat_model_referenced` while AssetLink or RiskScenarioLink rows still
+// reference the threat model — see ADR-024.
 // ---------------------------------------------------------------------------
 
 export async function createThreatModel(data, project) {

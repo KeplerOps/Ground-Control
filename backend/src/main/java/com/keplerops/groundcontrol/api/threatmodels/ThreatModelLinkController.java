@@ -35,7 +35,7 @@ public class ThreatModelLinkController {
             @PathVariable UUID threatModelId,
             @Valid @RequestBody ThreatModelLinkRequest request,
             @RequestParam(required = false) String project) {
-        var projectId = projectService.requireProjectId(project);
+        var projectId = projectService.resolveProjectId(project);
         var command = new CreateThreatModelLinkCommand(
                 request.targetType(),
                 request.targetEntityId(),
@@ -49,7 +49,7 @@ public class ThreatModelLinkController {
     @GetMapping
     public List<ThreatModelLinkResponse> list(
             @PathVariable UUID threatModelId, @RequestParam(required = false) String project) {
-        var projectId = projectService.requireProjectId(project);
+        var projectId = projectService.resolveProjectId(project);
         return linkService.listByThreatModel(projectId, threatModelId).stream()
                 .map(ThreatModelLinkResponse::from)
                 .toList();
@@ -61,7 +61,7 @@ public class ThreatModelLinkController {
             @PathVariable UUID threatModelId,
             @PathVariable UUID linkId,
             @RequestParam(required = false) String project) {
-        var projectId = projectService.requireProjectId(project);
+        var projectId = projectService.resolveProjectId(project);
         linkService.delete(projectId, threatModelId, linkId);
     }
 }

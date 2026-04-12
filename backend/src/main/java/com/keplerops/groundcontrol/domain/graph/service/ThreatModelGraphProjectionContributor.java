@@ -7,7 +7,6 @@ import com.keplerops.groundcontrol.domain.graph.model.GraphNode;
 import com.keplerops.groundcontrol.domain.threatmodels.repository.ThreatModelLinkRepository;
 import com.keplerops.groundcontrol.domain.threatmodels.repository.ThreatModelRepository;
 import com.keplerops.groundcontrol.domain.threatmodels.state.ThreatModelLinkTargetType;
-import com.keplerops.groundcontrol.domain.threatmodels.state.ThreatModelStatus;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,8 +27,13 @@ public class ThreatModelGraphProjectionContributor implements GraphProjectionCon
 
     @Override
     public List<GraphNode> contributeNodes(UUID projectId) {
+        // Include all threat models regardless of status. Archived threat models
+        // remain in the graph as historical evidence with `status=ARCHIVED` in
+        // their node properties — frontends can filter visually. Filtering
+        // archived nodes here would create dangling edges from
+        // AssetGraphProjectionContributor and RiskGraphProjectionContributor,
+        // which both project incoming THREAT_MODEL edges without status checks.
         return threatModelRepository.findByProjectIdOrderByCreatedAtDesc(projectId).stream()
-                .filter(tm -> tm.getStatus() != ThreatModelStatus.ARCHIVED)
                 .map(tm -> {
                     Map<String, Object> properties = new LinkedHashMap<>();
                     properties.put("title", tm.getTitle());

@@ -58,7 +58,7 @@ public class ThreatModelController {
 
     @GetMapping("/{id}")
     public ThreatModelResponse getById(@PathVariable UUID id, @RequestParam(required = false) String project) {
-        var projectId = projectService.requireProjectId(project);
+        var projectId = projectService.resolveProjectId(project);
         return ThreatModelResponse.from(threatModelService.getById(projectId, id));
     }
 
@@ -73,7 +73,7 @@ public class ThreatModelController {
             @PathVariable UUID id,
             @Valid @RequestBody UpdateThreatModelRequest request,
             @RequestParam(required = false) String project) {
-        var projectId = projectService.requireProjectId(project);
+        var projectId = projectService.resolveProjectId(project);
         var command = new UpdateThreatModelCommand(
                 request.title(),
                 request.threatSource(),
@@ -87,7 +87,7 @@ public class ThreatModelController {
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable UUID id, @RequestParam(required = false) String project) {
-        var projectId = projectService.requireProjectId(project);
+        var projectId = projectService.resolveProjectId(project);
         threatModelService.delete(projectId, id);
     }
 
@@ -96,7 +96,7 @@ public class ThreatModelController {
             @PathVariable UUID id,
             @Valid @RequestBody ThreatModelStatusTransitionRequest request,
             @RequestParam(required = false) String project) {
-        var projectId = projectService.requireProjectId(project);
+        var projectId = projectService.resolveProjectId(project);
         return ThreatModelResponse.from(threatModelService.transitionStatus(projectId, id, request.status()));
     }
 }
