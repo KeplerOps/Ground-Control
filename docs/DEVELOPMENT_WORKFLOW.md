@@ -29,9 +29,14 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 - OpenAI Codex CLI (`codex-cli`) installed at `~/.nvm/versions/node/v25.8.1/bin/codex`
 - Used for architecture preflight and cross-model code review via Ground Control MCP workflow tools
 
-## Workflow: `/implement <requirement-uid>`
+## Workflow: `/implement <issue-number | requirement-uid>`
 
-Pass the full requirement UID exactly as it exists in Ground Control. Do not synthesize or rewrite a project prefix.
+Every `/implement` run is driven by a GitHub issue. The issue is the durable artifact that records why the change is being made, which requirements are in scope (if any), and what acceptance looks like. You invoke the skill in either of two ways:
+
+- **`/implement 123`** or **`/implement #123`** — implement GitHub issue #123 in the current repo. The issue body may declare in-scope requirements under a `## Requirements` section (a bulleted list of UIDs). The skill parses that section and carries the list through clause verification, traceability reconciliation, and status transitions. If the section is absent or empty, the run is treated as a bug fix / refactor / maintenance change with no formal requirements — traceability is still reconciled against the diff, but no requirement is transitioned to `ACTIVE`.
+- **`/implement GC-X042`** — implement a requirement by UID. The skill finds the open GitHub issue linked to that requirement via traceability (`artifact_type: GITHUB_ISSUE`); if no such issue exists, it creates one via `gc_create_github_issue` and adds the UID to its `## Requirements` section. From that point forward the run is identical to the first form — the issue becomes the authoritative input.
+
+Grouped implementation — shipping several related requirements in one PR — is expressed by listing all of them under `## Requirements` in a single issue body. One issue → one `/implement` run → one PR → N requirements transitioned to `ACTIVE` in the same commit stream. Do NOT spin up one issue per requirement when they belong together; the grouping is what makes the review boundary coherent.
 
 Repo-local Ground Control project context comes from a `.ground-control.yaml` file at the repo root (with larger rule files under `.gc/`), not from `AGENTS.md` inline YAML or hardcoded assumptions in the skill. The workflow validates this via `gc_get_repo_ground_control_context` before it starts implementation — that call returns the project id, workflow commands, SonarCloud settings, and plan rules in a single response. It should:
 - use the repo's configured Ground Control `project` when present
@@ -56,11 +61,11 @@ Everything between these two checkpoints is automated.
 
 ```mermaid
 flowchart TB
-  Start([/implement UID])
-  S1[1 · Resolve repo GC config]
-  S2[2 · Fetch requirement + ensure GitHub issue]
+  Start([/implement #issue or UID])
+  S1[1 · Resolve issue + parse Requirements section]
+  S2[2 · Read issue body + comments]
   S3[3 · Codex architecture preflight]
-  S4[4 · Explore codebase for existing coverage]
+  S4[4 · Explore codebase + consult knowledge base]
   S5{{5 · User approves plan}}
   S6[6 · TDD implementation]
   S7[7 · pre-commit run]
@@ -73,8 +78,8 @@ flowchart TB
   S14[14 · Per-finding fix + gc_codex_verify_finding]
   S15[15 · /review-tests]
   S16[16 · Final CI re-verify]
-  S17[17 · Create traceability links · IMPLEMENTS + TESTS]
-  S18[18 · Transition requirement DRAFT → ACTIVE]
+  S17[17 · Reconcile traceability against diff]
+  S18[18 · Transition in-scope requirements DRAFT → ACTIVE]
   S19[19 · Verify GC state landed]
   S20[20 · Report — DO NOT MERGE]
   End([User reviews PR and merges])
@@ -107,7 +112,7 @@ flowchart TB
   S14 -->|re-run, cap 2| S13
   S15 -->|findings| S9
   S16 -->|red| S9
-  S19 -->|missing| S17
+  S19 -->|drift| S17
 
   classDef user fill:#fff7cc,stroke:#c9a900,color:#000
   class S5,Start,End user
@@ -116,11 +121,13 @@ flowchart TB
 **How it reads:**
 
 - **Yellow** nodes are user touchpoints. The loop halts at plan approval (step 5) and at the final report (step 20); everything in between runs without asking for input.
-- **Steps 1–4** gather context and run the codex architecture preflight before any code is written.
+- **Entry is always by issue.** Step 1 resolves the input to a GitHub issue (either directly or via a UID → issue shim) and parses the `## Requirements` section from the issue body into `in_scope_requirements[]`. The list may be empty (bug fix / refactor) or contain one or many UIDs (grouped implementation). Everything downstream treats the issue as the authoritative context and the list as the set of requirements to be transitioned to `ACTIVE` on completion.
+- **Steps 1–4** gather context and run the codex architecture preflight before any code is written. Step 4 also consults the repo knowledge base via the index if one is present.
 - **Step 6** is TDD (red → green → refactor per clause). Steps 7–8 are the local quality gate.
 - **Steps 9–12** commit, push, open the PR, and block on CI + SonarCloud before any reviewer looks at the code.
 - **Steps 13–16** are the review phase: `gc_codex_review` posts inline comments, `gc_codex_verify_finding` drives the per-finding fix loop (loop 14 → 13 re-runs the whole review after fixes, cap 2), then `/review-tests` catches false-assurance tests, then one final CI pass.
-- **Steps 17–19 are the Ground Control state finalization — and they run LAST, after every reviewer has signed off.** Traceability links and the `DRAFT → ACTIVE` transition deliberately do NOT land before commit: if the review cycle rejects code, we do not want Ground Control to have already claimed the requirement is implemented by that code. Step 19 re-verifies that steps 17 and 18 actually landed, looping back if anything is missing.
+- **Step 17 is traceability reconciliation, not link creation.** It walks every added/modified/renamed/deleted file in the diff, finds existing IMPLEMENTS/TESTS links pointing at each, and updates/deletes/creates links so the Ground Control graph matches reality after the change. Runs with zero in-scope requirements still reconcile, because a bug fix may have touched files linked to other requirements whose links are now stale. Deleting the sole implementation of a requirement is escalated to the user rather than silently removing the link.
+- **Steps 18–19** transition each in-scope requirement to `ACTIVE` and re-verify Ground Control state matches reality. Zero in-scope requirements → Step 18 is a no-op; Step 19 still audits the reconciliation from Step 17. These steps run LAST, after every reviewer has signed off, so Ground Control never runs ahead of code that hasn't passed review.
 - **Every downstream failure loops back to step 9** (stage + commit + push), which is the single re-entry point for fix commits. The completion gate (step 8) and the GC verify (step 19) are the only two loops that target earlier steps, because they correspond to local-only and GC-only state respectively.
 
 Claude does NOT merge. The user reviews the PR and merges.
