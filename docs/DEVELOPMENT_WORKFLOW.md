@@ -63,19 +63,19 @@ flowchart TB
   S4[4 · Explore codebase for existing coverage]
   S5{{5 · User approves plan}}
   S6[6 · TDD implementation]
-  S7[7 · Create traceability links · IMPLEMENTS + TESTS]
-  S8[8 · Transition requirement DRAFT → ACTIVE]
-  S9[9 · pre-commit run]
-  S10[10 · Completion gate · make policy + make check + CHANGELOG]
-  S11[11 · Re-verify GC state · traceability + status]
-  S12[12 · Stage + commit + push]
-  S13[13 · Create PR to dev]
-  S14[14 · CI monitor]
-  S15[15 · SonarCloud sweep]
-  S16[16 · gc_codex_review · core + security in parallel]
-  S17[17 · Per-finding fix + gc_codex_verify_finding]
-  S18[18 · /review-tests]
-  S19[19 · Final CI re-verify]
+  S7[7 · pre-commit run]
+  S8[8 · Completion gate · make policy + make check + CHANGELOG]
+  S9[9 · Stage + commit + push]
+  S10[10 · Create PR to dev]
+  S11[11 · CI monitor]
+  S12[12 · SonarCloud sweep]
+  S13[13 · gc_codex_review · core + security in parallel]
+  S14[14 · Per-finding fix + gc_codex_verify_finding]
+  S15[15 · /review-tests]
+  S16[16 · Final CI re-verify]
+  S17[17 · Create traceability links · IMPLEMENTS + TESTS]
+  S18[18 · Transition requirement DRAFT → ACTIVE]
+  S19[19 · Verify GC state landed]
   S20[20 · Report — DO NOT MERGE]
   End([User reviews PR and merges])
 
@@ -101,53 +101,27 @@ flowchart TB
   S19 --> S20
   S20 --> End
 
-  S10 -->|fail| S9
-  S11 -->|missing| S7
-  S14 -->|red| S12
-  S15 -->|findings| S12
-  S17 -->|re-run, cap 2| S16
-  S18 -->|findings| S12
-  S19 -->|red| S12
+  S8 -->|fail| S7
+  S11 -->|red| S9
+  S12 -->|findings| S9
+  S14 -->|re-run, cap 2| S13
+  S15 -->|findings| S9
+  S16 -->|red| S9
+  S19 -->|missing| S17
 
   classDef user fill:#fff7cc,stroke:#c9a900,color:#000
   class S5,Start,End user
 ```
 
-**Reading the diagram:**
+**How it reads:**
 
-- **Yellow** = user touchpoints. The loop halts at plan approval and at the final report; everything else is automated.
-- **Blue** = gates (pre-commit, local completion gate, Ground Control re-verify, CI, SonarCloud, final CI re-verify). Any gate failure loops back to the relevant upstream phase and re-runs downstream.
-- **Red** = reviewers. Three stages: architecture preflight before coding, parallel codex core + security review after CI, test-quality review last. Each review step has a 2-cycle cap; escalation returns control to the user.
-- **A6 + A7** are the Ground Control link-and-transition steps. `IMPLEMENTS` links land for every substantive code file the change introduces or modifies, `TESTS` links land for every new test file, and the requirement itself transitions `DRAFT → ACTIVE`. These are not optional — **B3 blocks the commit** until `gc_get_traceability` and `gc_get_requirement` confirm the state landed, looping back to A6 if anything is missing.
-- **D4 → FanOut** is the one concurrency point: `gc_codex_review` computes the diff once, runs the core and security reviewers in parallel against the same diff, and merges the findings with cross-reviewer dedup before returning a unified list to the coding agent.
-
-### Phase A: Plan & Implement
-1. Resolve repo-local Ground Control context via `gc_get_repo_ground_control_context`
-2. Fetch requirement from Ground Control, create GitHub issue if needed
-3. Checkout feature branch via `gh issue develop`
-4. Read the GitHub issue
-5. **Codex architecture preflight** — via `gc_codex_architecture_preflight`, including ADR/design guidance updates when needed
-6. Explore codebase for existing coverage using the preflight guardrails
-7. **Enter plan mode — user approves**
-8. Implement, clause-by-clause verification
-9. Create traceability links (IMPLEMENTS, TESTS), transition to ACTIVE
-
-### Phase B: Quality Gate
-10. Run `pre-commit run --all-files`
-11. Completion gate: `make policy`, `make check`, CHANGELOG, traceability, requirement status
-
-### Phase C: Stage, Commit, Push
-12. Stage files, pre-commit loop (fix failures, max 5 iterations)
-13. Commit (no attribution) and push
-
-### Phase D: Ship
-14. Create PR to dev
-15. Monitor CI (`gh run watch`)
-16. Check SonarCloud quality gate (token-based sweep of open issues and security hotspots for the PR)
-17. **Codex review** — cross-model review by ChatGPT via `gc_codex_review`, which posts each finding as an inline PR review comment. The coding agent then drives a per-finding fix/verify loop via `gc_codex_verify_finding`.
-18. **Test-quality review** — `/review-tests` skill to catch false-assurance tests
-19. Fix ALL findings from steps 17-18, commit, push, re-run CI
-20. **Report to user** — PR URL, summary of findings/fixes, CI/SonarCloud status
+- **Yellow** nodes are user touchpoints. The loop halts at plan approval (step 5) and at the final report (step 20); everything in between runs without asking for input.
+- **Steps 1–4** gather context and run the codex architecture preflight before any code is written.
+- **Step 6** is TDD (red → green → refactor per clause). Steps 7–8 are the local quality gate.
+- **Steps 9–12** commit, push, open the PR, and block on CI + SonarCloud before any reviewer looks at the code.
+- **Steps 13–16** are the review phase: `gc_codex_review` posts inline comments, `gc_codex_verify_finding` drives the per-finding fix loop (loop 14 → 13 re-runs the whole review after fixes, cap 2), then `/review-tests` catches false-assurance tests, then one final CI pass.
+- **Steps 17–19 are the Ground Control state finalization — and they run LAST, after every reviewer has signed off.** Traceability links and the `DRAFT → ACTIVE` transition deliberately do NOT land before commit: if the review cycle rejects code, we do not want Ground Control to have already claimed the requirement is implemented by that code. Step 19 re-verifies that steps 17 and 18 actually landed, looping back if anything is missing.
+- **Every downstream failure loops back to step 9** (stage + commit + push), which is the single re-entry point for fix commits. The completion gate (step 8) and the GC verify (step 19) are the only two loops that target earlier steps, because they correspond to local-only and GC-only state respectively.
 
 Claude does NOT merge. The user reviews the PR and merges.
 

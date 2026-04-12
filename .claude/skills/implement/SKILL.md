@@ -116,36 +116,25 @@ Present the mapping as a checklist:
 - [ ] Clause: "..." → Satisfied by: file.java:line
 - [ ] Clause: "..." → Satisfied by: file.java:line
 
-Do not proceed to Step 5 until every clause is checked off.
+Do not proceed until every clause is checked off.
 
-### Step 5: Ensure Traceability Links
-
-After implementation is complete (or if already implemented):
-- use the `gc_create_traceability_link` MCP tool to create any missing links:
-  - `IMPLEMENTS` links from the requirement to **every** code file that implements it — entities, enums, repositories, services, controllers, migrations, and MCP tool files. Link all substantive files, not just the top 3. DTOs and command records may be omitted.
-  - `TESTS` links from the requirement to the test files that verify it
-  - Only create links that don't already exist (check the traceability data from Step 1).
-- use the `gc_transition_status` MCP tool to transition the requirement to `ACTIVE` if it was `DRAFT`.
-
-Do not update the Changelog if all you did was operate Ground Control tools.
+Traceability links (`IMPLEMENTS` / `TESTS`) and the `DRAFT → ACTIVE` status transition are intentionally NOT done here. They land in Steps 15–17 after CI and all reviews have passed, so Ground Control state never runs ahead of the actual code that ships.
 
 ---
 
 ## Phase B: Quality Gate
 
-### Step 6: Quality Assurance
+### Step 5: Quality Assurance
 
 - run `pre-commit run --all-files` to ensure the codebase is in a healthy state.
 
-### Step 7: Completion Gate
+### Step 6: Completion Gate
 
-Implementation is NOT complete until ALL of the following are verified:
+Implementation is NOT ready for commit until ALL of the following are verified:
 
 1. **Completion gate passes** — run the `workflow.completion_command` cached in Step 1.3. If that field is null, fall back to `workflow.test_command`. If both are null, ask the user what the completion gate command should be for this repo (do not guess). Confirm the command exits successfully.
 2. **CHANGELOG.md updated** — verify it is in `git diff --name-only` if any source files changed.
-3. **Traceability links exist** — re-fetch with `gc_get_traceability` and confirm IMPLEMENTS and TESTS links are present.
-4. **Requirement status is ACTIVE** — re-fetch with `gc_get_requirement` and confirm status.
-5. **Step 4.5 clause mapping was completed** — if you skipped it, go back and do it now.
+3. **Step 4.5 clause mapping was completed** — if you skipped it, go back and do it now.
 
 If any check fails, fix it before proceeding. Do NOT move to Phase C until every check passes.
 
@@ -153,7 +142,7 @@ If any check fails, fix it before proceeding. Do NOT move to Phase C until every
 
 ## Phase C: Stage, Commit, Push
 
-### Step 8: Stage & Pre-commit Loop
+### Step 7: Stage & Pre-commit Loop
 
 1. `git add` all relevant changed files. Do NOT stage .env files, credentials, secrets, or large binaries.
 2. Run `pre-commit run --all-files`.
@@ -165,18 +154,18 @@ If any check fails, fix it before proceeding. Do NOT move to Phase C until every
    - Repeat up to 5 times. If still failing after 5 attempts, escalate to the user with the failure details.
 4. When pre-commit passes, proceed.
 
-### Step 9: Commit & Push
+### Step 8: Commit & Push
 
 1. Craft a concise commit message in imperative mood (per coding standards). Example: "Add risk scoring engine for requirement prioritization"
 2. NEVER include Co-Authored-By, "Generated with Claude Code", or any Claude/AI attribution in commit messages.
 3. `git commit -m "<message>"`
-3. `git push -u origin <branch>`
+4. `git push -u origin <branch>`
 
 ---
 
 ## Phase D: Ship
 
-### Step 10: Create PR
+### Step 9: Create PR
 
 1. Check if a PR already exists for this branch: `gh pr list --head <branch> --json number,url`
 2. If no PR exists, create one:
@@ -185,7 +174,7 @@ If any check fails, fix it before proceeding. Do NOT move to Phase C until every
    ```
 3. Note the PR number and URL.
 
-### Step 11: CI Monitor
+### Step 10: CI Monitor
 
 1. Find the latest workflow run: `gh run list --branch <branch> --limit 1 --json status,conclusion,databaseId`
 2. If the run is in progress, watch it: `gh run watch <id>`
@@ -196,11 +185,11 @@ If any check fails, fix it before proceeding. Do NOT move to Phase C until every
    - Go back to step 1 of this phase.
 4. If it succeeded, proceed.
 
-### Step 12: SonarCloud
+### Step 11: SonarCloud
 
-**Skip this step entirely if `sonarcloud` was null in the Step 1.3 config.** Log "SonarCloud skipped — no sonarcloud block in .ground-control.yaml" and proceed to Step 13.
+**Skip this step entirely if `sonarcloud` was null in the Step 1.3 config.** Log "SonarCloud skipped — no sonarcloud block in .ground-control.yaml" and proceed to Step 12.
 
-This step runs AFTER Step 11 (CI Monitor) reports green. A green CI run does not imply a clean SonarCloud — the quality gate and the issue list are separate from CI conclusions and must be checked independently.
+This step runs AFTER Step 10 (CI Monitor) reports green. A green CI run does not imply a clean SonarCloud — the quality gate and the issue list are separate from CI conclusions and must be checked independently.
 
 Otherwise:
 1. Wait 60 seconds for SonarCloud analysis to propagate after the CI run.
@@ -222,12 +211,12 @@ Otherwise:
    - Apply the fixes.
    - Re-run the local completion gate (`workflow.completion_command`) to confirm nothing regressed locally.
    - `git add`, `git commit` with message `Fix SonarCloud findings (cycle <N>)`, `git push`.
-   - Re-run Step 11 (CI Monitor) so SonarCloud re-analyzes the PR.
+   - Re-run Step 10 (CI Monitor) so SonarCloud re-analyzes the PR.
    - After CI is green, wait 60 seconds and re-run this entire step (quality gate + issues search + hotspots search) to verify.
 
 6. **Cycle cap: 2 iterations for SonarCloud.** If the issue list is still non-empty after 2 fix→re-analyze cycles, STOP and escalate to the user with the remaining findings.
 
-7. Proceed to Step 13 only when: the quality gate is `OK` AND `api/issues/search?resolved=false` returns zero rows for this PR AND `api/hotspots/search?status=TO_REVIEW` returns zero rows for this PR.
+7. Proceed to Step 12 only when: the quality gate is `OK` AND `api/issues/search?resolved=false` returns zero rows for this PR AND `api/hotspots/search?status=TO_REVIEW` returns zero rows for this PR.
 
 ## Review loop rules (apply to every review step in this phase)
 
@@ -243,7 +232,7 @@ Every review step below (Codex cross-model, test quality review) follows the **s
 
 For every cycle, after applying fixes, commit and push BEFORE re-running the review so the reviewer sees the updated tree. Format every fix commit as `Fix review findings (<reviewer>, cycle <N>)` so the loop history is visible in git log.
 
-### Step 13: Cross-Model Review (Codex)
+### Step 12: Cross-Model Review (Codex)
 
 `gc_codex_review` runs two focused codex reviewers in parallel — a core production-readiness reviewer and a dedicated application-security reviewer — against a single pre-computed diff. Both post their findings as inline PR review comments with a reviewer-tagged title (`[core]` or `[security]`). The tool returns a single deduplicated list; you then drive a per-finding fix/verify loop via `gc_codex_verify_finding`, which handles the GitHub API bookkeeping for you.
 
@@ -254,7 +243,7 @@ For every cycle, after applying fixes, commit and push BEFORE re-running the rev
    - `base_branch`: `dev`
    - `pr_number`: the PR number from step 2
 4. The tool returns `{pr_number, finding_count, comments: [{comment_id, thread_id, reviewer, path, line, title, html_url}, ...], reviewers, core_review_text, security_review_text}`. Each comment carries a `reviewer` field (`core` or `security`) so you can triage attention, but the fix/verify loop below is the same regardless. Codex has already posted each finding as an inline PR review comment — you do NOT need to post anything yourself.
-5. If `finding_count` is 0, skip to Step 14.
+5. If `finding_count` is 0, skip to Step 13.
 6. Otherwise, for EACH entry in `comments`, run the following fix/verify loop:
    1. Read the comment body if needed: `gh api /repos/<owner>/<repo>/pulls/comments/<comment_id>`.
    2. Fix the finding locally. Apply the same "fix every finding, no triage, ask user permission if you will not fix" rules from the **Review loop rules** section above.
@@ -267,23 +256,43 @@ For every cycle, after applying fixes, commit and push BEFORE re-running the rev
 
 **Tool shape**: `gc_codex_verify_finding` accepts only `repo_path`, `pr_number`, and `comment_id`. It reads the comment directly from GitHub; do not try to paraphrase the finding or pass additional context through the tool.
 
-### Step 14: Test Quality Review
+### Step 13: Test Quality Review
 
 **CRITICAL: You MUST use the Skill tool to invoke the review-tests skill.**
 
 1. Call the Skill tool with `skill="review-tests"` to invoke the test quality review.
 2. Apply the **Review loop rules** above: fix every finding, ask user permission for anything you will not fix (including "warning" level — the review loop rules apply to warnings too, there is no triage bucket), re-invoke `skill="review-tests"` after each fix cycle, cap at 2 cycles.
 
-### Step 15: Final CI re-verification
+### Step 14: Final CI re-verification
 
-After both review steps (13-14) have reported zero findings (or you have documented user-approved exceptions):
+After both review steps (12-13) have reported zero findings (or you have documented user-approved exceptions):
 
 1. Verify the branch is pushed with the latest fix commits.
-2. Re-run Step 11 (CI Monitor) to confirm CI is still green after the review fixes.
-3. Re-run Step 12 (SonarCloud) — or skip again if `sonarcloud` was null.
+2. Re-run Step 10 (CI Monitor) to confirm CI is still green after the review fixes.
+3. Re-run Step 11 (SonarCloud) — or skip again if `sonarcloud` was null.
 4. If either re-check fails, loop back through the appropriate review step — the cycle cap (2) applies per review step, not total.
 
-### Step 16: Report (DO NOT MERGE)
+### Step 15: Create Traceability Links
+
+Now that CI and all reviews are green, record the implementation in Ground Control. This MUST happen AFTER Step 14 and BEFORE Step 18 (Report). Doing it earlier risks marking unproven code as implementing the requirement if the review cycle rejects the work.
+
+1. Use the `gc_create_traceability_link` MCP tool to create links from the requirement to every substantive file in the diff:
+   - `IMPLEMENTS` links to every production file that implements the requirement — entities, enums, repositories, services, controllers, migrations, MCP tool files. Link all substantive files, not just the top 3. DTOs and command records may be omitted.
+   - `TESTS` links to every test file that verifies it.
+   - Skip links that already exist (check via `gc_get_traceability` first).
+
+### Step 16: Transition Requirement to ACTIVE
+
+1. Use the `gc_transition_status` MCP tool to transition the requirement from `DRAFT` to `ACTIVE`.
+2. If the requirement was already `ACTIVE`, skip.
+
+### Step 17: Verify Ground Control State Landed
+
+1. Re-fetch with `gc_get_traceability` and confirm the IMPLEMENTS and TESTS links from Step 15 are present.
+2. Re-fetch with `gc_get_requirement` and confirm status is `ACTIVE`.
+3. If anything is missing, loop back to Step 15 and fix. Do not proceed to Step 18 until Ground Control state matches reality.
+
+### Step 18: Report (DO NOT MERGE)
 
 **You MUST NOT merge the PR. You MUST NOT run `gh pr merge`. The user reviews and merges.**
 
