@@ -32,6 +32,7 @@ The workflow is implemented by:
 - Completion verifier agent (`.claude/agents/completion-verifier.md`)
 - Repo-native policy guardrails (`architecture/policies/adr-policy.json`, `bin/policy`, `make policy`)
 - Development workflow docs (`docs/DEVELOPMENT_WORKFLOW.md`, `docs/WORKFLOW.md`)
+- Repo-local workflow config at `.ground-control.yaml` (with larger rule files under `.gc/`), resolved by `gc_get_repo_ground_control_context`. `AGENTS.md` carries a brief pointer to this config rather than the full workflow definition inline.
 
 The requirement:
 - **Depends on** GC-O004 (agent traceability standards) and GC-O005 (requirement-before-code policy) — these supply the constraints the quality gate enforces.

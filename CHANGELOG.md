@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.111.1] - 2026-04-11
+
+### Added
+
+- `.ground-control.yaml` at repo root declaring the workflow config
+  consumed by the Ground Control MCP tool and centralized skills.
+- `.gc/plan-rules.md` containing the Java/JPA plan constraints that
+  were previously hardcoded in `implement/SKILL.md` Step 4.
+
+### Changed
+
+- `AGENTS.md` Ground Control Context section now points to
+  `.ground-control.yaml` instead of carrying an inline yaml block.
+
 ## [0.111.0] - 2026-04-11
 
 ### Changed
