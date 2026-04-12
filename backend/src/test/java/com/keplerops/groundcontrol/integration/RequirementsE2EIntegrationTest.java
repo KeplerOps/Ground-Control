@@ -102,6 +102,7 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                     return List.of();
                 }
 
+                @Override
                 public GitHubIssueData createIssue(String repo, String title, String body, List<String> labels) {
                     throw new UnsupportedOperationException("Not used in E2E tests");
                 }
