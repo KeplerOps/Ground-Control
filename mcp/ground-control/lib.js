@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join } from "node:path";
+import { basename, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { load as parseYaml } from "js-yaml";
@@ -54,6 +54,11 @@ export function buildSuggestedGroundControlYaml(project = "your-project-id") {
     "#   organization: <sonar-org>",
     "# rules:",
     "#   plan_rules: .gc/plan-rules.md",
+    "# knowledge:",
+    "#   dir: docs/knowledge",
+    "#   # optional overrides (default to <dir>/SCHEMA.md and <dir>/inbox):",
+    "#   # schema: docs/knowledge/SCHEMA.md",
+    "#   # inbox: docs/knowledge/inbox",
     "",
   ].join("\n");
 }
@@ -986,6 +991,31 @@ export async function createGitHubIssueViaApi(data, project) {
 
 const SUPPORTED_GROUND_CONTROL_SCHEMA_VERSIONS = [1];
 
+// Resolve a repo-relative config path against the repository root.
+// Rejects absolute paths and any traversal that escapes the repo root.
+// Callers use this for every repo-local path coming from .ground-control.yaml
+// instead of open-coding join(repoRoot, rawPath), which does not enforce containment.
+function resolveRepoRelativePath(repoRoot, rawPath, fieldName) {
+  if (typeof rawPath !== "string" || rawPath.trim() === "") {
+    return { ok: false, error: `${fieldName} must be a non-empty string when set` };
+  }
+  if (isAbsolute(rawPath)) {
+    return {
+      ok: false,
+      error: `${fieldName} must be a repo-relative path (got absolute path '${rawPath}')`,
+    };
+  }
+  const abs = resolvePath(repoRoot, rawPath);
+  const rel = relative(repoRoot, abs);
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+    return {
+      ok: false,
+      error: `${fieldName} must stay inside the repository root (got '${rawPath}')`,
+    };
+  }
+  return { ok: true, rel, abs };
+}
+
 function emptyWorkflowConfig() {
   return {
     test_command: null,
@@ -1074,6 +1104,41 @@ function normalizeRulesConfig(raw) {
   return { ok: true, value: { plan_rules_path: planRules } };
 }
 
+function normalizeKnowledgeConfig(raw) {
+  if (raw == null) {
+    return { ok: true, value: null };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, errors: ["knowledge must be a mapping, not a list or scalar"] };
+  }
+  const allowed = ["dir", "schema", "inbox"];
+  const errors = [];
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) {
+      errors.push(`knowledge has unknown key '${key}'`);
+    }
+  }
+  if (typeof raw.dir !== "string" || raw.dir.trim() === "") {
+    errors.push("knowledge.dir is required and must be a non-empty string");
+  }
+  for (const optional of ["schema", "inbox"]) {
+    const v = raw[optional];
+    if (v == null) continue;
+    if (typeof v !== "string" || v.trim() === "") {
+      errors.push(`knowledge.${optional} must be a non-empty string when set`);
+    }
+  }
+  if (errors.length) return { ok: false, errors };
+  return {
+    ok: true,
+    value: {
+      dir: raw.dir,
+      schema: raw.schema ?? null,
+      inbox: raw.inbox ?? null,
+    },
+  };
+}
+
 export function parseGroundControlYaml(yamlText) {
   let parsed;
   try {
@@ -1094,6 +1159,7 @@ export function parseGroundControlYaml(yamlText) {
     "workflow",
     "sonarcloud",
     "rules",
+    "knowledge",
   ];
   for (const key of Object.keys(parsed)) {
     if (!allowedTop.includes(key)) {
@@ -1135,6 +1201,9 @@ export function parseGroundControlYaml(yamlText) {
   const rulesResult = normalizeRulesConfig(parsed.rules);
   if (!rulesResult.ok) errors.push(...rulesResult.errors);
 
+  const knowledgeResult = normalizeKnowledgeConfig(parsed.knowledge);
+  if (!knowledgeResult.ok) errors.push(...knowledgeResult.errors);
+
   if (errors.length) return { ok: false, errors };
 
   return {
@@ -1147,6 +1216,7 @@ export function parseGroundControlYaml(yamlText) {
       rules: {
         plan_rules_path: rulesResult.value.plan_rules_path,
       },
+      knowledge: knowledgeResult.value,
     },
   };
 }
@@ -1210,6 +1280,18 @@ export async function getRepoGroundControlContext(repoPath) {
     }
   }
 
+  const knowledgeBlockResult = resolveKnowledgeBlock(repoRoot, parseResult.value.knowledge);
+  if (!knowledgeBlockResult.ok) {
+    return {
+      repo_path: repoRoot,
+      config_path: configPath,
+      status: "invalid_ground_control_yaml",
+      project: null,
+      errors: knowledgeBlockResult.errors,
+      suggested_ground_control_yaml: buildSuggestedGroundControlYaml(),
+    };
+  }
+
   return {
     repo_path: repoRoot,
     config_path: configPath,
@@ -1222,7 +1304,79 @@ export async function getRepoGroundControlContext(repoPath) {
       plan_rules_path: rules.plan_rules_path,
       plan_rules_content: planRulesContent,
     },
+    knowledge: knowledgeBlockResult.value,
     errors: [],
+  };
+}
+
+// Resolve a parsed knowledge block against the repository root:
+// - containment-check dir/schema/inbox paths (absolute / `..` escapes are rejected)
+// - fill in defaults (<dir>/SCHEMA.md, <dir>/inbox) when overrides are absent
+// - require `dir` to exist as a directory and `schema` to exist as a file
+// - do NOT require `inbox` to exist; later slices create it on first capture
+function resolveKnowledgeBlock(repoRoot, knowledge) {
+  if (knowledge == null) return { ok: true, value: null };
+
+  const dirResolved = resolveRepoRelativePath(repoRoot, knowledge.dir, "knowledge.dir");
+  if (!dirResolved.ok) return { ok: false, errors: [dirResolved.error] };
+
+  const rawSchema = knowledge.schema ?? `${dirResolved.rel}/SCHEMA.md`;
+  const rawInbox = knowledge.inbox ?? `${dirResolved.rel}/inbox`;
+
+  const schemaResolved = resolveRepoRelativePath(repoRoot, rawSchema, "knowledge.schema");
+  if (!schemaResolved.ok) return { ok: false, errors: [schemaResolved.error] };
+
+  const inboxResolved = resolveRepoRelativePath(repoRoot, rawInbox, "knowledge.inbox");
+  if (!inboxResolved.ok) return { ok: false, errors: [inboxResolved.error] };
+
+  // Filesystem existence: dir and schema must exist. Inbox is created lazily.
+  let dirStat;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- dir is contained in the repo root
+    dirStat = statSync(dirResolved.abs);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return {
+        ok: false,
+        errors: [`knowledge.dir references ${dirResolved.rel} which does not exist`],
+      };
+    }
+    throw error;
+  }
+  if (!dirStat.isDirectory()) {
+    return {
+      ok: false,
+      errors: [`knowledge.dir references ${dirResolved.rel} which is not a directory`],
+    };
+  }
+
+  let schemaStat;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- schema is contained in the repo root
+    schemaStat = statSync(schemaResolved.abs);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return {
+        ok: false,
+        errors: [`knowledge.schema references ${schemaResolved.rel} which does not exist (expected a SCHEMA.md file)`],
+      };
+    }
+    throw error;
+  }
+  if (!schemaStat.isFile()) {
+    return {
+      ok: false,
+      errors: [`knowledge.schema references ${schemaResolved.rel} which is not a file`],
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      dir: dirResolved.rel,
+      schema: schemaResolved.rel,
+      inbox: inboxResolved.rel,
+    },
   };
 }
 

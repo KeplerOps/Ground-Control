@@ -243,6 +243,7 @@ describe("parseGroundControlYaml", () => {
     });
     assert.equal(result.value.sonarcloud, null);
     assert.equal(result.value.rules.plan_rules_path, null);
+    assert.equal(result.value.knowledge, null);
   });
 
   it("parses a fully populated yaml", () => {
@@ -260,6 +261,10 @@ describe("parseGroundControlYaml", () => {
       "  organization: KeplerOps",
       "rules:",
       "  plan_rules: .gc/plan-rules.md",
+      "knowledge:",
+      "  dir: docs/knowledge",
+      "  schema: docs/knowledge/SCHEMA.md",
+      "  inbox: docs/knowledge/inbox",
       "",
     ].join("\n");
     const result = parseGroundControlYaml(yaml);
@@ -270,6 +275,11 @@ describe("parseGroundControlYaml", () => {
     assert.equal(result.value.sonarcloud.project_key, "KeplerOps_Ground-Control");
     assert.equal(result.value.sonarcloud.organization, "KeplerOps");
     assert.equal(result.value.rules.plan_rules_path, ".gc/plan-rules.md");
+    assert.deepEqual(result.value.knowledge, {
+      dir: "docs/knowledge",
+      schema: "docs/knowledge/SCHEMA.md",
+      inbox: "docs/knowledge/inbox",
+    });
   });
 
   it("rejects invalid yaml text", () => {
@@ -321,6 +331,90 @@ describe("parseGroundControlYaml", () => {
     assert.equal(result.ok, false);
     assert.ok(result.errors.some((e) => e.includes("organization")));
   });
+
+  it("parses a knowledge section with only dir and leaves overrides null", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "knowledge:",
+      "  dir: docs/knowledge",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.knowledge, {
+      dir: "docs/knowledge",
+      schema: null,
+      inbox: null,
+    });
+  });
+
+  it("requires knowledge.dir when the knowledge section is set", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "knowledge:",
+      "  schema: docs/knowledge/SCHEMA.md",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("knowledge.dir is required")));
+  });
+
+  it("rejects unknown keys inside knowledge", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "knowledge:",
+      "  dir: docs/knowledge",
+      "  bogus: true",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("knowledge has unknown key 'bogus'")));
+  });
+
+  it("rejects knowledge when it is not a mapping", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "knowledge:",
+      "  - docs/knowledge",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("knowledge must be a mapping")));
+  });
+
+  it("rejects an empty knowledge.dir", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "knowledge:",
+      "  dir: ''",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("knowledge.dir is required")));
+  });
+
+  it("rejects an empty knowledge.schema override", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "knowledge:",
+      "  dir: docs/knowledge",
+      "  schema: ''",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("knowledge.schema must be a non-empty string")));
+  });
 });
 
 describe("getRepoGroundControlContext", () => {
@@ -356,6 +450,7 @@ describe("getRepoGroundControlContext", () => {
       assert.equal(result.project, "test-project");
       assert.equal(result.rules.plan_rules_path, null);
       assert.equal(result.rules.plan_rules_content, null);
+      assert.equal(result.knowledge, null);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -421,6 +516,196 @@ describe("getRepoGroundControlContext", () => {
       const result = await getRepoGroundControlContext(dir);
       assert.equal(result.status, "invalid_ground_control_yaml");
       assert.ok(result.errors.some((e) => e.includes("lowercase identifier")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function makeKnowledgeRepo({ extraYamlLines = [] } = {}) {
+    const dir = makeTempRepo();
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+    mkdirSync(join(dir, "docs", "knowledge"), { recursive: true });
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+    writeFileSync(join(dir, "docs", "knowledge", "SCHEMA.md"), "# schema\n");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+    writeFileSync(
+      join(dir, ".ground-control.yaml"),
+      [
+        "schema_version: 1",
+        "project: test-project",
+        "knowledge:",
+        "  dir: docs/knowledge",
+        ...extraYamlLines,
+        "",
+      ].join("\n"),
+    );
+    return dir;
+  }
+
+  it("returns a resolved knowledge block when dir exists and defaults apply", async () => {
+    const dir = makeKnowledgeRepo();
+    try {
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "ok");
+      assert.deepEqual(result.knowledge, {
+        dir: "docs/knowledge",
+        schema: "docs/knowledge/SCHEMA.md",
+        inbox: "docs/knowledge/inbox",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("honors explicit knowledge.schema and knowledge.inbox overrides", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      mkdirSync(join(dir, "wiki"), { recursive: true });
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(join(dir, "wiki", "custom-schema.md"), "# schema\n");
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: wiki",
+          "  schema: wiki/custom-schema.md",
+          "  inbox: wiki/capture",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "ok");
+      assert.deepEqual(result.knowledge, {
+        dir: "wiki",
+        schema: "wiki/custom-schema.md",
+        inbox: "wiki/capture",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when knowledge.dir does not exist", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: docs/knowledge",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("knowledge.dir")));
+      assert.ok(result.errors.some((e) => e.includes("docs/knowledge")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when knowledge.schema file does not exist", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      mkdirSync(join(dir, "docs", "knowledge"), { recursive: true });
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: docs/knowledge",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("knowledge.schema")));
+      assert.ok(result.errors.some((e) => e.includes("SCHEMA.md")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when knowledge.dir is an absolute path", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: /etc/passwd",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("knowledge.dir")));
+      assert.ok(result.errors.some((e) => /repo[- ]relative|absolute/.test(e)));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when knowledge.dir escapes the repository root", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: ../escape",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("knowledge.dir")));
+      assert.ok(result.errors.some((e) => e.includes("repository root")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when knowledge.schema override escapes the repository root", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      mkdirSync(join(dir, "docs", "knowledge"), { recursive: true });
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(join(dir, "docs", "knowledge", "SCHEMA.md"), "# schema\n");
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: docs/knowledge",
+          "  schema: ../../etc/passwd",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("knowledge.schema")));
+      assert.ok(result.errors.some((e) => e.includes("repository root")));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

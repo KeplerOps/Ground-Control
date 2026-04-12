@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.113.0] - 2026-04-12
+
+### Added
+
+- Knowledge base config wiring (GC-X002, GC-X003, GC-X004, GC-X005, GC-X013):
+  `.ground-control.yaml` now accepts an optional `knowledge` section with
+  required `dir` and optional `schema` / `inbox` overrides. Paths are
+  validated against the repository root via a shared resolver that rejects
+  absolute paths and `..` traversal.
+- `gc_get_repo_ground_control_context` MCP tool returns a resolved
+  `knowledge` block when the section is configured, with existence checks
+  for the knowledge directory and schema file. The inbox path is surfaced
+  but not existence-checked; later slices create it on first capture.
+- Repo knowledge base skeleton at `docs/knowledge/` containing `SCHEMA.md`
+  (conventions, source-citation rule, one-repo invariant, navigation rule),
+  `index.md` (empty content catalog), and `log.md` (append-only history).
+- This repo's own `.ground-control.yaml` now points at `docs/knowledge/`
+  via the new `knowledge.dir` field.
+
+### Fixed
+
+- `mcp/ground-control/README.md` no longer describes
+  `gc_get_repo_ground_control_context` as reading from `AGENTS.md`; the
+  tool reads `.ground-control.yaml` at the repo root.
+
 ## [0.112.0] - 2026-04-12
 
 ### Added

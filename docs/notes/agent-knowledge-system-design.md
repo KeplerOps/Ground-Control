@@ -121,6 +121,12 @@ The yaml is authoritative — the registry only tracks "is this repo monitored";
 
 `knowledge.dir` is the only required field. `schema` and `inbox` default to sensible paths under `dir`.
 
+Config guardrails for implementation:
+- `knowledge` extends the existing `.ground-control.yaml` contract. Reuse the same parser, normalization, error-reporting shape, and suggested-snippet flow already used for repo workflow config. Do not introduce a second schema file, registry entry, or parallel config reader for knowledge-base location.
+- All `knowledge.*` paths are repo-relative author input resolved against the Git repo root. Absolute paths and repo-escaping traversal (`..`) are rejected. Use one shared repo-scoped path resolver for repo-local config paths rather than open-coding separate `join(repoRoot, rawPath)` logic for each field.
+- `knowledge.dir` is the single knowledge-base root. `knowledge.schema` and `knowledge.inbox` are overrides for locations inside that root, not a way to declare a second store elsewhere in the repo. `index.md` and `log.md` stay anchored under `knowledge.dir`.
+- Absence of `knowledge` means "this repo has no configured knowledge base yet", not "fall back to an implicit global default". Registration and sweep flows fail clearly; implementation workflows degrade gracefully and continue without knowledge capture.
+
 ## Invariants worth stating explicitly
 
 - **One repo, one knowledge base.** Each repo's knowledge is about that repo. Knowledge bases are never merged across repos. A cross-repo super-base is explicitly out of scope.
