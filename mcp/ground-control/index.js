@@ -59,6 +59,7 @@ import {
   getRepoGroundControlContext,
   runCodexArchitecturePreflight,
   runCodexReview,
+  runCodexVerifyFinding,
   embedRequirement,
   getEmbeddingStatus,
   embedProject,
@@ -735,19 +736,46 @@ server.tool(
 
 server.tool(
   "gc_codex_review",
-  "Run Codex review against the current repository with an exhaustive, no-triage review prompt focused on production-grade maintainability, reliability, security, and avoidance of concept confusion.",
+  "Run Codex against the current branch with a production-readiness review prompt. Codex enumerates all material findings (no triage) and, when a pull request is available, posts each finding as an inline PR review comment. Returns the list of posted comment ids, enriched with GraphQL review-thread ids and a short file/line/title preview so the coding agent can drive a fix/verify loop via gc_codex_verify_finding. Auto-detects the PR number for the current branch via `gh pr view` when pr_number is omitted.",
   {
     repo_path: z.string().describe("Absolute path to the target Git repository"),
     base_branch: z.string().optional().describe("Base branch to review against (defaults to 'dev')"),
     uncommitted: z.boolean().optional().describe("Review staged/unstaged/untracked changes instead of committed branch history"),
+    pr_number: z.number().int().positive().optional().describe("Pull request number to post findings to. When omitted and uncommitted is false, the tool auto-detects via `gh pr view --json number`. When no PR can be found, codex emits findings inline without posting."),
   },
-  async ({ repo_path, base_branch, uncommitted }) => {
+  async ({ repo_path, base_branch, uncommitted, pr_number }) => {
     try {
       return ok(JSON.stringify(
         await runCodexReview({
           repoPath: repo_path,
           baseBranch: base_branch || "dev",
           uncommitted: Boolean(uncommitted),
+          prNumber: pr_number != null ? pr_number : null,
+        }),
+        null,
+        2,
+      ));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_codex_verify_finding",
+  "Ask Codex to verify whether a specific PR review finding has been resolved in the local working tree. Accepts ONLY structured inputs (repo_path, pr_number, comment_id) — no free-text fields — so the coding agent cannot influence the verification prompt. Codex reads the original comment (rejected if not authored by a trusted login), reads the anchored file, and decides RESOLVED or UNRESOLVED. If RESOLVED, the review thread is marked resolved via GraphQL. If UNRESOLVED, a threaded reply with concrete new directions is posted to the original comment and returned to the caller.",
+  {
+    repo_path: z.string().describe("Absolute path to the target Git repository"),
+    pr_number: z.number().int().positive().describe("Pull request number the comment belongs to"),
+    comment_id: z.number().int().positive().describe("REST comment id (as returned in the gc_codex_review comments list) of the finding to verify"),
+  },
+  async ({ repo_path, pr_number, comment_id }) => {
+    try {
+      return ok(JSON.stringify(
+        await runCodexVerifyFinding({
+          repoPath: repo_path,
+          prNumber: pr_number,
+          commentId: comment_id,
         }),
         null,
         2,

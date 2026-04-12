@@ -89,6 +89,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GlobalExceptionHandler.handleValidation` applies the same empty-detail
   guard so legacy single-arg `DomainValidationException` throws across the
   ~30 422 sites no longer serialize `detail: {}` either.
+- MCP `gc_codex_review` now posts each finding as an inline PR review comment
+  via `gh api` and returns a structured list `{comment_id, thread_id, path,
+  line, title, html_url}` enriched with GraphQL review-thread ids via a
+  single `reviewThreads` query. The prompt is rewritten to demand
+  production-readiness ("accept nothing less") across fitness-for-purpose,
+  architectural soundness, maintainability, extensibility, security, and
+  consistency with the larger codebase. PR number auto-detects via
+  `gh pr view --json number` when not supplied. The structured tail
+  `COMMENT_IDS=[...]` is parsed by `parseCodexReviewTail`; missing or
+  malformed tails throw rather than silently returning zero findings.
+- New MCP tool `gc_codex_verify_finding` drives per-finding fix/verify loops
+  out of the coding-agent prompt stream. Accepts ONLY structured inputs
+  (`repo_path`, `pr_number`, `comment_id`) — no free-text fields — so the
+  caller cannot influence the verification prompt. Fetches the original
+  comment, rejects it if the author is not on the trusted allowlist
+  (closes a drive-by prompt-injection channel), assembles a fixed prompt
+  with the finding and current file fenced as DATA inside
+  `<<<FINDING…FINDING>>>` / `<<<FILE…FILE>>>` delimiters, runs `codex exec
+  --sandbox read-only`, and parses a `===VERIFY===` decision block. On
+  RESOLVED the review thread is marked resolved via the GraphQL
+  `resolveReviewThread` mutation. On UNRESOLVED a threaded reply with
+  codex's new directions is posted via
+  `/repos/:o/:r/pulls/:pr/comments/:id/replies` and returned to the agent.
+- Skills `implement` (Step 13) and `ship` (Phase 4) updated to drive the new
+  fix/verify loop: call `gc_codex_review` with `pr_number`, iterate over the
+  returned `comments` list, fix each one locally, then call
+  `gc_codex_verify_finding` to confirm. Per-finding cap of 2 verify calls
+  before escalation; overall step/phase cap of 2 `gc_codex_review`
+  invocations unchanged.
 - `ErrorResponse.of(code, message, detail)` now treats `null`/empty detail
   identically to the 2-arg overload, preventing both an `NPE` from
   `Map.copyOf(null)` and accidental `detail: {}` serialization at the type
