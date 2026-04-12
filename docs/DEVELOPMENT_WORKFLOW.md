@@ -111,8 +111,6 @@ flowchart TB
 
   classDef user fill:#fff7cc,stroke:#c9a900,color:#000
   class S5,Start,End user
-
-  linkStyle 21,22,23,24,25,26,27 stroke:#d94a4a,stroke-width:2px,color:#d94a4a
 ```
 
 **Reading the diagram:**
