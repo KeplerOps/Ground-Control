@@ -86,6 +86,34 @@ class ThreatModelGraphProjectionContributorTest {
     }
 
     @Test
+    void omitsNullNarrativeAndCreatedByFromNodeProperties() {
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var tm = new ThreatModel(project, "TM-NULL", "Sparse threat", "Actor", "Event", "Effect");
+        setField(tm, "id", UUID.randomUUID());
+        // narrative, createdBy, and stride all left null
+        when(threatModelRepository.findByProjectIdOrderByCreatedAtDesc(projectId))
+                .thenReturn(List.of(tm));
+
+        var nodes = contributor.contributeNodes(projectId);
+
+        assertThat(nodes).hasSize(1);
+        var properties = nodes.get(0).properties();
+        // Null-valued optional fields must be absent rather than present-with-null,
+        // because Apache AGE / Cypher property maps reject null property values.
+        assertThat(properties).doesNotContainKey("narrative");
+        assertThat(properties).doesNotContainKey("createdBy");
+        assertThat(properties).doesNotContainKey("stride");
+        // Required fields are still present.
+        assertThat(properties).containsEntry("title", "Sparse threat");
+        assertThat(properties).containsEntry("threatSource", "Actor");
+        assertThat(properties).containsEntry("threatEvent", "Event");
+        assertThat(properties).containsEntry("effect", "Effect");
+    }
+
+    @Test
     void contributesEdgesOnlyForInternalTargets() {
         var project = new Project("ground-control", "Ground Control");
         var projectId = UUID.randomUUID();
@@ -115,11 +143,11 @@ class ThreatModelGraphProjectionContributorTest {
 
         when(threatModelLinkRepository.findByProjectId(projectId))
                 .thenReturn(List.of(internalAssetLink, internalControlLink, externalCodeLink));
-        when(operationalAssetRepository.findByProjectIdAndArchivedAtIsNull(projectId))
-                .thenReturn(List.of(asset));
-        when(requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId))
+        when(operationalAssetRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId))
+                .thenReturn(List.of(asset.getId()));
+        when(requirementRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId))
                 .thenReturn(List.of());
-        when(riskScenarioRepository.findByProjectIdOrderByCreatedAtDesc(projectId))
+        when(riskScenarioRepository.findIdsByProjectIdAndStatusNot(projectId, RiskScenarioStatus.ARCHIVED))
                 .thenReturn(List.of());
 
         var edges = contributor.contributeEdges(projectId);
@@ -151,11 +179,11 @@ class ThreatModelGraphProjectionContributorTest {
         setField(archivedLink, "id", UUID.randomUUID());
 
         when(threatModelLinkRepository.findByProjectId(projectId)).thenReturn(List.of(liveLink, archivedLink));
-        when(operationalAssetRepository.findByProjectIdAndArchivedAtIsNull(projectId))
-                .thenReturn(List.of(liveAsset));
-        when(requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId))
+        when(operationalAssetRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId))
+                .thenReturn(List.of(liveAsset.getId()));
+        when(requirementRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId))
                 .thenReturn(List.of());
-        when(riskScenarioRepository.findByProjectIdOrderByCreatedAtDesc(projectId))
+        when(riskScenarioRepository.findIdsByProjectIdAndStatusNot(projectId, RiskScenarioStatus.ARCHIVED))
                 .thenReturn(List.of());
 
         var edges = contributor.contributeEdges(projectId);
@@ -186,11 +214,11 @@ class ThreatModelGraphProjectionContributorTest {
         setField(archivedLink, "id", UUID.randomUUID());
 
         when(threatModelLinkRepository.findByProjectId(projectId)).thenReturn(List.of(liveLink, archivedLink));
-        when(operationalAssetRepository.findByProjectIdAndArchivedAtIsNull(projectId))
+        when(operationalAssetRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId))
                 .thenReturn(List.of());
-        when(requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId))
-                .thenReturn(List.of(liveReq));
-        when(riskScenarioRepository.findByProjectIdOrderByCreatedAtDesc(projectId))
+        when(requirementRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId))
+                .thenReturn(List.of(liveReq.getId()));
+        when(riskScenarioRepository.findIdsByProjectIdAndStatusNot(projectId, RiskScenarioStatus.ARCHIVED))
                 .thenReturn(List.of());
 
         var edges = contributor.contributeEdges(projectId);
@@ -231,12 +259,12 @@ class ThreatModelGraphProjectionContributorTest {
         setField(archivedLink, "id", UUID.randomUUID());
 
         when(threatModelLinkRepository.findByProjectId(projectId)).thenReturn(List.of(liveLink, archivedLink));
-        when(operationalAssetRepository.findByProjectIdAndArchivedAtIsNull(projectId))
+        when(operationalAssetRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId))
                 .thenReturn(List.of());
-        when(requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId))
+        when(requirementRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId))
                 .thenReturn(List.of());
-        when(riskScenarioRepository.findByProjectIdOrderByCreatedAtDesc(projectId))
-                .thenReturn(List.of(liveScenario, archivedScenario));
+        when(riskScenarioRepository.findIdsByProjectIdAndStatusNot(projectId, RiskScenarioStatus.ARCHIVED))
+                .thenReturn(List.of(liveScenario.getId()));
 
         var edges = contributor.contributeEdges(projectId);
 

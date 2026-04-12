@@ -41,4 +41,12 @@ public interface RiskScenarioLinkRepository extends JpaRepository<RiskScenarioLi
             @Param("targetType") RiskScenarioLinkTargetType targetType,
             @Param("targetEntityId") UUID targetEntityId,
             @Param("projectId") UUID projectId);
+
+    @Query("SELECT l.riskScenario.uid FROM RiskScenarioLink l"
+            + " WHERE l.targetType = :targetType AND l.targetEntityId = :targetEntityId"
+            + " AND l.riskScenario.project.id = :projectId")
+    List<String> findRiskScenarioUidsByTargetTypeAndTargetEntityIdAndProjectId(
+            @Param("targetType") RiskScenarioLinkTargetType targetType,
+            @Param("targetEntityId") UUID targetEntityId,
+            @Param("projectId") UUID projectId);
 }

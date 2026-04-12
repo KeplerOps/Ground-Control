@@ -60,6 +60,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP `gc_update_threat_model` exposes `clear_stride` and `clear_narrative`
   boolean flags so callers can explicitly null those optional fields (the
   backend tri-state convention is now reachable from the MCP surface).
+- `ThreatModelGraphProjectionContributor.contributeNodes` now omits `narrative`
+  and `createdBy` from the node property map when their values are `null`,
+  matching the existing `stride` guard. Apache AGE / Cypher reject null
+  property values, so present-but-null entries would have failed graph
+  materialization for any threat model lacking a narrative or createdBy.
+- `OperationalAssetRepository`, `RequirementRepository`, and
+  `RiskScenarioRepository` gain `findIdsByProjectId*` projection queries.
+  `ThreatModelGraphProjectionContributor` uses them to build live-target ID
+  sets without hydrating full entities.
+- `AssetLinkRepository` and `RiskScenarioLinkRepository` gain
+  `find*UidsByTargetTypeAndTargetEntityIdAndProjectId` projection queries.
+  `ThreatModelService.delete` uses them to build the 409 conflict envelope
+  without hydrating full link rows.
+- `V057__create_threat_model_link.sql` sets `target_url` and `target_title`
+  to `NOT NULL DEFAULT ''` so the JPA entity's empty-string contract holds
+  end-to-end. `MigrationSmokeTest` verifies the column metadata directly.
 
 ## [0.111.1] - 2026-04-11
 

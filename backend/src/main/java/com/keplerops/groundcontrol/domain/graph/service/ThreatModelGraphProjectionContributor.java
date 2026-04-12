@@ -1,14 +1,11 @@
 package com.keplerops.groundcontrol.domain.graph.service;
 
-import com.keplerops.groundcontrol.domain.assets.model.OperationalAsset;
 import com.keplerops.groundcontrol.domain.assets.repository.OperationalAssetRepository;
 import com.keplerops.groundcontrol.domain.graph.model.GraphEdge;
 import com.keplerops.groundcontrol.domain.graph.model.GraphEntityType;
 import com.keplerops.groundcontrol.domain.graph.model.GraphIds;
 import com.keplerops.groundcontrol.domain.graph.model.GraphNode;
-import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
-import com.keplerops.groundcontrol.domain.riskscenarios.model.RiskScenario;
 import com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskScenarioRepository;
 import com.keplerops.groundcontrol.domain.riskscenarios.state.RiskScenarioStatus;
 import com.keplerops.groundcontrol.domain.threatmodels.repository.ThreatModelLinkRepository;
@@ -19,7 +16,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -63,8 +59,12 @@ public class ThreatModelGraphProjectionContributor implements GraphProjectionCon
                     if (tm.getStride() != null) {
                         properties.put("stride", tm.getStride().name());
                     }
-                    properties.put("narrative", tm.getNarrative());
-                    properties.put("createdBy", tm.getCreatedBy());
+                    if (tm.getNarrative() != null) {
+                        properties.put("narrative", tm.getNarrative());
+                    }
+                    if (tm.getCreatedBy() != null) {
+                        properties.put("createdBy", tm.getCreatedBy());
+                    }
                     return new GraphNode(
                             GraphIds.nodeId(GraphEntityType.THREAT_MODEL, tm.getId()),
                             tm.getId().toString(),
@@ -88,16 +88,12 @@ public class ThreatModelGraphProjectionContributor implements GraphProjectionCon
         // materialization. Other internal targets (CONTROL, OBSERVATION,
         // RISK_ASSESSMENT_RESULT, VERIFICATION_RESULT) are not archived in their own
         // contributors, so they require no filter here.
-        Set<UUID> liveAssetIds = operationalAssetRepository.findByProjectIdAndArchivedAtIsNull(projectId).stream()
-                .map(OperationalAsset::getId)
-                .collect(Collectors.toSet());
-        Set<UUID> liveRequirementIds = requirementRepository.findByProjectIdAndArchivedAtIsNull(projectId).stream()
-                .map(Requirement::getId)
-                .collect(Collectors.toSet());
-        Set<UUID> liveRiskScenarioIds = riskScenarioRepository.findByProjectIdOrderByCreatedAtDesc(projectId).stream()
-                .filter(scenario -> scenario.getStatus() != RiskScenarioStatus.ARCHIVED)
-                .map(RiskScenario::getId)
-                .collect(Collectors.toSet());
+        Set<UUID> liveAssetIds =
+                Set.copyOf(operationalAssetRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId));
+        Set<UUID> liveRequirementIds =
+                Set.copyOf(requirementRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId));
+        Set<UUID> liveRiskScenarioIds = Set.copyOf(
+                riskScenarioRepository.findIdsByProjectIdAndStatusNot(projectId, RiskScenarioStatus.ARCHIVED));
 
         return threatModelLinkRepository.findByProjectId(projectId).stream()
                 .map(link -> toThreatModelLinkEdge(

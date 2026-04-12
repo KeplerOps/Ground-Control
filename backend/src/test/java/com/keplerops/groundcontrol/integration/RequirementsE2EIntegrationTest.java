@@ -401,7 +401,7 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "054", // V054: typed control-pack registry payloads
                         "055", // V055: threat_model
                         "056", // V056: threat_model_audit
-                        "057", // V057: threat_model_link
+                        "057", // V057: threat_model_link (target_url / target_title NOT NULL DEFAULT '')
                         "058"); // V058: threat_model_link_audit
     }
 }

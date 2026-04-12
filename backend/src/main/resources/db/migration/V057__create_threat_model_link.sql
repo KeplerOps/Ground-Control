@@ -5,8 +5,8 @@ CREATE TABLE threat_model_link (
     target_entity_id   UUID,
     target_identifier  VARCHAR(500),
     link_type          VARCHAR(20)   NOT NULL,
-    target_url         VARCHAR(2000) DEFAULT '',
-    target_title       VARCHAR(255)  DEFAULT '',
+    target_url         VARCHAR(2000) NOT NULL DEFAULT '',
+    target_title       VARCHAR(255)  NOT NULL DEFAULT '',
     created_at         TIMESTAMPTZ   NOT NULL,
     updated_at         TIMESTAMPTZ   NOT NULL,
     CONSTRAINT uq_threat_model_link_identifier

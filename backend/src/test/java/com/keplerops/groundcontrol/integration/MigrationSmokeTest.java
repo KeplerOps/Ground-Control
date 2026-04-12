@@ -200,6 +200,16 @@ class MigrationSmokeTest extends BaseIntegrationTest {
         entityManager
                 .createNativeQuery("SELECT 1 FROM threat_model_link LIMIT 1")
                 .getResultList();
+        // V057 set target_url / target_title to NOT NULL DEFAULT '' so the entity-side
+        // empty-string contract holds end-to-end. Verify the column metadata directly.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'threat_model_link'"
+                        + " AND column_name = 'target_url' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'threat_model_link'"
+                        + " AND column_name = 'target_title' AND is_nullable = 'NO'")
+                .getSingleResult();
         entityManager
                 .createNativeQuery("SELECT 1 FROM threat_model_link_audit LIMIT 1")
                 .getResultList();
