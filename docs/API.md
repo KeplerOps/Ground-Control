@@ -675,6 +675,58 @@ must be non-blank), `reason` (optional, max 500).
 
 **Lifecycle states:** INSTALLED → UPGRADED → DEPRECATED → REMOVED.
 
+### Threat Models
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/threat-models` | ThreatModelRequest | 201 | Create threat model entry |
+| GET | `/threat-models` | — | 200 | List threat models for a project |
+| GET | `/threat-models/{id}` | — | 200 | Get threat model by UUID |
+| GET | `/threat-models/uid/{uid}` | — | 200 | Get threat model by UID |
+| PUT | `/threat-models/{id}` | UpdateThreatModelRequest | 200 | Update mutable fields |
+| DELETE | `/threat-models/{id}` | — | 204 | Delete threat model (cascades to links) |
+| PUT | `/threat-models/{id}/status` | `{"status": "ACTIVE"}` | 200 | Transition lifecycle status |
+| POST | `/threat-models/{id}/links` | ThreatModelLinkRequest | 201 | Create threat-model link |
+| GET | `/threat-models/{id}/links` | — | 200 | List links for a threat model |
+| DELETE | `/threat-models/{id}/links/{linkId}` | — | 204 | Delete threat-model link |
+
+All endpoints accept an optional `project` query parameter.
+
+Threat models are a separate aggregate from risk scenarios per ADR-024. They capture
+upstream security analysis (source, event, effect) and do not carry quantified risk,
+treatment, or governance state.
+
+**ThreatModelRequest fields:** `uid` (required, max 30), `title` (required, max 200),
+`threatSource` (required), `threatEvent` (required), `effect` (required), `stride`
+(optional, STRIDE enum: SPOOFING, TAMPERING, REPUDIATION, INFORMATION_DISCLOSURE,
+DENIAL_OF_SERVICE, ELEVATION_OF_PRIVILEGE), `narrative` (optional analyst context,
+non-authoritative).
+
+**UpdateThreatModelRequest fields:** same as create minus `uid`. Only provided fields
+are updated.
+
+**ThreatModelLinkRequest fields:** `targetType` (required, ThreatModelLinkTargetType
+enum), `targetEntityId` (UUID, for internal first-class targets), `targetIdentifier`
+(string max 500, for external / not-yet-modeled targets), `linkType` (required,
+ThreatModelLinkType enum), `targetUrl` (optional, max 2000), `targetTitle` (optional,
+max 255).
+
+**Internal target types (require `targetEntityId`, resolved project-scoped):** ASSET
+(includes boundaries via `AssetType.BOUNDARY`), REQUIREMENT, CONTROL, RISK_SCENARIO,
+OBSERVATION, RISK_ASSESSMENT_RESULT, VERIFICATION_RESULT.
+
+**External target types (require `targetIdentifier`):** ARCHITECTURE_MODEL (e.g. C4
+source or Structurizr DSL, per ADR-011), CODE (repo-relative path), ISSUE (GitHub
+issue or PR number), EVIDENCE (external evidence reference), EXTERNAL (catch-all).
+
+**Link types:** AFFECTS (threat affects an asset or boundary), EXPLOITS (threat
+exploits a requirement or condition), MITIGATED_BY (threat is mitigated by a control),
+ASSESSED_IN (threat feeds a risk scenario or assessment), OBSERVED_IN (threat
+evidenced by an observation or verification), DOCUMENTED_IN (threat documented in an
+architecture model, code, or issue), ASSOCIATED (generic association).
+
+**Lifecycle states:** DRAFT → ACTIVE → ARCHIVED (and DRAFT → ARCHIVED directly).
+
 ## Request / Response Format
 
 JSON. Error responses use a nested envelope:

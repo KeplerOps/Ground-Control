@@ -192,5 +192,16 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                 .createNativeQuery("SELECT 1 FROM trust_policy_audit LIMIT 1")
                 .getResultList();
         // V053/V054 pack registry tables verified
+        // V055-V058 threat model tables
+        entityManager.createNativeQuery("SELECT 1 FROM threat_model LIMIT 1").getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM threat_model_audit LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM threat_model_link LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM threat_model_link_audit LIMIT 1")
+                .getResultList();
     }
 }

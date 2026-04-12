@@ -206,6 +206,38 @@ export const RISK_SCENARIO_LINK_TYPES = [
   "OBSERVED_IN",
   "ASSOCIATED",
 ];
+export const THREAT_MODEL_STATUSES = ["DRAFT", "ACTIVE", "ARCHIVED"];
+export const STRIDE_CATEGORIES = [
+  "SPOOFING",
+  "TAMPERING",
+  "REPUDIATION",
+  "INFORMATION_DISCLOSURE",
+  "DENIAL_OF_SERVICE",
+  "ELEVATION_OF_PRIVILEGE",
+];
+export const THREAT_MODEL_LINK_TARGET_TYPES = [
+  "ASSET",
+  "REQUIREMENT",
+  "CONTROL",
+  "RISK_SCENARIO",
+  "OBSERVATION",
+  "RISK_ASSESSMENT_RESULT",
+  "VERIFICATION_RESULT",
+  "ARCHITECTURE_MODEL",
+  "CODE",
+  "ISSUE",
+  "EVIDENCE",
+  "EXTERNAL",
+];
+export const THREAT_MODEL_LINK_TYPES = [
+  "AFFECTS",
+  "EXPLOITS",
+  "MITIGATED_BY",
+  "ASSESSED_IN",
+  "OBSERVED_IN",
+  "DOCUMENTED_IN",
+  "ASSOCIATED",
+];
 
 // ---------------------------------------------------------------------------
 // Field name mapping (snake_case MCP <-> camelCase API)
@@ -325,6 +357,7 @@ const TO_CAMEL = {
   observation_refs: "observationRefs",
   topology_context: "topologyContext",
   risk_scenario_id: "riskScenarioId",
+  threat_model_id: "threatModelId",
   risk_register_record_id: "riskRegisterRecordId",
   methodology_profile_id: "methodologyProfileId",
   profile_key: "profileKey",
@@ -1832,6 +1865,62 @@ export async function deleteRiskScenarioLink(riskScenarioId, linkId, project) {
   await request(
     "DELETE",
     `/api/v1/risk-scenarios/${encodeURIComponent(riskScenarioId)}/links/${encodeURIComponent(linkId)}`,
+    { params: { project } },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Threat Model API functions (GC-H001)
+// ---------------------------------------------------------------------------
+
+export async function createThreatModel(data, project) {
+  return request("POST", "/api/v1/threat-models", { body: data, params: { project } });
+}
+
+export async function listThreatModels(project) {
+  return request("GET", "/api/v1/threat-models", { params: { project } });
+}
+
+export async function getThreatModel(id, project) {
+  return request("GET", `/api/v1/threat-models/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function getThreatModelByUid(uid, project) {
+  return request("GET", `/api/v1/threat-models/uid/${encodeURIComponent(uid)}`, { params: { project } });
+}
+
+export async function updateThreatModel(id, data, project) {
+  return request("PUT", `/api/v1/threat-models/${encodeURIComponent(id)}`, { body: data, params: { project } });
+}
+
+export async function deleteThreatModel(id, project) {
+  await request("DELETE", `/api/v1/threat-models/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function transitionThreatModelStatus(id, status, project) {
+  return request("PUT", `/api/v1/threat-models/${encodeURIComponent(id)}/status`, {
+    body: { status },
+    params: { project },
+  });
+}
+
+export async function createThreatModelLink(threatModelId, data, project) {
+  return request("POST", `/api/v1/threat-models/${encodeURIComponent(threatModelId)}/links`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function listThreatModelLinks(threatModelId, project) {
+  return request("GET", `/api/v1/threat-models/${encodeURIComponent(threatModelId)}/links`, {
+    params: { project },
+  });
+}
+
+export async function deleteThreatModelLink(threatModelId, linkId, project) {
+  await request(
+    "DELETE",
+    `/api/v1/threat-models/${encodeURIComponent(threatModelId)}/links/${encodeURIComponent(linkId)}`,
     { params: { project } },
   );
 }

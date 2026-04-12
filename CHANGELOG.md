@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.112.0] - 2026-04-12
+
+### Added
+
+- Threat model entry aggregate (GC-H001, ADR-024): new `ThreatModel` and
+  `ThreatModelLink` entities with Envers auditing. Captures threat source,
+  threat event, effect, and optional STRIDE taxonomy — separate aggregate from
+  risk scenarios, risk assessments, and treatment plans.
+- Threat model link targets: internal first-class targets (ASSET, REQUIREMENT,
+  CONTROL, RISK_SCENARIO, OBSERVATION, RISK_ASSESSMENT_RESULT, VERIFICATION_RESULT)
+  validated project-scoped via `GraphTargetResolverService`; external targets
+  (ARCHITECTURE_MODEL, CODE, ISSUE, EVIDENCE, EXTERNAL) stored as
+  `targetIdentifier` strings.
+- Threat model REST endpoints under `/api/v1/threat-models` and
+  `/api/v1/threat-models/{id}/links` with matching `@WebMvcTest` coverage.
+- MCP tools `gc_create_threat_model`, `gc_list_threat_models`,
+  `gc_get_threat_model`, `gc_update_threat_model`, `gc_delete_threat_model`,
+  `gc_transition_threat_model_status`, `gc_create_threat_model_link`,
+  `gc_list_threat_model_links`, `gc_delete_threat_model_link`.
+- New graph entity type `THREAT_MODEL` with `ThreatModelGraphProjectionContributor`
+  emitting nodes and edges for internal-target links.
+- Flyway migrations V055–V058 creating `threat_model`, `threat_model_audit`,
+  `threat_model_link`, and `threat_model_link_audit` tables.
+
+### Changed
+
+- `GraphTargetResolverService` now treats
+  `AssetLinkTargetType.THREAT_MODEL_ENTRY` and
+  `RiskScenarioLinkTargetType.THREAT_MODEL` as first-class internal targets
+  validated against `ThreatModelRepository` instead of free-form external
+  identifiers. Existing rows are unaffected; the new routing applies to
+  newly-created links.
+- `AssetGraphProjectionContributor` and `RiskGraphProjectionContributor` now
+  project edges to `GraphEntityType.THREAT_MODEL` when their threat-model
+  target type carries a `targetEntityId`.
+
 ## [0.111.1] - 2026-04-11
 
 ### Added

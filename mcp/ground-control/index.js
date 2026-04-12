@@ -142,6 +142,20 @@ import {
   createRiskScenarioLink,
   listRiskScenarioLinks,
   deleteRiskScenarioLink,
+  createThreatModel,
+  listThreatModels,
+  getThreatModel,
+  getThreatModelByUid,
+  updateThreatModel,
+  deleteThreatModel,
+  transitionThreatModelStatus,
+  createThreatModelLink,
+  listThreatModelLinks,
+  deleteThreatModelLink,
+  THREAT_MODEL_STATUSES,
+  STRIDE_CATEGORIES,
+  THREAT_MODEL_LINK_TARGET_TYPES,
+  THREAT_MODEL_LINK_TYPES,
   createControl,
   listControls,
   getControl,
@@ -2967,6 +2981,201 @@ server.tool(
     try {
       await deleteRiskScenarioLink(risk_scenario_id, link_id, project);
       return ok("Risk scenario link deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Threat Model tools (GC-H001)
+// ==========================================================================
+
+server.tool(
+  "gc_create_threat_model",
+  "Create a threat model entry — a first-class threat analysis artifact distinct from risk scenarios. Captures threat source or actor, threat event or method, effect/consequence, and optional STRIDE taxonomy. Link to assets, requirements, controls, risk scenarios, architecture models, code, and issues via gc_create_threat_model_link.",
+  {
+    uid: z.string().max(30).describe("Threat model UID (e.g. 'TM-001')"),
+    title: z.string().max(200).describe("Threat model title"),
+    threat_source: z.string().describe("Threat source or actor (NIST SP 800-30 language)"),
+    threat_event: z.string().describe("Threat event or method"),
+    effect: z.string().describe("Effect or consequence"),
+    stride: z.enum(STRIDE_CATEGORIES).optional().describe("Optional STRIDE category"),
+    narrative: z.string().optional().describe("Free-text analyst narrative (non-authoritative context)"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ uid, title, threat_source, threat_event, effect, stride, narrative, project }) => {
+    try {
+      const data = { uid, title, threat_source, threat_event, effect };
+      if (stride !== undefined) data.stride = stride;
+      if (narrative !== undefined) data.narrative = narrative;
+      return ok(JSON.stringify(await createThreatModel(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_threat_models",
+  "List all threat model entries for a project, ordered by creation date (newest first).",
+  {
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await listThreatModels(project);
+      if (Array.isArray(result) && result.length === 0) return ok("No threat models found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_threat_model",
+  "Get a threat model by UUID or UID.",
+  {
+    id: z.string().uuid().optional().describe("Threat model UUID"),
+    uid: z.string().optional().describe("Threat model UID (e.g. 'TM-001')"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, uid, project }) => {
+    try {
+      if (id) {
+        return ok(JSON.stringify(await getThreatModel(id, project), null, 2));
+      }
+      if (uid) {
+        return ok(JSON.stringify(await getThreatModelByUid(uid, project), null, 2));
+      }
+      return err(new Error("Provide either 'id' (UUID) or 'uid'"));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_threat_model",
+  "Update mutable fields of a threat model entry. Only provided fields are updated.",
+  {
+    id: z.string().uuid().describe("Threat model UUID"),
+    title: z.string().max(200).optional().describe("Updated title"),
+    threat_source: z.string().optional().describe("Updated threat source"),
+    threat_event: z.string().optional().describe("Updated threat event"),
+    effect: z.string().optional().describe("Updated effect"),
+    stride: z.enum(STRIDE_CATEGORIES).optional().describe("Updated STRIDE category"),
+    narrative: z.string().optional().describe("Updated narrative"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, title, threat_source, threat_event, effect, stride, narrative, project }) => {
+    try {
+      const data = {};
+      if (title !== undefined) data.title = title;
+      if (threat_source !== undefined) data.threat_source = threat_source;
+      if (threat_event !== undefined) data.threat_event = threat_event;
+      if (effect !== undefined) data.effect = effect;
+      if (stride !== undefined) data.stride = stride;
+      if (narrative !== undefined) data.narrative = narrative;
+      return ok(JSON.stringify(await updateThreatModel(id, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_threat_model",
+  "Delete a threat model entry. Cascades to all threat model links.",
+  {
+    id: z.string().uuid().describe("Threat model UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, project }) => {
+    try {
+      await deleteThreatModel(id, project);
+      return ok("Threat model deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_transition_threat_model_status",
+  "Transition a threat model lifecycle status. Valid transitions: DRAFT→ACTIVE|ARCHIVED, ACTIVE→ARCHIVED.",
+  {
+    id: z.string().uuid().describe("Threat model UUID"),
+    status: z.enum(THREAT_MODEL_STATUSES).describe("Target status"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, status, project }) => {
+    try {
+      return ok(JSON.stringify(await transitionThreatModelStatus(id, status, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_create_threat_model_link",
+  "Link a threat model to an operational asset or system boundary, requirement, control, risk scenario, observation, risk assessment result, verification result, or external architecture model / code / issue / evidence.",
+  {
+    threat_model_id: z.string().uuid().describe("Threat model UUID"),
+    target_type: z.enum(THREAT_MODEL_LINK_TARGET_TYPES).describe("Type of the linked target"),
+    target_entity_id: z.string().uuid().optional().describe("UUID of the internal target entity (for first-class targets)"),
+    target_identifier: z.string().max(500).optional().describe("Identifier of an external or not-yet-modeled target (e.g. repo-relative path, issue number)"),
+    link_type: z.enum(THREAT_MODEL_LINK_TYPES).describe("Nature of the relationship"),
+    target_url: z.string().max(2000).optional().describe("URL of the linked target"),
+    target_title: z.string().max(255).optional().describe("Human-readable title for the linked target"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ threat_model_id, target_type, target_entity_id, target_identifier, link_type, target_url, target_title, project }) => {
+    try {
+      const data = { target_type, link_type };
+      if (target_entity_id !== undefined) data.target_entity_id = target_entity_id;
+      if (target_identifier !== undefined) data.target_identifier = target_identifier;
+      if (target_url !== undefined) data.target_url = target_url;
+      if (target_title !== undefined) data.target_title = target_title;
+      return ok(JSON.stringify(await createThreatModelLink(threat_model_id, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_threat_model_links",
+  "List all links from a threat model entry.",
+  {
+    threat_model_id: z.string().uuid().describe("Threat model UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ threat_model_id, project }) => {
+    try {
+      const result = await listThreatModelLinks(threat_model_id, project);
+      if (Array.isArray(result) && result.length === 0) return ok("No threat model links found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_threat_model_link",
+  "Delete a link from a threat model entry.",
+  {
+    threat_model_id: z.string().uuid().describe("Threat model UUID"),
+    link_id: z.string().uuid().describe("Link UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ threat_model_id, link_id, project }) => {
+    try {
+      await deleteThreatModelLink(threat_model_id, link_id, project);
+      return ok("Threat model link deleted.");
     } catch (e) {
       return err(e);
     }
