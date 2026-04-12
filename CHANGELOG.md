@@ -5,6 +5,128 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.112.0] - 2026-04-12
+
+### Added
+
+- Threat model entry aggregate (GC-H001, ADR-024): new `ThreatModel` and
+  `ThreatModelLink` entities with Envers auditing. Captures threat source,
+  threat event, effect, and optional STRIDE taxonomy — separate aggregate from
+  risk scenarios, risk assessments, and treatment plans.
+- Threat model link targets: internal first-class targets (ASSET, REQUIREMENT,
+  CONTROL, RISK_SCENARIO, OBSERVATION, RISK_ASSESSMENT_RESULT, VERIFICATION_RESULT)
+  validated project-scoped via `GraphTargetResolverService`; external targets
+  (ARCHITECTURE_MODEL, CODE, ISSUE, EVIDENCE, EXTERNAL) stored as
+  `targetIdentifier` strings.
+- Threat model REST endpoints under `/api/v1/threat-models` and
+  `/api/v1/threat-models/{id}/links` with matching `@WebMvcTest` coverage.
+- MCP tools `gc_create_threat_model`, `gc_list_threat_models`,
+  `gc_get_threat_model`, `gc_update_threat_model`, `gc_delete_threat_model`,
+  `gc_transition_threat_model_status`, `gc_create_threat_model_link`,
+  `gc_list_threat_model_links`, `gc_delete_threat_model_link`.
+- New graph entity type `THREAT_MODEL` with `ThreatModelGraphProjectionContributor`
+  emitting nodes and edges for internal-target links.
+- Flyway migrations V055–V058 creating `threat_model`, `threat_model_audit`,
+  `threat_model_link`, and `threat_model_link_audit` tables.
+
+### Changed
+
+- `GraphTargetResolverService` now treats
+  `AssetLinkTargetType.THREAT_MODEL_ENTRY` and
+  `RiskScenarioLinkTargetType.THREAT_MODEL` as first-class internal targets
+  validated against `ThreatModelRepository` instead of free-form external
+  identifiers. Existing rows are unaffected; the new routing applies to
+  newly-created links.
+- `AssetGraphProjectionContributor` and `RiskGraphProjectionContributor` now
+  project edges to `GraphEntityType.THREAT_MODEL` when their threat-model
+  target type carries a `targetEntityId`.
+- `ThreatModelService.update` now rejects blank required fields
+  (`title`, `threatSource`, `threatEvent`, `effect`) with `validation_error`.
+- `UpdateThreatModelRequest` and `UpdateThreatModelCommand` gain `clearStride`
+  and `clearNarrative` boolean flags so callers can explicitly null those
+  optional fields (passing `null` alone now means "no change").
+- `VerificationResultGraphProjectionContributor` no longer emits `VERIFIES`
+  edges to archived requirements.
+- `ThreatModelService.delete` rejects deletion with 409 `threat_model_referenced`
+  while reverse `AssetLink` / `RiskScenarioLink` rows still target the threat
+  model. The conflict envelope's `detail` block lists offending UIDs.
+- MCP `gc_delete_threat_model` and other tools now surface the structured error
+  envelope (`code` + `detail`) returned by the API via the new `RequestError`
+  class in `mcp/ground-control/lib.js`.
+- `ThreatModelGraphProjectionContributor.contributeEdges` now skips edges to
+  archived `ASSET`, `REQUIREMENT`, and `RISK_SCENARIO` targets so the projection
+  never produces dangling edges relative to the peer contributors that omit
+  archived nodes from the graph.
+- MCP `gc_update_threat_model` exposes `clear_stride` and `clear_narrative`
+  boolean flags so callers can explicitly null those optional fields (the
+  backend tri-state convention is now reachable from the MCP surface).
+- `ThreatModelGraphProjectionContributor.contributeNodes` now omits `narrative`
+  and `createdBy` from the node property map when their values are `null`,
+  matching the existing `stride` guard. Apache AGE / Cypher reject null
+  property values, so present-but-null entries would have failed graph
+  materialization for any threat model lacking a narrative or createdBy.
+- `OperationalAssetRepository`, `RequirementRepository`, and
+  `RiskScenarioRepository` gain `findIdsByProjectId*` projection queries.
+  `ThreatModelGraphProjectionContributor` uses them to build live-target ID
+  sets without hydrating full entities.
+- `AssetLinkRepository` and `RiskScenarioLinkRepository` gain
+  `find*UidsByTargetTypeAndTargetEntityIdAndProjectId` projection queries.
+  `ThreatModelService.delete` uses them to build the 409 conflict envelope
+  without hydrating full link rows.
+- `V057__create_threat_model_link.sql` sets `target_url` and `target_title`
+  to `NOT NULL DEFAULT ''` so the JPA entity's empty-string contract holds
+  end-to-end. `MigrationSmokeTest` verifies the column metadata directly.
+- `VerificationResultGraphProjectionContributor.contributeNodes` now omits
+  `property` and `expiresAt` from the node property map when their values are
+  `null` (same class of fix as `ThreatModelGraphProjectionContributor`); the
+  `VERIFIES` edge id is now the bare `VerificationResult` UUID, matching every
+  other contributor.
+- `GlobalExceptionHandler.handleConflict` calls the 2-arg `ErrorResponse.of`
+  overload when the exception's detail map is empty so legacy 409 responses no
+  longer regress to serializing `detail: {}`. The cycle-2 envelope upgrade is
+  preserved for the threat-model `threat_model_referenced` path which always
+  carries detail.
+- `GlobalExceptionHandler.handleValidation` applies the same empty-detail
+  guard so legacy single-arg `DomainValidationException` throws across the
+  ~30 422 sites no longer serialize `detail: {}` either.
+- MCP `gc_codex_review` now fans out two focused codex reviewers in parallel
+  against a single pre-computed diff: a core production-readiness reviewer
+  (fitness for purpose, architectural soundness, maintainability,
+  extensibility, established patterns, codebase consistency) and a dedicated
+  application-security reviewer (input validation, AuthN/AuthZ, secrets and
+  crypto, data exposure, request handling, supply chain). Each reviewer
+  posts its own findings as inline PR review comments tagged `[core]` or
+  `[security]` in the title. The tool returns a single deduplicated
+  `comments` list with a `reviewer` field per entry, enriched with GraphQL
+  review-thread ids via one `reviewThreads` query, plus a `reviewers`
+  summary and per-reviewer `review_text`. PR number auto-detects via
+  `gh pr view --json number` when not supplied. `parseCodexReviewTail`
+  parses each reviewer's `COMMENT_IDS=[...]` tail; missing or malformed
+  tails throw rather than silently returning zero findings. New
+  `dedupFindings` helper collapses same-location findings by
+  `(path, line, title-prefix)` so cross-reviewer overlaps produce a
+  single entry in the returned list.
+- New MCP tool `gc_codex_verify_finding` takes `repo_path`, `pr_number`, and
+  the REST `comment_id` returned from `gc_codex_review`, fetches the
+  original comment from GitHub (only allowlisted authors are accepted),
+  reads the anchored file, and runs `codex exec --sandbox read-only` to
+  decide whether the finding is resolved. On RESOLVED the review thread
+  is marked resolved via the GraphQL `resolveReviewThread` mutation. On
+  UNRESOLVED a threaded reply with codex's new directions is posted via
+  `/repos/:o/:r/pulls/:pr/comments/:id/replies` and returned to the caller
+  so the coding agent can drive the next fix cycle without re-fetching.
+- Skills `implement` (Step 13) and `ship` (Phase 4) updated to drive the new
+  fix/verify loop: call `gc_codex_review` with `pr_number`, iterate over the
+  returned `comments` list, fix each one locally, then call
+  `gc_codex_verify_finding` to confirm. Per-finding cap of 2 verify calls
+  before escalation; overall step/phase cap of 2 `gc_codex_review`
+  invocations unchanged.
+- `ErrorResponse.of(code, message, detail)` now treats `null`/empty detail
+  identically to the 2-arg overload, preventing both an `NPE` from
+  `Map.copyOf(null)` and accidental `detail: {}` serialization at the type
+  boundary. Direct unit tests for `handleConflict` and `handleValidation`
+  cover both the empty- and populated-detail branches.
+
 ## [0.111.1] - 2026-04-11
 
 ### Added
