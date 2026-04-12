@@ -103,18 +103,49 @@ describe("buildUrl", () => {
 // ---------------------------------------------------------------------------
 
 describe("parseErrorBody", () => {
-  it("extracts message from error envelope", () => {
-    const body = JSON.stringify({ error: { code: "NOT_FOUND", message: "Requirement not found" } });
-    assert.equal(parseErrorBody(body), "Requirement not found");
+  it("extracts code, message, and detail from a Ground Control error envelope", () => {
+    const body = JSON.stringify({
+      error: {
+        code: "threat_model_referenced",
+        message: "Threat model TM-001 cannot be deleted while reverse links exist",
+        detail: {
+          threatModelUid: "TM-001",
+          assetUids: ["ASSET-001"],
+          scenarioUids: ["RS-001", "RS-002"],
+        },
+      },
+    });
+    const envelope = parseErrorBody(body);
+    assert.equal(envelope.code, "threat_model_referenced");
+    assert.match(envelope.message, /TM-001 cannot be deleted/);
+    assert.deepEqual(envelope.detail, {
+      threatModelUid: "TM-001",
+      assetUids: ["ASSET-001"],
+      scenarioUids: ["RS-001", "RS-002"],
+    });
   });
 
-  it("returns raw text for non-JSON", () => {
-    assert.equal(parseErrorBody("Internal Server Error"), "Internal Server Error");
+  it("returns null code/detail when the envelope only has a message", () => {
+    const body = JSON.stringify({ error: { code: "not_found", message: "Requirement not found" } });
+    const envelope = parseErrorBody(body);
+    assert.equal(envelope.code, "not_found");
+    assert.equal(envelope.message, "Requirement not found");
+    assert.equal(envelope.detail, null);
   });
 
-  it("returns raw text for unexpected JSON shape", () => {
-    const body = JSON.stringify({ status: 500 });
-    assert.equal(parseErrorBody(body), body);
+  it("falls back to raw text for non-JSON", () => {
+    const envelope = parseErrorBody("Internal Server Error");
+    assert.equal(envelope.code, null);
+    assert.equal(envelope.message, "Internal Server Error");
+    assert.equal(envelope.detail, null);
+  });
+
+  it("falls back to raw text for unexpected JSON shape", () => {
+    const raw = JSON.stringify({ status: 500 });
+    const envelope = parseErrorBody(raw);
+    assert.equal(envelope.code, null);
+    assert.equal(envelope.message, raw);
+    assert.equal(envelope.detail, null);
   });
 });
 

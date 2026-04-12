@@ -157,8 +157,8 @@ class ThreatModelServiceTest {
                     .thenReturn(Optional.of(tm));
             when(threatModelRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-            var command =
-                    new UpdateThreatModelCommand("Updated title", null, null, null, StrideCategory.TAMPERING, null);
+            var command = new UpdateThreatModelCommand(
+                    "Updated title", null, null, null, StrideCategory.TAMPERING, null, false, false);
             var result = threatModelService.update(projectId, tm.getId(), command);
 
             assertThat(result.getTitle()).isEqualTo("Updated title");
@@ -171,10 +171,81 @@ class ThreatModelServiceTest {
             var id = UUID.randomUUID();
             when(threatModelRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.empty());
 
-            var command = new UpdateThreatModelCommand("Title", null, null, null, null, null);
+            var command = new UpdateThreatModelCommand("Title", null, null, null, null, null, false, false);
 
             assertThatThrownBy(() -> threatModelService.update(projectId, id, command))
                     .isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void rejectsBlankTitle() {
+            var tm = makeThreatModel();
+            when(threatModelRepository.findByIdAndProjectId(tm.getId(), projectId))
+                    .thenReturn(Optional.of(tm));
+
+            var command = new UpdateThreatModelCommand("   ", null, null, null, null, null, false, false);
+
+            assertThatThrownBy(() -> threatModelService.update(projectId, tm.getId(), command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("title");
+        }
+
+        @Test
+        void rejectsBlankRequiredField() {
+            var tm = makeThreatModel();
+            when(threatModelRepository.findByIdAndProjectId(tm.getId(), projectId))
+                    .thenReturn(Optional.of(tm));
+
+            var command = new UpdateThreatModelCommand(null, null, "", null, null, null, false, false);
+
+            assertThatThrownBy(() -> threatModelService.update(projectId, tm.getId(), command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("threatEvent");
+        }
+
+        @Test
+        void clearsStrideWhenFlagSet() {
+            var tm = makeThreatModel();
+            assertThat(tm.getStride()).isNotNull();
+            when(threatModelRepository.findByIdAndProjectId(tm.getId(), projectId))
+                    .thenReturn(Optional.of(tm));
+            when(threatModelRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateThreatModelCommand(null, null, null, null, null, null, true, false);
+            var result = threatModelService.update(projectId, tm.getId(), command);
+
+            assertThat(result.getStride()).isNull();
+            assertThat(result.getNarrative()).isEqualTo("Observed 3x surge after breach dump release.");
+        }
+
+        @Test
+        void clearsNarrativeWhenFlagSet() {
+            var tm = makeThreatModel();
+            assertThat(tm.getNarrative()).isNotNull();
+            when(threatModelRepository.findByIdAndProjectId(tm.getId(), projectId))
+                    .thenReturn(Optional.of(tm));
+            when(threatModelRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateThreatModelCommand(null, null, null, null, null, null, false, true);
+            var result = threatModelService.update(projectId, tm.getId(), command);
+
+            assertThat(result.getNarrative()).isNull();
+            assertThat(result.getStride()).isEqualTo(StrideCategory.SPOOFING);
+        }
+
+        @Test
+        void clearStrideOverridesProvidedValue() {
+            var tm = makeThreatModel();
+            when(threatModelRepository.findByIdAndProjectId(tm.getId(), projectId))
+                    .thenReturn(Optional.of(tm));
+            when(threatModelRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            // clear flag wins over the supplied stride value
+            var command =
+                    new UpdateThreatModelCommand(null, null, null, null, StrideCategory.TAMPERING, null, true, false);
+            var result = threatModelService.update(projectId, tm.getId(), command);
+
+            assertThat(result.getStride()).isNull();
         }
     }
 

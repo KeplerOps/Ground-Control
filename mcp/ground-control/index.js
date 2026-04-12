@@ -273,7 +273,18 @@ function ok(text) {
 }
 
 function err(e) {
-  return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+  // RequestError carries the structured backend error envelope (status, code,
+  // detail). Render code and detail when present so callers see the full
+  // actionable info — for example the asset/scenario UID lists from a 409
+  // threat_model_referenced rejection.
+  let text = `Error: ${e.message}`;
+  if (e && e.name === "RequestError") {
+    if (e.code) text += ` (${e.code})`;
+    if (e.detail && typeof e.detail === "object" && Object.keys(e.detail).length > 0) {
+      text += `\nDetail: ${JSON.stringify(e.detail, null, 2)}`;
+    }
+  }
+  return { content: [{ type: "text", text }], isError: true };
 }
 
 const server = new McpServer({ name: "ground-control", version: "1.0.0" });

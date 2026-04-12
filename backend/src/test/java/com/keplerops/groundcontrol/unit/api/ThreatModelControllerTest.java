@@ -21,12 +21,14 @@ import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.threatmodels.model.ThreatModel;
 import com.keplerops.groundcontrol.domain.threatmodels.service.ThreatModelService;
+import com.keplerops.groundcontrol.domain.threatmodels.service.UpdateThreatModelCommand;
 import com.keplerops.groundcontrol.domain.threatmodels.state.StrideCategory;
 import com.keplerops.groundcontrol.domain.threatmodels.state.ThreatModelStatus;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.MediaType;
@@ -196,6 +198,77 @@ class ThreatModelControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.title", is("Updated title")));
+    }
+
+    @Test
+    void updateForwardsClearStrideFlagToCommand() throws Exception {
+        var updated = makeThreatModel();
+        updated.setStride(null);
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
+        when(threatModelService.update(eq(PROJECT_ID), eq(TM_ID), any())).thenReturn(updated);
+
+        mockMvc.perform(
+                        put("/api/v1/threat-models/{id}", TM_ID)
+                                .param("project", "ground-control")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                                {"clearStride": true}
+                                """))
+                .andExpect(status().isOk());
+
+        var captor = ArgumentCaptor.forClass(UpdateThreatModelCommand.class);
+        verify(threatModelService).update(eq(PROJECT_ID), eq(TM_ID), captor.capture());
+        var command = captor.getValue();
+        org.junit.jupiter.api.Assertions.assertTrue(command.clearStride());
+        org.junit.jupiter.api.Assertions.assertFalse(command.clearNarrative());
+    }
+
+    @Test
+    void updateForwardsClearNarrativeFlagToCommand() throws Exception {
+        var updated = makeThreatModel();
+        updated.setNarrative(null);
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
+        when(threatModelService.update(eq(PROJECT_ID), eq(TM_ID), any())).thenReturn(updated);
+
+        mockMvc.perform(
+                        put("/api/v1/threat-models/{id}", TM_ID)
+                                .param("project", "ground-control")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                                {"clearNarrative": true}
+                                """))
+                .andExpect(status().isOk());
+
+        var captor = ArgumentCaptor.forClass(UpdateThreatModelCommand.class);
+        verify(threatModelService).update(eq(PROJECT_ID), eq(TM_ID), captor.capture());
+        var command = captor.getValue();
+        org.junit.jupiter.api.Assertions.assertTrue(command.clearNarrative());
+        org.junit.jupiter.api.Assertions.assertFalse(command.clearStride());
+    }
+
+    @Test
+    void updateDefaultsClearFlagsToFalseWhenNotProvided() throws Exception {
+        var updated = makeThreatModel();
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
+        when(threatModelService.update(eq(PROJECT_ID), eq(TM_ID), any())).thenReturn(updated);
+
+        mockMvc.perform(
+                        put("/api/v1/threat-models/{id}", TM_ID)
+                                .param("project", "ground-control")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                                {"title": "still here"}
+                                """))
+                .andExpect(status().isOk());
+
+        var captor = ArgumentCaptor.forClass(UpdateThreatModelCommand.class);
+        verify(threatModelService).update(eq(PROJECT_ID), eq(TM_ID), captor.capture());
+        var command = captor.getValue();
+        org.junit.jupiter.api.Assertions.assertFalse(command.clearStride());
+        org.junit.jupiter.api.Assertions.assertFalse(command.clearNarrative());
     }
 
     @Test

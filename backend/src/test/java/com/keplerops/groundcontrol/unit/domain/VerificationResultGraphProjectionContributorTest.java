@@ -96,4 +96,34 @@ class VerificationResultGraphProjectionContributorTest {
         assertThat(edges.get(0).targetId())
                 .isEqualTo(GraphIds.nodeId(GraphEntityType.REQUIREMENT, requirement.getId()));
     }
+
+    @Test
+    void skipsVerifiesEdgeWhenLinkedRequirementIsArchived() {
+        var projectId = UUID.randomUUID();
+        var project = makeProject(projectId);
+
+        var liveRequirement = new Requirement(project, "REQ-001", "Live requirement", "Currently active.");
+        setField(liveRequirement, "id", UUID.randomUUID());
+
+        var archivedRequirement = new Requirement(project, "REQ-002", "Archived requirement", "Was retired.");
+        setField(archivedRequirement, "id", UUID.randomUUID());
+        // Bypass the DRAFT→ACTIVE→ARCHIVED state machine: we only need archivedAt set
+        // for the contributor's filter check.
+        setField(archivedRequirement, "status", com.keplerops.groundcontrol.domain.requirements.state.Status.ARCHIVED);
+        setField(archivedRequirement, "archivedAt", NOW);
+
+        var liveResult = makeResult(project, liveRequirement);
+        var archivedResult = makeResult(project, archivedRequirement);
+
+        when(verificationResultRepository.findByProjectIdOrderByVerifiedAtDesc(projectId))
+                .thenReturn(List.of(liveResult, archivedResult));
+
+        var edges = contributor.contributeEdges(projectId);
+
+        // The archived requirement is omitted by RequirementGraphProjectionContributor,
+        // so emitting an edge to it would dangle. Only the live edge survives.
+        assertThat(edges).hasSize(1);
+        assertThat(edges.get(0).targetId())
+                .isEqualTo(GraphIds.nodeId(GraphEntityType.REQUIREMENT, liveRequirement.getId()));
+    }
 }

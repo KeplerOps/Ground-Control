@@ -465,16 +465,40 @@ export function buildUrl(path, params) {
   return url.toString();
 }
 
+/**
+ * Carries the structured backend error envelope through the MCP layer so
+ * tools can surface error code, message, and detail map (e.g. the offending
+ * UID lists from a 409 referential integrity rejection).
+ */
+export class RequestError extends Error {
+  constructor({ status, code, message, detail }) {
+    super(`${status}: ${message}`);
+    this.name = "RequestError";
+    this.status = status;
+    this.code = code;
+    this.detail = detail;
+  }
+}
+
+/**
+ * Returns the parsed error envelope from a non-2xx response body. Falls back
+ * to a synthetic envelope when the body isn't JSON or doesn't match the
+ * Ground Control error shape.
+ */
 export function parseErrorBody(text) {
   try {
     const body = JSON.parse(text);
-    if (body.error && body.error.message) {
-      return body.error.message;
+    if (body && body.error && typeof body.error === "object") {
+      return {
+        code: body.error.code ?? null,
+        message: body.error.message ?? text,
+        detail: body.error.detail ?? null,
+      };
     }
-    return text;
   } catch {
-    return text;
+    // fall through to text fallback
   }
+  return { code: null, message: text, detail: null };
 }
 
 function requiresPackRegistryAdmin(path) {
@@ -513,8 +537,13 @@ async function request(method, path, { body, params, formData } = {}) {
   const text = await res.text();
 
   if (!res.ok) {
-    const msg = parseErrorBody(text);
-    throw new Error(`${res.status}: ${msg}`);
+    const envelope = parseErrorBody(text);
+    throw new RequestError({
+      status: res.status,
+      code: envelope.code,
+      message: envelope.message,
+      detail: envelope.detail,
+    });
   }
 
   const data = text ? JSON.parse(text) : null;

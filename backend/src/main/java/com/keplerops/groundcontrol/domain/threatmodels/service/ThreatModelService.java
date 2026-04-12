@@ -78,6 +78,13 @@ public class ThreatModelService {
     public ThreatModel update(UUID projectId, UUID id, UpdateThreatModelCommand command) {
         var threatModel = findByIdOrThrow(projectId, id);
 
+        // Required fields: present-and-non-blank or absent. Reject blank strings so
+        // partial updates can't corrupt records that the create path would refuse.
+        rejectBlankIfPresent("title", command.title());
+        rejectBlankIfPresent("threatSource", command.threatSource());
+        rejectBlankIfPresent("threatEvent", command.threatEvent());
+        rejectBlankIfPresent("effect", command.effect());
+
         if (command.title() != null) {
             threatModel.setTitle(command.title());
         }
@@ -90,16 +97,33 @@ public class ThreatModelService {
         if (command.effect() != null) {
             threatModel.setEffect(command.effect());
         }
-        if (command.stride() != null) {
+
+        // Optional fields: explicit clear flag wins over a non-null value so callers
+        // can null an incorrect classification or stale narrative without resorting
+        // to direct database edits.
+        if (command.clearStride()) {
+            threatModel.setStride(null);
+        } else if (command.stride() != null) {
             threatModel.setStride(command.stride());
         }
-        if (command.narrative() != null) {
+        if (command.clearNarrative()) {
+            threatModel.setNarrative(null);
+        } else if (command.narrative() != null) {
             threatModel.setNarrative(command.narrative());
         }
 
         var saved = threatModelRepository.save(threatModel);
         log.info("threat_model_updated: id={} uid={}", saved.getId(), saved.getUid());
         return saved;
+    }
+
+    private static void rejectBlankIfPresent(String fieldName, String value) {
+        if (value != null && value.isBlank()) {
+            throw new com.keplerops.groundcontrol.domain.exception.DomainValidationException(
+                    fieldName + " must not be blank when provided",
+                    "validation_error",
+                    java.util.Map.of("field", fieldName));
+        }
     }
 
     @Transactional(readOnly = true)

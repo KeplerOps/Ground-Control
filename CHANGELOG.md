@@ -40,6 +40,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AssetGraphProjectionContributor` and `RiskGraphProjectionContributor` now
   project edges to `GraphEntityType.THREAT_MODEL` when their threat-model
   target type carries a `targetEntityId`.
+- `ThreatModelService.update` now rejects blank required fields
+  (`title`, `threatSource`, `threatEvent`, `effect`) with `validation_error`.
+- `UpdateThreatModelRequest` and `UpdateThreatModelCommand` gain `clearStride`
+  and `clearNarrative` boolean flags so callers can explicitly null those
+  optional fields (passing `null` alone now means "no change").
+- `VerificationResultGraphProjectionContributor` no longer emits `VERIFIES`
+  edges to archived requirements.
+- `ThreatModelService.delete` rejects deletion with 409 `threat_model_referenced`
+  while reverse `AssetLink` / `RiskScenarioLink` rows still target the threat
+  model. The conflict envelope's `detail` block lists offending UIDs.
+- MCP `gc_delete_threat_model` and other tools now surface the structured error
+  envelope (`code` + `detail`) returned by the API via the new `RequestError`
+  class in `mcp/ground-control/lib.js`.
 
 ## [0.111.1] - 2026-04-11
 

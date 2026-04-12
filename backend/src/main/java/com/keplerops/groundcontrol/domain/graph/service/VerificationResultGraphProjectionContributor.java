@@ -55,8 +55,14 @@ public class VerificationResultGraphProjectionContributor implements GraphProjec
 
     @Override
     public List<GraphEdge> contributeEdges(UUID projectId) {
+        // Skip edges to archived requirements: RequirementGraphProjectionContributor
+        // omits archived requirement nodes (`findByProjectIdAndArchivedAtIsNull`),
+        // so emitting an edge here would either dangle (projection-only mode) or
+        // be silently dropped by AGE materialization. Behaviour must stay
+        // consistent across both modes.
         return verificationResultRepository.findByProjectIdOrderByVerifiedAtDesc(projectId).stream()
-                .filter(result -> result.getRequirement() != null)
+                .filter(result -> result.getRequirement() != null
+                        && result.getRequirement().getArchivedAt() == null)
                 .map(result -> new GraphEdge(
                         "VERIFIES:" + result.getId() + ":"
                                 + result.getRequirement().getId(),

@@ -710,8 +710,14 @@ referencing asset and scenario UIDs so callers can clean them up before retrying
 DENIAL_OF_SERVICE, ELEVATION_OF_PRIVILEGE), `narrative` (optional analyst context,
 non-authoritative).
 
-**UpdateThreatModelRequest fields:** same as create minus `uid`. Only provided fields
-are updated.
+**UpdateThreatModelRequest fields:** `title`, `threatSource`, `threatEvent`, `effect`,
+`stride`, `narrative`, `clearStride` (boolean), `clearNarrative` (boolean). Only fields
+present in the request body are updated. Required fields (`title`, `threatSource`,
+`threatEvent`, `effect`) reject blank strings server-side with 422 `validation_error`
+when present. Optional fields (`stride`, `narrative`) cannot be cleared by sending
+`null` (which means "no change") — set `clearStride` or `clearNarrative` to `true` to
+explicitly null them. When a `clear*` flag is true, any value supplied in the
+corresponding field is ignored.
 
 **ThreatModelLinkRequest fields:** `targetType` (required, ThreatModelLinkTargetType
 enum), `targetEntityId` (UUID, for internal first-class targets), `targetIdentifier`

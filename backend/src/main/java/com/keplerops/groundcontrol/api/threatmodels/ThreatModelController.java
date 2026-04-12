@@ -80,7 +80,9 @@ public class ThreatModelController {
                 request.threatEvent(),
                 request.effect(),
                 request.stride(),
-                request.narrative());
+                request.narrative(),
+                Boolean.TRUE.equals(request.clearStride()),
+                Boolean.TRUE.equals(request.clearNarrative()));
         return ThreatModelResponse.from(threatModelService.update(projectId, id, command));
     }
 
