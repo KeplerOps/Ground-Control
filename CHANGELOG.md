@@ -76,6 +76,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `V057__create_threat_model_link.sql` sets `target_url` and `target_title`
   to `NOT NULL DEFAULT ''` so the JPA entity's empty-string contract holds
   end-to-end. `MigrationSmokeTest` verifies the column metadata directly.
+- `VerificationResultGraphProjectionContributor.contributeNodes` now omits
+  `property` and `expiresAt` from the node property map when their values are
+  `null` (same class of fix as `ThreatModelGraphProjectionContributor`); the
+  `VERIFIES` edge id is now the bare `VerificationResult` UUID, matching every
+  other contributor.
+- `GlobalExceptionHandler.handleConflict` calls the 2-arg `ErrorResponse.of`
+  overload when the exception's detail map is empty so legacy 409 responses no
+  longer regress to serializing `detail: {}`. The cycle-2 envelope upgrade is
+  preserved for the threat-model `threat_model_referenced` path which always
+  carries detail.
 
 ## [0.111.1] - 2026-04-11
 

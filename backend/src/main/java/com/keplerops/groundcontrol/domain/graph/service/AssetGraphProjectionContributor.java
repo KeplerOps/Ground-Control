@@ -140,6 +140,10 @@ public class AssetGraphProjectionContributor implements GraphProjectionContribut
                     case TREATMENT_PLAN -> GraphEntityType.TREATMENT_PLAN;
                     case METHODOLOGY_PROFILE -> GraphEntityType.METHODOLOGY_PROFILE;
                     case CONTROL -> GraphEntityType.CONTROL;
+                        // Always emits an edge to the THREAT_MODEL node regardless of the
+                        // threat model's status. ThreatModelGraphProjectionContributor
+                        // intentionally keeps archived threat-model nodes in the graph
+                        // (see its contributeNodes javadoc) so this edge never dangles.
                     case THREAT_MODEL_ENTRY -> GraphEntityType.THREAT_MODEL;
                     case FINDING, EVIDENCE, AUDIT, ISSUE, CODE, CONFIGURATION, EXTERNAL -> null;
                 };

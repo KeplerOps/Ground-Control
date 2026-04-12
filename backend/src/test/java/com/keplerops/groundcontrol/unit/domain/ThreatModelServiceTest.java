@@ -3,6 +3,7 @@ package com.keplerops.groundcontrol.unit.domain;
 import static com.keplerops.groundcontrol.TestUtil.setField;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -378,14 +379,21 @@ class ThreatModelServiceTest {
                     .thenReturn(Optional.of(tm));
             when(assetLinkRepository.findAssetUidsByTargetTypeAndTargetEntityIdAndProjectId(
                             AssetLinkTargetType.THREAT_MODEL_ENTRY, tm.getId(), projectId))
-                    .thenReturn(List.of("ASSET-001"));
+                    .thenReturn(List.of("ASSET-001", "ASSET-002"));
             when(riskScenarioLinkRepository.findRiskScenarioUidsByTargetTypeAndTargetEntityIdAndProjectId(
                             RiskScenarioLinkTargetType.THREAT_MODEL, tm.getId(), projectId))
                     .thenReturn(List.of());
 
-            assertThatThrownBy(() -> threatModelService.delete(projectId, tm.getId()))
-                    .isInstanceOf(ConflictException.class)
-                    .hasMessageContaining("reverse links");
+            var thrown = catchThrowableOfType(
+                    () -> threatModelService.delete(projectId, tm.getId()), ConflictException.class);
+            assertThat(thrown).isNotNull().hasMessageContaining("reverse links");
+            assertThat(thrown.getErrorCode()).isEqualTo("threat_model_referenced");
+            var detail = thrown.getDetail();
+            assertThat(detail).containsEntry("threatModelUid", tm.getUid());
+            assertThat(detail).containsEntry("assetCount", 2);
+            assertThat(detail).containsEntry("scenarioCount", 0);
+            assertThat(detail.get("assetUids")).isEqualTo(List.of("ASSET-001", "ASSET-002"));
+            assertThat(detail.get("scenarioUids")).isEqualTo(List.of());
         }
 
         @Test
@@ -400,9 +408,16 @@ class ThreatModelServiceTest {
                             RiskScenarioLinkTargetType.THREAT_MODEL, tm.getId(), projectId))
                     .thenReturn(List.of("RS-001"));
 
-            assertThatThrownBy(() -> threatModelService.delete(projectId, tm.getId()))
-                    .isInstanceOf(ConflictException.class)
-                    .hasMessageContaining("reverse links");
+            var thrown = catchThrowableOfType(
+                    () -> threatModelService.delete(projectId, tm.getId()), ConflictException.class);
+            assertThat(thrown).isNotNull().hasMessageContaining("reverse links");
+            assertThat(thrown.getErrorCode()).isEqualTo("threat_model_referenced");
+            var detail = thrown.getDetail();
+            assertThat(detail).containsEntry("threatModelUid", tm.getUid());
+            assertThat(detail).containsEntry("assetCount", 0);
+            assertThat(detail).containsEntry("scenarioCount", 1);
+            assertThat(detail.get("assetUids")).isEqualTo(List.of());
+            assertThat(detail.get("scenarioUids")).isEqualTo(List.of("RS-001"));
         }
     }
 }

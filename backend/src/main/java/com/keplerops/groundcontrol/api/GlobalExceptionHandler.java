@@ -51,8 +51,15 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ErrorResponse> handleConflict(ConflictException ex) {
-        return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(ErrorResponse.of(ex.getErrorCode(), ex.getMessage(), ex.getDetail()));
+        // Only include the detail block when it has content; otherwise call the
+        // 2-arg overload so @JsonInclude(NON_NULL) omits the field. Without this
+        // guard every legacy single-arg ConflictException would start serializing
+        // `detail: {}` after the cycle-2 envelope upgrade.
+        var detail = ex.getDetail();
+        var body = (detail == null || detail.isEmpty())
+                ? ErrorResponse.of(ex.getErrorCode(), ex.getMessage())
+                : ErrorResponse.of(ex.getErrorCode(), ex.getMessage(), detail);
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

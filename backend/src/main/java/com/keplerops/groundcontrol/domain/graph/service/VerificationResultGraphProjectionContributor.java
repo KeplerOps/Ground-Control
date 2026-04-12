@@ -34,13 +34,20 @@ public class VerificationResultGraphProjectionContributor implements GraphProjec
     public List<GraphNode> contributeNodes(UUID projectId) {
         return verificationResultRepository.findByProjectIdOrderByVerifiedAtDesc(projectId).stream()
                 .map(result -> {
+                    // Required fields are always populated; optional fields (`property`,
+                    // `expiresAt`) must be omitted rather than written as null because
+                    // Apache AGE / Cypher property maps reject null property values.
                     Map<String, Object> properties = new LinkedHashMap<>();
                     properties.put("prover", result.getProver());
-                    properties.put("property", result.getProperty());
+                    if (result.getProperty() != null) {
+                        properties.put("property", result.getProperty());
+                    }
                     properties.put("result", result.getResult().name());
                     properties.put("assuranceLevel", result.getAssuranceLevel().name());
                     properties.put("verifiedAt", result.getVerifiedAt());
-                    properties.put("expiresAt", result.getExpiresAt());
+                    if (result.getExpiresAt() != null) {
+                        properties.put("expiresAt", result.getExpiresAt());
+                    }
                     return new GraphNode(
                             GraphIds.nodeId(GraphEntityType.VERIFICATION_RESULT, result.getId()),
                             result.getId().toString(),
@@ -64,8 +71,7 @@ public class VerificationResultGraphProjectionContributor implements GraphProjec
                 .filter(result -> result.getRequirement() != null
                         && result.getRequirement().getArchivedAt() == null)
                 .map(result -> new GraphEdge(
-                        "VERIFIES:" + result.getId() + ":"
-                                + result.getRequirement().getId(),
+                        result.getId().toString(),
                         "VERIFIES",
                         GraphIds.nodeId(GraphEntityType.VERIFICATION_RESULT, result.getId()),
                         GraphIds.nodeId(

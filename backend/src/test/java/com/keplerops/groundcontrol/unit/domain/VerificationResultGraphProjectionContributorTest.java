@@ -50,6 +50,33 @@ class VerificationResultGraphProjectionContributorTest {
     }
 
     @Test
+    void omitsNullPropertyAndExpiresAtFromNodeProperties() {
+        var projectId = UUID.randomUUID();
+        var project = makeProject(projectId);
+        var result = new VerificationResult(project, "openjml", VerificationStatus.PROVEN, AssuranceLevel.L2, NOW);
+        setField(result, "id", UUID.randomUUID());
+        setField(result, "createdAt", NOW);
+        setField(result, "updatedAt", NOW);
+        // property and expiresAt deliberately left null
+
+        when(verificationResultRepository.findByProjectIdOrderByVerifiedAtDesc(projectId))
+                .thenReturn(List.of(result));
+
+        var nodes = contributor.contributeNodes(projectId);
+
+        assertThat(nodes).hasSize(1);
+        var properties = nodes.get(0).properties();
+        // Apache AGE / Cypher reject null property values, so optional fields
+        // must be absent rather than present-with-null.
+        assertThat(properties).doesNotContainKey("property");
+        assertThat(properties).doesNotContainKey("expiresAt");
+        // Required fields stay.
+        assertThat(properties).containsEntry("prover", "openjml");
+        assertThat(properties).containsEntry("result", "PROVEN");
+        assertThat(properties).containsEntry("assuranceLevel", "L2");
+    }
+
+    @Test
     void contributesNodesForEachVerificationResult() {
         var projectId = UUID.randomUUID();
         var project = makeProject(projectId);
@@ -89,6 +116,8 @@ class VerificationResultGraphProjectionContributorTest {
 
         assertThat(edges).hasSize(1);
         assertThat(edges.get(0).edgeType()).isEqualTo("VERIFIES");
+        // Edge id is the plain UUID of the source row, matching every other contributor.
+        assertThat(edges.get(0).id()).isEqualTo(resultWithRequirement.getId().toString());
         assertThat(edges.get(0).sourceEntityType()).isEqualTo(GraphEntityType.VERIFICATION_RESULT);
         assertThat(edges.get(0).targetEntityType()).isEqualTo(GraphEntityType.REQUIREMENT);
         assertThat(edges.get(0).sourceId())
