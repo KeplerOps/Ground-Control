@@ -31,10 +31,30 @@ export function buildGroundControlContextSnippet(project = "your-project-id") {
   return [
     "## Ground Control Context",
     "",
-    "```yaml",
-    "ground_control:",
-    `  project: ${project}`,
-    "```",
+    "This repo's Ground Control project id, workflow commands, SonarCloud",
+    "settings, and plan rules live in `.ground-control.yaml` at repo root.",
+    "Agents read it via the `gc_get_repo_ground_control_context` MCP tool.",
+  ].join("\n");
+}
+
+export function buildSuggestedGroundControlYaml(project = "your-project-id") {
+  return [
+    "schema_version: 1",
+    `project: ${project}`,
+    "",
+    "# Optional fields:",
+    "# github_repo: owner/repo",
+    "# workflow:",
+    "#   test_command: <how to run tests>",
+    "#   completion_command: <how to run the full CI gate>",
+    "#   lint_command: <how to run the linter>",
+    "#   format_command: <how to run the formatter>",
+    "# sonarcloud:",
+    "#   project_key: <sonar-project-key>",
+    "#   organization: <sonar-org>",
+    "# rules:",
+    "#   plan_rules: .gc/plan-rules.md",
+    "",
   ].join("\n");
 }
 
@@ -900,108 +920,245 @@ export async function createGitHubIssueViaApi(data, project) {
 // Repository context helpers
 // ---------------------------------------------------------------------------
 
-export function parseRepoGroundControlContext(agentsMarkdown) {
-  const snippet = buildGroundControlContextSnippet();
-  const headingMatch = agentsMarkdown.match(/^#{1,6}\s+Ground Control Context\s*$/m);
-  if (!headingMatch || headingMatch.index == null) {
-    return {
-      status: "missing_ground_control_context",
-      project: null,
-      errors: [
-        "AGENTS.md must include a 'Ground Control Context' section with a fenced YAML block.",
-      ],
-      suggested_agents_snippet: snippet,
-    };
-  }
+const SUPPORTED_GROUND_CONTROL_SCHEMA_VERSIONS = [1];
 
-  const sectionStart = headingMatch.index + headingMatch[0].length;
-  const afterHeading = agentsMarkdown.slice(sectionStart);
-  const nextHeadingMatch = afterHeading.match(/^#{1,6}\s+\S.*$/m);
-  const sectionBody = nextHeadingMatch ? afterHeading.slice(0, nextHeadingMatch.index) : afterHeading;
-  const yamlBlockMatch = sectionBody.match(/```(?:yaml|yml)\s*\n([\s\S]*?)```/m);
-  if (!yamlBlockMatch) {
-    return {
-      status: "invalid_ground_control_context",
-      project: null,
-      errors: [
-        "The 'Ground Control Context' section must contain a fenced YAML block.",
-      ],
-      suggested_agents_snippet: snippet,
-    };
-  }
+function emptyWorkflowConfig() {
+  return {
+    test_command: null,
+    completion_command: null,
+    lint_command: null,
+    format_command: null,
+  };
+}
 
+function normalizeWorkflowConfig(raw) {
+  if (raw == null || typeof raw !== "object") {
+    return { ok: true, value: emptyWorkflowConfig() };
+  }
+  if (Array.isArray(raw)) {
+    return { ok: false, errors: ["workflow must be a mapping, not a list"] };
+  }
+  const allowed = ["test_command", "completion_command", "lint_command", "format_command"];
+  const value = emptyWorkflowConfig();
+  const errors = [];
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) {
+      errors.push(`workflow has unknown key '${key}'`);
+      continue;
+    }
+    const v = raw[key];
+    if (v == null) continue;
+    if (typeof v !== "string" || v.trim() === "") {
+      errors.push(`workflow.${key} must be a non-empty string when set`);
+      continue;
+    }
+    value[key] = v;
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, value };
+}
+
+function normalizeSonarcloudConfig(raw) {
+  if (raw == null) {
+    return { ok: true, value: null };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, errors: ["sonarcloud must be a mapping, not a list or scalar"] };
+  }
+  const allowed = ["project_key", "organization"];
+  const errors = [];
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) {
+      errors.push(`sonarcloud has unknown key '${key}'`);
+    }
+  }
+  const project_key = raw.project_key;
+  const organization = raw.organization;
+  if (typeof project_key !== "string" || project_key.trim() === "") {
+    errors.push("sonarcloud.project_key must be a non-empty string when sonarcloud is set");
+  }
+  if (typeof organization !== "string" || organization.trim() === "") {
+    errors.push("sonarcloud.organization must be a non-empty string when sonarcloud is set");
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, value: { project_key, organization } };
+}
+
+function normalizeRulesConfig(raw) {
+  if (raw == null) {
+    return { ok: true, value: { plan_rules_path: null } };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, errors: ["rules must be a mapping"] };
+  }
+  const allowed = ["plan_rules"];
+  const errors = [];
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) {
+      errors.push(`rules has unknown key '${key}'`);
+    }
+  }
+  if (errors.length) return { ok: false, errors };
+
+  const planRules = raw.plan_rules;
+  if (planRules == null) {
+    return { ok: true, value: { plan_rules_path: null } };
+  }
+  if (typeof planRules !== "string" || planRules.trim() === "") {
+    return { ok: false, errors: ["rules.plan_rules must be a non-empty string when set"] };
+  }
+  return { ok: true, value: { plan_rules_path: planRules } };
+}
+
+export function parseGroundControlYaml(yamlText) {
   let parsed;
   try {
-    parsed = parseYaml(yamlBlockMatch[1]);
+    parsed = parseYaml(yamlText);
   } catch (error) {
-    return {
-      status: "invalid_ground_control_context",
-      project: null,
-      errors: [`Could not parse Ground Control context YAML: ${error.message}`],
-      suggested_agents_snippet: snippet,
-    };
+    return { ok: false, errors: [`Could not parse .ground-control.yaml: ${error.message}`] };
   }
 
-  const project = parsed?.ground_control?.project;
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, errors: [".ground-control.yaml root must be a mapping"] };
+  }
+
+  const errors = [];
+  const allowedTop = [
+    "schema_version",
+    "project",
+    "github_repo",
+    "workflow",
+    "sonarcloud",
+    "rules",
+  ];
+  for (const key of Object.keys(parsed)) {
+    if (!allowedTop.includes(key)) {
+      errors.push(`unknown top-level key '${key}'`);
+    }
+  }
+
+  const schemaVersion = parsed.schema_version;
+  if (!SUPPORTED_GROUND_CONTROL_SCHEMA_VERSIONS.includes(schemaVersion)) {
+    errors.push(
+      `schema_version must be one of ${SUPPORTED_GROUND_CONTROL_SCHEMA_VERSIONS.join(", ")} (got ${JSON.stringify(schemaVersion)})`,
+    );
+  }
+
+  const project = parsed.project;
   if (typeof project !== "string" || project.trim() === "") {
-    return {
-      status: "invalid_ground_control_context",
-      project: null,
-      errors: [
-        "Ground Control context must define ground_control.project as a non-empty string.",
-      ],
-      suggested_agents_snippet: snippet,
-    };
+    errors.push("project is required and must be a non-empty string");
+  } else if (!GROUND_CONTROL_PROJECT_RE.test(project)) {
+    errors.push(
+      "project must be a lowercase identifier using letters, numbers, and hyphens only",
+    );
   }
 
-  if (!GROUND_CONTROL_PROJECT_RE.test(project)) {
-    return {
-      status: "invalid_ground_control_context",
-      project: null,
-      errors: [
-        "ground_control.project must be a lowercase identifier using letters, numbers, and hyphens only.",
-      ],
-      suggested_agents_snippet: snippet,
-    };
+  let githubRepo = null;
+  if (parsed.github_repo != null) {
+    if (typeof parsed.github_repo !== "string" || parsed.github_repo.trim() === "") {
+      errors.push("github_repo must be a non-empty string when set");
+    } else {
+      githubRepo = parsed.github_repo;
+    }
   }
+
+  const workflowResult = normalizeWorkflowConfig(parsed.workflow);
+  if (!workflowResult.ok) errors.push(...workflowResult.errors);
+
+  const sonarResult = normalizeSonarcloudConfig(parsed.sonarcloud);
+  if (!sonarResult.ok) errors.push(...sonarResult.errors);
+
+  const rulesResult = normalizeRulesConfig(parsed.rules);
+  if (!rulesResult.ok) errors.push(...rulesResult.errors);
+
+  if (errors.length) return { ok: false, errors };
 
   return {
-    status: "ok",
-    project,
-    errors: [],
-    suggested_agents_snippet: snippet,
+    ok: true,
+    value: {
+      project,
+      github_repo: githubRepo,
+      workflow: workflowResult.value,
+      sonarcloud: sonarResult.value,
+      rules: {
+        plan_rules_path: rulesResult.value.plan_rules_path,
+      },
+    },
   };
 }
 
 export async function getRepoGroundControlContext(repoPath) {
   const repoRoot = await ensureGitRepo(repoPath);
-  const agentsPath = join(repoRoot, "AGENTS.md");
-  const snippet = buildGroundControlContextSnippet();
+  const configPath = join(repoRoot, ".ground-control.yaml");
 
-  let agentsMarkdown;
+  let yamlText;
   try {
-    agentsMarkdown = readAbsoluteTextFile(agentsPath);
+    yamlText = readAbsoluteTextFile(configPath);
   } catch (error) {
     if (error.code === "ENOENT") {
       return {
         repo_path: repoRoot,
-        agents_path: agentsPath,
-        status: "missing_agents_md",
+        config_path: configPath,
+        status: "missing_ground_control_yaml",
         project: null,
         errors: [
-          "AGENTS.md was not found at the repository root.",
+          ".ground-control.yaml was not found at the repository root. Create it with schema_version: 1 and project: <your-project-id> at minimum.",
         ],
-        suggested_agents_snippet: snippet,
+        suggested_ground_control_yaml: buildSuggestedGroundControlYaml(),
       };
     }
-
     throw error;
+  }
+
+  const parseResult = parseGroundControlYaml(yamlText);
+  if (!parseResult.ok) {
+    return {
+      repo_path: repoRoot,
+      config_path: configPath,
+      status: "invalid_ground_control_yaml",
+      project: null,
+      errors: parseResult.errors,
+      suggested_ground_control_yaml: buildSuggestedGroundControlYaml(),
+    };
+  }
+
+  // Resolve the plan_rules file if referenced. Must stay inside the repo root.
+  const { rules } = parseResult.value;
+  let planRulesContent = null;
+  if (rules.plan_rules_path) {
+    const absRulesPath = join(repoRoot, rules.plan_rules_path);
+    try {
+      planRulesContent = readAbsoluteTextFile(absRulesPath);
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        return {
+          repo_path: repoRoot,
+          config_path: configPath,
+          status: "invalid_ground_control_yaml",
+          project: null,
+          errors: [
+            `rules.plan_rules references ${rules.plan_rules_path} which does not exist`,
+          ],
+          suggested_ground_control_yaml: buildSuggestedGroundControlYaml(),
+        };
+      }
+      throw error;
+    }
   }
 
   return {
     repo_path: repoRoot,
-    agents_path: agentsPath,
-    ...parseRepoGroundControlContext(agentsMarkdown),
+    config_path: configPath,
+    status: "ok",
+    project: parseResult.value.project,
+    github_repo: parseResult.value.github_repo,
+    workflow: parseResult.value.workflow,
+    sonarcloud: parseResult.value.sonarcloud,
+    rules: {
+      plan_rules_path: rules.plan_rules_path,
+      plan_rules_content: planRulesContent,
+    },
+    errors: [],
   };
 }
 

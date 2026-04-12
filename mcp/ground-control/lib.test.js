@@ -1,11 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import {
   buildUrl,
   parseErrorBody,
   formatIssueBody,
   buildGroundControlContextSnippet,
-  parseRepoGroundControlContext,
+  buildSuggestedGroundControlYaml,
+  parseGroundControlYaml,
+  getRepoGroundControlContext,
   buildCodexArchitecturePreflightPrompt,
   buildCodexArchitectureExecArgs,
   buildCodexReviewPrompt,
@@ -168,54 +174,220 @@ describe("formatIssueBody", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildGroundControlContextSnippet", () => {
-  it("renders the standardized AGENTS.md snippet", () => {
-    const snippet = buildGroundControlContextSnippet("aces-sdl");
+  it("renders a pointer section for AGENTS.md that references .ground-control.yaml", () => {
+    const snippet = buildGroundControlContextSnippet();
     assert.ok(snippet.includes("## Ground Control Context"));
-    assert.ok(snippet.includes("ground_control:"));
-    assert.ok(snippet.includes("project: aces-sdl"));
+    assert.ok(snippet.includes(".ground-control.yaml"));
+    assert.ok(snippet.includes("gc_get_repo_ground_control_context"));
   });
 });
 
-describe("parseRepoGroundControlContext", () => {
-  it("parses a valid Ground Control Context section", () => {
-    const result = parseRepoGroundControlContext(`
-# Agent Instructions
+describe("buildSuggestedGroundControlYaml", () => {
+  it("renders a starter yaml with schema_version and project", () => {
+    const yaml = buildSuggestedGroundControlYaml("aces-sdl");
+    assert.ok(yaml.includes("schema_version: 1"));
+    assert.ok(yaml.includes("project: aces-sdl"));
+    assert.ok(yaml.includes("workflow:"));
+    assert.ok(yaml.includes("sonarcloud:"));
+    assert.ok(yaml.includes("rules:"));
+  });
+});
 
-## Ground Control Context
-
-\`\`\`yaml
-ground_control:
-  project: aces-sdl
-\`\`\`
-`);
-
-    assert.equal(result.status, "ok");
-    assert.equal(result.project, "aces-sdl");
-    assert.deepEqual(result.errors, []);
+describe("parseGroundControlYaml", () => {
+  it("parses a minimal valid yaml", () => {
+    const result = parseGroundControlYaml("schema_version: 1\nproject: aces-sdl\n");
+    assert.equal(result.ok, true);
+    assert.equal(result.value.project, "aces-sdl");
+    assert.equal(result.value.github_repo, null);
+    assert.deepEqual(result.value.workflow, {
+      test_command: null,
+      completion_command: null,
+      lint_command: null,
+      format_command: null,
+    });
+    assert.equal(result.value.sonarcloud, null);
+    assert.equal(result.value.rules.plan_rules_path, null);
   });
 
-  it("reports a missing Ground Control Context section", () => {
-    const result = parseRepoGroundControlContext("# Agent Instructions\n");
-
-    assert.equal(result.status, "missing_ground_control_context");
-    assert.equal(result.project, null);
-    assert.ok(result.errors[0].includes("Ground Control Context"));
-    assert.ok(result.suggested_agents_snippet.includes("ground_control:"));
+  it("parses a fully populated yaml", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "github_repo: KeplerOps/Ground-Control",
+      "workflow:",
+      "  test_command: cd backend && ./gradlew test -Pquick",
+      "  completion_command: make check",
+      "  lint_command: cd backend && ./gradlew spotlessCheck",
+      "  format_command: cd backend && ./gradlew spotlessApply",
+      "sonarcloud:",
+      "  project_key: KeplerOps_Ground-Control",
+      "  organization: KeplerOps",
+      "rules:",
+      "  plan_rules: .gc/plan-rules.md",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, true);
+    assert.equal(result.value.project, "ground-control");
+    assert.equal(result.value.github_repo, "KeplerOps/Ground-Control");
+    assert.equal(result.value.workflow.completion_command, "make check");
+    assert.equal(result.value.sonarcloud.project_key, "KeplerOps_Ground-Control");
+    assert.equal(result.value.sonarcloud.organization, "KeplerOps");
+    assert.equal(result.value.rules.plan_rules_path, ".gc/plan-rules.md");
   });
 
-  it("reports an invalid project identifier", () => {
-    const result = parseRepoGroundControlContext(`
-## Ground Control Context
+  it("rejects invalid yaml text", () => {
+    const result = parseGroundControlYaml("project: a\n  bad: [unclosed");
+    assert.equal(result.ok, false);
+    assert.ok(result.errors[0].includes("parse"));
+  });
 
-\`\`\`yaml
-ground_control:
-  project: ACES_SDL
-\`\`\`
-`);
+  it("requires schema_version", () => {
+    const result = parseGroundControlYaml("project: x\n");
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("schema_version")));
+  });
 
-    assert.equal(result.status, "invalid_ground_control_context");
-    assert.equal(result.project, null);
-    assert.ok(result.errors[0].includes("lowercase identifier"));
+  it("rejects unsupported schema_version", () => {
+    const result = parseGroundControlYaml("schema_version: 99\nproject: x\n");
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("schema_version")));
+  });
+
+  it("requires project", () => {
+    const result = parseGroundControlYaml("schema_version: 1\n");
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("project")));
+  });
+
+  it("rejects an uppercase project identifier", () => {
+    const result = parseGroundControlYaml("schema_version: 1\nproject: ACES_SDL\n");
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("lowercase identifier")));
+  });
+
+  it("rejects unknown top-level keys", () => {
+    const result = parseGroundControlYaml("schema_version: 1\nproject: x\nbogus: true\n");
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("unknown top-level key")));
+  });
+
+  it("rejects workflow unknown keys", () => {
+    const yaml = "schema_version: 1\nproject: x\nworkflow:\n  bogus: nope\n";
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("workflow has unknown key")));
+  });
+
+  it("requires both sonarcloud fields when sonarcloud is set", () => {
+    const yaml = "schema_version: 1\nproject: x\nsonarcloud:\n  project_key: foo\n";
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("organization")));
+  });
+});
+
+describe("getRepoGroundControlContext", () => {
+  function makeTempRepo() {
+    const dir = mkdtempSync(join(tmpdir(), "gc-yaml-test-"));
+    execFileSync("git", ["-C", dir, "init", "-q"]);
+    return dir;
+  }
+
+  it("returns missing_ground_control_yaml when the file is absent", async () => {
+    const dir = makeTempRepo();
+    try {
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "missing_ground_control_yaml");
+      assert.equal(result.project, null);
+      assert.ok(result.errors[0].includes(".ground-control.yaml"));
+      assert.ok(result.suggested_ground_control_yaml.includes("schema_version"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns ok for a valid .ground-control.yaml", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        "schema_version: 1\nproject: test-project\n",
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "ok");
+      assert.equal(result.project, "test-project");
+      assert.equal(result.rules.plan_rules_path, null);
+      assert.equal(result.rules.plan_rules_content, null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("inlines plan_rules file content when referenced", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      mkdirSync(join(dir, ".gc"));
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(join(dir, ".gc", "plan-rules.md"), "- rule one\n- rule two\n");
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "rules:",
+          "  plan_rules: .gc/plan-rules.md",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "ok");
+      assert.equal(result.rules.plan_rules_path, ".gc/plan-rules.md");
+      assert.ok(result.rules.plan_rules_content.includes("rule one"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when plan_rules file is missing", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "rules:",
+          "  plan_rules: .gc/missing.md",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors[0].includes(".gc/missing.md"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when the yaml is malformed", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        "schema_version: 1\nproject: ACES_SDL\n",
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("lowercase identifier")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

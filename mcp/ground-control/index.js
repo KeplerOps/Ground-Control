@@ -666,7 +666,7 @@ server.tool(
 
 server.tool(
   "gc_get_repo_ground_control_context",
-  "Read the current repository's AGENTS.md and return the standardized Ground Control context used by workflow automation, including the project identifier and validation errors when the convention is missing or invalid.",
+  "Read the current repository's .ground-control.yaml and return the full Ground Control workflow config used by automation: project identifier, github_repo, workflow commands (test/completion/lint/format), optional sonarcloud settings, and optional inlined plan_rules file content. Returns validation errors when the file is missing or invalid.",
   {
     repo_path: z.string().describe("Absolute path to the target Git repository"),
   },
