@@ -33,19 +33,18 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
 Pass the full requirement UID exactly as it exists in Ground Control. Do not synthesize or rewrite a project prefix.
 
-Repo-local Ground Control project context should come from the current repository's `AGENTS.md`, not from hardcoded assumptions in the skill. The workflow validates this via `gc_get_repo_ground_control_context` before it starts implementation. It should:
+Repo-local Ground Control project context comes from a `.ground-control.yaml` file at the repo root (with larger rule files under `.gc/`), not from `AGENTS.md` inline YAML or hardcoded assumptions in the skill. The workflow validates this via `gc_get_repo_ground_control_context` before it starts implementation — that call returns the project id, workflow commands, SonarCloud settings, and plan rules in a single response. It should:
 - use the repo's configured Ground Control `project` when present
 - treat inputs like `OBS-001`, `DSL-101`, `API-412`, or `GC-J001` as already-complete UIDs
 - avoid guessing a prefix from the repository name
 
-Recommended `AGENTS.md` convention:
-
-## Ground Control Context
+Recommended `.ground-control.yaml` convention:
 
 ```yaml
-ground_control:
-  project: aces-sdl
+project: aces-sdl
 ```
+
+`AGENTS.md` should still carry a brief `Ground Control Context` section that points agents at `.ground-control.yaml` and `.gc/`, so repo newcomers know where the workflow config lives.
 
 ### User Touchpoints
 1. **Plan approval** — user reviews and approves the implementation plan

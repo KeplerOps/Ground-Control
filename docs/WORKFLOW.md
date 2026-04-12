@@ -168,8 +168,8 @@ For this repository, the human-maintained policy entrypoints are:
 
 Pick the next unblocked requirement from the work order and implement it. Ground Control's `/implement` skill automates the entire cycle:
 
-- The current repository's `AGENTS.md` should define repo-local Ground Control context using a `Ground Control Context` section with a fenced YAML block.
-- The `/implement` skill validates this up front via `gc_get_repo_ground_control_context` and stops rather than guessing if the repo context is missing or invalid.
+- The current repository's Ground Control context (project id, workflow commands, SonarCloud settings, plan rules) lives in `.ground-control.yaml` at the repo root, with larger rule files under `.gc/`. `AGENTS.md` carries a brief pointer to this config so agents know where to look.
+- The `/implement` skill validates this up front via `gc_get_repo_ground_control_context` — a single call that returns the full workflow config — and stops rather than guessing if the repo context is missing or invalid.
 - The `/implement` argument should be the full requirement UID as it already exists in Ground Control.
 
 1. **Fetch requirement** from Ground Control

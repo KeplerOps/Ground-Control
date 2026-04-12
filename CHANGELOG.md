@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.111.1] - 2026-04-11
+
+### Added
+
+- `.ground-control.yaml` at repo root declaring the workflow config
+  consumed by the Ground Control MCP tool and centralized skills.
+- `.gc/plan-rules.md` containing the Java/JPA plan constraints that
+  were previously hardcoded in `implement/SKILL.md` Step 4.
+
+### Changed
+
+- `AGENTS.md` Ground Control Context section now points to
+  `.ground-control.yaml` instead of carrying an inline yaml block.
+
+## [0.111.0] - 2026-04-11
+
+### Changed
+
+- Ground Control MCP server now reads `.ground-control.yaml` from each
+  repository root instead of parsing the "Ground Control Context" YAML
+  block in `AGENTS.md`. The `gc_get_repo_ground_control_context` tool
+  returns the full workflow config: project identifier, github_repo,
+  workflow commands (test/completion/lint/format), optional sonarcloud
+  settings, and optional inlined plan_rules file content. Repos must
+  provide `.ground-control.yaml` at their root; agents can self-service
+  migration using the `suggested_ground_control_yaml` field returned
+  on `missing_ground_control_yaml` status.
+
+### Removed
+
+- `parseRepoGroundControlContext` export and its AGENTS.md-based parser
+  (replaced by `parseGroundControlYaml`).
+
+### Added
+
+- `parseGroundControlYaml` and `buildSuggestedGroundControlYaml` exports
+  in `mcp/ground-control/lib.js`.
+- 16 new tests in `mcp/ground-control/lib.test.js` covering yaml
+  parsing, schema validation, plan_rules file resolution, and the
+  full `getRepoGroundControlContext` flow on a temporary git repo.
+
 ## [0.110.1] - 2026-04-10
 
 ### Added
