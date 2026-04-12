@@ -66,6 +66,12 @@ variable "ssm_embedding_api_key" {
   default     = "/gc/dev/embedding_api_key"
 }
 
+variable "ssm_pack_registry_security_json" {
+  description = "Optional SSM parameter path for SPRING_APPLICATION_JSON pack-registry security config"
+  type        = string
+  default     = "/gc/dev/pack_registry_security_json"
+}
+
 variable "gc_embedding_provider" {
   description = "Embedding provider name (openai or none)"
   type        = string

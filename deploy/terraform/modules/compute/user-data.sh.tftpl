@@ -62,6 +62,13 @@ EMBEDDING_API_KEY=$(aws ssm get-parameter \
   --query 'Parameter.Value' \
   --output text 2>/dev/null || echo "")
 
+PACK_REGISTRY_SECURITY_JSON=$(aws ssm get-parameter \
+  --region "${aws_region}" \
+  --name "${ssm_pack_registry_security_json}" \
+  --with-decryption \
+  --query 'Parameter.Value' \
+  --output text 2>/dev/null || echo "")
+
 # --- Deploy Ground Control ---
 mkdir -p /opt/gc
 
@@ -72,6 +79,7 @@ set -euo pipefail
 REGION="${aws_region}"
 DB_PASSWORD=$(aws ssm get-parameter --region "$${REGION}" --name "${ssm_db_password}" --with-decryption --query 'Parameter.Value' --output text)
 EMBEDDING_API_KEY=$(aws ssm get-parameter --region "$${REGION}" --name "${ssm_embedding_api_key}" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+PACK_REGISTRY_SECURITY_JSON=$(aws ssm get-parameter --region "$${REGION}" --name "${ssm_pack_registry_security_json}" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "")
 cat > /opt/gc/.env <<ENVEOF
 GC_DATABASE_URL=jdbc:postgresql://db:5432/${gc_database_name}
 GC_DATABASE_USER=${gc_database_user}
@@ -80,6 +88,7 @@ GC_SERVER_PORT=8000
 GC_CACHE_TYPE=none
 GC_EMBEDDING_PROVIDER=${gc_embedding_provider}
 GC_EMBEDDING_API_KEY=$${EMBEDDING_API_KEY}
+SPRING_APPLICATION_JSON=$${PACK_REGISTRY_SECURITY_JSON}
 JAVA_TOOL_OPTIONS=-Xmx512m -Xms256m
 POSTGRES_DB=${gc_database_name}
 POSTGRES_USER=${gc_database_user}
@@ -120,6 +129,7 @@ services:
       GC_CACHE_TYPE: "none"
       GC_EMBEDDING_PROVIDER: $${GC_EMBEDDING_PROVIDER:-none}
       GC_EMBEDDING_API_KEY: $${GC_EMBEDDING_API_KEY:-}
+      SPRING_APPLICATION_JSON: $${SPRING_APPLICATION_JSON:-}
       JAVA_TOOL_OPTIONS: $${JAVA_TOOL_OPTIONS}
       SPRING_PROFILES_ACTIVE: prod
     ports:

@@ -156,20 +156,21 @@ resource "aws_instance" "this" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user-data.sh.tftpl", {
-    aws_region            = var.aws_region
-    data_device           = var.data_device
-    ssm_tailscale_key     = var.ssm_tailscale_key
-    ssm_db_password       = var.ssm_db_password
-    tailscale_hostname    = var.tailscale_hostname
-    ecr_registry_url      = var.ecr_registry_url
-    backup_bucket         = var.backup_bucket_name
-    backup_cron           = var.backup_cron
-    local_retention_count = var.local_retention_count
-    gc_image              = var.gc_image
-    gc_database_user      = var.gc_database_user
-    gc_database_name      = var.gc_database_name
-    ssm_embedding_api_key = var.ssm_embedding_api_key
-    gc_embedding_provider = var.gc_embedding_provider
+    aws_region                      = var.aws_region
+    data_device                     = var.data_device
+    ssm_tailscale_key               = var.ssm_tailscale_key
+    ssm_db_password                 = var.ssm_db_password
+    tailscale_hostname              = var.tailscale_hostname
+    ecr_registry_url                = var.ecr_registry_url
+    backup_bucket                   = var.backup_bucket_name
+    backup_cron                     = var.backup_cron
+    local_retention_count           = var.local_retention_count
+    gc_image                        = var.gc_image
+    gc_database_user                = var.gc_database_user
+    gc_database_name                = var.gc_database_name
+    ssm_embedding_api_key           = var.ssm_embedding_api_key
+    ssm_pack_registry_security_json = var.ssm_pack_registry_security_json
+    gc_embedding_provider           = var.gc_embedding_provider
   }))
 
   tags = {
