@@ -1,9 +1,12 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { closeSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
-import { execFile as execFileCb } from "node:child_process";
+import { execFile as execFileCb, spawn as spawnChild } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
 import { promisify } from "node:util";
-import { load as parseYaml } from "js-yaml";
+import { dump as dumpYaml, load as parseYaml } from "js-yaml";
+import properLockfile from "proper-lockfile";
 
 const execFile = promisify(execFileCb);
 const GROUND_CONTROL_PROJECT_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -63,7 +66,7 @@ export function buildSuggestedGroundControlYaml(project = "your-project-id") {
   ].join("\n");
 }
 
-async function execFileWithInput(file, args, { input, ...options } = {}) {
+export async function execFileWithInput(file, args, { input, ...options } = {}) {
   return await new Promise((resolve, reject) => {
     const child = execFileCb(file, args, options, (error, stdout, stderr) => {
       if (error) {
@@ -2034,13 +2037,18 @@ async function computeReviewDiff(repoRoot, baseBranch, uncommitted) {
 }
 
 async function runSingleCodexReview({ repoRoot, prompt, args }) {
-  const { stdout } = await execFileWithInput("codex", args, {
+  // Return both stdout and stderr so the caller can include them in a
+  // diagnostic error when the structured COMMENT_IDS tail is missing.
+  // Dropping stderr silently (the prior behavior) made the common case
+  // "codex ran but didn't follow the output contract" impossible to
+  // debug without re-running by hand.
+  const { stdout, stderr } = await execFileWithInput("codex", args, {
     input: prompt,
     cwd: repoRoot,
     maxBuffer: 10 * 1024 * 1024,
     env: { ...process.env, NO_COLOR: "1" },
   });
-  return stdout;
+  return { stdout, stderr };
 }
 
 // Dedup key combines path, line, and a short prefix of the body so two
@@ -2097,6 +2105,40 @@ async function enrichCommentsList({ repoRoot, owner, name, prNumber, commentIds,
   return comments;
 }
 
+// Truncate a long string to `max` chars, prefixing an ellipsis when the
+// original was longer. Used for error-message previews of codex output so
+// callers don't have to eyeball multi-KB dumps.
+function previewTailString(raw, max = 500) {
+  if (typeof raw !== "string") return "";
+  if (raw.length <= max) return raw;
+  return `…${raw.slice(raw.length - max)}`;
+}
+
+// Wrap parseCodexReviewTail so the "missing tail" error is actionable.
+// The base error message is identical to the original so any downstream
+// matching on it keeps working, but we append the last ~500 chars of both
+// stdout and stderr from the reviewer subprocess. That preview is the
+// difference between "codex didn't follow the contract" and "codex
+// errored for a specific reason we can see".
+function parseReviewerTail(reviewerLabel, output) {
+  if (!output || typeof output !== "object") {
+    throw new Error(`Codex ${reviewerLabel} review returned no output object`);
+  }
+  const { stdout = "", stderr = "" } = output;
+  try {
+    return parseCodexReviewTail(stdout);
+  } catch (error) {
+    const stdoutPreview = previewTailString(stdout, 500);
+    const stderrPreview = previewTailString(stderr, 500);
+    const detail = [
+      `Codex ${reviewerLabel} review: ${error.message}`,
+      stdoutPreview ? `--- stdout tail ---\n${stdoutPreview}` : "--- stdout was empty ---",
+      stderrPreview ? `--- stderr tail ---\n${stderrPreview}` : "--- stderr was empty ---",
+    ].join("\n\n");
+    throw new Error(detail);
+  }
+}
+
 export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted = false, prNumber = null }) {
   const repoRoot = await ensureGitRepo(repoPath);
 
@@ -2122,10 +2164,10 @@ export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted
   });
   const args = buildCodexReviewArgs({ uncommitted });
 
-  let coreStdout;
-  let securityStdout;
+  let coreOutput;
+  let securityOutput;
   try {
-    [coreStdout, securityStdout] = await Promise.all([
+    [coreOutput, securityOutput] = await Promise.all([
       runSingleCodexReview({ repoRoot, prompt: corePrompt, args }),
       runSingleCodexReview({ repoRoot, prompt: securityPrompt, args }),
     ]);
@@ -2133,8 +2175,12 @@ export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted
     throw new Error(`Codex review failed: ${formatCommandFailure("codex", error)}`);
   }
 
-  const core = parseCodexReviewTail(coreStdout);
-  const security = parseCodexReviewTail(securityStdout);
+  // Wrap parseCodexReviewTail so its "missing tail" error includes a
+  // preview of the reviewer's actual stdout and stderr. Without that,
+  // the error is unactionable: there is no indication of what codex
+  // really emitted or whether it failed silently on the codex side.
+  const core = parseReviewerTail("core", coreOutput);
+  const security = parseReviewerTail("security", securityOutput);
 
   let owner = null;
   let name = null;
@@ -3357,4 +3403,407 @@ export async function listPackInstallRecords(project, { packId } = {}) {
 
 export async function getPackInstallRecord(id) {
   return request("GET", `/api/v1/pack-install-records/${encodeURIComponent(id)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge base capture / ingest helpers — GC-X006..GC-X011
+// ---------------------------------------------------------------------------
+
+// The canonical vocabulary for source citations. This list IS the source of
+// truth: gc_remember's Zod input enum, the ingest engine's validation, and
+// the citation prefixes written into page frontmatter, log.md entries, and
+// git commit messages all draw from here. Keep in sync with
+// docs/knowledge/SCHEMA.md §"Source citation rule".
+export const KNOWLEDGE_SOURCE_TYPES = Object.freeze([
+  "commit",
+  "pr",
+  "review",
+  "issue",
+  "ci",
+  "user-correction",
+  "file",
+]);
+
+// Short SHA minimum length; git accepts 4 chars but anything under 7 is
+// ambiguous in practice. 40 chars is a full SHA-1 hash.
+const COMMIT_SHA_RE = /^[0-9a-f]{7,40}$/;
+const POSITIVE_INT_RE = /^[1-9][0-9]*$/;
+// Allow stricter path validation for `file:` citations: repo-relative only,
+// no leading slash, no `..` segments, no backslashes. This mirrors the
+// repo-relative containment rules enforced by resolveRepoRelativePath for
+// config paths so the citation vocabulary can't sneak repo-escaping paths
+// into log.md or commit messages.
+const REPO_RELATIVE_PATH_RE = /^(?!\.\.(\/|$))(?!.*\/\.\.(\/|$))(?!\/)(?!.*\\)[^\s].*$/;
+
+// Turn a structured {source_type, source_ref} pair into the canonical
+// citation string. Every place that needs to record WHERE an observation
+// came from goes through this single function, so the inbox payload, page
+// frontmatter `sources` list, `log.md` bullets, and git commit messages
+// cannot drift in terminology or validation.
+//
+// Returns { ok: true, citation: string } on success, or
+// { ok: false, error: string } on validation failure. Does not throw.
+export function formatSourceCitation({ sourceType, sourceRef } = {}) {
+  if (typeof sourceType !== "string" || sourceType.trim() === "") {
+    return { ok: false, error: "source_type is required and must be a non-empty string" };
+  }
+  if (!KNOWLEDGE_SOURCE_TYPES.includes(sourceType)) {
+    return {
+      ok: false,
+      error: `source_type must be one of ${KNOWLEDGE_SOURCE_TYPES.join(", ")} (got '${sourceType}')`,
+    };
+  }
+  if (typeof sourceRef !== "string" || sourceRef.trim() === "") {
+    return { ok: false, error: "source_ref is required and must be a non-empty string" };
+  }
+
+  // Normalize per type. Each branch produces a single-line canonical ref
+  // so the resulting citation is safe to embed in a YAML scalar, a markdown
+  // bullet, or a git commit message subject without escaping.
+  switch (sourceType) {
+    case "commit": {
+      const ref = sourceRef.trim().toLowerCase();
+      if (!COMMIT_SHA_RE.test(ref)) {
+        return {
+          ok: false,
+          error: `source_ref for 'commit' must be a 7–40 char hex SHA (got '${sourceRef}')`,
+        };
+      }
+      return { ok: true, citation: `commit:${ref}` };
+    }
+    case "pr":
+    case "issue": {
+      const ref = sourceRef.trim().replace(/^#/, "");
+      if (!POSITIVE_INT_RE.test(ref)) {
+        return {
+          ok: false,
+          error: `source_ref for '${sourceType}' must be a positive integer (got '${sourceRef}')`,
+        };
+      }
+      return { ok: true, citation: `${sourceType}:${ref}` };
+    }
+    case "review":
+    case "ci": {
+      // Review comment ids and CI run ids are opaque strings produced by
+      // GitHub. Collapse any internal whitespace to a single space and
+      // reject anything empty after trimming.
+      const ref = sourceRef.trim().replace(/\s+/g, " ");
+      if (ref === "") {
+        return { ok: false, error: `source_ref for '${sourceType}' must be a non-empty id` };
+      }
+      return { ok: true, citation: `${sourceType}:${ref}` };
+    }
+    case "user-correction": {
+      // User corrections are free-form short descriptions. Collapse
+      // whitespace runs (including newlines) into single spaces so the
+      // citation stays a single line safe for commit-message subjects.
+      const ref = sourceRef.replace(/\s+/g, " ").trim();
+      if (ref === "") {
+        return { ok: false, error: "source_ref for 'user-correction' must be a non-empty description" };
+      }
+      return { ok: true, citation: `user-correction:${ref}` };
+    }
+    case "file": {
+      const ref = sourceRef.trim();
+      if (isAbsolute(ref)) {
+        return { ok: false, error: `source_ref for 'file' must be a repo-relative path (got absolute path '${sourceRef}')` };
+      }
+      if (!REPO_RELATIVE_PATH_RE.test(ref)) {
+        return { ok: false, error: `source_ref for 'file' must be a repo-relative path with no '..' segments (got '${sourceRef}')` };
+      }
+      return { ok: true, citation: `file:${ref}` };
+    }
+    default: {
+      // Unreachable: KNOWLEDGE_SOURCE_TYPES is the only valid set and we
+      // already validated membership above. Kept for defensive completeness
+      // so a future addition to the list without a switch case fails fast.
+      return { ok: false, error: `unsupported source_type '${sourceType}'` };
+    }
+  }
+}
+
+// Slug a note title into a filesystem-safe, kebab-cased string bounded at
+// 40 chars. Used as the tail of inbox filenames so humans scanning
+// `docs/knowledge/inbox/` can tell entries apart without opening them.
+function buildInboxSlug(note) {
+  const trimmed = (note || "").slice(0, 200).toLowerCase();
+  const kebab = trimmed
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const bounded = kebab.slice(0, 40).replace(/-+$/g, "");
+  return bounded || "note";
+}
+
+// ISO timestamp suitable for filename prefixes: swaps out the `:` chars
+// that are illegal on Windows / awkward in URLs, and drops the milliseconds
+// so filenames are exactly `YYYY-MM-DDTHH-MM-SS`.
+function formatInboxTimestamp(date = new Date()) {
+  return date.toISOString().replace(/\.\d+Z$/, "").replace(/:/g, "-");
+}
+
+// Default spawn implementation for gc_remember's detached ingest
+// subprocess. The returned function accepts { repoRoot, inboxFilePath,
+// knowledge } and returns after the child has been fully detached. Any
+// spawn-layer exception propagates to the caller which converts it to a
+// warning on the synchronous return envelope.
+function defaultSpawnIngest({ repoRoot, inboxFilePath, knowledge }) {
+  const cliPath = fileURLToPath(new URL("./knowledge_ingest_cli.js", import.meta.url));
+  const args = [
+    cliPath,
+    "--repo", repoRoot,
+    "--inbox-file", inboxFilePath,
+    "--knowledge-dir", knowledge.dir,
+    "--knowledge-schema", knowledge.schema,
+    "--knowledge-inbox", knowledge.inbox,
+  ];
+  const child = spawnChild(process.execPath, args, {
+    cwd: repoRoot,
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+}
+
+// Append a knowledge-base observation to the repo's inbox. Synchronous
+// success means the inbox entry is durably written to disk; the ingest
+// subprocess that integrates the observation into the wiki is spawned
+// after the write but its result is asynchronous and may fail. Per
+// GC-X006, subprocess spawn failures surface as a warning in the return
+// envelope but do not fail the capture — a later sweep will discover the
+// untouched inbox file and retry.
+//
+// Parameters:
+//   repoPath     — absolute path to the target git repo
+//   note         — the observation body text (required, non-empty)
+//   sourceType   — one of KNOWLEDGE_SOURCE_TYPES (required)
+//   sourceRef    — source reference (validated per sourceType)
+//   tags         — optional list of discovery tags
+//   spawnIngest  — optional DI hook for tests; defaults to
+//                  defaultSpawnIngest which launches the real CLI
+//
+// Returns { ok: true, inbox_path, citation, warning? } on success, or
+// { ok: false, error } on validation / config failure. Does not throw.
+export async function writeKnowledgeInbox({
+  repoPath,
+  note,
+  sourceType,
+  sourceRef,
+  tags = [],
+  spawnIngest = defaultSpawnIngest,
+} = {}) {
+  if (typeof repoPath !== "string" || !isAbsolute(repoPath)) {
+    return { ok: false, error: "repo_path must be an absolute path to a Git repository" };
+  }
+  if (typeof note !== "string" || note.trim() === "") {
+    return { ok: false, error: "note is required and must be a non-empty string" };
+  }
+  if (tags != null && !Array.isArray(tags)) {
+    return { ok: false, error: "tags must be an array of strings when set" };
+  }
+
+  const citationResult = formatSourceCitation({ sourceType, sourceRef });
+  if (!citationResult.ok) return { ok: false, error: citationResult.error };
+
+  let context;
+  try {
+    context = await getRepoGroundControlContext(repoPath);
+  } catch (error) {
+    return { ok: false, error: `failed to resolve repo context: ${error.message}` };
+  }
+  if (context.status !== "ok") {
+    return {
+      ok: false,
+      error: `repository is not ready for knowledge capture: ${context.errors?.[0] || context.status}`,
+    };
+  }
+  if (context.knowledge == null) {
+    return {
+      ok: false,
+      error: "repository has no 'knowledge' block in .ground-control.yaml — capture is not configured",
+    };
+  }
+
+  const repoRoot = context.repo_path;
+  const knowledge = context.knowledge;
+  const inboxRel = knowledge.inbox;
+  const absInboxDir = resolvePath(repoRoot, inboxRel);
+
+  // Lazy-create the inbox directory on first capture. The inbox is
+  // deliberately not committed as part of the #522 skeleton because an
+  // empty directory has nothing to commit.
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- absInboxDir derives from a realpath-contained, resolved knowledge.inbox
+    mkdirSync(absInboxDir, { recursive: true });
+  } catch (error) {
+    return { ok: false, error: `failed to create inbox directory ${inboxRel}: ${error.message}` };
+  }
+
+  // Compose the filename: ISO timestamp + 4-char random suffix + slug.
+  // The random suffix protects against sub-second concurrent captures
+  // producing identical timestamps; the slug keeps the file human-scanable.
+  const timestamp = formatInboxTimestamp();
+  const slug = buildInboxSlug(note);
+  const rand = randomBytes(3).toString("hex").slice(0, 4);
+  const filename = `${timestamp}-${rand}-${slug}.md`;
+  const absInboxFile = join(absInboxDir, filename);
+
+  // Build the frontmatter + body. js-yaml dump auto-quotes scalars that
+  // need escaping so citations containing `:` or special chars are safe.
+  const frontmatter = {
+    captured_at: new Date().toISOString(),
+    source: citationResult.citation,
+  };
+  if (tags && tags.length > 0) {
+    frontmatter.tags = tags;
+  }
+  const yamlBlock = dumpYaml(frontmatter, { lineWidth: -1, noRefs: true });
+  const fileContent = `---\n${yamlBlock}---\n\n${note.trim()}\n`;
+
+  // Atomic write: temp file + fsync + rename. A crash between the write
+  // and the rename leaves a .tmp sidecar but no partial file at the final
+  // path, so readers never observe a half-written inbox entry.
+  const tmpPath = `${absInboxFile}.tmp`;
+  let fd;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- tmpPath derives from inboxDir which is repo-relative
+    fd = openSync(tmpPath, "wx");
+    writeSync(fd, fileContent);
+    fsyncSync(fd);
+  } catch (error) {
+    if (fd != null) {
+      try { closeSync(fd); } catch { /* best-effort */ }
+    }
+    try {
+      rmSync(tmpPath, { force: true });
+    } catch { /* best-effort cleanup */ }
+    return { ok: false, error: `failed to write inbox tmp file: ${error.message}` };
+  }
+  try {
+    closeSync(fd);
+  } catch (error) {
+    return { ok: false, error: `failed to close inbox tmp file: ${error.message}` };
+  }
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- both paths are under absInboxDir which is realpath-contained within repoRoot
+    renameSync(tmpPath, absInboxFile);
+  } catch (error) {
+    try {
+      rmSync(tmpPath, { force: true });
+    } catch { /* best-effort cleanup */ }
+    return { ok: false, error: `failed to rename inbox tmp file: ${error.message}` };
+  }
+
+  const inboxRelFromRepo = relative(repoRoot, absInboxFile);
+
+  // Spawn the detached ingest subprocess. Spawn failures do not fail the
+  // capture — the inbox entry is durable and will be retried by a later
+  // real-time call, manual retry, or scheduled sweep.
+  let warning = null;
+  try {
+    spawnIngest({
+      repoRoot,
+      inboxFilePath: absInboxFile,
+      knowledge,
+    });
+  } catch (error) {
+    warning = `ingest_spawn_failed: ${error.message}`;
+  }
+
+  const result = {
+    ok: true,
+    inbox_path: inboxRelFromRepo,
+    citation: citationResult.citation,
+  };
+  if (warning) result.warning = warning;
+  return result;
+}
+
+// Acquire an interprocess lock on a knowledge base, keyed by the canonical
+// realpath of the knowledge directory. Different path spellings (symlinks,
+// `..`-normalized forms) that point at the same inode contend on the same
+// lock, which is required by GC-X008's invariant that "concurrent ingest
+// against the same knowledge base" serializes even if the callers supplied
+// different strings for the path.
+//
+// Uses `proper-lockfile`'s filesystem-based lock with stale detection:
+//   - stale  — lock is considered abandoned after this many ms if its
+//              refresh timestamp has not been updated. 60 s is long enough
+//              to survive normal ingest runs and short enough to recover
+//              from a crashed subprocess without blocking forever.
+//   - update — the holder refreshes the lock's mtime this often while
+//              work is in progress. 10 s gives a large margin under `stale`.
+//
+// By default `retries: 0` — contention fails fast so callers like
+// administrative tools can report a clean "locked, try again later"
+// error. Callers that want to wait (like `runIngest`, which serializes
+// two concurrent captures into a single sequential queue) pass a
+// `retries` option that matches proper-lockfile's retry shape.
+//
+// Returns an async release function. The returned function is
+// idempotent — calling it twice is safe but will no-op on the second call
+// (proper-lockfile throws if the lock is not actually held, so we swallow
+// that specific error).
+//
+// Throws on invalid input (non-absolute path, nonexistent directory) and
+// on contention. Errors carry a message that includes the canonical path
+// so debugging shows exactly which knowledge base is contended.
+export async function acquireKnowledgeLock(knowledgeDir, { retries = 0 } = {}) {
+  if (typeof knowledgeDir !== "string" || !isAbsolute(knowledgeDir)) {
+    throw new Error("acquireKnowledgeLock: path must be an absolute directory path");
+  }
+  let canonical;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- absolute path validated above
+    canonical = realpathSync(knowledgeDir);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new Error(`acquireKnowledgeLock: path does not exist: ${knowledgeDir}`);
+    }
+    throw error;
+  }
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- canonical is a realpath
+  const stat = statSync(canonical);
+  if (!stat.isDirectory()) {
+    throw new Error(`acquireKnowledgeLock: path is not a directory: ${knowledgeDir}`);
+  }
+
+  let release;
+  try {
+    release = await properLockfile.lock(canonical, {
+      stale: 60_000,
+      update: 10_000,
+      retries,
+      // Store the lockfile INSIDE the knowledge directory as `.gc-lock`
+      // rather than next to it, so rm'ing the knowledge directory also
+      // cleans up the lock. This keeps the host filesystem tidy on test
+      // teardown and stale-repo cleanup.
+      lockfilePath: join(canonical, ".gc-lock"),
+      realpath: false,
+    });
+  } catch (error) {
+    // proper-lockfile maps contention to `ELOCKED`. Rewrite as a clear
+    // message so callers do not need to know about the underlying code.
+    if (error.code === "ELOCKED") {
+      const contended = new Error(`knowledge base is already held by another process: ${canonical}`);
+      contended.code = "ELOCKED";
+      contended.path = canonical;
+      throw contended;
+    }
+    throw error;
+  }
+
+  let released = false;
+  return async function releaseHandle() {
+    if (released) return;
+    released = true;
+    try {
+      await release();
+    } catch (error) {
+      // "Lock is already released" is fine — we just observed the release
+      // through a different path. Anything else is a real error.
+      if (error.code !== "ENOTACQUIRED" && !/already released/i.test(error.message)) {
+        throw error;
+      }
+    }
+  };
 }

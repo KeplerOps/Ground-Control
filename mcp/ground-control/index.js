@@ -267,6 +267,8 @@ import {
   INSTALL_OUTCOMES,
   TRUST_POLICY_FIELDS,
   TRUST_POLICY_RULE_OPERATORS,
+  KNOWLEDGE_SOURCE_TYPES,
+  writeKnowledgeInbox,
 } from "./lib.js";
 
 function ok(text) {
@@ -706,6 +708,44 @@ server.tool(
 );
 
 server.tool(
+  "gc_remember",
+  "Capture a knowledge-base observation from the calling agent. Writes a structured inbox file in the repository's knowledge base and spawns a detached ingest subprocess that integrates the observation into the wiki. Synchronous success means the inbox entry was durably written; wiki integration happens asynchronously and may be retried by later real-time or scheduled runs. Requires the repository's .ground-control.yaml to declare a knowledge block.",
+  {
+    repo_path: z.string().describe("Absolute path to the target Git repository"),
+    note: z.string().min(1).describe("The observation to capture, as free-form text"),
+    source_type: z
+      .enum(KNOWLEDGE_SOURCE_TYPES)
+      .describe(
+        "Source citation type (must match the vocabulary in docs/knowledge/SCHEMA.md)",
+      ),
+    source_ref: z
+      .string()
+      .min(1)
+      .describe(
+        "Source citation reference (short SHA for commit, number for pr/issue, comment id for review, etc.)",
+      ),
+    tags: z
+      .array(z.string())
+      .optional()
+      .describe("Optional list of tags used for index discovery"),
+  },
+  async ({ repo_path, note, source_type, source_ref, tags }) => {
+    try {
+      const result = await writeKnowledgeInbox({
+        repoPath: repo_path,
+        note,
+        sourceType: source_type,
+        sourceRef: source_ref,
+        tags,
+      });
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
   "gc_codex_architecture_preflight",
   "Run Codex architecture preflight before implementation. Codex inspects the requirement and/or issue plus the repository, updates ADRs/design guidance when needed, and returns guardrails and changed files. At least one of `requirement_uid` or `issue_number` must be supplied; requirement-free issues (bugs, refactors, maintenance) should pass `issue_number` alone.",
   {
@@ -736,12 +776,12 @@ server.tool(
 
 server.tool(
   "gc_codex_review",
-  "Run Codex against the current branch with a production-readiness review prompt. Codex enumerates all material findings (no triage) and, when a pull request is available, posts each finding as an inline PR review comment. Returns the list of posted comment ids, enriched with GraphQL review-thread ids and a short file/line/title preview so the coding agent can drive a fix/verify loop via gc_codex_verify_finding. Auto-detects the PR number for the current branch via `gh pr view` when pr_number is omitted.",
+  "Run Codex against the current branch with a production-readiness review prompt. Codex enumerates all material findings (no triage) and, when a pull request is available, posts each finding as an inline PR review comment. Returns the list of posted comment ids, enriched with GraphQL review-thread ids and a short file/line/title preview so the coding agent can drive a fix/verify loop via gc_codex_verify_finding. DEFAULT INVOCATION: pass ONLY { repo_path } and optionally { base_branch }. The tool auto-detects the PR number via `gh pr view --json number` — do NOT pass pr_number explicitly; that path is reserved for the uncommitted / no-PR-yet edge cases documented on pr_number itself and has been a known footgun in practice. uncommitted: true reviews staged/unstaged/untracked changes instead of committed branch history.",
   {
     repo_path: z.string().describe("Absolute path to the target Git repository"),
     base_branch: z.string().optional().describe("Base branch to review against (defaults to 'dev')"),
     uncommitted: z.boolean().optional().describe("Review staged/unstaged/untracked changes instead of committed branch history"),
-    pr_number: z.number().int().positive().optional().describe("Pull request number to post findings to. When omitted and uncommitted is false, the tool auto-detects via `gh pr view --json number`. When no PR can be found, codex emits findings inline without posting."),
+    pr_number: z.number().int().positive().optional().describe("ADVANCED / DISCOURAGED. Pull request number to post findings to. In the common case leave this unset — the tool auto-detects via `gh pr view --json number`. Pass pr_number ONLY when the current branch is not associated with a PR that `gh pr view` can resolve (for example: running against a foreign checkout) and you know the exact number to target. Passing it unnecessarily has been a source of client-layer rejection bugs; prefer auto-detect."),
   },
   async ({ repo_path, base_branch, uncommitted, pr_number }) => {
     try {
