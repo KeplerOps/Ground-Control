@@ -203,6 +203,7 @@ If any check fails, fix it before proceeding. Do NOT move to Phase C until every
    ```
    gh pr create --base dev --title "<concise title>" --body "<description with requirement reference>"
    ```
+   The PR body should end with `Closes #<issue-number>` so the issue and PR are cross-linked in GitHub's UI.
 3. Note the PR number and URL.
 
 ### Step 10: CI Monitor
@@ -318,7 +319,7 @@ If `in_scope_requirements[]` is empty, this step is a no-op (bug/refactor/mainte
 
 ### Step 16: Reconcile Traceability Links Against the Diff
 
-Now that CI and all reviews are green AND every in-scope requirement is ACTIVE, reconcile the Ground Control traceability graph against the actual diff. This MUST happen AFTER Step 15 (transition) and BEFORE Step 18 (Report). Doing the reconciliation earlier either fails outright (IMPLEMENTS against DRAFT) or records links against unproven code if the review cycle rejects the work.
+Now that CI and all reviews are green AND every in-scope requirement is ACTIVE, reconcile the Ground Control traceability graph against the actual diff. This MUST happen AFTER Step 15 (transition) and BEFORE Step 19 (Report). Doing the reconciliation earlier either fails outright (IMPLEMENTS against DRAFT) or records links against unproven code if the review cycle rejects the work.
 
 **Reconciliation is not the same as "create links for the in-scope requirements"**. Even runs with zero in-scope requirements (pure bug fixes, refactors, maintenance) must reconcile, because the diff may have touched files that were already linked to OTHER requirements and those links may now be stale.
 
@@ -390,10 +391,14 @@ Reconciliation is idempotent: running it on a branch where the GC graph is alrea
    - Re-fetch with `gc_get_requirement` and confirm status is `ACTIVE` (Step 15 should have transitioned it).
    - Re-fetch with `gc_get_traceability` and confirm the expected IMPLEMENTS, TESTS, and GITHUB_ISSUE links are present (Step 16 should have recorded them).
 2. Re-run the deleted/renamed/modified audit from Step 16 point-by-point: every file in the diff should either have up-to-date links or have been intentionally left un-linked.
-3. If anything is missing or still drifted, loop back to the responsible step and fix: Step 15 for status drift, Step 16 for link drift. Do not proceed to Step 18 until Ground Control state matches reality across every file in the diff and every in-scope requirement.
+3. If anything is missing or still drifted, loop back to the responsible step and fix: Step 15 for status drift, Step 16 for link drift. Do not proceed to Step 18 (close issue) or Step 19 (report) until Ground Control state matches reality across every file in the diff and every in-scope requirement.
 4. **Never declare success on silent failures.** If any `gc_create_traceability_link` / `gc_delete_traceability_link` / `gc_transition_status` call returned a non-2xx response during Steps 15–16, treat that as a failure, surface the error to the user if it is not clearly fixable (e.g., a permission issue or an API constraint you cannot work around), and loop back to correct the root cause. A batch of 10 parallel calls where 7 succeeded and 3 failed is not "mostly done" — it's broken.
 
-### Step 18: Report (DO NOT MERGE)
+### Step 18: Close the Issue
+
+Close the GitHub issue now via `gh issue close <issue-number>`. The work is done, the PR records it, and GitHub's auto-close on merge is unreliable — close it yourself.
+
+### Step 19: Report (DO NOT MERGE)
 
 **You MUST NOT merge the PR. You MUST NOT run `gh pr merge`. The user reviews and merges.**
 
