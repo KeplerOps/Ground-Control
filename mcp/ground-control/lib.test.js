@@ -881,6 +881,72 @@ describe("getRepoGroundControlContext", () => {
     }
   });
 
+  it("returns invalid_ground_control_yaml when knowledge.inbox points at a regular file", async () => {
+    // An inbox configured to point at a file silently survives lexical and
+    // realpath checks, then every downstream capture flow crashes trying to
+    // write files under it. Catch the misconfig up front.
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      mkdirSync(join(dir, "docs", "knowledge"), { recursive: true });
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(join(dir, "docs", "knowledge", "SCHEMA.md"), "# schema\n");
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: docs/knowledge",
+          "  inbox: docs/knowledge/SCHEMA.md",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("knowledge.inbox")));
+      assert.ok(result.errors.some((e) => e.includes("not a directory")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml (not an exception) when knowledge.inbox descends through a regular file", async () => {
+    // inbox: docs/knowledge/SCHEMA.md/capture — realpathSync raises ENOTDIR
+    // when it tries to descend through SCHEMA.md. The helper must walk up
+    // past the bad component and return a structured validation error, not
+    // let the exception escape and hard-fail the whole MCP tool call.
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      mkdirSync(join(dir, "docs", "knowledge"), { recursive: true });
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(join(dir, "docs", "knowledge", "SCHEMA.md"), "# schema\n");
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: docs/knowledge",
+          "  inbox: docs/knowledge/SCHEMA.md/capture",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      // The key assertion is that the tool returned a structured response
+      // rather than throwing. The specific error code reflects which
+      // containment/inode check caught the problem.
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(Array.isArray(result.errors) && result.errors.length > 0);
+      assert.ok(result.errors.some((e) => e.includes("knowledge.inbox")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("accepts in-repo symlinks that stay inside the repository root", async () => {
     // Not every symlink is malicious. A repo that keeps its knowledge base
     // under docs/knowledge but symlinks it from a prettier path must still

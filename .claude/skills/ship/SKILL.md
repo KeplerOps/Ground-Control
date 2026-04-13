@@ -64,7 +64,7 @@ Every review phase (Codex cross-model, test quality review) follows the **same l
 4. **If you cannot or believe you should not fix a specific finding**, you MUST stop and ask the user for explicit permission to leave it unfixed. Do not decide unilaterally. State the finding, explain why you think it should be skipped, and wait for the user's answer. Resume only after they explicitly confirm.
 5. **Re-run the SAME review after fixing.** Do not assume your fixes are complete — the re-run is the verification.
 6. **Repeat until the reviewer reports zero findings, OR the cycle cap is hit.**
-7. **Cycle cap: 2 iterations per review phase.** If a review still reports findings after 2 invoke→fix→re-run cycles, STOP and escalate to the user with the full history of findings, fixes, and remaining issues. Do not loop indefinitely.
+7. **Cycle cap: 5 iterations per review phase.** If a review still reports findings after 5 invoke→fix→re-run cycles, STOP and escalate to the user with the full history of findings, fixes, and remaining issues. Do not loop indefinitely.
 
 For every cycle, after applying fixes, commit and push BEFORE re-running the review so the reviewer sees the updated tree. Format every fix commit as `Fix review findings (<reviewer>, cycle <N>)` so the loop history is visible in git log.
 
@@ -88,7 +88,7 @@ For every cycle, after applying fixes, commit and push BEFORE re-running the rev
       - **`status: "resolved"`** — the review thread has already been marked resolved on GitHub. Move on to the next comment.
       - **`status: "unresolved"`** — codex posted a threaded reply with `reply_body` containing concrete new directions. Read `reply_body`, fix per those directions, and re-invoke `gc_codex_verify_finding`. **Per-finding cap: 2 verify calls.** If the third call would be needed, STOP and escalate to the user with the finding, your fix history, and the latest `reply_body`.
 7. After all findings in the returned `comments` list are marked `resolved`, commit and push the fixes (one commit per fix cycle, message `Fix review findings (codex, cycle <N>)`), then re-invoke `gc_codex_review` with the same arguments to confirm no new issues surfaced after your fixes.
-8. **Overall phase cap: 2 iterations of `gc_codex_review`.** If a second invocation still returns findings, STOP and escalate to the user.
+8. **Overall phase cap: 5 iterations of `gc_codex_review`.** If the fifth invocation still returns findings, STOP and escalate to the user.
 
 **Tool shape**: `gc_codex_verify_finding` accepts only `repo_path`, `pr_number`, and `comment_id`. It reads the comment directly from GitHub; do not try to paraphrase the finding or pass additional context through the tool.
 
@@ -97,7 +97,7 @@ For every cycle, after applying fixes, commit and push BEFORE re-running the rev
 **CRITICAL: You MUST use the Skill tool to invoke the review-tests skill.**
 
 1. Call the Skill tool with `skill="review-tests"` to invoke the test quality review.
-2. Apply the **Review loop rules** above: fix every finding, ask user permission for anything you will not fix (warnings included — there is no triage bucket), re-invoke `skill="review-tests"` after each fix cycle, cap at 2 cycles.
+2. Apply the **Review loop rules** above: fix every finding, ask user permission for anything you will not fix (warnings included — there is no triage bucket), re-invoke `skill="review-tests"` after each fix cycle, cap at 5 cycles.
 
 ## Phase 6: Final CI re-verification
 
@@ -106,7 +106,7 @@ After both review phases (4-5) have reported zero findings (or you have document
 1. Verify the branch is pushed with the latest fix commits.
 2. Re-run Phase 2 (CI Monitor) to confirm CI is still green after the review fixes.
 3. Re-run Phase 3 (SonarCloud) — or skip again if `sonarcloud` was null.
-4. If either re-check fails, loop back through the appropriate review phase — the cycle cap (2) applies per review phase, not total.
+4. If either re-check fails, loop back through the appropriate review phase — the cycle cap (5) applies per review phase, not total.
 
 ## Phase 7: Report (DO NOT MERGE)
 

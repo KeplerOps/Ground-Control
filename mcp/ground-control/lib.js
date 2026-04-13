@@ -1062,12 +1062,19 @@ function assertRealpathInRepo(repoRootReal, targetAbs, fieldName) {
       canonical = realpathSync(cursor);
       break;
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      // ENOENT means the path itself (or the ancestor we're currently at)
+      // does not exist yet — walk up one level and keep looking.
+      // ENOTDIR means we descended *through* a regular file, e.g.
+      // `docs/knowledge/SCHEMA.md/capture`. The offending component is still
+      // somewhere above `cursor`; walk up the same way so the helper always
+      // returns a structured validation error instead of letting the
+      // exception escape and hard-fail the whole tool call.
+      if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
       const parent = dirname(cursor);
       if (parent === cursor) {
         return {
           ok: false,
-          error: `${fieldName} could not be canonicalized — no existing ancestor of '${targetAbs}'`,
+          error: `${fieldName} could not be canonicalized — no valid ancestor of '${targetAbs}' (${error.code})`,
         };
       }
       cursor = parent;
@@ -1468,6 +1475,33 @@ function resolveKnowledgeBlock(repoRoot, knowledge) {
     };
   }
 
+  // The inbox directory is lazily created, so its existence is optional in
+  // this slice — but when it DOES exist it must be a directory. An inbox
+  // configured to point at a regular file (e.g. `docs/knowledge/SCHEMA.md`)
+  // would pass the lexical and realpath checks but break every downstream
+  // capture flow that writes files under the inbox. Catch the misconfig
+  // here where the error message can name the offending field.
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- inboxReal.canonical is contained in the canonical repo root
+    const inboxStat = statSync(inboxReal.canonical);
+    if (!inboxStat.isDirectory()) {
+      return {
+        ok: false,
+        errors: [`knowledge.inbox references ${inboxResolved.rel} which is not a directory`],
+      };
+    }
+  } catch (error) {
+    // ENOENT is the expected happy-path state until a later slice creates
+    // the inbox on first capture. Anything else (permissions, I/O, ENOTDIR
+    // on a broken symlink target) is a configuration error worth surfacing.
+    if (error.code !== "ENOENT") {
+      return {
+        ok: false,
+        errors: [`knowledge.inbox references ${inboxResolved.rel} which cannot be examined (${error.code})`],
+      };
+    }
+  }
+
   return {
     ok: true,
     value: {
@@ -1681,14 +1715,24 @@ export async function runCodexArchitecturePreflight({
   // CLI not authenticated, etc.), there is nothing for codex to reason about
   // and no way for the caller to catch silent drift. Fail fast with a
   // specific error that names the issue number and the underlying reason.
+  //
+  // Empty bodies are acceptable — GitHub returns `"body": ""` for valid
+  // title-only issues (common shape for bugs and refactors), and the title
+  // plus the diff still gives codex a usable context. Only fail when the
+  // body field is missing entirely (lookup failure) or when getIssueContext
+  // attached a `warning` field indicating the gh CLI call did not succeed.
   if (requirement == null) {
-    if (!issueContext || issueContext.warning || !issueContext.body) {
+    const lookupFailed =
+      !issueContext
+      || issueContext.warning !== undefined
+      || !("body" in issueContext);
+    if (lookupFailed) {
       const detail = issueContext?.warning
         ?? (issueContext == null
           ? "getIssueContext returned null"
           : "issue context has no body field");
       throw new Error(
-        `gc_codex_architecture_preflight: issue-only run requires a loadable GitHub issue body but failed to fetch issue #${issueNumber}: ${detail}`,
+        `gc_codex_architecture_preflight: issue-only run requires a loadable GitHub issue but failed to fetch issue #${issueNumber}: ${detail}`,
       );
     }
   }

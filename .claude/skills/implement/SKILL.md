@@ -72,15 +72,20 @@ The issue body was cached in Step 1, but re-read it carefully now for labels, co
 
 ### Step 2.5: Run Codex Architecture Preflight
 
+Preflight MUST cover every in-scope requirement, not just the first one. The preflight tool loads exactly one requirement payload per call, so grouped issues that carry multiple UIDs need one call per UID — otherwise codex never sees the statements, rationale, or existing traceability for every requirement after the first, and the returned guardrails will be incomplete.
+
 1. Reuse the absolute repository root from Step 1.
-2. Call the `gc_codex_architecture_preflight` MCP tool with:
+2. **Determine the preflight call set.**
+   - If `in_scope_requirements[]` is non-empty, run the call below **once per UID in the list**. Each call preflights a single requirement.
+   - If `in_scope_requirements[]` is empty (requirement-free bug/refactor/maintenance run), run the call exactly once with `issue_number` alone and omit `requirement_uid`.
+3. For each call in the set, call the `gc_codex_architecture_preflight` MCP tool with:
    - `issue_number`: the issue number from Step 1 (always supplied — it is the authoritative anchor for preflight in both UID-first and issue-first runs)
    - `repo_path`: absolute path from Step 1
    - `project`: the repo-local Ground Control project from Step 1
-   - `requirement_uid`: the first UID in `in_scope_requirements[]` when that list is non-empty; omit this field entirely when the list is empty (requirement-free bug/refactor/maintenance runs). The tool accepts either `requirement_uid` or `issue_number` alone and requires at least one; since Step 1 always produced an issue number, the issue-number-only call is the guaranteed fallback.
-3. Read any ADRs, design notes, or workflow guidance that Codex created or updated.
-4. Treat the returned guardrails, cross-cutting concerns, and non-goals as binding unless they are clearly wrong.
-5. Do NOT revert or ignore Codex-added design guidance just because implementation looks possible without it.
+   - `requirement_uid`: the UID being preflighted in this call (omit entirely on requirement-free runs). The tool accepts either `requirement_uid` or `issue_number` alone and requires at least one; since Step 1 always produced an issue number, the issue-number-only call is the guaranteed fallback.
+4. After every call in the set has returned, read any ADRs, design notes, or workflow guidance that Codex created or updated. Multiple calls may touch overlapping files — that is fine; treat the union of all guardrails as binding.
+5. Treat the returned guardrails, cross-cutting concerns, and non-goals as binding unless they are clearly wrong.
+6. Do NOT revert or ignore Codex-added design guidance just because implementation looks possible without it.
 
 ### Step 3: Assess Codebase Coverage
 
@@ -240,7 +245,7 @@ Otherwise:
    - Re-run Step 10 (CI Monitor) so SonarCloud re-analyzes the PR.
    - After CI is green, wait 60 seconds and re-run this entire step (quality gate + issues search + hotspots search) to verify.
 
-6. **Cycle cap: 2 iterations for SonarCloud.** If the issue list is still non-empty after 2 fix→re-analyze cycles, STOP and escalate to the user with the remaining findings.
+6. **Cycle cap: 5 iterations for SonarCloud.** If the issue list is still non-empty after 5 fix→re-analyze cycles, STOP and escalate to the user with the remaining findings.
 
 7. Proceed to Step 12 only when: the quality gate is `OK` AND `api/issues/search?resolved=false` returns zero rows for this PR AND `api/hotspots/search?status=TO_REVIEW` returns zero rows for this PR.
 
@@ -254,7 +259,7 @@ Every review step below (Codex cross-model, test quality review) follows the **s
 4. **If you cannot or believe you should not fix a specific finding**, you MUST stop and ask the user for explicit permission to leave it unfixed. Do not decide unilaterally. State the finding, why you think it should be skipped, and wait for the user's answer. Resume only after they explicitly confirm.
 5. **Re-run the SAME review after fixing.** Do not assume your fixes are complete — the re-run is the verification.
 6. **Repeat until the reviewer reports zero findings, OR the cycle cap is hit.**
-7. **Cycle cap: 2 iterations per review step.** If a review still reports findings after 2 invoke→fix→re-run cycles, STOP and escalate to the user with the full history of findings, fixes, and remaining issues. Do not loop indefinitely.
+7. **Cycle cap: 5 iterations per review step.** If a review still reports findings after 5 invoke→fix→re-run cycles, STOP and escalate to the user with the full history of findings, fixes, and remaining issues. Do not loop indefinitely.
 
 For every cycle, after applying fixes, commit and push BEFORE re-running the review so the reviewer sees the updated tree. Format every fix commit as `Fix review findings (<reviewer>, cycle <N>)` so the loop history is visible in git log.
 
@@ -278,7 +283,7 @@ For every cycle, after applying fixes, commit and push BEFORE re-running the rev
       - **`status: "resolved"`** — the review thread has already been marked resolved on GitHub. Move on to the next comment.
       - **`status: "unresolved"`** — codex posted a threaded reply with `reply_body` containing concrete new directions. Read `reply_body`, fix per those directions, and re-invoke `gc_codex_verify_finding`. **Per-finding cap: 2 verify calls.** If the third call would be needed, STOP and escalate to the user with the finding, your fix history, and the latest `reply_body`.
 7. After all findings in the returned `comments` list are marked `resolved`, commit and push the fixes (one commit per fix cycle, message `Fix review findings (codex, cycle <N>)`), then re-invoke `gc_codex_review` with the same arguments to confirm no new issues surfaced after your fixes.
-8. **Overall step cap: 2 iterations of `gc_codex_review`.** If a second invocation still returns findings, STOP and escalate to the user.
+8. **Overall step cap: 5 iterations of `gc_codex_review`.** If the fifth invocation still returns findings, STOP and escalate to the user.
 
 **Tool shape**: `gc_codex_verify_finding` accepts only `repo_path`, `pr_number`, and `comment_id`. It reads the comment directly from GitHub; do not try to paraphrase the finding or pass additional context through the tool.
 
@@ -287,7 +292,7 @@ For every cycle, after applying fixes, commit and push BEFORE re-running the rev
 **CRITICAL: You MUST use the Skill tool to invoke the review-tests skill.**
 
 1. Call the Skill tool with `skill="review-tests"` to invoke the test quality review.
-2. Apply the **Review loop rules** above: fix every finding, ask user permission for anything you will not fix (including "warning" level — the review loop rules apply to warnings too, there is no triage bucket), re-invoke `skill="review-tests"` after each fix cycle, cap at 2 cycles.
+2. Apply the **Review loop rules** above: fix every finding, ask user permission for anything you will not fix (including "warning" level — the review loop rules apply to warnings too, there is no triage bucket), re-invoke `skill="review-tests"` after each fix cycle, cap at 5 cycles.
 
 ### Step 14: Final CI re-verification
 
@@ -296,7 +301,7 @@ After both review steps (12-13) have reported zero findings (or you have documen
 1. Verify the branch is pushed with the latest fix commits.
 2. Re-run Step 10 (CI Monitor) to confirm CI is still green after the review fixes.
 3. Re-run Step 11 (SonarCloud) — or skip again if `sonarcloud` was null.
-4. If either re-check fails, loop back through the appropriate review step — the cycle cap (2) applies per review step, not total.
+4. If either re-check fails, loop back through the appropriate review step — the cycle cap (5) applies per review step, not total.
 
 ### Step 15: Reconcile Traceability Links Against the Diff
 
@@ -337,7 +342,9 @@ Now that CI and all reviews are green, reconcile the Ground Control traceability
    - Create an IMPLEMENTS link (for production code) or TESTS link (for test files) via `gc_create_traceability_link` for each requirement the file satisfies.
 
 5. **Ensure every in-scope requirement has coverage appropriate to its nature.**
-   For each UID in `in_scope_requirements[]`:
+   This step has two modes depending on what Step 4 concluded:
+
+   **Mode A — the diff implemented the work.** This is the common case: the run added or modified files that implement at least one in-scope requirement. For each UID in `in_scope_requirements[]`:
    - Call `gc_get_traceability` on the requirement's UUID.
    - **IMPLEMENTS coverage is always required.** Every in-scope requirement must have at least one IMPLEMENTS link pointing at a file touched by this diff. The shape of "implementation" depends on what the requirement demands:
      - **Code requirements** (functional behavior, new endpoints, new entities, services, migrations) — IMPLEMENTS points at the production code file(s) that realize the behavior.
@@ -348,6 +355,13 @@ Now that CI and all reviews are green, reconcile the Ground Control traceability
    - **TESTS coverage is conditional.** Add a TESTS link when the diff introduces or touches an automated test that verifies the requirement — unit test, integration test, `@WebMvcTest`, policy test, property test, or any other form of executable verification. TESTS is NOT required when the requirement is satisfied purely by documentation, configuration, or structural invariants that have no executable behavior to test (for example: "SCHEMA.md shall document the source-citation rule", "the repo shall declare its knowledge base location in `.ground-control.yaml`"). In that case the IMPLEMENTS link alone is the complete coverage record.
    - **Do not fabricate test links** just to satisfy this step. If a requirement has testable behavior and no test was added, go back to Step 4.4 (TDD) and add the missing test; do not paper over the gap with a link to an unrelated file.
    - **Never link the diff to a requirement it does not satisfy** just to satisfy this step. Ripping out real coverage and linking a plausible-looking neighbor is worse than leaving a gap — STOP and surface the mismatch to the user instead.
+
+   **Mode B — Step 4 concluded the work is already complete (reconciliation-only run).** In this mode the code already ships and the diff has no new implementation files. Forcing an IMPLEMENTS link onto a file in the diff would be wrong — there may not be one. Instead:
+   - Call `gc_get_traceability` on the requirement's UUID.
+   - **Accept existing IMPLEMENTS coverage.** If the requirement already has one or more IMPLEMENTS links pointing at files that currently exist in the repo and that still satisfy the requirement (verify with a quick read — the code hasn't been ripped out), that coverage counts as complete. Do NOT fabricate new links against files in this diff just to satisfy the checklist.
+   - **Backfill only when nothing is linked.** If the requirement is in scope for this issue but has zero existing IMPLEMENTS links, the graph really is under-linked. Locate the file(s) in the repo (not necessarily in the diff) that implement the requirement and create the missing IMPLEMENTS link(s) via `gc_create_traceability_link`. The link target is the file that actually implements the behavior, regardless of whether the current diff touched it.
+   - **TESTS rules from Mode A still apply** — conditional on testable behavior, no fabrication, no plausible-neighbor linking.
+   - If Mode B discovers that a requirement has NO implementing file anywhere in the repo, STOP and surface to the user. That means either the requirement should be demoted (DEPRECATED) or the implementation is genuinely missing and the run should drop into Mode A to build it.
 
 6. **Reconcile the issue → requirement links (both directions).**
    The `## Requirements` section of the issue body is the source of truth for which requirements this issue covers. Reconciliation must make the Ground Control graph match that list exactly — which means both adding missing links AND deleting stale ones.
