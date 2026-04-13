@@ -60,9 +60,9 @@ This skill handles the ENTIRE lifecycle: plan, implement, verify, commit, push, 
    - If a UID in the section fails to resolve via `gc_get_requirement`, stop and report the broken reference.
    - If the input was a requirement UID (Step 7), ensure that UID is in `in_scope_requirements[]` — add it if missing, which also means updating the issue body to include a Requirements section.
 
-10. **For each UID in `in_scope_requirements[]`**, fetch the full requirement via `gc_get_requirement` and cache its UUID, title, statement, status, and wave. You will use these for clause verification (Step 4.5), traceability reconciliation (Step 15), and status transitions (Step 16).
+10. **For each UID in `in_scope_requirements[]`**, fetch the full requirement via `gc_get_requirement` and cache its UUID, title, statement, status, and wave. You will use these for clause verification (Step 4.5), status transitions (Step 15), and traceability reconciliation (Step 16).
 
-11. **Fetch the existing traceability links for the issue** via `gc_get_traceability_by_artifact` with `artifact_type: GITHUB_ISSUE` and `artifact_identifier: <issue-number>`. Cache the result — you will need it to reconcile the issue's relationship to requirements in Step 15.
+11. **Fetch the existing traceability links for the issue** via `gc_get_traceability_by_artifact` with `artifact_type: GITHUB_ISSUE` and `artifact_identifier: <issue-number>`. Cache the result — you will need it to reconcile the issue's relationship to requirements in Step 16.
 
 12. **Switch to the issue's feature branch**: run `gh issue develop <issue-number> --checkout --base dev`. If the branch already exists, `gh` reuses it.
 
@@ -109,7 +109,7 @@ Explore the codebase to determine whether the work described in the issue is alr
 - Avoid reinventing the wheel — use existing libraries and frameworks where appropriate.
 - Code should be easy to understand, test, and maintain. Simple is better than complex.
 - If Step 1.3 returned non-null `rules.plan_rules_content`, treat every bullet in that content as a mandatory plan constraint for this implementation. These are repo-specific "plans MUST..." rules (e.g., framework-specific migration rules, ADR conformance checks). Apply all of them in addition to the general principles above.
-- **If the work is ALREADY complete**: Report that the issue is satisfied and identify which code satisfies it. If `in_scope_requirements[]` is non-empty, verify each requirement is already linked and ACTIVE; if not, continue to Step 15 (reconciliation) to fix the Ground Control state without re-implementing the code.
+- **If the work is ALREADY complete**: Report that the issue is satisfied and identify which code satisfies it. If `in_scope_requirements[]` is non-empty, verify each requirement is already linked and ACTIVE; if not, continue to Steps 15–16 (transition then reconciliation) to fix the Ground Control state without re-implementing the code.
 
 ### Step 4.4: Test-Driven Development (mandatory)
 
@@ -303,9 +303,22 @@ After both review steps (12-13) have reported zero findings (or you have documen
 3. Re-run Step 11 (SonarCloud) — or skip again if `sonarcloud` was null.
 4. If either re-check fails, loop back through the appropriate review step — the cycle cap (5) applies per review step, not total.
 
-### Step 15: Reconcile Traceability Links Against the Diff
+### Step 15: Transition In-Scope Requirements to ACTIVE
 
-Now that CI and all reviews are green, reconcile the Ground Control traceability graph against the actual diff. This MUST happen AFTER Step 14 and BEFORE Step 18 (Report). Doing it earlier risks recording links against unproven code if the review cycle rejects the work.
+The status transition MUST happen BEFORE traceability reconciliation (Step 16). The Ground Control API enforces `IMPLEMENTS → ACTIVE`: any `gc_create_traceability_link` call with `link_type: IMPLEMENTS` against a `DRAFT` requirement returns `422 requirement_not_active`. Reconciling first therefore produces 10+ silent-looking failures; transitioning first is the only order that actually works.
+
+Semantically, moving a requirement from DRAFT to ACTIVE is the point at which the team commits to its statement. Once real code exists pointing at it, the requirement is no longer a proposal — it's a contract. The transition locks in the statement, and the subsequent reconciliation in Step 16 records the code that fulfills it.
+
+For each UID in `in_scope_requirements[]`:
+- Use the `gc_transition_status` MCP tool to transition the requirement from `DRAFT` to `ACTIVE`.
+- If the requirement was already `ACTIVE`, skip it.
+- If the requirement was in any other state (`DEPRECATED`, `ARCHIVED`), STOP and surface the anomaly to the user — transitioning out of those states is a user decision.
+
+If `in_scope_requirements[]` is empty, this step is a no-op (bug/refactor/maintenance run with no formal requirements). Proceed to Step 16 anyway — the reconciliation step still needs to run to catch drift on other requirements whose files this diff touched.
+
+### Step 16: Reconcile Traceability Links Against the Diff
+
+Now that CI and all reviews are green AND every in-scope requirement is ACTIVE, reconcile the Ground Control traceability graph against the actual diff. This MUST happen AFTER Step 15 (transition) and BEFORE Step 18 (Report). Doing the reconciliation earlier either fails outright (IMPLEMENTS against DRAFT) or records links against unproven code if the review cycle rejects the work.
 
 **Reconciliation is not the same as "create links for the in-scope requirements"**. Even runs with zero in-scope requirements (pure bug fixes, refactors, maintenance) must reconcile, because the diff may have touched files that were already linked to OTHER requirements and those links may now be stale.
 
@@ -371,22 +384,14 @@ Now that CI and all reviews are green, reconcile the Ground Control traceability
 
 Reconciliation is idempotent: running it on a branch where the GC graph is already correct is a no-op. Running it on a branch where the graph has drifted fixes the drift in both directions.
 
-### Step 16: Transition In-Scope Requirements to ACTIVE
-
-For each UID in `in_scope_requirements[]`:
-- Use the `gc_transition_status` MCP tool to transition the requirement from `DRAFT` to `ACTIVE`.
-- If the requirement was already `ACTIVE`, skip it.
-- If the requirement was in any other state (`DEPRECATED`, `ARCHIVED`), STOP and surface the anomaly to the user — transitioning out of those states is a user decision.
-
-If `in_scope_requirements[]` is empty, this step is a no-op.
-
 ### Step 17: Verify Ground Control State Landed
 
 1. For each UID in `in_scope_requirements[]`:
-   - Re-fetch with `gc_get_requirement` and confirm status is `ACTIVE`.
-   - Re-fetch with `gc_get_traceability` and confirm the expected IMPLEMENTS, TESTS, and GITHUB_ISSUE links are present.
-2. Re-run the deleted/renamed/modified audit from Step 15 point-by-point: every file in the diff should either have up-to-date links or have been intentionally left un-linked.
-3. If anything is missing or still drifted, loop back to Step 15 and fix. Do not proceed to Step 18 until Ground Control state matches reality across every file in the diff and every in-scope requirement.
+   - Re-fetch with `gc_get_requirement` and confirm status is `ACTIVE` (Step 15 should have transitioned it).
+   - Re-fetch with `gc_get_traceability` and confirm the expected IMPLEMENTS, TESTS, and GITHUB_ISSUE links are present (Step 16 should have recorded them).
+2. Re-run the deleted/renamed/modified audit from Step 16 point-by-point: every file in the diff should either have up-to-date links or have been intentionally left un-linked.
+3. If anything is missing or still drifted, loop back to the responsible step and fix: Step 15 for status drift, Step 16 for link drift. Do not proceed to Step 18 until Ground Control state matches reality across every file in the diff and every in-scope requirement.
+4. **Never declare success on silent failures.** If any `gc_create_traceability_link` / `gc_delete_traceability_link` / `gc_transition_status` call returned a non-2xx response during Steps 15–16, treat that as a failure, surface the error to the user if it is not clearly fixable (e.g., a permission issue or an API constraint you cannot work around), and loop back to correct the root cause. A batch of 10 parallel calls where 7 succeeded and 3 failed is not "mostly done" — it's broken.
 
 ### Step 18: Report (DO NOT MERGE)
 
