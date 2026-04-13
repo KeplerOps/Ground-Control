@@ -11,3 +11,5 @@ sonarcloud:
   organization: KeplerOps
 rules:
   plan_rules: .gc/plan-rules.md
+knowledge:
+  dir: docs/knowledge

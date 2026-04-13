@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -162,6 +162,7 @@ describe("formatIssueBody", () => {
   it("formats a full requirement with all fields", () => {
     const req = {
       uid: "GC-D007",
+      title: "Create GitHub issues from requirements",
       requirement_type: "FUNCTIONAL",
       priority: "SHOULD",
       wave: 1,
@@ -171,6 +172,8 @@ describe("formatIssueBody", () => {
     };
     const body = formatIssueBody(req);
     assert.ok(body.includes("> **GC-D007** | FUNCTIONAL | SHOULD | Wave 1 | DRAFT"));
+    assert.ok(body.includes("## Requirements"));
+    assert.ok(body.includes("- GC-D007 — Create GitHub issues from requirements"));
     assert.ok(body.includes("## Statement"));
     assert.ok(body.includes("The system shall create GitHub issues."));
     assert.ok(body.includes("## Rationale"));
@@ -181,6 +184,7 @@ describe("formatIssueBody", () => {
   it("omits rationale and wave when null", () => {
     const req = {
       uid: "GC-A001",
+      title: "Constraints apply to everyone",
       requirement_type: "CONSTRAINT",
       priority: "MUST",
       wave: null,
@@ -192,6 +196,8 @@ describe("formatIssueBody", () => {
     assert.ok(body.includes("> **GC-A001** | CONSTRAINT | MUST | ACTIVE"));
     assert.ok(!body.includes("Wave"));
     assert.ok(!body.includes("## Rationale"));
+    assert.ok(body.includes("## Requirements"));
+    assert.ok(body.includes("- GC-A001 — Constraints apply to everyone"));
   });
 
   it("appends extra body text", () => {
@@ -202,6 +208,75 @@ describe("formatIssueBody", () => {
     const body = formatIssueBody(req, "## Acceptance Criteria\n- [ ] Done");
     assert.ok(body.includes("## Acceptance Criteria"));
     assert.ok(body.includes("- [ ] Done"));
+  });
+
+  it("seeds a ## Requirements section that `/implement` can parse as in_scope_requirements[]", () => {
+    // /implement's issue-first path reads the ## Requirements section and
+    // treats every UID bullet as an authoritative in-scope requirement.
+    // An issue created from a Ground Control requirement must seed that
+    // section so the round-trip works without a manual body edit.
+    const req = {
+      uid: "GC-X042",
+      title: "Example requirement",
+      statement: "The system shall do the thing.",
+    };
+    const body = formatIssueBody(req);
+    const reqIndex = body.indexOf("## Requirements");
+    const statementIndex = body.indexOf("## Statement");
+    assert.notEqual(reqIndex, -1, "## Requirements must be present");
+    assert.ok(
+      reqIndex < statementIndex,
+      "## Requirements must precede ## Statement",
+    );
+    assert.match(body, /## Requirements\n\n- GC-X042 — Example requirement\n/);
+  });
+
+  it("falls back to the UID alone when no title is supplied", () => {
+    const req = { uid: "GC-T002", statement: "No title." };
+    const body = formatIssueBody(req);
+    assert.match(body, /## Requirements\n\n- GC-T002\n/);
+  });
+
+  it("collapses newlines in the title so they cannot inject extra Requirements bullets", () => {
+    // Requirement titles are untrusted user input. A malicious or
+    // accidentally-pasted multiline title must not produce a second
+    // list item — the parser at the `/implement` side would otherwise
+    // treat the second line as a second UID entry in
+    // `in_scope_requirements[]` and link/transition an unrelated
+    // requirement. See code comment in formatIssueBody for the rule.
+    const req = {
+      uid: "GC-INJ001",
+      title: "Original title\n- GC-X999 — fake injected requirement",
+      statement: "The system shall be resistant to title injection.",
+    };
+    const body = formatIssueBody(req);
+    assert.ok(body.includes("## Requirements"));
+    const reqSection = body.slice(body.indexOf("## Requirements"));
+    const nextHeader = reqSection.indexOf("## Statement");
+    const reqBody = reqSection.slice(0, nextHeader);
+    // Exactly one bullet in the Requirements section.
+    const bullets = reqBody.split("\n").filter((line) => line.startsWith("- "));
+    assert.equal(
+      bullets.length,
+      1,
+      `expected exactly one requirement bullet, got ${bullets.length}: ${JSON.stringify(bullets)}`,
+    );
+    assert.equal(
+      bullets[0],
+      "- GC-INJ001 — Original title - GC-X999 — fake injected requirement",
+    );
+    // And the injected GC-X999 UID must not appear as a standalone bullet.
+    assert.ok(!reqBody.includes("\n- GC-X999"));
+  });
+
+  it("collapses tabs and runs of whitespace in the title", () => {
+    const req = {
+      uid: "GC-T003",
+      title: "Multiple\t\twhitespace    runs",
+      statement: "Ok.",
+    };
+    const body = formatIssueBody(req);
+    assert.match(body, /## Requirements\n\n- GC-T003 — Multiple whitespace runs\n/);
   });
 });
 
@@ -243,6 +318,7 @@ describe("parseGroundControlYaml", () => {
     });
     assert.equal(result.value.sonarcloud, null);
     assert.equal(result.value.rules.plan_rules_path, null);
+    assert.equal(result.value.knowledge, null);
   });
 
   it("parses a fully populated yaml", () => {
@@ -260,6 +336,10 @@ describe("parseGroundControlYaml", () => {
       "  organization: KeplerOps",
       "rules:",
       "  plan_rules: .gc/plan-rules.md",
+      "knowledge:",
+      "  dir: docs/knowledge",
+      "  schema: docs/knowledge/SCHEMA.md",
+      "  inbox: docs/knowledge/inbox",
       "",
     ].join("\n");
     const result = parseGroundControlYaml(yaml);
@@ -270,6 +350,11 @@ describe("parseGroundControlYaml", () => {
     assert.equal(result.value.sonarcloud.project_key, "KeplerOps_Ground-Control");
     assert.equal(result.value.sonarcloud.organization, "KeplerOps");
     assert.equal(result.value.rules.plan_rules_path, ".gc/plan-rules.md");
+    assert.deepEqual(result.value.knowledge, {
+      dir: "docs/knowledge",
+      schema: "docs/knowledge/SCHEMA.md",
+      inbox: "docs/knowledge/inbox",
+    });
   });
 
   it("rejects invalid yaml text", () => {
@@ -321,6 +406,90 @@ describe("parseGroundControlYaml", () => {
     assert.equal(result.ok, false);
     assert.ok(result.errors.some((e) => e.includes("organization")));
   });
+
+  it("parses a knowledge section with only dir and leaves overrides null", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "knowledge:",
+      "  dir: docs/knowledge",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.knowledge, {
+      dir: "docs/knowledge",
+      schema: null,
+      inbox: null,
+    });
+  });
+
+  it("requires knowledge.dir when the knowledge section is set", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "knowledge:",
+      "  schema: docs/knowledge/SCHEMA.md",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("knowledge.dir is required")));
+  });
+
+  it("rejects unknown keys inside knowledge", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "knowledge:",
+      "  dir: docs/knowledge",
+      "  bogus: true",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("knowledge has unknown key 'bogus'")));
+  });
+
+  it("rejects knowledge when it is not a mapping", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "knowledge:",
+      "  - docs/knowledge",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("knowledge must be a mapping")));
+  });
+
+  it("rejects an empty knowledge.dir", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "knowledge:",
+      "  dir: ''",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("knowledge.dir is required")));
+  });
+
+  it("rejects an empty knowledge.schema override", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "knowledge:",
+      "  dir: docs/knowledge",
+      "  schema: ''",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("knowledge.schema must be a non-empty string")));
+  });
 });
 
 describe("getRepoGroundControlContext", () => {
@@ -356,6 +525,7 @@ describe("getRepoGroundControlContext", () => {
       assert.equal(result.project, "test-project");
       assert.equal(result.rules.plan_rules_path, null);
       assert.equal(result.rules.plan_rules_content, null);
+      assert.equal(result.knowledge, null);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -425,6 +595,389 @@ describe("getRepoGroundControlContext", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  function makeKnowledgeRepo({ extraYamlLines = [] } = {}) {
+    const dir = makeTempRepo();
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+    mkdirSync(join(dir, "docs", "knowledge"), { recursive: true });
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+    writeFileSync(join(dir, "docs", "knowledge", "SCHEMA.md"), "# schema\n");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+    writeFileSync(
+      join(dir, ".ground-control.yaml"),
+      [
+        "schema_version: 1",
+        "project: test-project",
+        "knowledge:",
+        "  dir: docs/knowledge",
+        ...extraYamlLines,
+        "",
+      ].join("\n"),
+    );
+    return dir;
+  }
+
+  it("returns a resolved knowledge block when dir exists and defaults apply", async () => {
+    const dir = makeKnowledgeRepo();
+    try {
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "ok");
+      assert.deepEqual(result.knowledge, {
+        dir: "docs/knowledge",
+        schema: "docs/knowledge/SCHEMA.md",
+        inbox: "docs/knowledge/inbox",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("honors explicit knowledge.schema and knowledge.inbox overrides", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      mkdirSync(join(dir, "wiki"), { recursive: true });
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(join(dir, "wiki", "custom-schema.md"), "# schema\n");
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: wiki",
+          "  schema: wiki/custom-schema.md",
+          "  inbox: wiki/capture",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "ok");
+      assert.deepEqual(result.knowledge, {
+        dir: "wiki",
+        schema: "wiki/custom-schema.md",
+        inbox: "wiki/capture",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when knowledge.dir does not exist", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: docs/knowledge",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("knowledge.dir")));
+      assert.ok(result.errors.some((e) => e.includes("docs/knowledge")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when knowledge.schema file does not exist", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      mkdirSync(join(dir, "docs", "knowledge"), { recursive: true });
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: docs/knowledge",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("knowledge.schema")));
+      assert.ok(result.errors.some((e) => e.includes("SCHEMA.md")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when knowledge.dir is an absolute path", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: /etc/passwd",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("knowledge.dir")));
+      assert.ok(result.errors.some((e) => /repo[- ]relative|absolute/.test(e)));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when knowledge.dir escapes the repository root", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: ../escape",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("knowledge.dir")));
+      assert.ok(result.errors.some((e) => e.includes("repository root")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when knowledge.schema override escapes the repository root", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      mkdirSync(join(dir, "docs", "knowledge"), { recursive: true });
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(join(dir, "docs", "knowledge", "SCHEMA.md"), "# schema\n");
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: docs/knowledge",
+          "  schema: ../../etc/passwd",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("knowledge.schema")));
+      assert.ok(result.errors.some((e) => e.includes("repository root")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when knowledge.dir is a symlink to an out-of-repo directory", async () => {
+    const dir = makeTempRepo();
+    const outside = mkdtempSync(join(tmpdir(), "gc-yaml-outside-"));
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(join(outside, "SCHEMA.md"), "# schema\n");
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      symlinkSync(outside, join(dir, "sneaky"));
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: sneaky",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("knowledge.dir")));
+      assert.ok(result.errors.some((e) => /symlink|outside the repository/.test(e)));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when knowledge.schema is a symlink to an out-of-repo file", async () => {
+    const dir = makeTempRepo();
+    const outside = mkdtempSync(join(tmpdir(), "gc-yaml-outside-"));
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      mkdirSync(join(dir, "docs", "knowledge"), { recursive: true });
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(join(outside, "secret.md"), "stolen\n");
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      symlinkSync(join(outside, "secret.md"), join(dir, "docs", "knowledge", "SCHEMA.md"));
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: docs/knowledge",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("knowledge.schema")));
+      assert.ok(result.errors.some((e) => /symlink|outside the repository/.test(e)));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when knowledge.inbox default lands under a symlink-escaping dir", async () => {
+    // inbox does not need to exist, but its path must still be contained;
+    // a symlink on its parent directory must still trigger rejection so
+    // a later capture slice never writes outside the repo.
+    const dir = makeTempRepo();
+    const outside = mkdtempSync(join(tmpdir(), "gc-yaml-outside-"));
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(join(outside, "SCHEMA.md"), "# schema\n");
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      symlinkSync(outside, join(dir, "wiki"));
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: wiki",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      // The dir itself is caught first; that alone is enough to fail the request,
+      // but we also want to be sure an inbox default computed from that dir
+      // does not silently succeed if the dir check is ever relaxed.
+      assert.ok(result.errors.some((e) => /knowledge\.(dir|inbox)/.test(e)));
+      assert.ok(result.errors.some((e) => /symlink|outside the repository/.test(e)));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml when knowledge.inbox points at a regular file", async () => {
+    // An inbox configured to point at a file silently survives lexical and
+    // realpath checks, then every downstream capture flow crashes trying to
+    // write files under it. Catch the misconfig up front.
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      mkdirSync(join(dir, "docs", "knowledge"), { recursive: true });
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(join(dir, "docs", "knowledge", "SCHEMA.md"), "# schema\n");
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: docs/knowledge",
+          "  inbox: docs/knowledge/SCHEMA.md",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("knowledge.inbox")));
+      assert.ok(result.errors.some((e) => e.includes("not a directory")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns invalid_ground_control_yaml (not an exception) when knowledge.inbox descends through a regular file", async () => {
+    // inbox: docs/knowledge/SCHEMA.md/capture — realpathSync raises ENOTDIR
+    // when it tries to descend through SCHEMA.md. The helper must walk up
+    // past the bad component and return a structured validation error, not
+    // let the exception escape and hard-fail the whole MCP tool call.
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      mkdirSync(join(dir, "docs", "knowledge"), { recursive: true });
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(join(dir, "docs", "knowledge", "SCHEMA.md"), "# schema\n");
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: docs/knowledge",
+          "  inbox: docs/knowledge/SCHEMA.md/capture",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      // The key assertion is that the tool returned a structured response
+      // rather than throwing. The specific error code reflects which
+      // containment/inode check caught the problem.
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(Array.isArray(result.errors) && result.errors.length > 0);
+      assert.ok(result.errors.some((e) => e.includes("knowledge.inbox")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts in-repo symlinks that stay inside the repository root", async () => {
+    // Not every symlink is malicious. A repo that keeps its knowledge base
+    // under docs/knowledge but symlinks it from a prettier path must still
+    // be able to declare the symlinked location without getting rejected.
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      mkdirSync(join(dir, "docs", "knowledge"), { recursive: true });
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(join(dir, "docs", "knowledge", "SCHEMA.md"), "# schema\n");
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      symlinkSync(join(dir, "docs", "knowledge"), join(dir, "wiki"));
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "knowledge:",
+          "  dir: wiki",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "ok");
+      assert.equal(result.knowledge.dir, "wiki");
+      assert.equal(result.knowledge.schema, "wiki/SCHEMA.md");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -456,6 +1009,36 @@ describe("buildCodexArchitecturePreflightPrompt", () => {
     assert.ok(prompt.includes("ADR-012"));
     assert.ok(prompt.includes("\"number\": 501"));
     assert.ok(prompt.includes("gotchas and anti-patterns"));
+  });
+
+  it("switches the requirement payload to a requirement-free preamble when requirement is null", () => {
+    const prompt = buildCodexArchitecturePreflightPrompt({
+      requirement: null,
+      traceabilityLinks: [],
+      issueContext: { number: 742, title: "Fix flaky test in AuthService" },
+    });
+
+    assert.ok(prompt.includes("Do not implement the issue itself."));
+    assert.ok(!prompt.includes("Do not implement the requirement itself."));
+    assert.ok(prompt.includes("Requirement payload: none."));
+    assert.ok(prompt.includes("requirement-free run"));
+    assert.ok(!prompt.includes("Existing traceability summary:"));
+    assert.ok(prompt.includes("\"number\": 742"));
+    assert.ok(prompt.includes("Do not spend time re-fetching issue details"));
+  });
+
+  it("uses the requirement-anchored completion line when a requirement is provided", () => {
+    const prompt = buildCodexArchitecturePreflightPrompt({
+      requirement: {
+        uid: "GC-A123",
+        title: "Shared Concept Authority",
+        statement: "The system shall define a canonical concept authority.",
+      },
+      issueContext: { number: 501 },
+    });
+
+    assert.ok(prompt.includes("Do not spend time re-fetching requirement details"));
+    assert.ok(!prompt.includes("Do not spend time re-fetching issue details"));
   });
 });
 

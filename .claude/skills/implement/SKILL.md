@@ -1,19 +1,21 @@
 ---
 name: implement
-description: End-to-end requirement implementation — from plan through merged PR
-argument-hint: <requirement-uid>
+description: End-to-end issue implementation — from plan through merged PR
+argument-hint: <issue-number | requirement-uid>
 disable-model-invocation: true
 ---
 
-# Implement Requirement: $ARGUMENTS
+# Implement: $ARGUMENTS
 
 This skill handles the ENTIRE lifecycle: plan, implement, verify, commit, push, PR, CI, reviews, fix, merge, cleanup. The user's only checkpoint is plan approval.
+
+**Every run is driven by a GitHub issue.** The issue is the durable artifact that records why the change is being made, what requirements are in scope (if any), and how completion is reviewed. `$ARGUMENTS` may be either a GitHub issue number OR a Ground Control requirement UID; in the UID case the skill finds or creates the matching issue and runs against it. Bug fixes, refactors, dependency updates, and other requirement-free work enter the same workflow via an issue with zero requirements in scope.
 
 ---
 
 ## Phase A: Plan & Implement
 
-### Step 1: Fetch Requirement and Ensure GitHub Issue Exists
+### Step 1: Resolve the Issue and Branch
 
 1. Enter plan mode.
 
@@ -37,64 +39,83 @@ This skill handles the ENTIRE lifecycle: plan, implement, verify, commit, push, 
    - `sonarcloud` — if set, used by `/ship` later; if null, SonarCloud is skipped
    - `rules.plan_rules_content` — if non-null, treated as mandatory plan constraints in Step 4
 
-6. Treat `$ARGUMENTS` as the full requirement UID exactly as provided by the user.
-   - Do NOT synthesize or rewrite a project prefix.
-   - Inputs like `OBS-001`, `DSL-101`, `API-412`, and `GC-J001` are already full UIDs and should be used as-is.
+6. **Classify `$ARGUMENTS` as either an issue reference or a requirement UID**:
+   - **Issue reference**: a plain integer (`123`), a `#`-prefixed integer (`#123`), or a form like `issue:123`. In all cases, strip to the integer and treat it as the GitHub issue number.
+   - **Requirement UID**: anything matching the pattern `<letters>-<letters/digits>` (examples: `GC-X001`, `OBS-042`, `DSL-101`, `TC-015`). Treat the entire string as the UID exactly as provided. Do NOT synthesize or rewrite a project prefix.
+   - If the input fits neither pattern, stop and ask the user for disambiguation.
 
-7. Use the `gc_get_requirement` MCP tool with uid `$ARGUMENTS` and the repo-local Ground Control `project`. Note the requirement's UUID, title, statement, status, and wave.
+7. **If the input was a requirement UID**, resolve it to a GitHub issue:
+   1. Use `gc_get_requirement` with the UID and the cached `project`. If the requirement does not exist, stop and report it.
+   2. Use `gc_get_traceability` with the requirement's UUID. Look for a link with `artifact_type: GITHUB_ISSUE`.
+   3. If such a link exists, note the issue number from its `artifact_identifier`.
+   4. If no link exists, use `gc_create_github_issue` with the UID and `project` to create an issue and auto-link it. Note the new issue number.
+   - From this point forward, treat the resolved issue number as the authoritative input. The requirement UID becomes a single entry in the `in_scope_requirements[]` list computed below.
 
-8. Use the `gc_get_traceability` MCP tool with the requirement's UUID to check for existing traceability links. Look for a link with artifact_type `GITHUB_ISSUE`.
+8. **Fetch the issue** via `gh issue view <issue-number> --json number,title,body,labels,url`. Cache the full body text.
 
-9. If NO GitHub issue link exists:
-   - Use the `gc_create_github_issue` MCP tool with uid `$ARGUMENTS` and the repo-local Ground Control `project` to create a GitHub issue and auto-link it.
+9. **Parse the `in_scope_requirements[]` list from the issue body.** The convention is a Markdown section whose heading is exactly `## Requirements` (case-insensitive match on the word `Requirements`, any heading level from `##` to `####`). The section contains a bulleted list where each bullet is a Ground Control requirement UID (matching the `<letters>-<letters/digits>` pattern), optionally followed by prose explanation.
+   - If the section is present and non-empty, every valid UID bullet becomes an entry in `in_scope_requirements[]`.
+   - If the section is present and empty, `in_scope_requirements[]` is empty — this is a bug/refactor/maintenance run with no formal requirements.
+   - If the section is absent entirely, `in_scope_requirements[]` is empty.
+   - If a UID in the section fails to resolve via `gc_get_requirement`, stop and report the broken reference.
+   - If the input was a requirement UID (Step 7), ensure that UID is in `in_scope_requirements[]` — add it if missing, which also means updating the issue body to include a Requirements section.
 
-10. If a GitHub issue link DOES exist, note the issue number from the artifact_identifier.
+10. **For each UID in `in_scope_requirements[]`**, fetch the full requirement via `gc_get_requirement` and cache its UUID, title, statement, status, and wave. You will use these for clause verification (Step 4.5), status transitions (Step 15), and traceability reconciliation (Step 16).
 
-11. Run `gh issue develop <issue-number> --checkout --base dev` to switch to the issue branch.
+11. **Fetch the existing traceability links for the issue** via `gc_get_traceability_by_artifact` with `artifact_type: GITHUB_ISSUE` and `artifact_identifier: <issue-number>`. Cache the result — you will need it to reconcile the issue's relationship to requirements in Step 16.
 
-### Step 2: Read the GitHub Issue
+12. **Switch to the issue's feature branch**: run `gh issue develop <issue-number> --checkout --base dev`. If the branch already exists, `gh` reuses it.
 
-Run `gh issue view <issue-number>` to read the full issue details including description, labels, and comments.
+### Step 2: Read the Issue and Gather Context
+
+The issue body was cached in Step 1, but re-read it carefully now for labels, comments, and any user discussion. Run `gh issue view <issue-number> --comments` to pull the comment thread too. The issue is the authoritative description of the work; everything downstream (plan, clause verification, review scope) anchors on it.
 
 ### Step 2.5: Run Codex Architecture Preflight
 
+Preflight MUST cover every in-scope requirement, not just the first one. The preflight tool loads exactly one requirement payload per call, so grouped issues that carry multiple UIDs need one call per UID — otherwise codex never sees the statements, rationale, or existing traceability for every requirement after the first, and the returned guardrails will be incomplete.
+
 1. Reuse the absolute repository root from Step 1.
-2. Call the `gc_codex_architecture_preflight` MCP tool with:
-   - `requirement_uid`: `$ARGUMENTS`
+2. **Determine the preflight call set.**
+   - If `in_scope_requirements[]` is non-empty, run the call below **once per UID in the list**. Each call preflights a single requirement.
+   - If `in_scope_requirements[]` is empty (requirement-free bug/refactor/maintenance run), run the call exactly once with `issue_number` alone and omit `requirement_uid`.
+3. For each call in the set, call the `gc_codex_architecture_preflight` MCP tool with:
+   - `issue_number`: the issue number from Step 1 (always supplied — it is the authoritative anchor for preflight in both UID-first and issue-first runs)
    - `repo_path`: absolute path from Step 1
    - `project`: the repo-local Ground Control project from Step 1
-   - `issue_number`: the issue number from Step 1
-3. Read any ADRs, design notes, or workflow guidance that Codex created or updated.
-4. Treat the returned guardrails, cross-cutting concerns, and non-goals as binding unless they are clearly wrong.
-5. Do NOT revert or ignore Codex-added design guidance just because implementation looks possible without it.
+   - `requirement_uid`: the UID being preflighted in this call (omit entirely on requirement-free runs). The tool accepts either `requirement_uid` or `issue_number` alone and requires at least one; since Step 1 always produced an issue number, the issue-number-only call is the guaranteed fallback.
+4. After every call in the set has returned, read any ADRs, design notes, or workflow guidance that Codex created or updated. Multiple calls may touch overlapping files — that is fine; treat the union of all guardrails as binding.
+5. Treat the returned guardrails, cross-cutting concerns, and non-goals as binding unless they are clearly wrong.
+6. Do NOT revert or ignore Codex-added design guidance just because implementation looks possible without it.
 
 ### Step 3: Assess Codebase Coverage
 
-Explore the codebase to determine whether the requirement described in the issue is already satisfied by existing code:
-- Search for relevant classes, methods, tests, and configurations
-- Check if the described behavior already exists
-- Review any existing traceability links (IMPLEMENTS, TESTS) from Step 1
-- Reuse the architecture-preflight guidance from Step 2.5 while assessing existing coverage and planning changes
+Explore the codebase to determine whether the work described in the issue is already covered by existing code:
+- Search for relevant classes, methods, tests, and configurations touching the subsystems the issue describes.
+- Consult the repository knowledge base (see the Ground Control agent knowledge system design — `docs/notes/agent-knowledge-system-design.md`) during exploration when one is present. Grep the knowledge index for keywords matching the issue's subject area and read any pages that match.
+- Check if the described behavior already exists.
+- For each requirement in `in_scope_requirements[]`, review its existing traceability links (IMPLEMENTS, TESTS) via `gc_get_traceability` on the requirement UUID. Some or all clauses may already be satisfied.
+- Reuse the architecture-preflight guidance from Step 2.5 while assessing existing coverage and planning changes.
 
 ### Step 4: Plan or Report
 
-- **If the requirement is NOT yet met**: Plan the implementation. Identify which files need to be created or modified, what tests to write, and what approach to take. Enter plan mode.
+- **If the work is NOT yet complete**: Plan the implementation. Identify which files need to be created or modified, what tests to write, and what approach to take. Enter plan mode.
+- When `in_scope_requirements[]` is non-empty, the plan must cover every clause of every in-scope requirement. When it is empty, the plan must fully address every acceptance criterion in the issue body and any user clarifications in comments.
 - Your plans must respect the coding standards and formal methods classification levels.
 - You must add or update ADRs as appropriate.
 - Plans must include updating the changelog, readme, and docs as appropriate.
-- If designing code, remember to build off existing cross-cutting concerns, code, and patterns
-- Good code is readable, maintainable, and follows the coding standards
-- Address the concerns a FAANG L6+ engineer would have around security, performance, reliability, and scalability
-- Avoid reinventing the wheel - use existing libraries and frameworks where appropriate
+- If designing code, remember to build off existing cross-cutting concerns, code, and patterns.
+- Good code is readable, maintainable, and follows the coding standards.
+- Address the concerns a FAANG L6+ engineer would have around security, performance, reliability, and scalability.
+- Avoid reinventing the wheel — use existing libraries and frameworks where appropriate.
 - Code should be easy to understand, test, and maintain. Simple is better than complex.
 - If Step 1.3 returned non-null `rules.plan_rules_content`, treat every bullet in that content as a mandatory plan constraint for this implementation. These are repo-specific "plans MUST..." rules (e.g., framework-specific migration rules, ADR conformance checks). Apply all of them in addition to the general principles above.
-- **If the requirement IS already met**: Report that the requirement is satisfied and identify which code satisfies it.
+- **If the work is ALREADY complete**: Report that the issue is satisfied and identify which code satisfies it. If `in_scope_requirements[]` is non-empty, verify each requirement is already linked and ACTIVE; if not, continue to Steps 15–16 (transition then reconciliation) to fix the Ground Control state without re-implementing the code.
 
 ### Step 4.4: Test-Driven Development (mandatory)
 
 After plan approval, implement using **TDD**. This is not optional:
 
-1. **Write the failing test first.** For each clause of the requirement and each acceptance criterion, write a unit test that exercises the new behavior. Run the test and confirm it fails for the right reason (missing code, not a typo / wiring issue). A test you never saw fail is not a test — it's a guess.
+1. **Write the failing test first.** For each clause of each in-scope requirement AND each acceptance criterion in the issue body, write a unit test that exercises the new behavior. Run the test and confirm it fails for the right reason (missing code, not a typo / wiring issue). A test you never saw fail is not a test — it's a guess.
 2. **Write the minimum production code to make the test pass.** No premature abstraction, no scope creep, no "while I'm here" cleanups. Just enough to flip the failing assertion green.
 3. **Refactor with the test green.** Clean up duplication, extract helpers, rename for clarity — but only with the safety net of green tests. Re-run the test after each refactor.
 4. **Repeat per clause / acceptance criterion / edge case.** Do not write a batch of production code first and then "fill in tests" afterwards — that is not TDD, it is post-hoc test-shaped coverage and fails to drive the design.
@@ -106,19 +127,29 @@ Pre-existing tests around touched code must stay green at every step. If a refac
 
 ### Step 4.5: Clause-by-Clause Verification
 
-Before declaring implementation complete:
-1. Re-read the requirement statement from Step 1.
-2. Break it into individual clauses and acceptance criteria.
-3. For EACH clause, identify the specific code (file:line) that satisfies it.
-4. If any clause is not satisfied, go back and implement it before proceeding.
+Before declaring implementation complete, build a mapping from every clause of every in-scope requirement AND every acceptance criterion in the issue body to the specific code (`file:line`) that satisfies it.
 
-Present the mapping as a checklist:
-- [ ] Clause: "..." → Satisfied by: file.java:line
-- [ ] Clause: "..." → Satisfied by: file.java:line
+1. For each requirement in `in_scope_requirements[]`:
+   - Re-read the requirement statement cached in Step 1.
+   - Break it into individual clauses.
+   - For EACH clause, identify the specific code (`file:line`) that satisfies it.
+2. For each acceptance criterion stated in the issue body (or in the issue comments by the user):
+   - Identify the specific code (`file:line`) that satisfies it.
+3. If `in_scope_requirements[]` is empty AND the issue body has no explicit acceptance criteria, treat the issue title and description as the acceptance contract and verify the change matches.
+4. If any clause or criterion is not satisfied, go back and implement it before proceeding.
 
-Do not proceed until every clause is checked off.
+Present the mapping as a checklist with the requirement UID (or `issue`) as the source label:
 
-Traceability links (`IMPLEMENTS` / `TESTS`) and the `DRAFT → ACTIVE` status transition are intentionally NOT done here. They land in Steps 15–17 after CI and all reviews have passed, so Ground Control state never runs ahead of the actual code that ships.
+```
+- [ ] GC-X004 clause: "..." → Satisfied by: file.java:line
+- [ ] GC-X004 clause: "..." → Satisfied by: file.java:line
+- [ ] GC-X005 clause: "..." → Satisfied by: file.java:line
+- [ ] issue acceptance: "..." → Satisfied by: file.java:line
+```
+
+Do not proceed until every clause and criterion is checked off.
+
+Traceability reconciliation (IMPLEMENTS / TESTS links) and the `DRAFT → ACTIVE` status transitions are intentionally NOT done here. They land in Steps 15–17 after CI and all reviews have passed, so Ground Control state never runs ahead of the actual code that ships.
 
 ---
 
@@ -214,7 +245,7 @@ Otherwise:
    - Re-run Step 10 (CI Monitor) so SonarCloud re-analyzes the PR.
    - After CI is green, wait 60 seconds and re-run this entire step (quality gate + issues search + hotspots search) to verify.
 
-6. **Cycle cap: 2 iterations for SonarCloud.** If the issue list is still non-empty after 2 fix→re-analyze cycles, STOP and escalate to the user with the remaining findings.
+6. **Cycle cap: 5 iterations for SonarCloud.** If the issue list is still non-empty after 5 fix→re-analyze cycles, STOP and escalate to the user with the remaining findings.
 
 7. Proceed to Step 12 only when: the quality gate is `OK` AND `api/issues/search?resolved=false` returns zero rows for this PR AND `api/hotspots/search?status=TO_REVIEW` returns zero rows for this PR.
 
@@ -228,7 +259,7 @@ Every review step below (Codex cross-model, test quality review) follows the **s
 4. **If you cannot or believe you should not fix a specific finding**, you MUST stop and ask the user for explicit permission to leave it unfixed. Do not decide unilaterally. State the finding, why you think it should be skipped, and wait for the user's answer. Resume only after they explicitly confirm.
 5. **Re-run the SAME review after fixing.** Do not assume your fixes are complete — the re-run is the verification.
 6. **Repeat until the reviewer reports zero findings, OR the cycle cap is hit.**
-7. **Cycle cap: 2 iterations per review step.** If a review still reports findings after 2 invoke→fix→re-run cycles, STOP and escalate to the user with the full history of findings, fixes, and remaining issues. Do not loop indefinitely.
+7. **Cycle cap: 5 iterations per review step.** If a review still reports findings after 5 invoke→fix→re-run cycles, STOP and escalate to the user with the full history of findings, fixes, and remaining issues. Do not loop indefinitely.
 
 For every cycle, after applying fixes, commit and push BEFORE re-running the review so the reviewer sees the updated tree. Format every fix commit as `Fix review findings (<reviewer>, cycle <N>)` so the loop history is visible in git log.
 
@@ -252,7 +283,7 @@ For every cycle, after applying fixes, commit and push BEFORE re-running the rev
       - **`status: "resolved"`** — the review thread has already been marked resolved on GitHub. Move on to the next comment.
       - **`status: "unresolved"`** — codex posted a threaded reply with `reply_body` containing concrete new directions. Read `reply_body`, fix per those directions, and re-invoke `gc_codex_verify_finding`. **Per-finding cap: 2 verify calls.** If the third call would be needed, STOP and escalate to the user with the finding, your fix history, and the latest `reply_body`.
 7. After all findings in the returned `comments` list are marked `resolved`, commit and push the fixes (one commit per fix cycle, message `Fix review findings (codex, cycle <N>)`), then re-invoke `gc_codex_review` with the same arguments to confirm no new issues surfaced after your fixes.
-8. **Overall step cap: 2 iterations of `gc_codex_review`.** If a second invocation still returns findings, STOP and escalate to the user.
+8. **Overall step cap: 5 iterations of `gc_codex_review`.** If the fifth invocation still returns findings, STOP and escalate to the user.
 
 **Tool shape**: `gc_codex_verify_finding` accepts only `repo_path`, `pr_number`, and `comment_id`. It reads the comment directly from GitHub; do not try to paraphrase the finding or pass additional context through the tool.
 
@@ -261,7 +292,7 @@ For every cycle, after applying fixes, commit and push BEFORE re-running the rev
 **CRITICAL: You MUST use the Skill tool to invoke the review-tests skill.**
 
 1. Call the Skill tool with `skill="review-tests"` to invoke the test quality review.
-2. Apply the **Review loop rules** above: fix every finding, ask user permission for anything you will not fix (including "warning" level — the review loop rules apply to warnings too, there is no triage bucket), re-invoke `skill="review-tests"` after each fix cycle, cap at 2 cycles.
+2. Apply the **Review loop rules** above: fix every finding, ask user permission for anything you will not fix (including "warning" level — the review loop rules apply to warnings too, there is no triage bucket), re-invoke `skill="review-tests"` after each fix cycle, cap at 5 cycles.
 
 ### Step 14: Final CI re-verification
 
@@ -270,37 +301,108 @@ After both review steps (12-13) have reported zero findings (or you have documen
 1. Verify the branch is pushed with the latest fix commits.
 2. Re-run Step 10 (CI Monitor) to confirm CI is still green after the review fixes.
 3. Re-run Step 11 (SonarCloud) — or skip again if `sonarcloud` was null.
-4. If either re-check fails, loop back through the appropriate review step — the cycle cap (2) applies per review step, not total.
+4. If either re-check fails, loop back through the appropriate review step — the cycle cap (5) applies per review step, not total.
 
-### Step 15: Create Traceability Links
+### Step 15: Transition In-Scope Requirements to ACTIVE
 
-Now that CI and all reviews are green, record the implementation in Ground Control. This MUST happen AFTER Step 14 and BEFORE Step 18 (Report). Doing it earlier risks marking unproven code as implementing the requirement if the review cycle rejects the work.
+The status transition MUST happen BEFORE traceability reconciliation (Step 16). The Ground Control API enforces `IMPLEMENTS → ACTIVE`: any `gc_create_traceability_link` call with `link_type: IMPLEMENTS` against a `DRAFT` requirement returns `422 requirement_not_active`. Reconciling first therefore produces 10+ silent-looking failures; transitioning first is the only order that actually works.
 
-1. Use the `gc_create_traceability_link` MCP tool to create links from the requirement to every substantive file in the diff:
-   - `IMPLEMENTS` links to every production file that implements the requirement — entities, enums, repositories, services, controllers, migrations, MCP tool files. Link all substantive files, not just the top 3. DTOs and command records may be omitted.
-   - `TESTS` links to every test file that verifies it.
-   - Skip links that already exist (check via `gc_get_traceability` first).
+Semantically, moving a requirement from DRAFT to ACTIVE is the point at which the team commits to its statement. Once real code exists pointing at it, the requirement is no longer a proposal — it's a contract. The transition locks in the statement, and the subsequent reconciliation in Step 16 records the code that fulfills it.
 
-### Step 16: Transition Requirement to ACTIVE
+For each UID in `in_scope_requirements[]`:
+- Use the `gc_transition_status` MCP tool to transition the requirement from `DRAFT` to `ACTIVE`.
+- If the requirement was already `ACTIVE`, skip it.
+- If the requirement was in any other state (`DEPRECATED`, `ARCHIVED`), STOP and surface the anomaly to the user — transitioning out of those states is a user decision.
 
-1. Use the `gc_transition_status` MCP tool to transition the requirement from `DRAFT` to `ACTIVE`.
-2. If the requirement was already `ACTIVE`, skip.
+If `in_scope_requirements[]` is empty, this step is a no-op (bug/refactor/maintenance run with no formal requirements). Proceed to Step 16 anyway — the reconciliation step still needs to run to catch drift on other requirements whose files this diff touched.
+
+### Step 16: Reconcile Traceability Links Against the Diff
+
+Now that CI and all reviews are green AND every in-scope requirement is ACTIVE, reconcile the Ground Control traceability graph against the actual diff. This MUST happen AFTER Step 15 (transition) and BEFORE Step 18 (Report). Doing the reconciliation earlier either fails outright (IMPLEMENTS against DRAFT) or records links against unproven code if the review cycle rejects the work.
+
+**Reconciliation is not the same as "create links for the in-scope requirements"**. Even runs with zero in-scope requirements (pure bug fixes, refactors, maintenance) must reconcile, because the diff may have touched files that were already linked to OTHER requirements and those links may now be stale.
+
+1. **Compute the touched file set.** Run `git diff --name-status <base-ref>...HEAD` to get every added (`A`), modified (`M`), deleted (`D`), renamed (`R`), and copied (`C`) file in this branch. Cache the full list.
+
+   Resolve `<base-ref>` in the same order the codex review already uses so reconciliation works in fully-hydrated GitHub clones, local-only checkouts, and disconnected workstations:
+   1. `origin/dev` — the canonical remote-tracking ref. Verify it exists with `git rev-parse --verify origin/dev` before using.
+   2. `dev` — the local branch. Verify with `git rev-parse --verify dev`.
+   3. `origin/main` — fallback for repos whose default base is not `dev`.
+   4. `main` — fallback for local-only clones of main-based repos.
+   5. If none of the above resolve, run `git fetch origin dev` and retry the list. If the fetch itself fails (no network, no remote), STOP and surface a clear error — reconciliation cannot run without a base ref, and silently falling back to an empty diff would under-report drift.
+
+2. **Process deleted and renamed files first.**
+   For every deleted file `path`:
+   - Call `gc_get_traceability_by_artifact` with `artifact_type: CODE_FILE` and `artifact_identifier: path`. Repeat with `artifact_type: TEST`. This returns every IMPLEMENTS/TESTS link pointing at that path.
+   - For each link found: inspect the diff to determine whether the behavior moved to a new file (rename or split) or was genuinely removed.
+     - If the behavior moved to an identifiable new file, delete the stale link via `gc_delete_traceability_link` and create a replacement via `gc_create_traceability_link` pointing at the new path with the same `link_type` and the same source requirement.
+     - If the behavior was removed entirely and the linked requirement no longer has any implementation, STOP. Ripping out the only implementation of a requirement is a user decision, not an agent decision. Surface this to the user with the requirement UID, the deleted file, and the suggestion that either the requirement should be deprecated or the behavior should be reimplemented. Wait for explicit direction.
+   For every renamed file `old_path → new_path`:
+   - Call `gc_get_traceability_by_artifact` with the old path. For each matching link, delete it and re-create it with the new path.
+
+3. **Process modified files.**
+   For every modified file `path`:
+   - Call `gc_get_traceability_by_artifact` with `artifact_type: CODE_FILE` (or `TEST` for test files) and `artifact_identifier: path` to find every existing link.
+   - For each existing link, inspect the modified file and decide: does this file still satisfy the linked requirement?
+     - **Yes, unchanged** — leave the link alone.
+     - **Yes, but the behavior now spans a different file too** — create additional links covering the new location(s).
+     - **No, the behavior moved out of this file** — delete the stale link and create replacement(s) at the new location(s).
+   - Additionally, inspect the modified file for behaviors that satisfy requirements which were NOT previously linked. This is the case where a change incidentally touches code that implements an under-linked requirement. Create new links for any such matches. Bound the search to requirements whose subject area the modified file plausibly touches; do not exhaustively compare every requirement to every file.
+
+4. **Process added files.**
+   For every added file `path`:
+   - Determine which requirement(s) this file satisfies. If the file is part of the work described by an in-scope requirement, link it there. If the file is incidental (test helper, fixture, generated file), it may have no requirement link — that is fine.
+   - Create an IMPLEMENTS link (for production code) or TESTS link (for test files) via `gc_create_traceability_link` for each requirement the file satisfies.
+
+5. **Ensure every in-scope requirement has coverage appropriate to its nature.**
+   This step has two modes depending on what Step 4 concluded:
+
+   **Mode A — the diff implemented the work.** This is the common case: the run added or modified files that implement at least one in-scope requirement. For each UID in `in_scope_requirements[]`:
+   - Call `gc_get_traceability` on the requirement's UUID.
+   - **IMPLEMENTS coverage is always required.** Every in-scope requirement must have at least one IMPLEMENTS link pointing at a file touched by this diff. The shape of "implementation" depends on what the requirement demands:
+     - **Code requirements** (functional behavior, new endpoints, new entities, services, migrations) — IMPLEMENTS points at the production code file(s) that realize the behavior.
+     - **Documentation requirements** (invariants, conventions, schemas, ADR-recorded decisions) — IMPLEMENTS points at the authoritative documentation file (ADR, `SCHEMA.md`, `docs/*.md`) where the invariant or convention is declared.
+     - **Configuration requirements** (repo config, workflow config, policy files, ground-control.yaml sections) — IMPLEMENTS points at the config file or schema file that encodes the requirement.
+     - **Workflow requirements** (CI steps, hooks, policy rules) — IMPLEMENTS points at the workflow file, hook script, or policy script.
+     If the diff does not touch any file that implements a given in-scope requirement, either add the implementation (go back to Step 4) or the requirement is not actually in scope and should be removed from the issue body before reconciliation proceeds.
+   - **TESTS coverage is conditional.** Add a TESTS link when the diff introduces or touches an automated test that verifies the requirement — unit test, integration test, `@WebMvcTest`, policy test, property test, or any other form of executable verification. TESTS is NOT required when the requirement is satisfied purely by documentation, configuration, or structural invariants that have no executable behavior to test (for example: "SCHEMA.md shall document the source-citation rule", "the repo shall declare its knowledge base location in `.ground-control.yaml`"). In that case the IMPLEMENTS link alone is the complete coverage record.
+   - **Do not fabricate test links** just to satisfy this step. If a requirement has testable behavior and no test was added, go back to Step 4.4 (TDD) and add the missing test; do not paper over the gap with a link to an unrelated file.
+   - **Never link the diff to a requirement it does not satisfy** just to satisfy this step. Ripping out real coverage and linking a plausible-looking neighbor is worse than leaving a gap — STOP and surface the mismatch to the user instead.
+
+   **Mode B — Step 4 concluded the work is already complete (reconciliation-only run).** In this mode the code already ships and the diff has no new implementation files. Forcing an IMPLEMENTS link onto a file in the diff would be wrong — there may not be one. Instead:
+   - Call `gc_get_traceability` on the requirement's UUID.
+   - **Accept existing IMPLEMENTS coverage.** If the requirement already has one or more IMPLEMENTS links pointing at files that currently exist in the repo and that still satisfy the requirement (verify with a quick read — the code hasn't been ripped out), that coverage counts as complete. Do NOT fabricate new links against files in this diff just to satisfy the checklist.
+   - **Backfill only when nothing is linked.** If the requirement is in scope for this issue but has zero existing IMPLEMENTS links, the graph really is under-linked. Locate the file(s) in the repo (not necessarily in the diff) that implement the requirement and create the missing IMPLEMENTS link(s) via `gc_create_traceability_link`. The link target is the file that actually implements the behavior, regardless of whether the current diff touched it.
+   - **TESTS rules from Mode A still apply** — conditional on testable behavior, no fabrication, no plausible-neighbor linking.
+   - If Mode B discovers that a requirement has NO implementing file anywhere in the repo, STOP and surface to the user. That means either the requirement should be demoted (DEPRECATED) or the implementation is genuinely missing and the run should drop into Mode A to build it.
+
+6. **Reconcile the issue → requirement links (both directions).**
+   The `## Requirements` section of the issue body is the source of truth for which requirements this issue covers. Reconciliation must make the Ground Control graph match that list exactly — which means both adding missing links AND deleting stale ones.
+   - **Add missing links.** For each UID in `in_scope_requirements[]`, ensure there is a traceability link with `artifact_type: GITHUB_ISSUE` and `artifact_identifier: <issue-number>` on the requirement, pointing at this run's issue. Create it via `gc_create_traceability_link` if missing.
+   - **Delete stale links.** Call `gc_get_traceability_by_artifact` with `artifact_type: GITHUB_ISSUE` and `artifact_identifier: <issue-number>` to list every requirement currently linked to this issue. For each returned link, if the requirement UID is NOT in `in_scope_requirements[]`, delete the link via `gc_delete_traceability_link`. This catches the case where an issue was narrowed from `[GC-A, GC-B]` down to `[GC-A]` and leaves no orphan pointers from GC-B.
+   - Stale links from the current issue to requirements in `in_scope_requirements[]` (a no-op) are fine; duplicate-create is intentionally rejected by `gc_create_traceability_link`, so re-adding is safe.
+
+Reconciliation is idempotent: running it on a branch where the GC graph is already correct is a no-op. Running it on a branch where the graph has drifted fixes the drift in both directions.
 
 ### Step 17: Verify Ground Control State Landed
 
-1. Re-fetch with `gc_get_traceability` and confirm the IMPLEMENTS and TESTS links from Step 15 are present.
-2. Re-fetch with `gc_get_requirement` and confirm status is `ACTIVE`.
-3. If anything is missing, loop back to Step 15 and fix. Do not proceed to Step 18 until Ground Control state matches reality.
+1. For each UID in `in_scope_requirements[]`:
+   - Re-fetch with `gc_get_requirement` and confirm status is `ACTIVE` (Step 15 should have transitioned it).
+   - Re-fetch with `gc_get_traceability` and confirm the expected IMPLEMENTS, TESTS, and GITHUB_ISSUE links are present (Step 16 should have recorded them).
+2. Re-run the deleted/renamed/modified audit from Step 16 point-by-point: every file in the diff should either have up-to-date links or have been intentionally left un-linked.
+3. If anything is missing or still drifted, loop back to the responsible step and fix: Step 15 for status drift, Step 16 for link drift. Do not proceed to Step 18 until Ground Control state matches reality across every file in the diff and every in-scope requirement.
+4. **Never declare success on silent failures.** If any `gc_create_traceability_link` / `gc_delete_traceability_link` / `gc_transition_status` call returned a non-2xx response during Steps 15–16, treat that as a failure, surface the error to the user if it is not clearly fixable (e.g., a permission issue or an API constraint you cannot work around), and loop back to correct the root cause. A batch of 10 parallel calls where 7 succeeded and 3 failed is not "mostly done" — it's broken.
 
 ### Step 18: Report (DO NOT MERGE)
 
 **You MUST NOT merge the PR. You MUST NOT run `gh pr merge`. The user reviews and merges.**
 
 Provide a final summary:
-- What was implemented (requirement title and UID)
-- Files created or modified
+- Issue number and title
+- `in_scope_requirements[]` — each UID + title, with its new status
+- Files created, modified, renamed, or deleted
+- Traceability reconciliation summary — how many links were added, deleted, updated, and which requirements gained coverage
 - Review findings and fixes (if any)
-- Security review findings and fixes (if any)
 - Test quality review findings and fixes (if any)
 - Confirmation: CI green, SonarCloud passed (or skipped if not configured), PR ready for user review
 - PR URL

@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { load as parseYaml } from "js-yaml";
@@ -54,6 +54,11 @@ export function buildSuggestedGroundControlYaml(project = "your-project-id") {
     "#   organization: <sonar-org>",
     "# rules:",
     "#   plan_rules: .gc/plan-rules.md",
+    "# knowledge:",
+    "#   dir: docs/knowledge",
+    "#   # optional overrides (default to <dir>/SCHEMA.md and <dir>/inbox):",
+    "#   # schema: docs/knowledge/SCHEMA.md",
+    "#   # inbox: docs/knowledge/inbox",
     "",
   ].join("\n");
 }
@@ -936,7 +941,28 @@ export function formatIssueBody(req, extraBody) {
   }
   headerParts.push(req.status || "DRAFT");
 
-  let body = `> ${headerParts.join(" | ")}\n\n## Statement\n\n${req.statement}`;
+  // The `## Requirements` section is the authoritative list of requirement
+  // UIDs in scope for the issue — the `/implement` workflow parses it as
+  // `in_scope_requirements[]` and drives clause verification, traceability
+  // reconciliation, and DRAFT→ACTIVE transitions from that list. Any issue
+  // created from a Ground Control requirement must seed this section so the
+  // round-trip "create issue from requirement → /implement → reconcile"
+  // works without a manual body edit.
+  //
+  // The title is untrusted input — it can contain newlines, leading `- `
+  // sequences, or markdown that would produce extra bullets and trick the
+  // parser into picking up an unrelated UID. Collapse all whitespace runs
+  // to a single space so the bullet is guaranteed to be a single line.
+  const sanitizedTitle = req.title
+    ? req.title.replace(/\s+/g, " ").trim()
+    : null;
+  const requirementsLine = sanitizedTitle
+    ? `- ${req.uid} — ${sanitizedTitle}`
+    : `- ${req.uid}`;
+  let body =
+    `> ${headerParts.join(" | ")}` +
+    `\n\n## Requirements\n\n${requirementsLine}` +
+    `\n\n## Statement\n\n${req.statement}`;
 
   if (req.rationale) {
     body += `\n\n## Rationale\n\n${req.rationale}`;
@@ -985,6 +1011,90 @@ export async function createGitHubIssueViaApi(data, project) {
 // ---------------------------------------------------------------------------
 
 const SUPPORTED_GROUND_CONTROL_SCHEMA_VERSIONS = [1];
+
+// Resolve a repo-relative config path against the repository root.
+// Rejects absolute paths and any traversal that escapes the repo root.
+// Callers use this for every repo-local path coming from .ground-control.yaml
+// instead of open-coding join(repoRoot, rawPath), which does not enforce containment.
+//
+// This is a LEXICAL check only. A symlink whose target escapes the repo root
+// is not caught here — callers that resolve filesystem paths should additionally
+// canonicalize via assertRealpathInRepo() to defeat symlink-based escapes.
+function resolveRepoRelativePath(repoRoot, rawPath, fieldName) {
+  if (typeof rawPath !== "string" || rawPath.trim() === "") {
+    return { ok: false, error: `${fieldName} must be a non-empty string when set` };
+  }
+  if (isAbsolute(rawPath)) {
+    return {
+      ok: false,
+      error: `${fieldName} must be a repo-relative path (got absolute path '${rawPath}')`,
+    };
+  }
+  const abs = resolvePath(repoRoot, rawPath);
+  const rel = relative(repoRoot, abs);
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+    return {
+      ok: false,
+      error: `${fieldName} must stay inside the repository root (got '${rawPath}')`,
+    };
+  }
+  return { ok: true, rel, abs };
+}
+
+// Canonicalize an absolute path via realpath and verify it is still contained
+// inside the canonical repo root. This catches the symlink-escape class of
+// attack that resolveRepoRelativePath() cannot see: a repo-local file that is
+// itself a symlink pointing outside the repo.
+//
+// The path may or may not exist on disk. If it does not exist, the nearest
+// existing ancestor is canonicalized instead — so a symlink on ANY ancestor
+// that points outside the repo still gets caught even when the target itself
+// is pending creation (the knowledge.inbox case).
+//
+// `repoRootReal` must be the canonical realpath of the repo root. Callers
+// compute it once per request and reuse it for all field checks.
+function assertRealpathInRepo(repoRootReal, targetAbs, fieldName) {
+  let cursor = targetAbs;
+  let canonical = null;
+  for (;;) {
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- cursor originates from an already-validated repo-relative path
+      canonical = realpathSync(cursor);
+      break;
+    } catch (error) {
+      // ENOENT means the path itself (or the ancestor we're currently at)
+      // does not exist yet — walk up one level and keep looking.
+      // ENOTDIR means we descended *through* a regular file, e.g.
+      // `docs/knowledge/SCHEMA.md/capture`. The offending component is still
+      // somewhere above `cursor`; walk up the same way so the helper always
+      // returns a structured validation error instead of letting the
+      // exception escape and hard-fail the whole tool call.
+      if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+      const parent = dirname(cursor);
+      if (parent === cursor) {
+        return {
+          ok: false,
+          error: `${fieldName} could not be canonicalized — no valid ancestor of '${targetAbs}' (${error.code})`,
+        };
+      }
+      cursor = parent;
+    }
+  }
+
+  // If we walked up the tree, append the unresolved tail back so the
+  // "resolved" path reflects what the caller will actually use. The tail
+  // cannot re-introduce symlink escapes because it does not yet exist.
+  const tail = relative(cursor, targetAbs);
+  const effective = tail === "" ? canonical : resolvePath(canonical, tail);
+  const relToRoot = relative(repoRootReal, effective);
+  if (relToRoot === "" || relToRoot.startsWith("..") || isAbsolute(relToRoot)) {
+    return {
+      ok: false,
+      error: `${fieldName} resolves outside the repository root via a symlink (canonical path '${effective}')`,
+    };
+  }
+  return { ok: true, canonical: effective };
+}
 
 function emptyWorkflowConfig() {
   return {
@@ -1074,6 +1184,41 @@ function normalizeRulesConfig(raw) {
   return { ok: true, value: { plan_rules_path: planRules } };
 }
 
+function normalizeKnowledgeConfig(raw) {
+  if (raw == null) {
+    return { ok: true, value: null };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, errors: ["knowledge must be a mapping, not a list or scalar"] };
+  }
+  const allowed = ["dir", "schema", "inbox"];
+  const errors = [];
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) {
+      errors.push(`knowledge has unknown key '${key}'`);
+    }
+  }
+  if (typeof raw.dir !== "string" || raw.dir.trim() === "") {
+    errors.push("knowledge.dir is required and must be a non-empty string");
+  }
+  for (const optional of ["schema", "inbox"]) {
+    const v = raw[optional];
+    if (v == null) continue;
+    if (typeof v !== "string" || v.trim() === "") {
+      errors.push(`knowledge.${optional} must be a non-empty string when set`);
+    }
+  }
+  if (errors.length) return { ok: false, errors };
+  return {
+    ok: true,
+    value: {
+      dir: raw.dir,
+      schema: raw.schema ?? null,
+      inbox: raw.inbox ?? null,
+    },
+  };
+}
+
 export function parseGroundControlYaml(yamlText) {
   let parsed;
   try {
@@ -1094,6 +1239,7 @@ export function parseGroundControlYaml(yamlText) {
     "workflow",
     "sonarcloud",
     "rules",
+    "knowledge",
   ];
   for (const key of Object.keys(parsed)) {
     if (!allowedTop.includes(key)) {
@@ -1135,6 +1281,9 @@ export function parseGroundControlYaml(yamlText) {
   const rulesResult = normalizeRulesConfig(parsed.rules);
   if (!rulesResult.ok) errors.push(...rulesResult.errors);
 
+  const knowledgeResult = normalizeKnowledgeConfig(parsed.knowledge);
+  if (!knowledgeResult.ok) errors.push(...knowledgeResult.errors);
+
   if (errors.length) return { ok: false, errors };
 
   return {
@@ -1147,6 +1296,7 @@ export function parseGroundControlYaml(yamlText) {
       rules: {
         plan_rules_path: rulesResult.value.plan_rules_path,
       },
+      knowledge: knowledgeResult.value,
     },
   };
 }
@@ -1210,6 +1360,18 @@ export async function getRepoGroundControlContext(repoPath) {
     }
   }
 
+  const knowledgeBlockResult = resolveKnowledgeBlock(repoRoot, parseResult.value.knowledge);
+  if (!knowledgeBlockResult.ok) {
+    return {
+      repo_path: repoRoot,
+      config_path: configPath,
+      status: "invalid_ground_control_yaml",
+      project: null,
+      errors: knowledgeBlockResult.errors,
+      suggested_ground_control_yaml: buildSuggestedGroundControlYaml(),
+    };
+  }
+
   return {
     repo_path: repoRoot,
     config_path: configPath,
@@ -1222,7 +1384,131 @@ export async function getRepoGroundControlContext(repoPath) {
       plan_rules_path: rules.plan_rules_path,
       plan_rules_content: planRulesContent,
     },
+    knowledge: knowledgeBlockResult.value,
     errors: [],
+  };
+}
+
+// Resolve a parsed knowledge block against the repository root:
+// - containment-check dir/schema/inbox paths (absolute / `..` escapes are rejected)
+// - fill in defaults (<dir>/SCHEMA.md, <dir>/inbox) when overrides are absent
+// - canonicalize via realpath so symlink-based escapes are also rejected
+// - require `dir` to exist as a directory and `schema` to exist as a file
+// - do NOT require `inbox` to exist; later slices create it on first capture
+function resolveKnowledgeBlock(repoRoot, knowledge) {
+  if (knowledge == null) return { ok: true, value: null };
+
+  // Canonicalize the repo root once; every containment check compares against
+  // this canonical path so symlinks on either side cannot disagree. `repoRoot`
+  // comes from `git rev-parse --show-toplevel` but may still traverse a
+  // symlink on macOS or on bind-mounted checkouts, so always realpath it.
+  let repoRootReal;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- repoRoot comes from git rev-parse --show-toplevel
+    repoRootReal = realpathSync(repoRoot);
+  } catch (error) {
+    throw new Error(`failed to canonicalize repo root ${repoRoot}: ${error.message}`);
+  }
+
+  const dirResolved = resolveRepoRelativePath(repoRoot, knowledge.dir, "knowledge.dir");
+  if (!dirResolved.ok) return { ok: false, errors: [dirResolved.error] };
+
+  const rawSchema = knowledge.schema ?? `${dirResolved.rel}/SCHEMA.md`;
+  const rawInbox = knowledge.inbox ?? `${dirResolved.rel}/inbox`;
+
+  const schemaResolved = resolveRepoRelativePath(repoRoot, rawSchema, "knowledge.schema");
+  if (!schemaResolved.ok) return { ok: false, errors: [schemaResolved.error] };
+
+  const inboxResolved = resolveRepoRelativePath(repoRoot, rawInbox, "knowledge.inbox");
+  if (!inboxResolved.ok) return { ok: false, errors: [inboxResolved.error] };
+
+  // Realpath containment: catches symlink escapes that the lexical check cannot.
+  const dirReal = assertRealpathInRepo(repoRootReal, dirResolved.abs, "knowledge.dir");
+  if (!dirReal.ok) return { ok: false, errors: [dirReal.error] };
+
+  const schemaReal = assertRealpathInRepo(repoRootReal, schemaResolved.abs, "knowledge.schema");
+  if (!schemaReal.ok) return { ok: false, errors: [schemaReal.error] };
+
+  const inboxReal = assertRealpathInRepo(repoRootReal, inboxResolved.abs, "knowledge.inbox");
+  if (!inboxReal.ok) return { ok: false, errors: [inboxReal.error] };
+
+  // Filesystem existence: dir and schema must exist. Inbox is created lazily.
+  // We stat the canonical path so the directory/file-type checks cannot be
+  // spoofed by a symlink whose target is a different kind of inode.
+  let dirStat;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- dirReal.canonical is contained in the canonical repo root
+    dirStat = statSync(dirReal.canonical);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return {
+        ok: false,
+        errors: [`knowledge.dir references ${dirResolved.rel} which does not exist`],
+      };
+    }
+    throw error;
+  }
+  if (!dirStat.isDirectory()) {
+    return {
+      ok: false,
+      errors: [`knowledge.dir references ${dirResolved.rel} which is not a directory`],
+    };
+  }
+
+  let schemaStat;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- schemaReal.canonical is contained in the canonical repo root
+    schemaStat = statSync(schemaReal.canonical);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return {
+        ok: false,
+        errors: [`knowledge.schema references ${schemaResolved.rel} which does not exist (expected a SCHEMA.md file)`],
+      };
+    }
+    throw error;
+  }
+  if (!schemaStat.isFile()) {
+    return {
+      ok: false,
+      errors: [`knowledge.schema references ${schemaResolved.rel} which is not a file`],
+    };
+  }
+
+  // The inbox directory is lazily created, so its existence is optional in
+  // this slice — but when it DOES exist it must be a directory. An inbox
+  // configured to point at a regular file (e.g. `docs/knowledge/SCHEMA.md`)
+  // would pass the lexical and realpath checks but break every downstream
+  // capture flow that writes files under the inbox. Catch the misconfig
+  // here where the error message can name the offending field.
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- inboxReal.canonical is contained in the canonical repo root
+    const inboxStat = statSync(inboxReal.canonical);
+    if (!inboxStat.isDirectory()) {
+      return {
+        ok: false,
+        errors: [`knowledge.inbox references ${inboxResolved.rel} which is not a directory`],
+      };
+    }
+  } catch (error) {
+    // ENOENT is the expected happy-path state until a later slice creates
+    // the inbox on first capture. Anything else (permissions, I/O, ENOTDIR
+    // on a broken symlink target) is a configuration error worth surfacing.
+    if (error.code !== "ENOENT") {
+      return {
+        ok: false,
+        errors: [`knowledge.inbox references ${inboxResolved.rel} which cannot be examined (${error.code})`],
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    value: {
+      dir: dirResolved.rel,
+      schema: schemaResolved.rel,
+      inbox: inboxResolved.rel,
+    },
   };
 }
 
@@ -1243,7 +1529,7 @@ async function ensureGitRepo(repoPath) {
   }
 }
 
-async function getIssueContext(issueNumber, repo) {
+async function getIssueContext(issueNumber, repo, { cwd } = {}) {
   if (issueNumber == null) return null;
 
   const args = ["issue", "view", String(issueNumber), "--json", "number,title,body"];
@@ -1252,8 +1538,14 @@ async function getIssueContext(issueNumber, repo) {
     args.push("--repo", targetRepo);
   }
 
+  // Binding cwd to the target repository lets `gh` auto-detect the repo from
+  // git config when no explicit `--repo` was supplied, and prevents the
+  // lookup from picking up a neighboring checkout's remotes when the MCP
+  // server is running from a different working directory.
+  const execOptions = cwd ? { cwd } : {};
+
   try {
-    const { stdout } = await execFile("gh", args);
+    const { stdout } = await execFile("gh", args, execOptions);
     return JSON.parse(stdout);
   } catch (error) {
     return {
@@ -1305,16 +1597,19 @@ function readGeneratedCodexSummary(outputPath) {
   }
 }
 
-export function buildCodexArchitecturePreflightPrompt({ requirement, traceabilityLinks = [], issueContext = null }) {
-  const traceabilitySummary = summarizeTraceabilityLinks(traceabilityLinks);
+export function buildCodexArchitecturePreflightPrompt({ requirement = null, traceabilityLinks = [], issueContext = null }) {
+  const hasRequirement = requirement != null;
+  const traceabilitySummary = hasRequirement ? summarizeTraceabilityLinks(traceabilityLinks) : [];
 
-  return [
+  const lines = [
     "You are Codex performing an architecture preflight before implementation.",
     "",
     "Your job is to set the implementation on the right road before coding starts.",
     "",
     "Hard constraints:",
-    "- Do not implement the requirement itself.",
+    hasRequirement
+      ? "- Do not implement the requirement itself."
+      : "- Do not implement the issue itself.",
     "- You may add or update ADRs, design notes, workflow notes, or other guidance docs when they materially reduce design risk.",
     "- Keep guidance minimal but sufficient. Do not write an implementation plan.",
     "- Do not invent new abstractions if existing cross-cutting concerns, schemas, error handling, validation, logging, or workflow patterns already cover the need.",
@@ -1323,12 +1618,26 @@ export function buildCodexArchitecturePreflightPrompt({ requirement, traceabilit
     "- Hold the upcoming implementation to a top-tier production engineering bar for maintainability, reliability, security, consistency, reuse of existing cross-cutting concerns, clear boundaries, and avoidance of abstraction or concept confusion.",
     "- Call out all gotchas and guardrails up front. Do not silently omit concerns because they seem low priority.",
     "",
-    "Requirement payload:",
-    JSON.stringify(requirement, null, 2),
-    "",
-    "Existing traceability summary:",
-    JSON.stringify(traceabilitySummary, null, 2),
-    "",
+  ];
+
+  if (hasRequirement) {
+    lines.push(
+      "Requirement payload:",
+      JSON.stringify(requirement, null, 2),
+      "",
+      "Existing traceability summary:",
+      JSON.stringify(traceabilitySummary, null, 2),
+      "",
+    );
+  } else {
+    lines.push(
+      "Requirement payload: none.",
+      "This is a requirement-free run (bug, refactor, or maintenance). There is no formal Ground Control requirement attached — the GitHub issue below is the authoritative contract. Treat its title, body, and acceptance criteria as the source of truth for what must ship, and apply the same production-readiness bar as any requirement-backed run.",
+      "",
+    );
+  }
+
+  lines.push(
     "GitHub issue context:",
     JSON.stringify(issueContext, null, 2),
     "",
@@ -1346,8 +1655,12 @@ export function buildCodexArchitecturePreflightPrompt({ requirement, traceabilit
     "- Summarize gotchas and anti-patterns to avoid.",
     "- Summarize non-goals and implementation boundaries.",
     "",
-    "Do not spend time re-fetching requirement details if the provided payload is sufficient.",
-  ].join("\n");
+    hasRequirement
+      ? "Do not spend time re-fetching requirement details if the provided payload is sufficient."
+      : "Do not spend time re-fetching issue details if the provided context is sufficient.",
+  );
+
+  return lines.join("\n");
 }
 
 export function buildCodexArchitectureExecArgs({ repoPath, outputPath }) {
@@ -1371,10 +1684,59 @@ export async function runCodexArchitecturePreflight({
   issueNumber,
   repo,
 }) {
+  // The /implement workflow supports two entry points: UID-first (a formal
+  // Ground Control requirement) and issue-first (a requirement-free issue
+  // for a bug, refactor, or maintenance run). Preflight must support both,
+  // so at least one of the two anchors is required — an invocation with
+  // neither has no subject to reason about.
+  if (!requirementUid && issueNumber == null) {
+    throw new Error(
+      "gc_codex_architecture_preflight requires at least one of requirement_uid or issue_number",
+    );
+  }
+
   const repoRoot = await ensureGitRepo(repoPath);
-  const requirement = await getRequirementByUid(requirementUid, project);
-  const traceabilityLinks = await getTraceabilityLinks(requirement.id);
-  const issueContext = await getIssueContext(issueNumber, repo);
+
+  let requirement = null;
+  let traceabilityLinks = [];
+  if (requirementUid) {
+    requirement = await getRequirementByUid(requirementUid, project);
+    traceabilityLinks = await getTraceabilityLinks(requirement.id);
+  }
+
+  // `getIssueContext` is bound to `repoRoot` so `gh` resolves the target
+  // repository from the checkout's git config even when `GH_REPO` is unset
+  // and no explicit `repo` was supplied. This prevents the MCP server's own
+  // working directory from leaking into the lookup.
+  const issueContext = await getIssueContext(issueNumber, repo, { cwd: repoRoot });
+
+  // Issue-first runs treat the GitHub issue as the authoritative contract.
+  // If the issue body could not be loaded (wrong repo, missing scope, gh
+  // CLI not authenticated, etc.), there is nothing for codex to reason about
+  // and no way for the caller to catch silent drift. Fail fast with a
+  // specific error that names the issue number and the underlying reason.
+  //
+  // Empty bodies are acceptable — GitHub returns `"body": ""` for valid
+  // title-only issues (common shape for bugs and refactors), and the title
+  // plus the diff still gives codex a usable context. Only fail when the
+  // body field is missing entirely (lookup failure) or when getIssueContext
+  // attached a `warning` field indicating the gh CLI call did not succeed.
+  if (requirement == null) {
+    const lookupFailed =
+      !issueContext
+      || issueContext.warning !== undefined
+      || !("body" in issueContext);
+    if (lookupFailed) {
+      const detail = issueContext?.warning
+        ?? (issueContext == null
+          ? "getIssueContext returned null"
+          : "issue context has no body field");
+      throw new Error(
+        `gc_codex_architecture_preflight: issue-only run requires a loadable GitHub issue but failed to fetch issue #${issueNumber}: ${detail}`,
+      );
+    }
+  }
+
   const preexistingChangedFiles = await listWorkingTreeChanges(repoRoot);
 
   const tempDir = mkdtempSync(join(tmpdir(), "gc-codex-preflight-"));
@@ -1400,7 +1762,8 @@ export async function runCodexArchitecturePreflight({
     const summary = readGeneratedCodexSummary(outputPath);
     const changedFiles = findNewWorkingTreeChanges(preexistingChangedFiles, await listWorkingTreeChanges(repoRoot));
     return {
-      requirement_uid: requirementUid,
+      requirement_uid: requirementUid ?? null,
+      issue_number: issueNumber ?? null,
       repo_path: repoRoot,
       preexisting_changed_files: preexistingChangedFiles,
       changed_files: changedFiles,

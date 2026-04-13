@@ -707,12 +707,12 @@ server.tool(
 
 server.tool(
   "gc_codex_architecture_preflight",
-  "Run Codex architecture preflight before implementation. Codex inspects the requirement and repository, updates ADRs/design guidance when needed, and returns guardrails and changed files.",
+  "Run Codex architecture preflight before implementation. Codex inspects the requirement and/or issue plus the repository, updates ADRs/design guidance when needed, and returns guardrails and changed files. At least one of `requirement_uid` or `issue_number` must be supplied; requirement-free issues (bugs, refactors, maintenance) should pass `issue_number` alone.",
   {
-    requirement_uid: z.string().describe("Requirement UID (for example 'GC-J001')"),
+    requirement_uid: z.string().optional().describe("Requirement UID (for example 'GC-J001'). Optional when issue_number is supplied."),
     repo_path: z.string().describe("Absolute path to the target Git repository"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
-    issue_number: z.number().int().positive().optional().describe("Optional GitHub issue number for extra implementation context"),
+    issue_number: z.number().int().positive().optional().describe("GitHub issue number. Optional when requirement_uid is supplied; required for requirement-free issues."),
     repo: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/).optional().describe("GitHub repo as 'owner/repo' (defaults to GH_REPO env var)"),
   },
   async ({ requirement_uid, repo_path, project, issue_number, repo }) => {
