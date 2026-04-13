@@ -2037,13 +2037,18 @@ async function computeReviewDiff(repoRoot, baseBranch, uncommitted) {
 }
 
 async function runSingleCodexReview({ repoRoot, prompt, args }) {
-  const { stdout } = await execFileWithInput("codex", args, {
+  // Return both stdout and stderr so the caller can include them in a
+  // diagnostic error when the structured COMMENT_IDS tail is missing.
+  // Dropping stderr silently (the prior behavior) made the common case
+  // "codex ran but didn't follow the output contract" impossible to
+  // debug without re-running by hand.
+  const { stdout, stderr } = await execFileWithInput("codex", args, {
     input: prompt,
     cwd: repoRoot,
     maxBuffer: 10 * 1024 * 1024,
     env: { ...process.env, NO_COLOR: "1" },
   });
-  return stdout;
+  return { stdout, stderr };
 }
 
 // Dedup key combines path, line, and a short prefix of the body so two
@@ -2100,6 +2105,40 @@ async function enrichCommentsList({ repoRoot, owner, name, prNumber, commentIds,
   return comments;
 }
 
+// Truncate a long string to `max` chars, prefixing an ellipsis when the
+// original was longer. Used for error-message previews of codex output so
+// callers don't have to eyeball multi-KB dumps.
+function previewTailString(raw, max = 500) {
+  if (typeof raw !== "string") return "";
+  if (raw.length <= max) return raw;
+  return `…${raw.slice(raw.length - max)}`;
+}
+
+// Wrap parseCodexReviewTail so the "missing tail" error is actionable.
+// The base error message is identical to the original so any downstream
+// matching on it keeps working, but we append the last ~500 chars of both
+// stdout and stderr from the reviewer subprocess. That preview is the
+// difference between "codex didn't follow the contract" and "codex
+// errored for a specific reason we can see".
+function parseReviewerTail(reviewerLabel, output) {
+  if (!output || typeof output !== "object") {
+    throw new Error(`Codex ${reviewerLabel} review returned no output object`);
+  }
+  const { stdout = "", stderr = "" } = output;
+  try {
+    return parseCodexReviewTail(stdout);
+  } catch (error) {
+    const stdoutPreview = previewTailString(stdout, 500);
+    const stderrPreview = previewTailString(stderr, 500);
+    const detail = [
+      `Codex ${reviewerLabel} review: ${error.message}`,
+      stdoutPreview ? `--- stdout tail ---\n${stdoutPreview}` : "--- stdout was empty ---",
+      stderrPreview ? `--- stderr tail ---\n${stderrPreview}` : "--- stderr was empty ---",
+    ].join("\n\n");
+    throw new Error(detail);
+  }
+}
+
 export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted = false, prNumber = null }) {
   const repoRoot = await ensureGitRepo(repoPath);
 
@@ -2125,10 +2164,10 @@ export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted
   });
   const args = buildCodexReviewArgs({ uncommitted });
 
-  let coreStdout;
-  let securityStdout;
+  let coreOutput;
+  let securityOutput;
   try {
-    [coreStdout, securityStdout] = await Promise.all([
+    [coreOutput, securityOutput] = await Promise.all([
       runSingleCodexReview({ repoRoot, prompt: corePrompt, args }),
       runSingleCodexReview({ repoRoot, prompt: securityPrompt, args }),
     ]);
@@ -2136,8 +2175,12 @@ export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted
     throw new Error(`Codex review failed: ${formatCommandFailure("codex", error)}`);
   }
 
-  const core = parseCodexReviewTail(coreStdout);
-  const security = parseCodexReviewTail(securityStdout);
+  // Wrap parseCodexReviewTail so its "missing tail" error includes a
+  // preview of the reviewer's actual stdout and stderr. Without that,
+  // the error is unactionable: there is no indication of what codex
+  // really emitted or whether it failed silently on the codex side.
+  const core = parseReviewerTail("core", coreOutput);
+  const security = parseReviewerTail("security", securityOutput);
 
   let owner = null;
   let name = null;
