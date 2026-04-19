@@ -106,14 +106,30 @@ raise the defaults so GC-P021 is met:
    AWS console access, Tailscale credentials, and no prior exposure to
    Ground Control internals; it is executable end-to-end without
    consulting other documents.
-6. **Drift protection** — `scripts/assert-backup-policy.sh` is a
-   structural check over the Terraform module and the two `test-restore`
-   copies. It runs in pre-commit and `make policy` and fails loudly if the
-   cadence, retention, cron, or verification checks are altered away from
-   the GC-P021 defaults. `scripts/test-backup-restore-locally.sh` stands
-   up a fresh apache/age container, replays every Flyway migration,
-   dumps, and exercises `test-restore.sh` against the dump; operators can
-   run it locally to prove the loop works end-to-end.
+6. **Script rollout** — because `deploy/terraform/modules/compute/main.tf`
+   declares `ignore_changes = [ami, user_data]`, Terraform cannot rewrite
+   `/opt/gc/*.sh` on the live instance on updates. The CI `deploy` job
+   closes that gap: after `terraform apply` and before running
+   `/opt/gc/deploy.sh`, it `aws ssm send-command`s the contents of
+   `deploy/scripts/install-ops-scripts.sh` to the running instance with
+   the GC-P021 env vars (`GC_BACKUP_BUCKET`, `GC_BACKUP_CRON`,
+   `GC_LOCAL_RETENTION_COUNT`). The installer is idempotent, enforces
+   the ≥ 3×/day cadence and ≥ 4-file retention floors on input, and
+   rewrites `/opt/gc/{backup,restore,test-restore,watchdog}.sh` plus the
+   three `/etc/cron.d/gc-*` entries on every deploy. First-boot
+   provisioning uses the same installer, keeping one source of truth.
+7. **Drift protection** — `scripts/assert-backup-policy.sh` is a
+   structural check over the Terraform module and env vars, the inlined
+   user-data copy, the canonical `deploy/scripts/test-restore.sh`, and
+   the installer. It also executes the installer against an ephemeral
+   prefix to prove (a) it refuses non-compliant inputs and (b) it
+   writes the expected files and substitutions. It runs in pre-commit
+   and `make policy` and fails the build if cadence, retention, cron,
+   verification, or CI-workflow wiring drifts away from the GC-P021
+   defaults. `scripts/test-backup-restore-locally.sh` is a second
+   guardrail: it stands up a fresh apache/age container, replays every
+   Flyway migration, dumps, and exercises `test-restore.sh` against the
+   dump end-to-end, asserting every sentinel check.
 
 ## Consequences
 

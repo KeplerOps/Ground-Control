@@ -46,12 +46,26 @@ docker run -d --name "${SEED_CONTAINER}" \
   -p "${SEED_PORT}:5432" \
   "${DB_IMAGE}" >/dev/null
 
-for _ in $(seq 1 60); do
-  if docker exec "${SEED_CONTAINER}" pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1; then
-    break
+# Two-phase wait: the apache/age image briefly restarts after first boot.
+# Require three consecutive successful SELECT 1 calls so migrations don't
+# race against the restart.
+ready=0
+for _ in $(seq 1 120); do
+  if docker exec "${SEED_CONTAINER}" pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1 \
+     && docker exec "${SEED_CONTAINER}" \
+          psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -q -t -A \
+          -c "SELECT 1" >/dev/null 2>&1; then
+    ready=$((ready + 1))
+    [ "${ready}" -ge 3 ] && break
+  else
+    ready=0
   fi
   sleep 1
 done
+if [ "${ready}" -lt 3 ]; then
+  echo "ERROR: seed database did not stabilize within 120s" >&2
+  exit 1
+fi
 
 echo "Creating flyway_schema_history and applying migrations..."
 docker exec -i "${SEED_CONTAINER}" psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -v ON_ERROR_STOP=1 <<'SQL'

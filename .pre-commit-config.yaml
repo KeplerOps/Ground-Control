@@ -33,7 +33,7 @@ repos:
         name: assert GC-P021 backup policy defaults
         entry: scripts/assert-backup-policy.sh
         language: system
-        files: ^(deploy/terraform/modules/(backup|compute)/|deploy/scripts/(backup|test-restore)\.sh|deploy/terraform/environments/dev/terraform\.tfvars\.example|scripts/assert-backup-policy\.sh)
+        files: ^(\.github/workflows/ci\.yml|deploy/terraform/modules/(backup|compute)/|deploy/terraform/environments/dev/(variables\.tf|terraform\.tfvars\.example)|deploy/scripts/(backup|test-restore|install-ops-scripts)\.sh|scripts/assert-backup-policy\.sh)
         pass_filenames: false
 
   # Java formatting (Spotless via Gradle — auto-fix mode)

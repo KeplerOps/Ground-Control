@@ -349,7 +349,38 @@ For IAM / ECR / Tailscale rotation see
 | `/etc/cron.d/gc-backup` | Cron declaration for scheduled backups |
 | `/etc/cron.d/gc-restore-test` | Cron declaration for daily verification |
 | `/etc/cron.d/gc-watchdog` | 5-minute health-check watchdog (restarts backend on failure) |
-| `deploy/terraform/modules/compute/user-data.sh.tftpl` | Source of truth for every `/opt/gc/*` script (written at first boot) |
-| `deploy/scripts/*.sh` | Repo-side copies used for local testing and review |
+| `deploy/scripts/install-ops-scripts.sh` | Canonical installer for `/opt/gc/*.sh` and `/etc/cron.d/gc-*`. Runs on the instance in two paths: first boot (written by `user-data.sh.tftpl`) and every main-branch deploy (pushed via SSM SendCommand by the CI `deploy` job, sidestepping `ignore_changes = [user_data]`). Enforces the GC-P021 cadence (≥ 3×/day) and retention (≥ 4) floors on input. |
+| `deploy/terraform/modules/compute/user-data.sh.tftpl` | First-boot bootstrap (Docker, Tailscale, EBS volume, initial docker compose up). Writes `/opt/gc/install-ops-scripts.sh` and calls it once at first boot. |
+| `deploy/scripts/*.sh` | Reference copies used by local testing (`scripts/test-backup-restore-locally.sh` invokes `deploy/scripts/test-restore.sh`). Kept consistent with the installer heredocs by `scripts/assert-backup-policy.sh`. |
 | `scripts/test-backup-restore-locally.sh` | Self-contained local end-to-end test of the restore loop |
 | `scripts/assert-backup-policy.sh` | Pre-commit / `make policy` guardrail preventing drift away from GC-P021 defaults |
+
+### Manually rolling out script updates to an existing instance
+
+If you changed any `/opt/gc/*` script in this repo and need it on the
+running `gc-dev` instance immediately (not on the next main-branch
+deploy), run the installer via SSM:
+
+```bash
+INSTANCE_ID=$(aws ec2 describe-instances \
+  --profile catalyst-dev --region us-east-2 \
+  --filters "Name=tag:Name,Values=groundcontrol-ec2" "Name=instance-state-name,Values=running" \
+  --query 'Reservations[0].Instances[0].InstanceId' --output text)
+
+B64=$(base64 -w0 deploy/scripts/install-ops-scripts.sh)
+CMD="export GC_BACKUP_BUCKET='groundcontrol-backups-catalyst-dev'; \
+     export GC_BACKUP_CRON='0 3,11,19 * * *'; \
+     export GC_LOCAL_RETENTION_COUNT=4; \
+     echo '${B64}' | base64 -d | bash"
+jq -n --arg cmd "$CMD" '{commands:[$cmd]}' > /tmp/install.json
+
+aws ssm send-command \
+  --profile catalyst-dev --region us-east-2 \
+  --instance-ids "$INSTANCE_ID" \
+  --document-name AWS-RunShellScript \
+  --parameters file:///tmp/install.json \
+  --timeout-seconds 300
+```
+
+The CI `deploy` job performs the same step on every main-branch push;
+this manual path is only needed for off-cycle rollouts.

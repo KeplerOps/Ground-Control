@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `deploy/scripts/install-ops-scripts.sh` — canonical, idempotent
+  installer for `/opt/gc/{backup,restore,test-restore,watchdog}.sh` and
+  `/etc/cron.d/gc-{backup,restore-test,watchdog}`. Enforces the GC-P021
+  cadence (≥ 3×/day) and retention (≥ 4) floors on input; exits non-zero
+  on any out-of-spec value. Runs on the instance in two paths: first
+  boot (written by user-data) and every main-branch deploy (pushed via
+  `aws ssm send-command` by the CI `deploy` job).
+- CI `deploy` job now refreshes `/opt/gc` scripts via SSM before
+  invoking `/opt/gc/deploy.sh` so the live instance picks up script
+  changes even though `ignore_changes = [user_data]` prevents Terraform
+  from replacing user-data. Closes the rollout gap flagged in Codex
+  review of #534.
+- `scripts/assert-backup-policy.sh` now additionally validates:
+  - the dev env root `variables.tf` defaults (not just the module
+    defaults, so the forwarded `module.backup` inputs stay compliant),
+  - `install-ops-scripts.sh` contains every GC-P021 sentinel and the
+    `GC-P021` anchor,
+  - the CI workflow wires `install-ops-scripts.sh` into the deploy
+    job,
+  - executing the installer against an ephemeral prefix — rejecting
+    non-compliant inputs and writing the expected artifacts with the
+    expected substitutions.
 - GC-P021 backup policy enforcement (ADR-025): backup cadence raised to
   3× / day (`0 3,11,19 * * *` UTC) and local dump retention raised to 4
   files, guaranteeing ≥ 24 h of local retention with a one-run margin
