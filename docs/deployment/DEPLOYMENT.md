@@ -136,7 +136,7 @@ Ground Control runs on a single EC2 instance in the `catalyst-dev` AWS account, 
 - **Instance**: `t3a.small` (2 vCPU, 2 GB RAM) running Amazon Linux 2023
 - **Access**: Tailscale only — zero public ingress. `http://gc-dev:8000` via MagicDNS
 - **Storage**: Root EBS (8 GB gp3) + data EBS (20 GB gp3, encrypted) at `/data`
-- **Backup**: EBS snapshots (daily, 7-day retention) + pg_dump to S3 (daily, 30-day retention)
+- **Backup**: EBS snapshots (daily, 7-day retention) + pg_dump to S3 (3×/day, 30-day retention) — see [ADR-025](../../architecture/adrs/025-backup-policy.md) for policy rationale (GC-P021)
 - **Cost**: ~$17/mo on-demand
 
 ### Prerequisites
@@ -238,98 +238,53 @@ ssh gc-dev 'docker compose -f /opt/gc/docker-compose.yml exec -T db \
 
 Ground Control uses two complementary backup strategies: **logical backups** (pg_dump to S3) for portable, table-level restore and **block-level backups** (EBS snapshots) for fast full-volume recovery. Both run automatically and are configurable via Terraform.
 
+The authoritative operator runbook is **[docs/operations/backup-restore.md](../operations/backup-restore.md)** — it walks a cold operator through every recovery scenario without assuming prior exposure to the stack. The ADR behind the current policy is [ADR-025](../../architecture/adrs/025-backup-policy.md).
+
 #### Backup Configuration
 
 | Parameter | Default | Terraform Variable | Description |
 |-----------|---------|-------------------|-------------|
-| Backup schedule | `0 3 * * *` (daily 03:00 UTC) | `backup_cron` | Cron expression for pg_dump frequency |
+| Backup schedule | `0 3,11,19 * * *` (03:00 / 11:00 / 19:00 UTC, 3×/day) | `backup_cron` | Cron expression for pg_dump frequency. GC-P021 requires ≥ 3×/day; do not lower. |
 | S3 retention | 30 days | `s3_retention_days` | How long S3 dumps are kept |
-| Local dump retention | 3 files | `local_retention_count` | Number of pg_dump files kept on EC2 |
+| Local dump retention | 4 files | `local_retention_count` | Number of pg_dump files kept on EC2. GC-P021 requires ≥ 24 h; at 3×/day this means ≥ 4 files. |
 | EBS snapshot retention | 7 snapshots | `snapshot_retention_count` | Number of daily EBS snapshots kept |
 | EBS snapshot schedule | Daily 04:00 UTC | DLM policy (fixed) | Block-level volume snapshots |
+| Restore-test schedule | Daily 05:00 UTC | fixed in `user-data.sh.tftpl` | Automated verification of the newest dump |
 
-To change backup frequency, set the Terraform variable and redeploy:
-
-```hcl
-# terraform.tfvars — example: backup every 6 hours
-backup_cron = "0 */6 * * *"
-```
+To change backup frequency, set the Terraform variable and redeploy.
+Any override must remain ≥ 3×/day to stay GC-P021 compliant — the
+`scripts/assert-backup-policy.sh` gate (run by pre-commit and
+`make policy`) will fail the build otherwise.
 
 #### Point-in-Time Restore
 
-Point-in-time restore granularity equals the backup frequency. Each pg_dump is a consistent database snapshot at the moment it was taken. To restore to a specific point in time, select the backup with the closest timestamp before your target time. Reducing the `backup_cron` interval increases granularity (e.g., `0 */6 * * *` gives 6-hour RPO).
+Point-in-time restore granularity equals the backup frequency. Each pg_dump is a consistent database snapshot at the moment it was taken. To restore to a specific point in time, select the backup with the closest timestamp before your target time. The default `0 3,11,19 * * *` schedule gives an RPO of approximately 8 hours.
 
-#### Manual Backup
+#### Manual Backup / Restore / Verification
 
-```bash
-ssh gc-dev /opt/gc/backup.sh
-```
-
-#### List Available Backups
+Quick reference (full procedures live in the operator runbook):
 
 ```bash
-ssh gc-dev /opt/gc/restore.sh --list
+ssh gc-dev /opt/gc/backup.sh                                  # ad-hoc backup
+ssh gc-dev /opt/gc/restore.sh --list                          # enumerate backups
+ssh gc-dev /opt/gc/restore.sh --from-s3 pg-dumps/gc-...dump   # restore
+ssh gc-dev /opt/gc/test-restore.sh                            # verify newest dump
+ssh gc-dev cat /var/log/gc-restore-test.log                   # daily verification log
+scripts/test-backup-restore-locally.sh                        # self-contained local loop
 ```
 
-#### Restore from Local Dump
+For restore-from-EBS-snapshot, credential rotation, full-loss rebuild,
+or AGE graph rematerialization, follow the operator runbook rather than
+ad-hoc commands.
 
-```bash
-ssh gc-dev /opt/gc/restore.sh --from-file /data/backups/gc-20260329-030000.dump
-```
+**Automated verification checks** (executed daily at 05:00 UTC):
 
-The restore script automatically creates a safety backup before restoring and prompts for confirmation. Use `--yes` to skip the confirmation prompt.
-
-#### Restore from S3
-
-```bash
-ssh gc-dev /opt/gc/restore.sh --from-s3 pg-dumps/gc-20260329-030000.dump
-```
-
-Downloads the dump from S3, creates a safety backup, and restores.
-
-#### Restore from EBS Snapshot
-
-For full-volume recovery (restores everything including PostgreSQL data directory):
-
-1. Find the snapshot: `aws ec2 describe-snapshots --filters "Name=tag:Service,Values=ground-control" --query 'Snapshots[*].{ID:SnapshotId,Time:StartTime}' --output table`
-2. Create a new volume from the snapshot: `aws ec2 create-volume --snapshot-id <snap-id> --availability-zone us-east-2a --volume-type gp3`
-3. Stop the instance: `aws ec2 stop-instances --instance-ids <instance-id>`
-4. Detach old data volume: `aws ec2 detach-volume --volume-id <old-vol-id>`
-5. Attach new volume at same device: `aws ec2 attach-volume --volume-id <new-vol-id> --instance-id <instance-id> --device /dev/xvdf`
-6. Start the instance: `aws ec2 start-instances --instance-ids <instance-id>`
-
-#### Restore Testing
-
-A restore test script validates backup integrity without impacting the production database. It spins up a temporary PostgreSQL container, restores the latest backup, runs verification queries, and tears down automatically.
-
-**Manual test:**
-
-```bash
-# Test latest backup
-ssh gc-dev /opt/gc/test-restore.sh
-
-# Test a specific backup file
-ssh gc-dev /opt/gc/test-restore.sh /data/backups/gc-20260329-030000.dump
-```
-
-**Automated test:** Runs weekly (Sunday 05:00 UTC) via cron. Check results:
-
-```bash
-ssh gc-dev cat /var/log/gc-restore-test.log
-```
-
-**Verification checks performed:**
 - PostgreSQL responds to `pg_isready`
 - Public tables exist in the restored database
-- Flyway migration history is present
-
-#### Post-Restore Verification Checklist
-
-After any restore to the production database:
-
-1. Database responds: `docker compose -f /opt/gc/docker-compose.yml exec db pg_isready -U gc -d ground_control`
-2. Application is healthy: `curl http://gc-dev:8000/actuator/health`
-3. Spot check data: `curl http://gc-dev:8000/api/v1/analysis/dashboard-stats?project=ground-control`
+- `flyway_schema_history` contains migrations, including V010 (`create_age_graph`)
+- The Apache AGE extension is installed
+- Core Ground Control tables exist (`project`, `requirement`, `requirement_relation`, `traceability_link`, `document`, `section`, `threat_model`)
+- `create_graph('requirements_verify')` succeeds — proves AGE is operationally usable against restored data
 
 ### Monitoring
 

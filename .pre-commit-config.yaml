@@ -20,6 +20,22 @@ repos:
       - id: detect-private-key
         exclude: ^backend/src/test/
 
+  # Bash syntax check for deploy/operator scripts
+  - repo: local
+    hooks:
+      - id: bash-syntax
+        name: bash -n (deploy + ops scripts)
+        entry: bash -c 'for f in "$@"; do bash -n "$f" || exit 1; done' --
+        language: system
+        files: ^(deploy/scripts/.*\.sh|scripts/(assert-backup-policy|test-backup-restore-locally)\.sh)$
+
+      - id: assert-backup-policy
+        name: assert GC-P021 backup policy defaults
+        entry: scripts/assert-backup-policy.sh
+        language: system
+        files: ^(deploy/terraform/modules/(backup|compute)/|deploy/scripts/(backup|test-restore)\.sh|deploy/terraform/environments/dev/terraform\.tfvars\.example|scripts/assert-backup-policy\.sh)
+        pass_filenames: false
+
   # Java formatting (Spotless via Gradle — auto-fix mode)
   - repo: local
     hooks:

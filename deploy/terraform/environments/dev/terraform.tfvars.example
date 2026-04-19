@@ -12,11 +12,13 @@ tailscale_hostname = "gc-dev"
 # S3 backup bucket
 backup_bucket_name = "groundcontrol-backups-catalyst-dev"
 
-# Backup schedule (cron expression, default: daily at 03:00 UTC)
-# backup_cron = "0 3 * * *"
+# Backup schedule (cron expression) — GC-P021 requires at least 3x/day.
+# Default: 03:00, 11:00, 19:00 UTC.
+# backup_cron = "0 3,11,19 * * *"
 
-# Number of local backup dumps to keep (default: 3)
-# local_retention_count = 3
+# Number of local backup dumps to keep — GC-P021 requires >= 24h retention.
+# At 3 backups/day, 4 gives ~32h. Do not set below 4.
+# local_retention_count = 4
 
 # Embedding provider (set to "openai" to enable, then put the API key in SSM)
 # gc_embedding_provider = "openai"
