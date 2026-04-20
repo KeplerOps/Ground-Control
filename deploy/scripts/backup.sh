@@ -1,6 +1,8 @@
 #!/bin/bash
-# Ground Control database backup — pg_dump to local + S3
-# Runs via cron. Schedule and retention are configurable via Terraform.
+# Ground Control database backup — pg_dump to local + S3 (GC-P021).
+# Runs via cron. Cadence (>= 3/day) and local retention (>= 24h) are
+# enforced by deploy/terraform/modules/backup/variables.tf defaults;
+# scripts/assert-backup-policy.sh asserts those defaults stay in place.
 set -euo pipefail
 
 # Source env for DB credentials

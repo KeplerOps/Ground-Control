@@ -41,5 +41,6 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | [022](022-content-pack-distribution-architecture.md) | Content Pack Distribution Architecture | Accepted |
 | [023](023-plugin-architecture.md) | Plugin Architecture | Accepted |
 | [024](024-threat-model-entry-boundary.md) | Threat Model Entry Boundary | Accepted |
+| [025](025-backup-policy.md) | Backup Policy (GC-P021) | Accepted |
 
 Prior ADRs from the old project frame are archived in `archive/architecture/adrs/`.

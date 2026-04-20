@@ -41,15 +41,25 @@ variable "backup_bucket_name" {
 }
 
 variable "backup_cron" {
-  description = "Cron expression for automated pg_dump backup schedule"
+  description = <<-EOT
+    Cron expression for automated pg_dump backup. GC-P021 requires at least
+    three backups per day; this env default matches the upstream backup
+    module default (`0 3,11,19 * * *`). Overrides must stay >= 3x/day to
+    remain compliant — the scripts/assert-backup-policy.sh guardrail fails
+    the build otherwise.
+  EOT
   type        = string
-  default     = "0 3 * * *"
+  default     = "0 3,11,19 * * *"
 }
 
 variable "local_retention_count" {
-  description = "Number of local pg_dump files to retain on the EC2 instance"
+  description = <<-EOT
+    Number of local pg_dump files to retain on the EC2 instance. GC-P021
+    requires at least 24 hours of retention; at 3 backups/day the minimum
+    compliant value is 4. Do not set below 4.
+  EOT
   type        = number
-  default     = 3
+  default     = 4
 }
 
 variable "gc_embedding_provider" {

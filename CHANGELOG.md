@@ -5,6 +5,85 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.114.0] - 2026-04-19
+
+### Added
+
+- `deploy/scripts/install-ops-scripts.sh` — canonical, idempotent
+  installer for `/opt/gc/{backup,restore,test-restore,watchdog}.sh` and
+  `/etc/cron.d/gc-{backup,restore-test,watchdog}`. Enforces the GC-P021
+  cadence (≥ 3×/day) and retention (≥ 4) floors on input; exits non-zero
+  on any out-of-spec value. Runs on the instance in two paths: first
+  boot (written by user-data) and every main-branch deploy (pushed via
+  `aws ssm send-command` by the CI `deploy` job).
+- CI `deploy` job now refreshes `/opt/gc` scripts via SSM before
+  invoking `/opt/gc/deploy.sh` so the live instance picks up script
+  changes even though `ignore_changes = [user_data]` prevents Terraform
+  from replacing user-data. Closes the rollout gap flagged in Codex
+  review of #534.
+- `scripts/assert-backup-policy.sh` now additionally validates:
+  - the dev env root `variables.tf` defaults (not just the module
+    defaults, so the forwarded `module.backup` inputs stay compliant),
+  - `install-ops-scripts.sh` contains every GC-P021 sentinel and the
+    `GC-P021` anchor,
+  - the CI workflow wires `install-ops-scripts.sh` into the deploy
+    job,
+  - executing the installer against an ephemeral prefix — rejecting
+    non-compliant inputs and writing the expected artifacts with the
+    expected substitutions.
+- GC-P021 backup policy enforcement (ADR-025): backup cadence raised to
+  3× / day (`0 3,11,19 * * *` UTC) and local dump retention raised to 4
+  files, guaranteeing ≥ 24 h of local retention with a one-run margin
+  on top of the 30-day S3 lifecycle. Defaults live in
+  `deploy/terraform/modules/backup/variables.tf`; overrides below these
+  thresholds are blocked by the new structural guardrail.
+- Daily restore verification (`0 5 * * *` UTC) replaces the prior
+  weekly run. `deploy/scripts/test-restore.sh` and the user-data
+  inlined copy now additionally assert the AGE extension is present,
+  core Ground Control tables (`project`, `requirement`,
+  `requirement_relation`, `traceability_link`, `document`, `section`,
+  `threat_model`) exist in the restored database, `flyway_schema_history`
+  contains V010, and `create_graph('requirements_verify')` succeeds
+  against the restored catalog — proving AGE is operationally usable
+  after restore, not just installed.
+- `docs/operations/backup-restore.md` — standalone operator runbook
+  covering the three recovery scenarios (in-place, volume survives,
+  full rebuild), AGE graph rematerialization after S3 dump restore,
+  credential rotation, and post-restore verification. Written for an
+  operator with AWS + Tailscale credentials but no prior exposure to
+  the stack.
+- `scripts/assert-backup-policy.sh` — structural guardrail that fails
+  pre-commit / `make policy` if the GC-P021 cadence, retention, cron, or
+  verification sentinels are altered away from the accepted defaults.
+- `scripts/test-backup-restore-locally.sh` + `make test-backup-restore-local`
+  — self-contained end-to-end local exerciser. Stands up a fresh
+  `apache/age` container, replays every Flyway migration, takes a
+  pg_dump, and invokes `test-restore.sh` against the dump; asserts
+  every sentinel check appears in the output.
+- `.pre-commit-config.yaml` now runs `bash -n` across
+  `deploy/scripts/*.sh` plus the two new ops scripts, and invokes
+  `scripts/assert-backup-policy.sh` on any change to the backup module,
+  user-data template, backup/restore scripts, or the example tfvars.
+- ADR-025 (Backup Policy) documents the decision to retain
+  pg_dump + EBS rather than switching to pgBackRest, the GC-P021
+  clause-to-change mapping, and the AGE-derivative-from-relational
+  invariant that makes the decision safe.
+
+### Changed
+
+- `deploy/scripts/backup.sh` and `deploy/scripts/test-restore.sh`
+  headers now reference GC-P021 so the policy anchor is visible at the
+  script level. `test-restore.sh` accepts env overrides
+  (`BACKUP_DIR`, `TEST_CONTAINER`, `TEST_PORT`, `DB_IMAGE`,
+  `POSTGRES_*`, `SKIP_ENV_FILE=1`) so it runs locally without the
+  production `/opt/gc/.env`. The readiness loop now requires three
+  consecutive successful `SELECT 1` calls to outlast the apache/age
+  image's post-init restart window.
+- `docs/deployment/DEPLOYMENT.md` Backup and Recovery section now
+  delegates to `docs/operations/backup-restore.md`, records the new
+  cadence / retention / verification defaults, and enumerates the AGE
+  verification checks.
+
 ## [0.113.0] - 2026-04-12
 
 ### Added
