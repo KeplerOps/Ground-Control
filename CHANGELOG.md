@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.114.1] - 2026-04-19
+
+### Changed
+
+- All CI workflows (`.github/workflows/ci.yml` and
+  `.github/workflows/pack-registry-sync.yml`) now target
+  `[self-hosted, linux, x64]` instead of `ubuntu-latest`. Jobs route
+  to the aurora-provisioned ephemeral Proxmox runners via Fabricator's
+  org webhook, per GC-GitHub issue #535.
+
 ## [0.114.0] - 2026-04-19
 
 ### Added
