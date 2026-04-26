@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `gc_codex_review` no longer hangs indefinitely. Three independent
+  bugs in the implement workflow were causing the final code-review
+  step to stall:
+  - `execFileWithInput` (used by every codex invocation in
+    `mcp/ground-control/lib.js`) ran without any timeout. A stuck
+    codex child blocked the MCP tool, the agent, and the workflow
+    forever. It now accepts `timeoutMs` and escalates SIGTERM →
+    SIGKILL after a grace period; the codex callers default to
+    `GC_CODEX_TIMEOUT_MS` (20 min by default).
+  - `runCodexReview` invoked `codex review` with a stdin prompt,
+    which was observed to occasionally not exit after emitting the
+    structured tail. It now uses `codex exec --sandbox workspace-write
+    -C <repo> --output-last-message <file>` — the same shape that the
+    architecture preflight and verify-finding callers already use
+    successfully — and reads the result from the output file.
+  - The two reviewers (core + security) were always run in parallel
+    via `Promise.all`, doubling local resource pressure. They now run
+    sequentially by default; set `GC_CODEX_REVIEW_PARALLEL=2` to
+    re-enable the old parallel behavior.
+
+### Changed
+
+- `gc_codex_review` caps the inlined diff at 256 KiB by default
+  (override via `GC_CODEX_REVIEW_MAX_DIFF_BYTES`; set 0 to disable).
+  Beyond the cap, the prompt switches to a manifest of changed files
+  with line counts and instructs codex to fetch per-file diffs via
+  shell. Keeps prompt size predictable on long-lived branches.
+- `enrichCommentsWithThreadIds` (`mcp/ground-control/lib.js`) now
+  hard-caps GraphQL pagination at 100 pages so a malformed response
+  cannot loop forever.
+- `.claude/skills/implement/SKILL.md` Step 10 (CI Monitor) replaces
+  `gh run watch` with a bounded poll. Surfaces a stuck-queued
+  condition after 5 min (likely no self-hosted runner picked the
+  job up) and caps total wait at 45 min, instead of waiting silently
+  for a runner that may never appear.
+
 ## [0.114.1] - 2026-04-19
 
 ### Changed
