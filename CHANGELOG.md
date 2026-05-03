@@ -94,6 +94,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   knobs). 19 unit tests cover happy path, override path, refusal
   path, missing-reason rejection, override-marker round-trip, and
   reasons containing embedded quotes.
+- Plan-before-review ordering gate on `gc_codex_review` (#794
+  extension). Post-push reviews look up the PR's closing-issue refs
+  via `gh pr view --json closingIssuesReferences` and refuse unless
+  at least one of those issues carries a `plan` phase marker.
+  Closes the same ordering hole MVP-2 closes for preflight→plan,
+  but for plan→review. PRs that close no issues skip the gate
+  (legitimate refactor/chore PRs without an issue). Override is
+  available via `override_phase_gate=true` +
+  `override_phase_reason` for trivial cases the user explicitly
+  authorizes.
+- Per-finding hard-cap-2 enforcement on `gc_codex_verify_finding`
+  (#794 extension). Same template as the MVP-1 cycle cap but
+  keyed per `(PR, comment_id)`. After 2 verify cycles per finding,
+  the tool refuses cycle 3+ unless `override_cap=true` with
+  `override_reason`. Override cycles are recorded with
+  `override="true"` in the marker for audit. Three new
+  pure-function exports back the enforcement:
+  `parseCodexVerifyCycleMarkers`, `evaluateCodexVerifyCycleCap`,
+  `buildCodexVerifyCycleMarker`. Successful returns surface
+  `cycle`, `cap`, `next_action`, `override`, `override_reason`.
 - `gc_post_implementation_plan` MCP tool (closes #794 MVP-2). Posts
   the implementation plan as an issue-thread comment per ADR-029,
   but refuses unless a `preflight` phase marker exists for the

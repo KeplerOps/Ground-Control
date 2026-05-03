@@ -30,6 +30,11 @@ import {
   evaluatePhasePrerequisite,
   buildPhaseMarker,
   PHASE_MARKER_PREFIX,
+  parseCodexVerifyCycleMarkers,
+  evaluateCodexVerifyCycleCap,
+  buildCodexVerifyCycleMarker,
+  CODEX_VERIFY_HARD_CAP,
+  CODEX_VERIFY_CYCLE_MARKER_PREFIX,
   dedupFindings,
   buildCodexVerifyPrompt,
   parseCodexVerifyTail,
@@ -2094,6 +2099,113 @@ describe("buildCodexReviewCycleMarker", () => {
     // contain the prefix and round-trip.
     assert.match(marker, /reason="user said \\"yes do it\\" then ran off"/);
     assert.equal(parseCodexReviewCycleMarkers([marker], 1), 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gc_codex_verify_finding per-finding cap (#794 extension)
+// ---------------------------------------------------------------------------
+
+describe("parseCodexVerifyCycleMarkers", () => {
+  it("counts markers for the matching (PR, comment_id) pair", () => {
+    const bodies = [
+      '<!-- gc:codex-verify-cycle pr="792" comment="42" cycle="1" -->',
+      '<!-- gc:codex-verify-cycle pr="792" comment="42" cycle="2" -->',
+      '<!-- gc:codex-verify-cycle pr="792" comment="99" cycle="1" -->', // different finding
+    ];
+    assert.equal(parseCodexVerifyCycleMarkers(bodies, 792, 42), 2);
+    assert.equal(parseCodexVerifyCycleMarkers(bodies, 792, 99), 1);
+    assert.equal(parseCodexVerifyCycleMarkers(bodies, 792, 1000), 0);
+  });
+
+  it("ignores markers for other PRs even with the same comment_id", () => {
+    const bodies = [
+      '<!-- gc:codex-verify-cycle pr="100" comment="42" cycle="1" -->',
+      '<!-- gc:codex-verify-cycle pr="200" comment="42" cycle="1" -->',
+    ];
+    assert.equal(parseCodexVerifyCycleMarkers(bodies, 100, 42), 1);
+    assert.equal(parseCodexVerifyCycleMarkers(bodies, 200, 42), 1);
+    assert.equal(parseCodexVerifyCycleMarkers(bodies, 300, 42), 0);
+  });
+
+  it("tolerates non-string entries and a non-array input", () => {
+    assert.equal(parseCodexVerifyCycleMarkers(["a", 42, null], 1, 1), 0);
+    assert.equal(parseCodexVerifyCycleMarkers(null, 1, 1), 0);
+  });
+});
+
+describe("evaluateCodexVerifyCycleCap", () => {
+  it("allows cycle 1 with no priors and surfaces a fix-and-retry next_action", () => {
+    const result = evaluateCodexVerifyCycleCap({ priorCount: 0, prNumber: 792, commentId: 42 });
+    assert.equal(result.ok, true);
+    assert.equal(result.nextCycle, 1);
+    assert.equal(result.cap, CODEX_VERIFY_HARD_CAP);
+    assert.equal(result.next_action, "fix_finding_and_retry");
+  });
+
+  it("allows cycle 2 with one prior and signals the escalate-if-still-unresolved discipline", () => {
+    const result = evaluateCodexVerifyCycleCap({ priorCount: 1, prNumber: 792, commentId: 42 });
+    assert.equal(result.ok, true);
+    assert.equal(result.nextCycle, 2);
+    assert.equal(result.next_action, "fix_finding_then_escalate_if_still_unresolved");
+  });
+
+  it("refuses cycle 3 with structured error pointing at escalation", () => {
+    const result = evaluateCodexVerifyCycleCap({ priorCount: 2, prNumber: 792, commentId: 42 });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "codex_verify_cap_reached");
+    assert.equal(result.next_action, "escalate_finding_to_user");
+    assert.match(result.message, /comment #42/);
+    assert.match(result.message, /PR #792/);
+  });
+
+  it("override path requires a non-empty reason", () => {
+    const noReason = evaluateCodexVerifyCycleCap({
+      priorCount: 2,
+      prNumber: 1,
+      commentId: 1,
+      overrideCap: true,
+    });
+    assert.equal(noReason.ok, false);
+    assert.equal(noReason.error, "codex_verify_override_missing_reason");
+
+    const goodOverride = evaluateCodexVerifyCycleCap({
+      priorCount: 2,
+      prNumber: 1,
+      commentId: 1,
+      overrideCap: true,
+      overrideReason: "user said: try once more on this one",
+    });
+    assert.equal(goodOverride.ok, true);
+    assert.equal(goodOverride.override, true);
+    assert.equal(goodOverride.nextCycle, 3);
+  });
+
+  it("throws on garbage priorCount (defensive)", () => {
+    assert.throws(() => evaluateCodexVerifyCycleCap({ priorCount: -1, prNumber: 1, commentId: 1 }));
+  });
+});
+
+describe("buildCodexVerifyCycleMarker", () => {
+  it("round-trips through parseCodexVerifyCycleMarkers", () => {
+    const m = buildCodexVerifyCycleMarker({ prNumber: 792, commentId: 42, cycleNumber: 1 });
+    assert.ok(m.startsWith(CODEX_VERIFY_CYCLE_MARKER_PREFIX));
+    assert.equal(parseCodexVerifyCycleMarkers([m], 792, 42), 1);
+  });
+
+  it("override markers are distinguishable but still counted", () => {
+    const reason = "user authorized verify cycle 3 for this finding";
+    const m = buildCodexVerifyCycleMarker({
+      prNumber: 1,
+      commentId: 7,
+      cycleNumber: 3,
+      override: true,
+      overrideReason: reason,
+    });
+    assert.match(m, /override="true"/);
+    assert.match(m, /USER-AUTHORIZED OVERRIDE/);
+    assert.match(m, new RegExp(reason));
+    assert.equal(parseCodexVerifyCycleMarkers([m], 1, 7), 1);
   });
 });
 

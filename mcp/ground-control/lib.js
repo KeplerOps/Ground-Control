@@ -2400,6 +2400,119 @@ export function buildCodexReviewCycleMarker({ prNumber, cycleNumber, override = 
 }
 
 // ---------------------------------------------------------------------------
+// gc_codex_verify_finding per-finding cap (issue #794 extension)
+//
+// Same failure mode as the cycle cap (agents rationalize "just one more verify
+// pass"), keyed per (PR, comment_id) instead of per (PR). Same template
+// family as the cycle markers. Cap is 2 verify calls per finding.
+// ---------------------------------------------------------------------------
+
+export const CODEX_VERIFY_HARD_CAP = 2;
+export const CODEX_VERIFY_CYCLE_MARKER_PREFIX = "<!-- gc:codex-verify-cycle";
+const CODEX_VERIFY_CYCLE_MARKER_RE =
+  /<!--\s*gc:codex-verify-cycle\s+pr="(\d+)"\s+comment="(\d+)"\s+cycle="(\d+)"[^]*?-->/g;
+
+// Pure: count prior verify markers for a specific (PR, commentId) pair.
+export function parseCodexVerifyCycleMarkers(commentBodies, prNumber, commentId) {
+  if (!Array.isArray(commentBodies)) return 0;
+  let count = 0;
+  for (const body of commentBodies) {
+    if (typeof body !== "string") continue;
+    for (const m of body.matchAll(CODEX_VERIFY_CYCLE_MARKER_RE)) {
+      const markerPr = Number.parseInt(m[1], 10);
+      const markerComment = Number.parseInt(m[2], 10);
+      if (markerPr === prNumber && markerComment === commentId) count += 1;
+    }
+  }
+  return count;
+}
+
+// Pure: decide whether the next verify cycle for a finding is allowed.
+// Same shape as evaluateCodexReviewCycleCap (and the same override semantics).
+export function evaluateCodexVerifyCycleCap({
+  priorCount,
+  prNumber,
+  commentId,
+  hardCap = CODEX_VERIFY_HARD_CAP,
+  overrideCap = false,
+  overrideReason = null,
+}) {
+  if (typeof priorCount !== "number" || !Number.isFinite(priorCount) || priorCount < 0) {
+    throw new Error(`evaluateCodexVerifyCycleCap: priorCount must be a non-negative number, got ${priorCount}`);
+  }
+
+  if (overrideCap === true) {
+    if (typeof overrideReason !== "string" || overrideReason.trim() === "") {
+      return {
+        ok: false,
+        error: "codex_verify_override_missing_reason",
+        message:
+          "override_cap=true requires a non-empty override_reason quoting the user's authorization. " +
+          "Audits cannot distinguish legitimate overrides from accidents without a reason.",
+        pr_number: prNumber,
+        comment_id: commentId,
+        prior_cycles: priorCount,
+        cap: hardCap,
+      };
+    }
+    return {
+      ok: true,
+      nextCycle: priorCount + 1,
+      cap: hardCap,
+      override: true,
+      override_reason: overrideReason.trim(),
+    };
+  }
+
+  if (priorCount >= hardCap) {
+    return {
+      ok: false,
+      error: "codex_verify_cap_reached",
+      message:
+        `gc_codex_verify_finding hard cap reached (${hardCap} cycles) for comment #${commentId} ` +
+        `on PR #${prNumber}. After cycle ${hardCap}, escalate to the user with the comment + verify ` +
+        `history; do not silently re-invoke. If the user authorizes another verify call, retry with ` +
+        `override_cap=true and override_reason="<user authorization>".`,
+      pr_number: prNumber,
+      comment_id: commentId,
+      prior_cycles: priorCount,
+      cap: hardCap,
+      next_action: "escalate_finding_to_user",
+    };
+  }
+
+  return {
+    ok: true,
+    nextCycle: priorCount + 1,
+    cap: hardCap,
+    next_action: priorCount + 1 === hardCap ? "fix_finding_then_escalate_if_still_unresolved" : "fix_finding_and_retry",
+  };
+}
+
+export function buildCodexVerifyCycleMarker({ prNumber, commentId, cycleNumber, override = false, overrideReason = null }) {
+  const overrideAttr = override === true ? ' override="true"' : "";
+  const reasonAttr =
+    override === true && typeof overrideReason === "string" && overrideReason.trim() !== ""
+      ? ` reason=${JSON.stringify(overrideReason.trim())}`
+      : "";
+  const headline = override
+    ? `_gc_codex_verify_finding cycle ${cycleNumber} (USER-AUTHORIZED OVERRIDE past cap ${CODEX_VERIFY_HARD_CAP}) complete for PR #${prNumber} comment #${commentId}._`
+    : `_gc_codex_verify_finding cycle ${cycleNumber} of ${CODEX_VERIFY_HARD_CAP} complete for PR #${prNumber} comment #${commentId}._`;
+  const reasonLine =
+    override && typeof overrideReason === "string" && overrideReason.trim() !== ""
+      ? `\nOverride reason: ${overrideReason.trim()}`
+      : "";
+  return [
+    `${CODEX_VERIFY_CYCLE_MARKER_PREFIX} pr="${prNumber}" comment="${commentId}" cycle="${cycleNumber}"${overrideAttr}${reasonAttr} -->`,
+    "",
+    headline +
+      " Posted by the MCP server to enforce the per-finding hard-cap-2 contract (issue #794). " +
+      "Do not edit or delete — used by the next `gc_codex_verify_finding` invocation to count cycles." +
+      reasonLine,
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // gc workflow phase markers (issue #794 MVP-2)
 //
 // Phase markers record completion of a workflow phase on a GitHub issue so
@@ -2650,6 +2763,28 @@ async function getOwnerRepo(repoRoot) {
   return { owner, name };
 }
 
+// Look up the issue numbers a PR closes via "Closes #N" / "Fixes #N" syntax
+// in its body. Used to map a review back to the issue thread where phase
+// markers live. Returns [] when the PR closes no issues (legitimate case for
+// some refactors and chore PRs).
+async function getPullRequestClosingIssues(repoRoot, prNumber) {
+  try {
+    const { stdout } = await execFile(
+      "gh",
+      ["pr", "view", String(prNumber), "--json", "closingIssuesReferences"],
+      { cwd: repoRoot },
+    );
+    const data = JSON.parse(stdout);
+    const refs = data?.closingIssuesReferences;
+    if (!Array.isArray(refs)) return [];
+    return refs
+      .map((r) => Number.parseInt(r?.number, 10))
+      .filter((n) => Number.isInteger(n) && n > 0);
+  } catch {
+    return [];
+  }
+}
+
 // Generic helper: read all top-level comments on a GitHub issue (which on a
 // PR is the same endpoint — issues/{N}/comments). Used by both cycle-marker
 // counting and phase-marker counting. Returns an array of comment body
@@ -2714,6 +2849,37 @@ async function readPriorCodexReviewCycleCount(repoRoot, owner, name, prNumber) {
 async function readCompletedPhases(repoRoot, owner, name, issueNumber) {
   const bodies = await readIssueCommentBodies(repoRoot, owner, name, issueNumber);
   return parsePhaseMarkers(bodies, issueNumber);
+}
+
+// Read the PR's issue-comments and count prior gc_codex_verify_finding cycle
+// markers for a specific finding (PR + comment_id).
+async function readPriorCodexVerifyCycleCount(repoRoot, owner, name, prNumber, commentId) {
+  const bodies = await readIssueCommentBodies(repoRoot, owner, name, prNumber);
+  return parseCodexVerifyCycleMarkers(bodies, prNumber, commentId);
+}
+
+// Post the verify cycle marker as a PR issue-comment. Mirrors the cycle-marker
+// poster but with verify-specific shape (carries comment_id).
+async function postCodexVerifyCycleMarker(repoRoot, owner, name, prNumber, commentId, cycleNumber, extras = {}) {
+  const body = buildCodexVerifyCycleMarker({
+    prNumber,
+    commentId,
+    cycleNumber,
+    override: extras.override === true,
+    overrideReason: extras.overrideReason ?? null,
+  });
+  await execFile(
+    "gh",
+    [
+      "api",
+      "--method",
+      "POST",
+      `/repos/${owner}/${name}/issues/${prNumber}/comments`,
+      "-f",
+      `body=${body}`,
+    ],
+    { cwd: repoRoot },
+  );
 }
 
 // Post the cycle marker as a PR issue-comment so the next invocation sees it.
@@ -2981,6 +3147,8 @@ export async function runCodexReview({
   prNumber = null,
   overrideCap = false,
   overrideReason = null,
+  overridePhaseGate = false,
+  overridePhaseReason = null,
 }) {
   const repoRoot = await ensureGitRepo(repoPath);
 
@@ -2989,15 +3157,73 @@ export async function runCodexReview({
     effectivePr = await autoDetectPrNumber(repoRoot);
   }
 
-  // Hard-cap-2 enforcement (issue #794 MVP-1). Only applies to post-push
-  // reviews tied to a PR; pre-push uncommitted reviews use a separate cap and
-  // have no PR yet. If the cap is exceeded and overrideCap is false, refuse
-  // without consuming a codex run. overrideCap=true requires a non-empty
-  // overrideReason quoting the user's authorization (the agent cannot
-  // self-authorize).
+  // Hard-cap-2 enforcement (issue #794 MVP-1) + plan-before-review ordering
+  // gate (issue #794 MVP-2 extension). Both apply only to post-push reviews
+  // tied to a PR; pre-push uncommitted reviews use a separate mechanic.
   let cycleOwnership = null;
   if (!uncommitted && effectivePr != null) {
     const { owner, name } = await getOwnerRepo(repoRoot);
+
+    // (1) Plan-before-review ordering gate. Look up the PR's closing-issues
+    //     refs (from "Closes #N" syntax in the PR body); if any of them
+    //     carries a `plan` phase marker, planning happened — proceed. If none
+    //     do, refuse unless override_phase_gate=true with reason. PRs that
+    //     close no issues skip the gate (legitimate for some refactor / chore
+    //     PRs that aren't tied to an issue).
+    const closingIssues = await getPullRequestClosingIssues(repoRoot, effectivePr);
+    if (closingIssues.length > 0 && !overridePhaseGate) {
+      let anyHasPlan = false;
+      const issuesChecked = [];
+      for (const issueNumber of closingIssues) {
+        const completed = await readCompletedPhases(repoRoot, owner, name, issueNumber);
+        issuesChecked.push({ issue_number: issueNumber, phases: [...completed] });
+        if (completed.has("plan")) {
+          anyHasPlan = true;
+          break;
+        }
+      }
+      if (!anyHasPlan) {
+        return {
+          repo_path: repoRoot,
+          base_branch: baseBranch,
+          uncommitted,
+          pr_number: effectivePr,
+          ok: false,
+          error: "phase_prerequisite_missing",
+          message:
+            `gc_codex_review requires a 'plan' phase marker on at least one of PR #${effectivePr}'s ` +
+            `closing-issue refs (${closingIssues.map((n) => `#${n}`).join(", ")}). Run ` +
+            `gc_post_implementation_plan first; if you genuinely need to skip planning (e.g., trivial ` +
+            `bug fix the user approved), retry with override_phase_gate=true and ` +
+            `override_phase_reason="<user authorization>".`,
+          missing: ["plan"],
+          closing_issues: closingIssues,
+          issues_checked: issuesChecked,
+          next_action: "run_gc_post_implementation_plan_first",
+          finding_count: 0,
+          comments: [],
+          reviewers: [],
+        };
+      }
+    } else if (overridePhaseGate) {
+      if (typeof overridePhaseReason !== "string" || overridePhaseReason.trim() === "") {
+        return {
+          repo_path: repoRoot,
+          base_branch: baseBranch,
+          uncommitted,
+          pr_number: effectivePr,
+          ok: false,
+          error: "phase_override_missing_reason",
+          message:
+            "override_phase_gate=true requires a non-empty override_phase_reason quoting the user's " +
+            "authorization to skip the plan-before-review gate. Audits cannot distinguish legitimate " +
+            "overrides from accidents without a reason.",
+        };
+      }
+    }
+
+    // (2) Hard-cap-2 cycle enforcement (MVP-1). overrideCap=true requires a
+    //     non-empty overrideReason — the agent cannot self-authorize.
     const priorCount = await readPriorCodexReviewCycleCount(repoRoot, owner, name, effectivePr);
     const decision = evaluateCodexReviewCycleCap({
       priorCount,
@@ -3277,7 +3503,13 @@ async function postReviewCommentReply(repoRoot, owner, name, prNumber, commentId
   return JSON.parse(stdout);
 }
 
-export async function runCodexVerifyFinding({ repoPath, prNumber, commentId }) {
+export async function runCodexVerifyFinding({
+  repoPath,
+  prNumber,
+  commentId,
+  overrideCap = false,
+  overrideReason = null,
+}) {
   if (!Number.isInteger(prNumber) || prNumber <= 0) {
     throw new Error("pr_number must be a positive integer");
   }
@@ -3287,6 +3519,31 @@ export async function runCodexVerifyFinding({ repoPath, prNumber, commentId }) {
 
   const repoRoot = await ensureGitRepo(repoPath);
   const { owner, name } = await getOwnerRepo(repoRoot);
+
+  // Per-finding hard-cap-2 enforcement. Same template as the cycle cap but
+  // keyed per (PR, comment_id). Refuses cycle 3+ unless overrideCap=true with
+  // a non-empty reason.
+  const priorVerifyCount = await readPriorCodexVerifyCycleCount(repoRoot, owner, name, prNumber, commentId);
+  const verifyDecision = evaluateCodexVerifyCycleCap({
+    priorCount: priorVerifyCount,
+    prNumber,
+    commentId,
+    overrideCap,
+    overrideReason,
+  });
+  if (!verifyDecision.ok) {
+    return {
+      repo_path: repoRoot,
+      pr_number: prNumber,
+      comment_id: commentId,
+      ok: false,
+      error: verifyDecision.error,
+      message: verifyDecision.message,
+      prior_cycles: verifyDecision.prior_cycles,
+      cap: verifyDecision.cap,
+      next_action: verifyDecision.next_action ?? null,
+    };
+  }
 
   const comment = await fetchReviewCommentById(repoRoot, owner, name, commentId);
 
@@ -3365,6 +3622,26 @@ export async function runCodexVerifyFinding({ repoPath, prNumber, commentId }) {
 
   const parsed = parseCodexVerifyTail(stdout);
 
+  // Record the verify cycle marker after a successful run (whether the
+  // finding came back RESOLVED or UNRESOLVED — both are completed cycles).
+  // Marker-post failures are non-fatal, same policy as the cycle marker.
+  try {
+    await postCodexVerifyCycleMarker(
+      repoRoot,
+      owner,
+      name,
+      prNumber,
+      commentId,
+      verifyDecision.nextCycle,
+      { override: verifyDecision.override === true, overrideReason: verifyDecision.override_reason ?? null },
+    );
+  } catch (markerError) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[gc_codex_verify_finding] cycle marker post failed for PR #${prNumber} comment #${commentId}: ${markerError.message}`,
+    );
+  }
+
   if (parsed.status === "resolved") {
     if (!threadId) {
       throw new Error(
@@ -3379,6 +3656,11 @@ export async function runCodexVerifyFinding({ repoPath, prNumber, commentId }) {
       thread_id: threadId,
       status: "resolved",
       thread_resolved: resolved,
+      cycle: verifyDecision.nextCycle,
+      cap: verifyDecision.cap,
+      next_action: verifyDecision.next_action ?? null,
+      override: verifyDecision.override === true,
+      override_reason: verifyDecision.override_reason ?? null,
     };
   }
 
@@ -3400,6 +3682,11 @@ export async function runCodexVerifyFinding({ repoPath, prNumber, commentId }) {
     reply_comment_id: replyComment.id,
     reply_body: parsed.reply,
     reply_html_url: replyComment.html_url || null,
+    cycle: verifyDecision.nextCycle,
+    cap: verifyDecision.cap,
+    next_action: verifyDecision.next_action ?? null,
+    override: verifyDecision.override === true,
+    override_reason: verifyDecision.override_reason ?? null,
   };
 }
 

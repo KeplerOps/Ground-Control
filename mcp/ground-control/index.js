@@ -757,8 +757,10 @@ server.tool(
     pr_number: z.number().int().positive().optional().describe("Pull request number to post findings to. When omitted and uncommitted is false, the tool auto-detects via `gh pr view --json number`. When no PR can be found, codex emits findings inline without posting."),
     override_cap: z.boolean().optional().describe("Override the hard-cap-2 cycle limit. Only legitimate when the user has explicitly authorized cycle 3+ in the conversation. Requires override_reason."),
     override_reason: z.string().optional().describe("Required when override_cap=true. Quote the user's authorization (e.g. 'user said: yes run cycle 3 to verify'). Stored in the marker for audit."),
+    override_phase_gate: z.boolean().optional().describe("Override the plan-before-review ordering gate. Only legitimate when the user explicitly authorized skipping planning (e.g., trivial bug fix). Requires override_phase_reason."),
+    override_phase_reason: z.string().optional().describe("Required when override_phase_gate=true. Quote the user's authorization. Logged for audit."),
   },
-  async ({ repo_path, base_branch, uncommitted, pr_number, override_cap, override_reason }) => {
+  async ({ repo_path, base_branch, uncommitted, pr_number, override_cap, override_reason, override_phase_gate, override_phase_reason }) => {
     try {
       return ok(JSON.stringify(
         await runCodexReview({
@@ -768,6 +770,8 @@ server.tool(
           prNumber: pr_number != null ? pr_number : null,
           overrideCap: Boolean(override_cap),
           overrideReason: override_reason ?? null,
+          overridePhaseGate: Boolean(override_phase_gate),
+          overridePhaseReason: override_phase_reason ?? null,
         }),
         null,
         2,
@@ -780,19 +784,23 @@ server.tool(
 
 server.tool(
   "gc_codex_verify_finding",
-  "Ask Codex to verify whether a specific PR review finding has been resolved in the local working tree. Takes repo_path, pr_number, and the REST comment_id returned from gc_codex_review. Codex reads the original comment directly from GitHub (only comments from allowlisted authors are accepted), reads the anchored file, and decides RESOLVED or UNRESOLVED. If RESOLVED, the review thread is marked resolved via GraphQL. If UNRESOLVED, a threaded reply with concrete new directions is posted to the original comment and returned to the caller.",
+  "Ask Codex to verify whether a specific PR review finding has been resolved in the local working tree. Takes repo_path, pr_number, and the REST comment_id returned from gc_codex_review. Codex reads the original comment directly from GitHub (only comments from allowlisted authors are accepted), reads the anchored file, and decides RESOLVED or UNRESOLVED. If RESOLVED, the review thread is marked resolved via GraphQL. If UNRESOLVED, a threaded reply with concrete new directions is posted to the original comment and returned to the caller. Per-finding hard cap of 2 verify calls per (PR, comment_id); refuses cycle 3+ unless override_cap=true with override_reason quoting the user's authorization.",
   {
     repo_path: z.string().describe("Absolute path to the target Git repository"),
     pr_number: z.number().int().positive().describe("Pull request number the comment belongs to"),
     comment_id: z.number().int().positive().describe("REST comment id (as returned in the gc_codex_review comments list) of the finding to verify"),
+    override_cap: z.boolean().optional().describe("Override the per-finding hard-cap-2. Only legitimate when the user explicitly authorized cycle 3+ for this finding. Requires override_reason."),
+    override_reason: z.string().optional().describe("Required when override_cap=true. Quote the user's authorization. Logged on the marker for audit."),
   },
-  async ({ repo_path, pr_number, comment_id }) => {
+  async ({ repo_path, pr_number, comment_id, override_cap, override_reason }) => {
     try {
       return ok(JSON.stringify(
         await runCodexVerifyFinding({
           repoPath: repo_path,
           prNumber: pr_number,
           commentId: comment_id,
+          overrideCap: Boolean(override_cap),
+          overrideReason: override_reason ?? null,
         }),
         null,
         2,

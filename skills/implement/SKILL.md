@@ -343,7 +343,7 @@ This step normally lands as a **verification pass** rather than a fix/verify loo
    3. Run the local completion gate to make sure nothing regressed locally.
    4. Call `gc_codex_verify_finding` with `repo_path`, `pr_number`, and the `comment_id`. Codex will read your local changes and decide:
       - **`status: "resolved"`** — the review thread has already been marked resolved on GitHub. Move on.
-      - **`status: "unresolved"`** — codex posted a threaded reply with `reply_body`. Fix per those directions and re-invoke `gc_codex_verify_finding`. **Per-finding cap: 2 verify calls.** If a third would be needed, STOP, post the finding + fix history as an issue comment, escalate.
+      - **`status: "unresolved"`** — codex posted a threaded reply with `reply_body`. Fix per those directions and re-invoke `gc_codex_verify_finding`. **Per-finding cap: 2 verify calls** (enforced by the MCP server, see #794 — the tool refuses cycle 3 with a structured error and `next_action: "escalate_finding_to_user"`). If the user authorizes a 3rd verify, retry with `override_cap=true` and `override_reason="<their authorization>"`.
    5. After the finding is resolved (or marked `wontfix`/`not-applicable` by user direction), post a one-line decision comment on the GitHub issue thread linking back to the PR review comment. `defer` is not a valid decision — the workflow's contract is "fix every finding before PR is ready"; deferring a finding violates that contract.
 7. After all findings are resolved, commit and push the fixes (one commit per fix cycle, message `Fix review findings (codex, cycle <N>)`), then re-invoke `gc_codex_review` to confirm no new issues surfaced.
 
@@ -366,7 +366,9 @@ This step normally lands as a **verification pass** rather than a fix/verify loo
 
    Successful returns also surface `next_action` — `"fix_findings_and_push"` for cycle 1, `"fix_findings_then_summarize_and_escalate"` for cycle 2, etc. Follow the next_action verbatim. (See issue #794 for the enforcement design.)
 
-**Tool shape**: `gc_codex_verify_finding` accepts only `repo_path`, `pr_number`, and `comment_id`. It reads the comment directly from GitHub; do not paraphrase the finding through the tool.
+**Tool shape**: `gc_codex_verify_finding` accepts `repo_path`, `pr_number`, `comment_id`, and (for user-authorized cycle 3) `override_cap` + `override_reason`. It reads the comment directly from GitHub; do not paraphrase the finding through the tool.
+
+**Plan-before-review gate**: `gc_codex_review` itself refuses to run if the PR's closing-issue refs don't carry a `plan` phase marker (per #794). The agent must run `gc_post_implementation_plan` (Step 4) first. PR bodies must therefore include `Closes #<issue>` so the linked issue is discoverable. If the user has explicitly authorized skipping planning (e.g., a one-line bug fix), retry with `override_phase_gate=true` and `override_phase_reason="<their authorization>"`.
 
 ### Step 13: Test Quality Review
 
