@@ -582,23 +582,30 @@ function requiresAdminRole(path) {
 
 // Forwards a bearer token on `/api/v1/**` requests so the MCP server can talk
 // to a Ground Control deployment with `groundcontrol.security.enabled=true`.
+//
 // Resolution order:
-//   1. GROUND_CONTROL_API_TOKEN — generic token (USER or ADMIN role).
-//   2. GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN — admin-role legacy var,
-//      forwarded only for paths that require ADMIN.
+//   - On admin-only paths: prefer GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN
+//     when set (it's, by definition, an ADMIN-role token), then fall back to
+//     GROUND_CONTROL_API_TOKEN. Picking the admin token first prevents a
+//     deployment that has both vars configured but a USER-only generic token
+//     from getting 403s on admin endpoints.
+//   - On non-admin paths: use GROUND_CONTROL_API_TOKEN.
 // When neither is set the header is omitted (dev profile / disabled security).
 function addAuthorizationHeader(path, headers) {
   if (!path.startsWith("/api/v1/")) {
     return;
   }
   const apiToken = process.env.GROUND_CONTROL_API_TOKEN;
-  if (apiToken) {
-    headers.Authorization = `Bearer ${apiToken}`;
+  const adminToken = process.env.GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN;
+  if (requiresAdminRole(path)) {
+    const token = adminToken || apiToken;
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
     return;
   }
-  const adminToken = process.env.GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN;
-  if (adminToken && requiresAdminRole(path)) {
-    headers.Authorization = `Bearer ${adminToken}`;
+  if (apiToken) {
+    headers.Authorization = `Bearer ${apiToken}`;
   }
 }
 

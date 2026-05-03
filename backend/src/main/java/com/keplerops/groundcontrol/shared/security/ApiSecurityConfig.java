@@ -4,12 +4,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
+import org.springframework.security.web.util.matcher.RegexRequestMatcher;
 
 /**
  * Wires the API access control filter chain.
@@ -123,13 +125,29 @@ public class ApiSecurityConfig {
                     .authenticated()
                     .requestMatchers("/actuator/**")
                     .denyAll()
-                    // SPA static assets and client-side routes (anything not under /api or
-                    // /actuator) are served anonymously — without an auth token the API calls
-                    // they make will return 401, but the shell HTML/CSS/JS must load so a
-                    // login UI can render. The SpaController forwards non-API routes to
-                    // index.html; static resources are served from the classpath.
+                    // SPA static assets and client-side routes are anonymous so the React
+                    // shell loads (the API calls it then makes still require a token, returning
+                    // 401 to drive the login UI). Permit only known static asset paths and a
+                    // strict GET regex that mirrors SpaController's pattern (no dot in any
+                    // segment, first segment not /api or /actuator). Anything outside that
+                    // narrow allowlist is denyAll, so a future controller mounted outside the
+                    // documented matrix is fail-closed.
+                    .requestMatchers(
+                            HttpMethod.GET,
+                            "/",
+                            "/index.html",
+                            "/favicon.ico",
+                            "/favicon.svg",
+                            "/manifest.json",
+                            "/robots.txt",
+                            "/assets/**",
+                            "/static/**")
+                    .permitAll()
+                    .requestMatchers(RegexRequestMatcher.regexMatcher(
+                            HttpMethod.GET, "^/(?!api/|api$|actuator/|actuator$)[^.]+$"))
+                    .permitAll()
                     .anyRequest()
-                    .permitAll();
+                    .denyAll();
         });
 
         return http.build();

@@ -10,7 +10,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * tokens); this properties class only carries the list of trusted signers used by
  * {@link PackIntegrityVerifier} to validate signed pack imports.
  */
-@ConfigurationProperties(prefix = "ground-control.pack-registry.security")
+@ConfigurationProperties(prefix = "ground-control.pack-registry.security", ignoreUnknownFields = false)
 public class PackRegistrySecurityProperties {
 
     private List<TrustedSigner> trustedSigners = new ArrayList<>();
