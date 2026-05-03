@@ -60,6 +60,26 @@ export function buildSuggestedGroundControlYaml(project = "your-project-id") {
     "#   # schema: docs/knowledge/SCHEMA.md",
     "#   # inbox: docs/knowledge/inbox",
     "",
+    "# Workflow-packaging fields (ADR-027). The canonical /implement skill",
+    "# renders prose against these via {cfg.X|default Y} placeholders.",
+    "# docs:",
+    "#   adr_dir: architecture/adrs/",
+    "#   architecture_overview: docs/architecture/ARCHITECTURE.md",
+    "#   coding_standards: docs/CODING_STANDARDS.md",
+    "#   workflow_reference: docs/DEVELOPMENT_WORKFLOW.md",
+    "#   knowledge_base: docs/knowledge/",
+    "# example_paths:",
+    "#   source: backend/src/main/java/com/keplerops/groundcontrol/",
+    "#   test:   backend/src/test/java/com/keplerops/groundcontrol/",
+    "# requirements:",
+    "#   uid_examples: [\"GC-X001\", \"OBS-042\"]",
+    "# cross_cutting_concerns:",
+    "#   description: |",
+    "#     Logger: <project's logging library>",
+    "#     Validation: <project's validation approach>",
+    "#     Errors: <error envelope / handler>",
+    "#     Tests: <fixture / test-slice patterns>",
+    "",
   ].join("\n");
 }
 
@@ -1193,6 +1213,7 @@ function emptyWorkflowConfig() {
     completion_command: null,
     lint_command: null,
     format_command: null,
+    base_branch: null,
   };
 }
 
@@ -1203,7 +1224,7 @@ function normalizeWorkflowConfig(raw) {
   if (Array.isArray(raw)) {
     return { ok: false, errors: ["workflow must be a mapping, not a list"] };
   }
-  const allowed = ["test_command", "completion_command", "lint_command", "format_command"];
+  const allowed = ["test_command", "completion_command", "lint_command", "format_command", "base_branch"];
   const value = emptyWorkflowConfig();
   const errors = [];
   for (const key of Object.keys(raw)) {
@@ -1275,6 +1296,142 @@ function normalizeRulesConfig(raw) {
   return { ok: true, value: { plan_rules_path: planRules } };
 }
 
+function emptyDocsConfig() {
+  return {
+    adr_dir: null,
+    architecture_overview: null,
+    coding_standards: null,
+    workflow_reference: null,
+    knowledge_base: null,
+  };
+}
+
+function normalizeDocsConfig(raw) {
+  if (raw == null) {
+    return { ok: true, value: emptyDocsConfig() };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, errors: ["docs must be a mapping, not a list or scalar"] };
+  }
+  const allowed = ["adr_dir", "architecture_overview", "coding_standards", "workflow_reference", "knowledge_base"];
+  const value = emptyDocsConfig();
+  const errors = [];
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) {
+      errors.push(`docs has unknown key '${key}'`);
+      continue;
+    }
+    const v = raw[key];
+    if (v == null) continue;
+    if (typeof v !== "string" || v.trim() === "") {
+      errors.push(`docs.${key} must be a non-empty string when set`);
+      continue;
+    }
+    value[key] = v;
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, value };
+}
+
+function emptyExamplePathsConfig() {
+  return { source: null, test: null };
+}
+
+function normalizeExamplePathsConfig(raw) {
+  if (raw == null) {
+    return { ok: true, value: emptyExamplePathsConfig() };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, errors: ["example_paths must be a mapping, not a list or scalar"] };
+  }
+  const allowed = ["source", "test"];
+  const value = emptyExamplePathsConfig();
+  const errors = [];
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) {
+      errors.push(`example_paths has unknown key '${key}'`);
+      continue;
+    }
+    const v = raw[key];
+    if (v == null) continue;
+    if (typeof v !== "string" || v.trim() === "") {
+      errors.push(`example_paths.${key} must be a non-empty string when set`);
+      continue;
+    }
+    value[key] = v;
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, value };
+}
+
+function emptyRequirementsConfig() {
+  return { uid_examples: [] };
+}
+
+function normalizeRequirementsConfig(raw) {
+  if (raw == null) {
+    return { ok: true, value: emptyRequirementsConfig() };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, errors: ["requirements must be a mapping, not a list or scalar"] };
+  }
+  const allowed = ["uid_examples"];
+  const errors = [];
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) {
+      errors.push(`requirements has unknown key '${key}'`);
+    }
+  }
+  const value = emptyRequirementsConfig();
+  const uidExamples = raw.uid_examples;
+  if (uidExamples != null) {
+    if (!Array.isArray(uidExamples)) {
+      errors.push("requirements.uid_examples must be a list of strings");
+    } else {
+      for (const entry of uidExamples) {
+        if (typeof entry !== "string" || entry.trim() === "") {
+          errors.push("requirements.uid_examples entries must be non-empty strings");
+          break;
+        }
+      }
+      if (!errors.length) value.uid_examples = [...uidExamples];
+    }
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, value };
+}
+
+function emptyCrossCuttingConcernsConfig() {
+  return { description: null };
+}
+
+function normalizeCrossCuttingConcernsConfig(raw) {
+  if (raw == null) {
+    return { ok: true, value: emptyCrossCuttingConcernsConfig() };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, errors: ["cross_cutting_concerns must be a mapping, not a list or scalar"] };
+  }
+  const allowed = ["description"];
+  const value = emptyCrossCuttingConcernsConfig();
+  const errors = [];
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) {
+      errors.push(`cross_cutting_concerns has unknown key '${key}'`);
+      continue;
+    }
+    const v = raw[key];
+    if (v == null) continue;
+    if (typeof v !== "string" || v.trim() === "") {
+      errors.push(`cross_cutting_concerns.${key} must be a non-empty string when set`);
+      continue;
+    }
+    value[key] = v;
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, value };
+}
+
 function normalizeKnowledgeConfig(raw) {
   if (raw == null) {
     return { ok: true, value: null };
@@ -1331,6 +1488,10 @@ export function parseGroundControlYaml(yamlText) {
     "sonarcloud",
     "rules",
     "knowledge",
+    "docs",
+    "example_paths",
+    "requirements",
+    "cross_cutting_concerns",
   ];
   for (const key of Object.keys(parsed)) {
     if (!allowedTop.includes(key)) {
@@ -1375,6 +1536,18 @@ export function parseGroundControlYaml(yamlText) {
   const knowledgeResult = normalizeKnowledgeConfig(parsed.knowledge);
   if (!knowledgeResult.ok) errors.push(...knowledgeResult.errors);
 
+  const docsResult = normalizeDocsConfig(parsed.docs);
+  if (!docsResult.ok) errors.push(...docsResult.errors);
+
+  const examplePathsResult = normalizeExamplePathsConfig(parsed.example_paths);
+  if (!examplePathsResult.ok) errors.push(...examplePathsResult.errors);
+
+  const requirementsResult = normalizeRequirementsConfig(parsed.requirements);
+  if (!requirementsResult.ok) errors.push(...requirementsResult.errors);
+
+  const crossCuttingResult = normalizeCrossCuttingConcernsConfig(parsed.cross_cutting_concerns);
+  if (!crossCuttingResult.ok) errors.push(...crossCuttingResult.errors);
+
   if (errors.length) return { ok: false, errors };
 
   return {
@@ -1388,6 +1561,10 @@ export function parseGroundControlYaml(yamlText) {
         plan_rules_path: rulesResult.value.plan_rules_path,
       },
       knowledge: knowledgeResult.value,
+      docs: docsResult.value,
+      example_paths: examplePathsResult.value,
+      requirements: requirementsResult.value,
+      cross_cutting_concerns: crossCuttingResult.value,
     },
   };
 }
@@ -1463,6 +1640,54 @@ export async function getRepoGroundControlContext(repoPath) {
     };
   }
 
+  // Validate docs.* and example_paths.* path-valued fields are repo-relative
+  // and don't escape the repo root. ADR-027 requires this so a malicious
+  // .ground-control.yaml can't use docs.knowledge_base or example_paths.source
+  // to point an agent at /etc/passwd or ../parent-repo/secrets. Lexical check
+  // first (resolveRepoRelativePath), then realpath containment for paths the
+  // agent will actually open (the docs.* set; example_paths.* are illustrative
+  // strings the skill renders into prose, no on-disk reads).
+  let repoRootRealForDocs;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- repoRoot from git rev-parse
+    repoRootRealForDocs = realpathSync(repoRoot);
+  } catch (error) {
+    throw new Error(`failed to canonicalize repo root ${repoRoot}: ${error.message}`);
+  }
+  const docs = parseResult.value.docs;
+  const docsPathErrors = [];
+  for (const field of ["adr_dir", "architecture_overview", "coding_standards", "workflow_reference", "knowledge_base"]) {
+    const v = docs[field];
+    if (v == null) continue;
+    const r = resolveRepoRelativePath(repoRoot, v, `docs.${field}`);
+    if (!r.ok) {
+      docsPathErrors.push(r.error);
+      continue;
+    }
+    // Realpath containment: catches symlink escapes that lexical resolution
+    // alone cannot. Skipped for paths that don't yet exist (the helper walks
+    // up to the nearest existing ancestor on ENOENT).
+    const real = assertRealpathInRepo(repoRootRealForDocs, r.abs, `docs.${field}`);
+    if (!real.ok) docsPathErrors.push(real.error);
+  }
+  const examplePaths = parseResult.value.example_paths;
+  for (const field of ["source", "test"]) {
+    const v = examplePaths[field];
+    if (v == null) continue;
+    const r = resolveRepoRelativePath(repoRoot, v, `example_paths.${field}`);
+    if (!r.ok) docsPathErrors.push(r.error);
+  }
+  if (docsPathErrors.length) {
+    return {
+      repo_path: repoRoot,
+      config_path: configPath,
+      status: "invalid_ground_control_yaml",
+      project: null,
+      errors: docsPathErrors,
+      suggested_ground_control_yaml: buildSuggestedGroundControlYaml(),
+    };
+  }
+
   return {
     repo_path: repoRoot,
     config_path: configPath,
@@ -1476,6 +1701,10 @@ export async function getRepoGroundControlContext(repoPath) {
       plan_rules_content: planRulesContent,
     },
     knowledge: knowledgeBlockResult.value,
+    docs: parseResult.value.docs,
+    example_paths: parseResult.value.example_paths,
+    requirements: parseResult.value.requirements,
+    cross_cutting_concerns: parseResult.value.cross_cutting_concerns,
     errors: [],
   };
 }

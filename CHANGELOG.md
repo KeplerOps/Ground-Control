@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Canonical `skills/implement/SKILL.md` at the repo root (closes #791,
+  GC-O007, GC-O009). One source of truth for the agentic implement
+  workflow, parameterized at runtime by the per-repo
+  `.ground-control.yaml`. Replaces the per-repo `.claude/skills/implement/`
+  copies that previously diverged across Ground-Control, shifter, pulsar,
+  and aptl. The skill is agent-neutral: it runs from Claude Code or
+  Codex against the same content. Codex remains the reviewer of record
+  via `gc_codex_*` MCP tools regardless of driver.
+- `bin/install-skills.sh` distributes `skills/*` to `~/.claude/skills/`
+  (Claude Code) and `~/.codex/prompts/*.md` (Codex). Symlinks by default
+  so the agent always reads the latest source-of-truth from the repo;
+  `--copy` for environments without symlink support; `--no-codex` to
+  skip the Codex install target if the host doesn't have it.
+- `.ground-control.yaml` gains four optional blocks consumed by the
+  canonical skill via `gc_get_repo_ground_control_context`:
+  `docs.{adr_dir, architecture_overview, coding_standards,
+  workflow_reference, knowledge_base}`, `example_paths.{source, test}`,
+  `requirements.uid_examples`, and `cross_cutting_concerns.description`.
+  All four are optional; missing blocks fall back to defaults baked
+  into the skill prose via `{cfg.X|default Y}` placeholders.
+- `mcp/ground-control/lib.js` extends `parseGroundControlYaml` with the
+  four new normalize functions and updates `buildSuggestedGroundControlYaml`
+  with commented examples of the new sections.
+- ADR-027 (Agent-Neutral Implement Workflow Packaging),
+  ADR-028 (Temporal Workflow Orchestration Boundary; forward-looking for
+  GC-O009), and ADR-029 (Issue-Thread Gate Model) document the design.
+
+### Changed
+
+- **GC-O007 amended (ADR-029)**: the workflow's human-touchpoint count
+  drops from two to one. PR merge is the only synchronous human gate.
+  Plan approval is no longer a synchronous gate — the plan is posted to
+  the GitHub issue as a comment and the workflow proceeds directly to
+  TDD. Review findings and decisions on findings (fix / wontfix / defer
+  / not-applicable, each with a one-line rationale) are recorded as
+  comments on the issue thread so the durable record survives PR
+  merge/close. ADR-021 is amended (not superseded). Codex review loops
+  are hard-capped at two cycles.
+- ADR-021 carries an inline amendment note pointing at ADR-029.
+- `docs/DEVELOPMENT_WORKFLOW.md` updates the human-touchpoint guidance
+  to reflect the single PR-merge gate.
+
+### Removed
+
+- `.claude/skills/implement/SKILL.md` — replaced by the canonical
+  `skills/implement/SKILL.md`. Run `bin/install-skills.sh` to install
+  the canonical skill into `~/.claude/skills/` (and `~/.codex/prompts/`
+  for Codex driver use).
+
 - `bin/policy --pr-body-file <path>` and `--pr-number <n>` modes so the
   PR-body template check can run from a local draft or a fetched
   GitHub PR body. Backed by a new `scripts/check-pr-body.sh` pre-push

@@ -318,6 +318,7 @@ describe("parseGroundControlYaml", () => {
       completion_command: null,
       lint_command: null,
       format_command: null,
+      base_branch: null,
     });
     assert.equal(result.value.sonarcloud, null);
     assert.equal(result.value.rules.plan_rules_path, null);
@@ -493,6 +494,233 @@ describe("parseGroundControlYaml", () => {
     assert.equal(result.ok, false);
     assert.ok(result.errors.some((e) => e.includes("knowledge.schema must be a non-empty string")));
   });
+
+  // -------------------------------------------------------------------------
+  // ADR-027 schema additions: docs, example_paths, requirements,
+  // cross_cutting_concerns. All four are optional; absent block returns a
+  // null-shaped default so the canonical SKILL.md can fall back via
+  // {cfg.X|default Y} placeholders.
+  // -------------------------------------------------------------------------
+
+  it("returns null-shaped defaults when docs/example_paths/requirements/cross_cutting_concerns are absent", () => {
+    const result = parseGroundControlYaml("schema_version: 1\nproject: ground-control\n");
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.docs, {
+      adr_dir: null,
+      architecture_overview: null,
+      coding_standards: null,
+      workflow_reference: null,
+      knowledge_base: null,
+    });
+    assert.deepEqual(result.value.example_paths, { source: null, test: null });
+    assert.deepEqual(result.value.requirements, { uid_examples: [] });
+    assert.deepEqual(result.value.cross_cutting_concerns, { description: null });
+  });
+
+  it("parses a fully populated docs block", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "docs:",
+      "  adr_dir: architecture/adrs/",
+      "  architecture_overview: docs/architecture/ARCHITECTURE.md",
+      "  coding_standards: docs/CODING_STANDARDS.md",
+      "  workflow_reference: docs/DEVELOPMENT_WORKFLOW.md",
+      "  knowledge_base: docs/knowledge/",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.docs, {
+      adr_dir: "architecture/adrs/",
+      architecture_overview: "docs/architecture/ARCHITECTURE.md",
+      coding_standards: "docs/CODING_STANDARDS.md",
+      workflow_reference: "docs/DEVELOPMENT_WORKFLOW.md",
+      knowledge_base: "docs/knowledge/",
+    });
+  });
+
+  it("rejects unknown keys inside docs", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "docs:",
+      "  bogus: nope",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("docs has unknown key 'bogus'")));
+  });
+
+  it("rejects docs when it is not a mapping", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "docs:",
+      "  - not-a-mapping",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("docs must be a mapping")));
+  });
+
+  it("rejects an empty string for docs.adr_dir", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "docs:",
+      "  adr_dir: ''",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("docs.adr_dir must be a non-empty string")));
+  });
+
+  it("parses a fully populated example_paths block", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "example_paths:",
+      "  source: backend/src/main/java/com/keplerops/groundcontrol/",
+      "  test: backend/src/test/java/com/keplerops/groundcontrol/",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.example_paths, {
+      source: "backend/src/main/java/com/keplerops/groundcontrol/",
+      test: "backend/src/test/java/com/keplerops/groundcontrol/",
+    });
+  });
+
+  it("rejects unknown keys inside example_paths", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "example_paths:",
+      "  source: src/",
+      "  bogus: src/",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("example_paths has unknown key 'bogus'")));
+  });
+
+  it("rejects example_paths when it is not a mapping", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "example_paths: not-a-mapping",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("example_paths must be a mapping")));
+  });
+
+  it("parses a requirements block with uid_examples", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "requirements:",
+      "  uid_examples:",
+      "    - GC-X001",
+      "    - OBS-042",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.requirements.uid_examples, ["GC-X001", "OBS-042"]);
+  });
+
+  it("rejects requirements.uid_examples when it is not a list", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "requirements:",
+      "  uid_examples: GC-X001",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("requirements.uid_examples must be a list")));
+  });
+
+  it("rejects non-string entries in requirements.uid_examples", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "requirements:",
+      "  uid_examples:",
+      "    - GC-X001",
+      "    - 42",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("requirements.uid_examples")));
+  });
+
+  it("rejects unknown keys inside requirements", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "requirements:",
+      "  uid_examples: []",
+      "  bogus: true",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("requirements has unknown key 'bogus'")));
+  });
+
+  it("parses a cross_cutting_concerns description", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "cross_cutting_concerns:",
+      "  description: |",
+      "    Logger: SLF4J via @Slf4j",
+      "    Validation: Bean Validation + Zod",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, true);
+    assert.ok(result.value.cross_cutting_concerns.description.includes("SLF4J"));
+    assert.ok(result.value.cross_cutting_concerns.description.includes("Bean Validation"));
+  });
+
+  it("rejects unknown keys inside cross_cutting_concerns", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "cross_cutting_concerns:",
+      "  description: x",
+      "  bogus: y",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("cross_cutting_concerns has unknown key 'bogus'")));
+  });
+
+  it("rejects cross_cutting_concerns.description when empty", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "cross_cutting_concerns:",
+      "  description: ''",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("cross_cutting_concerns.description must be a non-empty string")));
+  });
 });
 
 describe("getRepoGroundControlContext", () => {
@@ -529,6 +757,119 @@ describe("getRepoGroundControlContext", () => {
       assert.equal(result.rules.plan_rules_path, null);
       assert.equal(result.rules.plan_rules_content, null);
       assert.equal(result.knowledge, null);
+      // ADR-027 schema additions are returned even when absent (null-shaped defaults)
+      assert.deepEqual(result.docs, {
+        adr_dir: null,
+        architecture_overview: null,
+        coding_standards: null,
+        workflow_reference: null,
+        knowledge_base: null,
+      });
+      assert.deepEqual(result.example_paths, { source: null, test: null });
+      assert.deepEqual(result.requirements, { uid_examples: [] });
+      assert.deepEqual(result.cross_cutting_concerns, { description: null });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns the docs/example_paths/requirements/cross_cutting_concerns blocks when present", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "docs:",
+          "  adr_dir: architecture/adrs/",
+          "  coding_standards: docs/CODING_STANDARDS.md",
+          "example_paths:",
+          "  source: src/",
+          "  test: tests/",
+          "requirements:",
+          "  uid_examples: [\"X-001\", \"Y-002\"]",
+          "cross_cutting_concerns:",
+          "  description: Logger via pino",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "ok");
+      assert.equal(result.docs.adr_dir, "architecture/adrs/");
+      assert.equal(result.docs.coding_standards, "docs/CODING_STANDARDS.md");
+      assert.equal(result.example_paths.source, "src/");
+      assert.deepEqual(result.requirements.uid_examples, ["X-001", "Y-002"]);
+      assert.equal(result.cross_cutting_concerns.description, "Logger via pino");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an absolute docs.knowledge_base path", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "docs:",
+          "  knowledge_base: /etc/passwd",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("docs.knowledge_base")));
+      assert.ok(result.errors.some((e) => e.includes("absolute path")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a docs path that escapes the repo root via ..", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "docs:",
+          "  architecture_overview: ../../../etc/secrets",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("docs.architecture_overview")));
+      assert.ok(result.errors.some((e) => e.includes("inside the repository root")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an absolute example_paths.source path", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "example_paths:",
+          "  source: /usr/bin",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("example_paths.source")));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

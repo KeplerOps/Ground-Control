@@ -120,7 +120,7 @@ flowchart TB
 
 **How it reads:**
 
-- **Yellow** nodes are user touchpoints. The loop halts at plan approval (step 5) and at the final report (step 20); everything in between runs without asking for input.
+- **Yellow** nodes are user touchpoints. Per ADR-029, the workflow has **one** synchronous human touchpoint: PR merge. Plans are posted to the GitHub issue thread (not gated by `EnterPlanMode`); review findings and decisions on findings are also recorded on the issue thread. Earlier docs and the diagram may still show a "plan approval" yellow node — interpret that as the plan-comment step, which proceeds without waiting.
 - **Entry is always by issue.** Step 1 resolves the input to a GitHub issue (either directly or via a UID → issue shim) and parses the `## Requirements` section from the issue body into `in_scope_requirements[]`. The list may be empty (bug fix / refactor) or contain one or many UIDs (grouped implementation). Everything downstream treats the issue as the authoritative context and the list as the set of requirements to be transitioned to `ACTIVE` on completion.
 - **Steps 1–4** gather context and run the codex architecture preflight before any code is written. Step 4 also consults the repo knowledge base via the index if one is present.
 - **Step 6** is TDD (red → green → refactor per clause). Steps 7–8 are the local quality gate.
