@@ -72,6 +72,7 @@ import {
   runCodexArchitecturePreflight,
   runCodexReview,
   runCodexVerifyFinding,
+  runPostImplementationPlan,
   embedRequirement,
   getEmbeddingStatus,
   embedProject,
@@ -792,6 +793,35 @@ server.tool(
           repoPath: repo_path,
           prNumber: pr_number,
           commentId: comment_id,
+        }),
+        null,
+        2,
+      ));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_post_implementation_plan",
+  "Post the implementation plan as a comment on the GitHub issue thread (per ADR-029, the issue is the durable record). Enforces the preflight-before-planning ordering from #794 MVP-2: refuses unless a 'preflight' phase marker exists for the issue (gc_codex_architecture_preflight writes that marker on success). On a successful post, also writes a 'plan' phase marker so downstream tools can confirm planning happened. Override is available for cases where the user explicitly authorizes skipping preflight, but the override_reason must quote the authorization for audit.",
+  {
+    repo_path: z.string().describe("Absolute path to the target Git repository"),
+    issue_number: z.number().int().positive().describe("GitHub issue number the plan is for"),
+    plan_body: z.string().min(1).describe("Plan body in Markdown. Posted verbatim as a comment on the issue, alongside the phase marker."),
+    override: z.boolean().optional().describe("Skip the preflight prerequisite check. Only legitimate when the user has explicitly authorized skipping preflight (e.g., trivial bug fixes). Requires override_reason."),
+    override_reason: z.string().optional().describe("Required when override=true. Quote the user's authorization. Stored alongside the marker for audit."),
+  },
+  async ({ repo_path, issue_number, plan_body, override, override_reason }) => {
+    try {
+      return ok(JSON.stringify(
+        await runPostImplementationPlan({
+          repoPath: repo_path,
+          issueNumber: issue_number,
+          planBody: plan_body,
+          override: Boolean(override),
+          overrideReason: override_reason ?? null,
         }),
         null,
         2,

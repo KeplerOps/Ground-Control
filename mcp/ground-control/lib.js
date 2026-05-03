@@ -2106,6 +2106,27 @@ export async function runCodexArchitecturePreflight({
 
     const summary = readGeneratedCodexSummary(outputPath);
     const changedFiles = findNewWorkingTreeChanges(preexistingChangedFiles, await listWorkingTreeChanges(repoRoot));
+
+    // Record the `preflight` phase marker on the issue thread so downstream
+    // tools (gc_post_implementation_plan etc.) can detect that preflight ran
+    // before they let the workflow advance. Marker post is best-effort — a
+    // failed post does not invalidate the preflight; the worst case is the
+    // next gating tool sees no marker and refuses, prompting the agent to
+    // re-run preflight (which is the correct fallback).
+    let phaseMarker = null;
+    if (issueNumber != null) {
+      try {
+        const { owner, name } = await getOwnerRepo(repoRoot);
+        await postPhaseMarker(repoRoot, owner, name, issueNumber, "preflight");
+        phaseMarker = { phase: "preflight", issue_number: issueNumber };
+      } catch (markerError) {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[gc_codex_architecture_preflight] phase marker post failed for issue #${issueNumber}: ${markerError.message}`,
+        );
+      }
+    }
+
     return {
       requirement_uid: requirementUid ?? null,
       issue_number: issueNumber ?? null,
@@ -2113,12 +2134,91 @@ export async function runCodexArchitecturePreflight({
       preexisting_changed_files: preexistingChangedFiles,
       changed_files: changedFiles,
       summary,
+      phase_marker: phaseMarker,
     };
   } catch (error) {
     throw new Error(`Codex architecture preflight failed: ${formatCommandFailure("codex", error)}`);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
+}
+
+// ---------------------------------------------------------------------------
+// gc_post_implementation_plan (issue #794 MVP-2)
+//
+// Posts the implementation plan as a comment on the GitHub issue thread (per
+// ADR-029 — the issue thread is the durable record). Refuses unless a
+// `preflight` phase marker exists for the issue, enforcing the
+// preflight-before-planning ordering that agents repeatedly tried to invert
+// when the constraint was prose-only.
+//
+// On success, the same comment carries (a) the `plan` phase marker, so
+// downstream tools can detect that planning happened, and (b) the plan body
+// the agent passed in.
+// ---------------------------------------------------------------------------
+
+export async function runPostImplementationPlan({ repoPath, issueNumber, planBody, override = false, overrideReason = null }) {
+  if (issueNumber == null || !Number.isInteger(issueNumber) || issueNumber <= 0) {
+    throw new Error("gc_post_implementation_plan requires a positive integer issue_number");
+  }
+  if (typeof planBody !== "string" || planBody.trim() === "") {
+    throw new Error("gc_post_implementation_plan requires a non-empty plan_body");
+  }
+
+  const repoRoot = await ensureGitRepo(repoPath);
+  const { owner, name } = await getOwnerRepo(repoRoot);
+
+  // Prerequisite check: preflight must have run for this issue. Override is
+  // available for the same reason as the codex-review cap override — the user
+  // can explicitly authorize skipping the gate (for tiny bug fixes where
+  // preflight is overkill, for example). Override requires a non-empty reason.
+  if (override === true) {
+    if (typeof overrideReason !== "string" || overrideReason.trim() === "") {
+      return {
+        ok: false,
+        error: "phase_override_missing_reason",
+        message:
+          "override=true requires a non-empty override_reason quoting the user's authorization to skip preflight. " +
+          "Audits cannot distinguish legitimate overrides from accidents without a reason.",
+        issue_number: issueNumber,
+      };
+    }
+  } else {
+    const completed = await readCompletedPhases(repoRoot, owner, name, issueNumber);
+    const decision = evaluatePhasePrerequisite({
+      completed,
+      nextPhase: "plan",
+      requires: ["preflight"],
+      issueNumber,
+    });
+    if (!decision.ok) {
+      return {
+        repo_path: repoRoot,
+        issue_number: issueNumber,
+        ok: false,
+        error: decision.error,
+        message: decision.message,
+        missing: decision.missing,
+        completed: decision.completed,
+        next_action: "run_gc_codex_architecture_preflight_first",
+      };
+    }
+  }
+
+  // Post the plan + the `plan` phase marker as a single combined comment so
+  // the marker and the human-visible plan are the same thread artifact.
+  const apiResponse = await postPhaseMarker(repoRoot, owner, name, issueNumber, "plan", { commentBody: planBody });
+
+  return {
+    repo_path: repoRoot,
+    issue_number: issueNumber,
+    ok: true,
+    phase_marker: { phase: "plan", issue_number: issueNumber },
+    override: override === true ? true : false,
+    override_reason: override === true ? overrideReason.trim() : null,
+    comment_url: apiResponse && typeof apiResponse.html_url === "string" ? apiResponse.html_url : null,
+    comment_id: apiResponse && Number.isInteger(apiResponse.id) ? apiResponse.id : null,
+  };
 }
 
 function buildCommonReviewPreamble({ baseBranch, uncommitted, diffMode = "inline" }) {
@@ -2296,6 +2396,79 @@ export function buildCodexReviewCycleMarker({ prNumber, cycleNumber, override = 
       " Posted by the MCP server to enforce the hard-cap-2 contract (issue #794). " +
       "Do not edit or delete — used by the next `gc_codex_review` invocation to count cycles." +
       reasonLine,
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// gc workflow phase markers (issue #794 MVP-2)
+//
+// Phase markers record completion of a workflow phase on a GitHub issue so
+// downstream tools can enforce ordering. The most important constraint today
+// is "preflight before planning" — agents repeatedly try to defer
+// gc_codex_architecture_preflight until after planning, which inverts the
+// design (preflight's guardrails are supposed to inform the plan). The fix is
+// to make `gc_post_implementation_plan` refuse unless a `preflight` marker
+// exists for the issue.
+//
+// Persistence: same template family as cycle markers. Marker is an HTML
+// comment posted as a top-level comment on the issue by the MCP server
+// (trusted side, not the agent). Surviving agent restarts is automatic.
+// ---------------------------------------------------------------------------
+
+export const PHASE_MARKER_PREFIX = "<!-- gc:phase";
+const PHASE_MARKER_RE = /<!--\s*gc:phase\s+phase="([a-z_]+)"\s+issue="(\d+)"[^]*?-->/g;
+
+// Pure: scan a list of comment bodies and return the set of phases that have
+// been recorded for `issueNumber`. Set semantics — duplicates are collapsed.
+export function parsePhaseMarkers(commentBodies, issueNumber) {
+  const phases = new Set();
+  if (!Array.isArray(commentBodies)) return phases;
+  for (const body of commentBodies) {
+    if (typeof body !== "string") continue;
+    for (const m of body.matchAll(PHASE_MARKER_RE)) {
+      const phase = m[1];
+      const markerIssue = Number.parseInt(m[2], 10);
+      if (markerIssue === issueNumber) phases.add(phase);
+    }
+  }
+  return phases;
+}
+
+// Pure: given the set of completed phases, decide whether the requested
+// next phase is allowed. Returns either { ok: true, ... } or
+// { ok: false, error, missing, ... }.
+export function evaluatePhasePrerequisite({ completed, nextPhase, requires, issueNumber }) {
+  if (!(completed instanceof Set)) {
+    throw new Error("evaluatePhasePrerequisite: completed must be a Set");
+  }
+  if (typeof nextPhase !== "string" || nextPhase === "") {
+    throw new Error("evaluatePhasePrerequisite: nextPhase must be a non-empty string");
+  }
+  const required = Array.isArray(requires) ? requires : [];
+  const missing = required.filter((p) => !completed.has(p));
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      error: "phase_prerequisite_missing",
+      next_phase: nextPhase,
+      missing,
+      completed: [...completed],
+      issue_number: issueNumber,
+      message:
+        `Cannot enter phase '${nextPhase}' for issue #${issueNumber}: prerequisite phase(s) ` +
+        `[${missing.join(", ")}] have not been recorded. Run them first; then retry.`,
+    };
+  }
+  return { ok: true, next_phase: nextPhase };
+}
+
+export function buildPhaseMarker({ phase, issueNumber }) {
+  return [
+    `<!-- gc:phase phase="${phase}" issue="${issueNumber}" -->`,
+    "",
+    `_gc workflow phase recorded: \`${phase}\` (issue #${issueNumber})._ ` +
+      "Posted by the MCP server to enforce ordering between workflow steps (issue #794 MVP-2). " +
+      "Do not edit or delete — used by downstream tools to gate phase prerequisites.",
   ].join("\n");
 }
 
@@ -2477,31 +2650,70 @@ async function getOwnerRepo(repoRoot) {
   return { owner, name };
 }
 
-// Read the PR's issue-comments and count prior gc_codex_review cycle markers.
-// Issue-comments (not pull-request review comments) — the marker is a top-level
-// comment on the PR, which GitHub stores under the issue API.
-async function readPriorCodexReviewCycleCount(repoRoot, owner, name, prNumber) {
-  // /repos/{o}/{r}/issues/{n}/comments paginates 30/page; this is way more
-  // than the cap (2) so a small per-page fetch is fine, but for completeness
-  // we ask for 100 per page and consume a single page.
+// Generic helper: read all top-level comments on a GitHub issue (which on a
+// PR is the same endpoint — issues/{N}/comments). Used by both cycle-marker
+// counting and phase-marker counting. Returns an array of comment body
+// strings; entries that don't have a string body are silently skipped.
+async function readIssueCommentBodies(repoRoot, owner, name, issueNumber) {
   const { stdout } = await execFile(
     "gh",
     [
       "api",
       "--method",
       "GET",
-      `/repos/${owner}/${name}/issues/${prNumber}/comments`,
+      `/repos/${owner}/${name}/issues/${issueNumber}/comments`,
       "-F",
       "per_page=100",
     ],
     { cwd: repoRoot },
   );
   const comments = JSON.parse(stdout);
-  if (!Array.isArray(comments)) return 0;
-  return parseCodexReviewCycleMarkers(
-    comments.map((c) => (c && typeof c.body === "string" ? c.body : "")),
-    prNumber,
+  if (!Array.isArray(comments)) return [];
+  return comments
+    .map((c) => (c && typeof c.body === "string" ? c.body : null))
+    .filter((b) => b != null);
+}
+
+// Post a phase marker as an issue-comment so downstream tools can detect the
+// phase has been completed. `extras.commentBody` (optional) lets the caller
+// piggy-back additional human-readable content on the same comment (used by
+// gc_post_implementation_plan to attach the actual plan body to the same
+// comment that records the phase marker). Returns the GitHub API response so
+// callers can surface the comment URL.
+async function postPhaseMarker(repoRoot, owner, name, issueNumber, phase, extras = {}) {
+  const marker = buildPhaseMarker({ phase, issueNumber });
+  const body = extras.commentBody ? `${marker}\n\n${extras.commentBody}` : marker;
+  const { stdout } = await execFile(
+    "gh",
+    [
+      "api",
+      "--method",
+      "POST",
+      `/repos/${owner}/${name}/issues/${issueNumber}/comments`,
+      "-f",
+      `body=${body}`,
+    ],
+    { cwd: repoRoot },
   );
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+}
+
+// Read the PR's issue-comments and count prior gc_codex_review cycle markers.
+// Issue-comments (not pull-request review comments) — the marker is a top-level
+// comment on the PR, which GitHub stores under the issue API.
+async function readPriorCodexReviewCycleCount(repoRoot, owner, name, prNumber) {
+  const bodies = await readIssueCommentBodies(repoRoot, owner, name, prNumber);
+  return parseCodexReviewCycleMarkers(bodies, prNumber);
+}
+
+// Read the issue's comments and return the set of completed workflow phases.
+async function readCompletedPhases(repoRoot, owner, name, issueNumber) {
+  const bodies = await readIssueCommentBodies(repoRoot, owner, name, issueNumber);
+  return parsePhaseMarkers(bodies, issueNumber);
 }
 
 // Post the cycle marker as a PR issue-comment so the next invocation sees it.

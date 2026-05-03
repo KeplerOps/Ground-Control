@@ -94,6 +94,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   knobs). 19 unit tests cover happy path, override path, refusal
   path, missing-reason rejection, override-marker round-trip, and
   reasons containing embedded quotes.
+- `gc_post_implementation_plan` MCP tool (closes #794 MVP-2). Posts
+  the implementation plan as an issue-thread comment per ADR-029,
+  but refuses unless a `preflight` phase marker exists for the
+  issue. `gc_codex_architecture_preflight` now writes that marker
+  on success. This closes the specific ordering bug where agents
+  repeatedly tried to defer preflight until after planning — the
+  MCP server now refuses to accept the plan until preflight has
+  run. Override is available with `override=true` +
+  `override_reason` for cases where the user explicitly authorizes
+  skipping preflight (e.g., trivial bug fixes); reason is logged
+  on the marker for audit. Three new pure-function exports back
+  the enforcement: `parsePhaseMarkers`, `evaluatePhasePrerequisite`,
+  `buildPhaseMarker`. 14 new unit tests cover the parser, the cap
+  evaluator, and the marker builder; covering missing-prerequisite
+  refusal, multiple-prerequisite reporting, duplicate-marker
+  collapsing, and other-issue isolation.
 
 ### Fixed
 

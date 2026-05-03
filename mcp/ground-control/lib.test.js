@@ -26,6 +26,10 @@ import {
   buildCodexReviewCycleMarker,
   CODEX_REVIEW_HARD_CAP,
   CODEX_REVIEW_CYCLE_MARKER_PREFIX,
+  parsePhaseMarkers,
+  evaluatePhasePrerequisite,
+  buildPhaseMarker,
+  PHASE_MARKER_PREFIX,
   dedupFindings,
   buildCodexVerifyPrompt,
   parseCodexVerifyTail,
@@ -2090,6 +2094,138 @@ describe("buildCodexReviewCycleMarker", () => {
     // contain the prefix and round-trip.
     assert.match(marker, /reason="user said \\"yes do it\\" then ran off"/);
     assert.equal(parseCodexReviewCycleMarkers([marker], 1), 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Workflow phase markers (#794 MVP-2)
+// ---------------------------------------------------------------------------
+
+describe("parsePhaseMarkers", () => {
+  it("returns an empty Set when no comments contain markers", () => {
+    const phases = parsePhaseMarkers(["random", "comments", "here"], 791);
+    assert.ok(phases instanceof Set);
+    assert.equal(phases.size, 0);
+  });
+
+  it("collects each phase recorded for the matching issue", () => {
+    const bodies = [
+      '<!-- gc:phase phase="preflight" issue="791" -->\n_preflight done._',
+      "unrelated comment",
+      '<!-- gc:phase phase="plan" issue="791" -->',
+    ];
+    const phases = parsePhaseMarkers(bodies, 791);
+    assert.deepEqual([...phases].sort(), ["plan", "preflight"]);
+  });
+
+  it("ignores markers for other issues", () => {
+    const bodies = [
+      '<!-- gc:phase phase="preflight" issue="791" -->',
+      '<!-- gc:phase phase="plan" issue="100" -->',
+    ];
+    const phases = parsePhaseMarkers(bodies, 791);
+    assert.deepEqual([...phases], ["preflight"]);
+  });
+
+  it("treats duplicates as a single set entry", () => {
+    const bodies = [
+      '<!-- gc:phase phase="preflight" issue="50" -->',
+      'redundant: <!-- gc:phase phase="preflight" issue="50" -->',
+    ];
+    assert.equal(parsePhaseMarkers(bodies, 50).size, 1);
+  });
+
+  it("tolerates non-string entries and non-array input", () => {
+    assert.equal(parsePhaseMarkers(["a", 42, null, undefined], 1).size, 0);
+    assert.equal(parsePhaseMarkers(null, 1).size, 0);
+    assert.equal(parsePhaseMarkers("not an array", 1).size, 0);
+  });
+});
+
+describe("evaluatePhasePrerequisite", () => {
+  it("allows the next phase when all prerequisites are present", () => {
+    const result = evaluatePhasePrerequisite({
+      completed: new Set(["preflight"]),
+      nextPhase: "plan",
+      requires: ["preflight"],
+      issueNumber: 791,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.next_phase, "plan");
+  });
+
+  it("refuses with a structured error when prerequisites are missing", () => {
+    const result = evaluatePhasePrerequisite({
+      completed: new Set(),
+      nextPhase: "plan",
+      requires: ["preflight"],
+      issueNumber: 791,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "phase_prerequisite_missing");
+    assert.equal(result.next_phase, "plan");
+    assert.deepEqual(result.missing, ["preflight"]);
+    assert.equal(result.issue_number, 791);
+    assert.match(result.message, /preflight/);
+    assert.match(result.message, /issue #791/);
+  });
+
+  it("handles multiple prerequisites and reports every missing one", () => {
+    const result = evaluatePhasePrerequisite({
+      completed: new Set(["preflight"]),
+      nextPhase: "review",
+      requires: ["preflight", "plan", "tdd"],
+      issueNumber: 1,
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.missing.sort(), ["plan", "tdd"]);
+  });
+
+  it("treats requires=[] as 'no prerequisites' (allows unconditionally)", () => {
+    const result = evaluatePhasePrerequisite({
+      completed: new Set(),
+      nextPhase: "preflight",
+      requires: [],
+      issueNumber: 1,
+    });
+    assert.equal(result.ok, true);
+  });
+
+  it("throws on garbage input (defensive)", () => {
+    assert.throws(() =>
+      evaluatePhasePrerequisite({ completed: ["array, not Set"], nextPhase: "p", requires: [] }),
+    );
+    assert.throws(() =>
+      evaluatePhasePrerequisite({ completed: new Set(), nextPhase: "", requires: [] }),
+    );
+  });
+});
+
+describe("buildPhaseMarker", () => {
+  it("produces a marker that round-trips through parsePhaseMarkers", () => {
+    const marker = buildPhaseMarker({ phase: "preflight", issueNumber: 791 });
+    assert.ok(marker.startsWith(PHASE_MARKER_PREFIX));
+    const phases = parsePhaseMarkers([marker], 791);
+    assert.ok(phases.has("preflight"));
+  });
+
+  it("two different phases on the same issue both register", () => {
+    const m1 = buildPhaseMarker({ phase: "preflight", issueNumber: 1 });
+    const m2 = buildPhaseMarker({ phase: "plan", issueNumber: 1 });
+    const phases = parsePhaseMarkers([m1, m2], 1);
+    assert.deepEqual([...phases].sort(), ["plan", "preflight"]);
+  });
+
+  it("a marker for one issue does not register for another", () => {
+    const marker = buildPhaseMarker({ phase: "preflight", issueNumber: 791 });
+    assert.equal(parsePhaseMarkers([marker], 100).size, 0);
+  });
+
+  it("includes attribution to #794 in the human-readable body", () => {
+    const marker = buildPhaseMarker({ phase: "plan", issueNumber: 42 });
+    assert.match(marker, /issue #794/);
+    assert.match(marker, /issue #42/);
+    assert.match(marker, /\bplan\b/);
   });
 });
 

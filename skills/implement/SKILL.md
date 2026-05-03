@@ -140,7 +140,14 @@ Per ADR-029, the plan is **published to the GitHub issue as a comment** and the 
    - Simple is better than complex.
    - If `cfg.rules.plan_rules_content` is non-null, treat every bullet in that content as a mandatory plan constraint (repo-specific "plans MUST..." rules).
 
-2. **Post the plan to the issue thread** via `gh issue comment <issue-number> --body-file <path-to-plan-file>`. Use `--body-file` (not inline `--body`) to preserve multi-line markdown formatting. Cache the comment URL for the final report (Step 19).
+2. **Post the plan to the issue thread** via the `gc_post_implementation_plan` MCP tool with:
+   - `repo_path`: absolute path from Step 1
+   - `issue_number`: the issue number from Step 1
+   - `plan_body`: the full plan as a Markdown string
+
+   The tool refuses unless a `preflight` phase marker exists for this issue (per #794 MVP-2 — `gc_codex_architecture_preflight` writes that marker on success). If you skipped Step 2.5, this gate will refuse the plan post and instruct you to run preflight first; do not work around the refusal by `gh issue comment` directly. The tool also writes a `plan` phase marker so downstream tools can confirm planning happened.
+
+   Cache the returned comment URL for the final report (Step 19).
 
 3. **Do not wait for user approval.** Proceed directly to Step 4.4 (TDD). The issue thread is the durable record of the plan; if the user has feedback they can comment on the issue and the agent can revise mid-flight.
 
