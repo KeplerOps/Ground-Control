@@ -348,7 +348,9 @@ This step normally lands as a **verification pass** rather than a fix/verify loo
    - Cycle 2 → review → **fix every finding** → push.
    - Cycle 3 is forbidden. After fixing cycle 2's findings you do **not** run a 3rd `gc_codex_review` to verify the fixes. The fixes ship without further codex verification, and any residual concern is escalated to the user as an issue-thread comment listing the remaining-after-cycle-2 findings.
 
-   The cap exists because cycle 3+ codex passes hit diminishing returns and start repeating out-of-scope findings — not because cycle 2 fixes themselves are optional. (See issue #794: this contract is currently advisory; once the MCP server enforces the cap, `gc_codex_review` will refuse a 3rd invocation directly.)
+   The cap exists because cycle 3+ codex passes hit diminishing returns and start repeating out-of-scope findings — not because cycle 2 fixes themselves are optional.
+
+   **The cap is enforced by the MCP server, not by this prose.** `gc_codex_review` posts a machine-readable marker comment to the PR after each successful invocation and refuses a 3rd invocation for the same PR with a structured error: `{ok: false, error: "codex_review_cap_reached", message, prior_cycles, cap}`. The agent literally cannot run cycle 3; it must escalate. Each successful return also surfaces `cycle` and `cap` so the agent can see "cycle 1 of 2" or "cycle 2 of 2" and self-pace. (See issue #794 for the enforcement design.)
 
 **Tool shape**: `gc_codex_verify_finding` accepts only `repo_path`, `pr_number`, and `comment_id`. It reads the comment directly from GitHub; do not paraphrase the finding through the tool.
 

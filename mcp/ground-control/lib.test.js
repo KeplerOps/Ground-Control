@@ -21,6 +21,11 @@ import {
   selectDiffMode,
   execFileWithInput,
   parseCodexReviewTail,
+  parseCodexReviewCycleMarkers,
+  evaluateCodexReviewCycleCap,
+  buildCodexReviewCycleMarker,
+  CODEX_REVIEW_HARD_CAP,
+  CODEX_REVIEW_CYCLE_MARKER_PREFIX,
   dedupFindings,
   buildCodexVerifyPrompt,
   parseCodexVerifyTail,
@@ -1888,6 +1893,122 @@ describe("parseCodexVerifyTail", () => {
         ),
       /empty REPLY/,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gc_codex_review hard-cap-2 enforcement (#794 MVP-1)
+// ---------------------------------------------------------------------------
+
+describe("parseCodexReviewCycleMarkers", () => {
+  it("returns 0 when no comments contain markers", () => {
+    const bodies = ["random comment", "another one", "## Codex review summary"];
+    assert.equal(parseCodexReviewCycleMarkers(bodies, 792), 0);
+  });
+
+  it("counts markers for the matching PR", () => {
+    const bodies = [
+      'first cycle: <!-- gc:codex-review-cycle cycle="1" pr="792" -->\n_done._',
+      "unrelated comment",
+      'second cycle: <!-- gc:codex-review-cycle cycle="2" pr="792" -->',
+    ];
+    assert.equal(parseCodexReviewCycleMarkers(bodies, 792), 2);
+  });
+
+  it("ignores markers for other PRs", () => {
+    const bodies = [
+      '<!-- gc:codex-review-cycle cycle="1" pr="100" -->',
+      '<!-- gc:codex-review-cycle cycle="1" pr="792" -->',
+      '<!-- gc:codex-review-cycle cycle="2" pr="999" -->',
+    ];
+    assert.equal(parseCodexReviewCycleMarkers(bodies, 792), 1);
+  });
+
+  it("tolerates non-string entries and a non-array input", () => {
+    assert.equal(parseCodexReviewCycleMarkers(["a", 42, null, undefined], 1), 0);
+    assert.equal(parseCodexReviewCycleMarkers(null, 1), 0);
+    assert.equal(parseCodexReviewCycleMarkers("not an array", 1), 0);
+  });
+
+  it("ignores malformed markers (missing pr=, missing cycle=, garbled)", () => {
+    const bodies = [
+      "<!-- gc:codex-review-cycle -->",
+      '<!-- gc:codex-review-cycle pr="792" -->', // no cycle attr
+      '<!-- gc:codex-review-cycle cycle="1" -->', // no pr attr
+      "<!-- gc:codex-review-cycle cycle=1 pr=792 -->", // unquoted (regex requires quotes)
+    ];
+    assert.equal(parseCodexReviewCycleMarkers(bodies, 792), 0);
+  });
+});
+
+describe("evaluateCodexReviewCycleCap", () => {
+  it("allows cycle 1 when no priors exist", () => {
+    const result = evaluateCodexReviewCycleCap({ priorCount: 0, prNumber: 792 });
+    assert.equal(result.ok, true);
+    assert.equal(result.nextCycle, 1);
+    assert.equal(result.cap, CODEX_REVIEW_HARD_CAP);
+  });
+
+  it("allows cycle 2 after one prior", () => {
+    const result = evaluateCodexReviewCycleCap({ priorCount: 1, prNumber: 792 });
+    assert.equal(result.ok, true);
+    assert.equal(result.nextCycle, 2);
+  });
+
+  it("refuses cycle 3 (cap reached)", () => {
+    const result = evaluateCodexReviewCycleCap({ priorCount: 2, prNumber: 792 });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "codex_review_cap_reached");
+    assert.equal(result.prior_cycles, 2);
+    assert.equal(result.cap, 2);
+    assert.equal(result.pr_number, 792);
+    assert.match(result.message, /hard cap reached/);
+    assert.match(result.message, /escalated to the user/);
+  });
+
+  it("refuses higher counts the same way (cap is a floor, not equality)", () => {
+    const result = evaluateCodexReviewCycleCap({ priorCount: 7, prNumber: 1 });
+    assert.equal(result.ok, false);
+    assert.equal(result.prior_cycles, 7);
+  });
+
+  it("respects an override hardCap (used by tests / future per-tool caps)", () => {
+    const allowed = evaluateCodexReviewCycleCap({ priorCount: 2, prNumber: 1, hardCap: 5 });
+    assert.equal(allowed.ok, true);
+    assert.equal(allowed.nextCycle, 3);
+    const refused = evaluateCodexReviewCycleCap({ priorCount: 5, prNumber: 1, hardCap: 5 });
+    assert.equal(refused.ok, false);
+    assert.equal(refused.cap, 5);
+  });
+
+  it("throws on garbage priorCount (defensive, surfaces a real bug rather than counting nothing)", () => {
+    assert.throws(() => evaluateCodexReviewCycleCap({ priorCount: -1, prNumber: 1 }));
+    assert.throws(() => evaluateCodexReviewCycleCap({ priorCount: NaN, prNumber: 1 }));
+    assert.throws(() => evaluateCodexReviewCycleCap({ priorCount: "1", prNumber: 1 }));
+  });
+});
+
+describe("buildCodexReviewCycleMarker", () => {
+  it("produces a marker that round-trips through parseCodexReviewCycleMarkers", () => {
+    const marker = buildCodexReviewCycleMarker({ prNumber: 792, cycleNumber: 1 });
+    assert.ok(marker.startsWith(CODEX_REVIEW_CYCLE_MARKER_PREFIX));
+    assert.equal(parseCodexReviewCycleMarkers([marker], 792), 1);
+  });
+
+  it("includes the cycle and cap in the human-readable body so reviewers see the count", () => {
+    const marker = buildCodexReviewCycleMarker({ prNumber: 100, cycleNumber: 2 });
+    assert.match(marker, /cycle 2 of 2/);
+    assert.match(marker, /PR #100/);
+    assert.match(marker, /issue #794/); // attribution to the enforcement issue
+  });
+
+  it("two markers from the same PR are both counted", () => {
+    const m1 = buildCodexReviewCycleMarker({ prNumber: 50, cycleNumber: 1 });
+    const m2 = buildCodexReviewCycleMarker({ prNumber: 50, cycleNumber: 2 });
+    assert.equal(parseCodexReviewCycleMarkers([m1, m2], 50), 2);
+    // and a marker for a different PR is not counted
+    const other = buildCodexReviewCycleMarker({ prNumber: 999, cycleNumber: 1 });
+    assert.equal(parseCodexReviewCycleMarkers([m1, m2, other], 50), 2);
   });
 });
 

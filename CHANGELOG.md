@@ -57,6 +57,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/DEVELOPMENT_WORKFLOW.md` updates the human-touchpoint guidance
   to reflect the single PR-merge gate.
 
+### Added
+
+- `gc_codex_review` enforces the GC-O007 hard-cap-2 contract on the
+  MCP-server side instead of relying on skill prose (closes #794
+  MVP-1). After each successful post-push review the tool posts a
+  machine-readable cycle marker (`<!-- gc:codex-review-cycle ... -->`)
+  as a PR issue-comment. The next invocation reads the markers and
+  refuses a 3rd cycle on the same PR with a structured error:
+  `{ok: false, error: "codex_review_cap_reached", message,
+  prior_cycles, cap}`. Successful returns surface `cycle` and `cap` so
+  the agent sees its position. Pre-push uncommitted reviews
+  (Step 6.5) are not capped here — they have a separate cycle limit
+  and no PR yet; left for a follow-up MVP. Three new pure-function
+  exports back the enforcement: `parseCodexReviewCycleMarkers`,
+  `evaluateCodexReviewCycleCap`, `buildCodexReviewCycleMarker`. 14
+  new unit tests in `lib.test.js`.
+
 ### Fixed
 
 - `workflow.base_branch` is now validated against an allowlist of safe

@@ -2156,6 +2156,81 @@ function buildPostingInstructions({ prNumber, reviewerLabel }) {
   ];
 }
 
+// ---------------------------------------------------------------------------
+// gc_codex_review hard-cap-2 cycle enforcement (issue #794 MVP-1)
+//
+// GC-O007 / ADR-029 specify a hard cap of two `gc_codex_review` cycles per PR
+// (cycle 3+ hits diminishing returns and starts repeating out-of-scope
+// findings). The cap was previously prose-only in skills/implement/SKILL.md,
+// and agents routinely rationalized past it. This MVP moves enforcement onto
+// the MCP server's trusted side: each successful post-push review posts a
+// machine-readable marker comment to the PR, and the next invocation refuses
+// if two markers already exist for the same PR.
+//
+// Persistence model: PR issue-comments authored by whoever the MCP server's
+// `gh` CLI authenticates as (typically the repo owner / a service account).
+// No new database, no local state file — the durable record lives on the
+// issue thread per ADR-029. Restart-safe by construction.
+//
+// Scope: enforces on `runCodexReview({ uncommitted: false, prNumber: <N> })`
+// only. Pre-push uncommitted reviews (Step 6.5) have a separate cap (5)
+// and no PR yet; left for a follow-up MVP.
+// ---------------------------------------------------------------------------
+
+export const CODEX_REVIEW_HARD_CAP = 2;
+export const CODEX_REVIEW_CYCLE_MARKER_PREFIX = "<!-- gc:codex-review-cycle";
+const CODEX_REVIEW_CYCLE_MARKER_RE =
+  /<!--\s*gc:codex-review-cycle\s+cycle="(\d+)"\s+pr="(\d+)"\s+-->/;
+
+// Pure: counts how many cycle markers are present in a list of issue-comment
+// bodies for a given PR. Tolerates extra whitespace and unrelated markers.
+export function parseCodexReviewCycleMarkers(commentBodies, prNumber) {
+  if (!Array.isArray(commentBodies)) return 0;
+  let count = 0;
+  for (const body of commentBodies) {
+    if (typeof body !== "string") continue;
+    const match = body.match(CODEX_REVIEW_CYCLE_MARKER_RE);
+    if (!match) continue;
+    const markerPr = Number.parseInt(match[2], 10);
+    if (markerPr === prNumber) count += 1;
+  }
+  return count;
+}
+
+// Pure: given the prior cycle count, decide whether the next cycle is allowed.
+// Returns either { ok: true, nextCycle } or { ok: false, error, ... }. Keeping
+// this separate from the subprocess plumbing keeps it cheap to test.
+export function evaluateCodexReviewCycleCap({ priorCount, prNumber, hardCap = CODEX_REVIEW_HARD_CAP }) {
+  if (typeof priorCount !== "number" || !Number.isFinite(priorCount) || priorCount < 0) {
+    throw new Error(`evaluateCodexReviewCycleCap: priorCount must be a non-negative number, got ${priorCount}`);
+  }
+  if (priorCount >= hardCap) {
+    return {
+      ok: false,
+      error: "codex_review_cap_reached",
+      message:
+        `gc_codex_review hard cap reached (${hardCap} cycles) for PR #${prNumber}. ` +
+        `Per GC-O007 / ADR-029, residual concerns must be escalated to the user as an issue-thread comment, ` +
+        `not addressed in a third cycle. Push fix commits first if you have new code to review; ` +
+        `the cap is per-PR, not per-commit.`,
+      pr_number: prNumber,
+      prior_cycles: priorCount,
+      cap: hardCap,
+    };
+  }
+  return { ok: true, nextCycle: priorCount + 1, cap: hardCap };
+}
+
+export function buildCodexReviewCycleMarker({ prNumber, cycleNumber }) {
+  return [
+    `${CODEX_REVIEW_CYCLE_MARKER_PREFIX} cycle="${cycleNumber}" pr="${prNumber}" -->`,
+    "",
+    `_gc_codex_review cycle ${cycleNumber} of ${CODEX_REVIEW_HARD_CAP} complete for PR #${prNumber}._ ` +
+      "Posted by the MCP server to enforce the hard-cap-2 contract (issue #794). " +
+      "Do not edit or delete — used by the next `gc_codex_review` invocation to count cycles.",
+  ].join("\n");
+}
+
 // Maximum bytes of diff text to inline into a codex review prompt. Beyond
 // this, we switch to a manifest (file list + numstat) and instruct codex to
 // fetch per-file diffs via shell. Keeps prompt size bounded so review latency
@@ -2332,6 +2407,50 @@ async function getOwnerRepo(repoRoot) {
     throw new Error(`Unable to parse owner/repo from gh repo view output: ${stdout}`);
   }
   return { owner, name };
+}
+
+// Read the PR's issue-comments and count prior gc_codex_review cycle markers.
+// Issue-comments (not pull-request review comments) — the marker is a top-level
+// comment on the PR, which GitHub stores under the issue API.
+async function readPriorCodexReviewCycleCount(repoRoot, owner, name, prNumber) {
+  // /repos/{o}/{r}/issues/{n}/comments paginates 30/page; this is way more
+  // than the cap (2) so a small per-page fetch is fine, but for completeness
+  // we ask for 100 per page and consume a single page.
+  const { stdout } = await execFile(
+    "gh",
+    [
+      "api",
+      "--method",
+      "GET",
+      `/repos/${owner}/${name}/issues/${prNumber}/comments`,
+      "-F",
+      "per_page=100",
+    ],
+    { cwd: repoRoot },
+  );
+  const comments = JSON.parse(stdout);
+  if (!Array.isArray(comments)) return 0;
+  return parseCodexReviewCycleMarkers(
+    comments.map((c) => (c && typeof c.body === "string" ? c.body : "")),
+    prNumber,
+  );
+}
+
+// Post the cycle marker as a PR issue-comment so the next invocation sees it.
+async function postCodexReviewCycleMarker(repoRoot, owner, name, prNumber, cycleNumber) {
+  const body = buildCodexReviewCycleMarker({ prNumber, cycleNumber });
+  await execFile(
+    "gh",
+    [
+      "api",
+      "--method",
+      "POST",
+      `/repos/${owner}/${name}/issues/${prNumber}/comments`,
+      "-f",
+      `body=${body}`,
+    ],
+    { cwd: repoRoot },
+  );
 }
 
 async function autoDetectPrNumber(repoRoot) {
@@ -2576,6 +2695,34 @@ export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted
     effectivePr = await autoDetectPrNumber(repoRoot);
   }
 
+  // Hard-cap-2 enforcement (issue #794 MVP-1). Only applies to post-push
+  // reviews tied to a PR; pre-push uncommitted reviews use a separate cap and
+  // have no PR yet. If the cap is exceeded, refuse without consuming a codex
+  // run.
+  let cycleOwnership = null;
+  if (!uncommitted && effectivePr != null) {
+    const { owner, name } = await getOwnerRepo(repoRoot);
+    const priorCount = await readPriorCodexReviewCycleCount(repoRoot, owner, name, effectivePr);
+    const decision = evaluateCodexReviewCycleCap({ priorCount, prNumber: effectivePr });
+    if (!decision.ok) {
+      return {
+        repo_path: repoRoot,
+        base_branch: baseBranch,
+        uncommitted,
+        pr_number: effectivePr,
+        ok: false,
+        error: decision.error,
+        message: decision.message,
+        prior_cycles: decision.prior_cycles,
+        cap: decision.cap,
+        finding_count: 0,
+        comments: [],
+        reviewers: [],
+      };
+    }
+    cycleOwnership = { owner, name, prNumber: effectivePr, cycleNumber: decision.nextCycle, cap: decision.cap };
+  }
+
   // Compute the diff once and reuse it across both reviewers.
   const { diffText, manifest, baseRefDescriptor } = await computeReviewDiff(
     repoRoot,
@@ -2640,6 +2787,30 @@ export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted
 
   const comments = dedupFindings([...coreComments, ...securityComments]);
 
+  // Successfully ran codex — record the cycle marker on the PR so subsequent
+  // invocations honor the hard cap. Posting after the codex run (not before)
+  // means failed/aborted runs don't consume a cycle. Marker-post failures are
+  // not fatal: the review itself succeeded and surfaced findings; the worst
+  // case is the next cycle's count is off-by-one, which the cap-evaluator
+  // handles gracefully (it reads whatever count is on the PR at the time).
+  if (cycleOwnership != null) {
+    try {
+      await postCodexReviewCycleMarker(
+        repoRoot,
+        cycleOwnership.owner,
+        cycleOwnership.name,
+        cycleOwnership.prNumber,
+        cycleOwnership.cycleNumber,
+      );
+    } catch (markerError) {
+      // Surface as warning text; do not throw.
+      // eslint-disable-next-line no-console
+      console.error(
+        `[gc_codex_review] cycle marker post failed for PR #${cycleOwnership.prNumber}: ${markerError.message}`,
+      );
+    }
+  }
+
   return {
     repo_path: repoRoot,
     base_branch: baseBranch,
@@ -2653,6 +2824,8 @@ export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted
       { name: "core", finding_count: core.commentIds.length },
       { name: "security", finding_count: security.commentIds.length },
     ],
+    cycle: cycleOwnership ? cycleOwnership.cycleNumber : null,
+    cap: cycleOwnership ? cycleOwnership.cap : null,
   };
 }
 
