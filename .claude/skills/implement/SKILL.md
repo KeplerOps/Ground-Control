@@ -178,6 +178,20 @@ Implementation is NOT ready for commit until ALL of the following are verified:
 
 If any check fails, fix it before proceeding. Do NOT move to Phase C until every check passes.
 
+### Step 6.5: Pre-push Codex Review (uncommitted)
+
+Run `gc_codex_review` with `uncommitted=true` against the staged + unstaged changes BEFORE the first push. Each codex review cycle takes ~5 min locally; each CI cycle to discover the same findings takes 10–15 min plus self-hosted runner overhead. Iterating locally collapses N CI runs into N local runs and one push.
+
+1. Stage everything you intend to push (`git add -A` for the full diff).
+2. Call the `gc_codex_review` MCP tool with:
+   - `repo_path`: absolute path from Step 1
+   - `base_branch`: `dev`
+   - `uncommitted`: `true`
+3. Apply the **Review loop rules** (defined above Step 12) to the returned findings, fix locally, re-stage, and re-invoke `gc_codex_review` until clean. **Cap: 5 iterations** — same as the post-push review loop.
+4. Once clean, proceed to Phase C with the staged diff. Step 12 then becomes a verification pass against the merge commit (typically a no-op) instead of the loop driver.
+
+Skip this step only if the diff is so trivial (one-liner typo fix) that codex would have nothing to find. When in doubt, run it.
+
 ---
 
 ## Phase C: Stage, Commit, Push
@@ -274,6 +288,8 @@ Every review step below (Codex cross-model, refactor & cross-cutting concerns, t
 For every cycle, after applying fixes, commit and push BEFORE re-running the review so the reviewer sees the updated tree. Format every fix commit as `Fix review findings (<reviewer>, cycle <N>)` so the loop history is visible in git log.
 
 ### Step 12: Cross-Model Review (Codex)
+
+This step normally lands as a **verification pass** rather than a fix/verify loop, because Step 6.5 should already have driven the diff through codex locally before the first push. Treat Step 12 as the post-merge-commit re-check: codex sometimes catches issues that only surface on the merged tree (interactions with target-branch changes since the local review ran). Most of the time it returns 0 findings.
 
 `gc_codex_review` runs two focused codex reviewers — a core production-readiness reviewer and a dedicated application-security reviewer — against a single pre-computed diff. By default the reviewers run sequentially (set `GC_CODEX_REVIEW_PARALLEL=2` to opt back into parallel execution). Both post their findings as inline PR review comments with a reviewer-tagged title (`[core]` or `[security]`). The tool returns a single deduplicated list; you then drive a per-finding fix/verify loop via `gc_codex_verify_finding`, which handles the GitHub API bookkeeping for you.
 

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `bin/policy --pr-body-file <path>` and `--pr-number <n>` modes so the
+  PR-body template check can run from a local draft or a fetched
+  GitHub PR body. Backed by a new `scripts/check-pr-body.sh` pre-push
+  hook (registered via `pre-commit install --hook-type pre-push`)
+  that catches missing template sections before the push triggers a
+  CI run that would fail at the policy job.
+- New `Step 6.5: Pre-push Codex Review (uncommitted)` in the
+  `/implement` skill. Runs `gc_codex_review` with `uncommitted=true`
+  against the staged diff before the first push so each fix iterates
+  through codex locally (~5 min) instead of through CI (~10–15 min).
+  Step 12 becomes a verification pass against the merge commit
+  rather than the loop driver.
 - REST API access control via Spring Security (closes #243, GC-P011). All
   `/api/v1/**` endpoints now require `Authorization: Bearer <token>` against
   the configured `groundcontrol.security.credentials` list; admin paths

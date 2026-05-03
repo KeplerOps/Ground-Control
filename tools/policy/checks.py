@@ -246,9 +246,21 @@ def run_migration_policy(changed_files: list[str], root: Path = REPO_ROOT) -> li
 
 
 def run_pr_body_check(event_path: Path) -> list[Violation]:
+    """Backwards-compatible wrapper that loads the PR body from a GitHub event payload."""
     event = json.loads(event_path.read_text(encoding="utf-8"))
     pull_request = event.get("pull_request") or {}
     body = pull_request.get("body") or ""
+    return check_pr_body(body)
+
+
+def check_pr_body(body: str) -> list[Violation]:
+    """Validate a PR body against the Ground Control template requirements.
+
+    Pure function over the body string so it can be driven from GitHub event
+    payloads (CI), a local draft file (pre-push hook), or `gh pr view --json
+    body`. The CI path is `run_pr_body_check`; local tooling should call this
+    directly.
+    """
     violations: list[Violation] = []
 
     required_headers = [
@@ -340,6 +352,23 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--event-path",
         help="Path to a GitHub event payload. Defaults to GITHUB_EVENT_PATH when present.",
     )
+    parser.add_argument(
+        "--pr-body-file",
+        help=(
+            "Path to a plain-text PR body draft. Use this in pre-push hooks to "
+            "validate the PR body before push. Mutually exclusive with --event-path / "
+            "--pr-number; --pr-body-file wins when supplied."
+        ),
+    )
+    parser.add_argument(
+        "--pr-number",
+        type=int,
+        help=(
+            "GitHub PR number. When set (and neither --pr-body-file nor "
+            "--event-path is supplied), the body is fetched via "
+            "`gh pr view <n> --json body`."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -371,11 +400,39 @@ def main(argv: list[str] | None = None) -> int:
     violations.extend(run_controller_contracts(changed_files))
     violations.extend(run_migration_policy(changed_files))
 
-    event_path = args.event_path or os.getenv("GITHUB_EVENT_PATH")
-    if not args.skip_pr_body and event_path:
-        violations.extend(run_pr_body_check(Path(event_path)))
+    if not args.skip_pr_body:
+        body = _resolve_pr_body(args)
+        if body is not None:
+            violations.extend(check_pr_body(body))
 
     return render_and_exit(violations)
+
+
+def _resolve_pr_body(args: argparse.Namespace) -> str | None:
+    """Resolve the PR body string from CLI args / environment, in priority order.
+
+    1. ``--pr-body-file`` — local pre-push hook driver.
+    2. ``--pr-number`` — fetched via ``gh pr view <n> --json body``.
+    3. ``--event-path`` or ``GITHUB_EVENT_PATH`` — CI driver.
+
+    Returns ``None`` when no source is configured (the check is skipped).
+    """
+    if args.pr_body_file:
+        return Path(args.pr_body_file).read_text(encoding="utf-8")
+    if args.pr_number is not None:
+        result = subprocess.run(
+            ["gh", "pr", "view", str(args.pr_number), "--json", "body", "--jq", ".body"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout
+    event_path = args.event_path or os.getenv("GITHUB_EVENT_PATH")
+    if event_path:
+        event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+        pull_request = event.get("pull_request") or {}
+        return pull_request.get("body") or ""
+    return None
 
 
 if __name__ == "__main__":
