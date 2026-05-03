@@ -589,7 +589,11 @@ function requiresAdminRole(path) {
 //     GROUND_CONTROL_API_TOKEN. Picking the admin token first prevents a
 //     deployment that has both vars configured but a USER-only generic token
 //     from getting 403s on admin endpoints.
-//   - On non-admin paths: use GROUND_CONTROL_API_TOKEN.
+//   - On non-admin paths: use GROUND_CONTROL_API_TOKEN if set, otherwise fall
+//     back to GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN. An ADMIN credential is
+//     valid for all `/api/v1/**` paths under the unified security model
+//     (ADR-026), so deployments that migrated from the legacy admin-only var
+//     keep working for ordinary requirement / project / graph reads.
 // When neither is set the header is omitted (dev profile / disabled security).
 function addAuthorizationHeader(path, headers) {
   if (!path.startsWith("/api/v1/")) {
@@ -597,15 +601,14 @@ function addAuthorizationHeader(path, headers) {
   }
   const apiToken = process.env.GROUND_CONTROL_API_TOKEN;
   const adminToken = process.env.GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN;
+  let token;
   if (requiresAdminRole(path)) {
-    const token = adminToken || apiToken;
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-    return;
+    token = adminToken || apiToken;
+  } else {
+    token = apiToken || adminToken;
   }
-  if (apiToken) {
-    headers.Authorization = `Bearer ${apiToken}`;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
   }
 }
 

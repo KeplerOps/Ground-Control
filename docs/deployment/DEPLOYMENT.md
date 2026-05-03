@@ -78,7 +78,10 @@ Authority matrix:
 | `/api/v1/embeddings/**` | `ROLE_ADMIN` |
 | `/api/v1/analysis/sweep/**` | `ROLE_ADMIN` |
 | `/api/v1/pack-registry/**` | `ROLE_ADMIN` |
+| `/api/v1/trust-policies/**` | `ROLE_ADMIN` |
+| `/api/v1/pack-install-records/**` | `ROLE_ADMIN` |
 | Other `/api/v1/**` | authenticated (USER or ADMIN) |
+| SPA shell, static assets, SPA client routes (GET only, non-API non-actuator) | anonymous |
 | Anything else | denyAll |
 
 Clients send `Authorization: Bearer <token>` on every request. Tokens are
