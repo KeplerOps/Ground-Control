@@ -11,13 +11,19 @@ This skill is invoked by the `implement` workflow at Step 13. It is agent-neutra
 
 ## How to Find Changed Test Files
 
-The base branch is configurable per-repo via `.ground-control.yaml` under `workflow.base_branch` (default: `dev`). Resolve the placeholder before running the diff:
+The base branch is configurable per-repo via `.ground-control.yaml` under `workflow.base_branch` (default: `dev`). This skill reads the YAML itself rather than expecting a caller to resolve a placeholder for it, because it can be invoked standalone (from `Skill` or a Codex prompt) without an enclosing workflow.
 
-```bash
-git diff --name-only origin/{cfg.workflow.base_branch|default dev}...HEAD | grep -iE '(test_|_test\.|tests/|Test\.)'
-```
+1. Resolve the absolute repo root with `pwd`.
+2. Call `gc_get_repo_ground_control_context` with `repo_path: <pwd>`. Read `workflow.base_branch` from the response; treat `null`/missing as the literal string `dev`.
+3. Cache the resolved value as `BASE_REF`.
+4. Run:
 
-If `origin/<base>` is not available (no remote, fetch needed), retry with the local ref `{cfg.workflow.base_branch|default dev}`. Read every changed test file. For each, also read the source file it tests so you understand what behavior should be verified.
+   ```bash
+   git diff --name-only origin/${BASE_REF}...HEAD | grep -iE '(test_|_test\.|tests/|Test\.)'
+   ```
+
+   If `origin/${BASE_REF}` is not available (no remote, fetch needed), retry with the local ref `${BASE_REF}`. If neither resolves, run `git fetch origin ${BASE_REF}` and retry; if the fetch fails, STOP and surface a clear error.
+5. Read every changed test file. For each, also read the source file it tests so you understand what behavior should be verified.
 
 ## What to Flag
 

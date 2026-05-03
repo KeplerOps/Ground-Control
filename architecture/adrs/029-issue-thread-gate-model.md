@@ -54,9 +54,11 @@ comment on the GitHub issue:
   review comment for codex; issue comment summary for review aggregates).
   The issue thread carries a summary linking back to the PR comments.
 - **Decisions on findings** — for every finding, the agent records its
-  disposition as an issue comment: **fix**, **wontfix**, **defer**, or
-  **not-applicable**, with a one-line rationale. This is mandatory; agent
-  silence on a finding is treated as a process violation.
+  disposition as an issue comment: **fix**, **wontfix**, or
+  **not-applicable**, with a one-line rationale. `defer` is not a valid
+  decision: the workflow's contract is "fix every finding before PR is
+  ready." Recording the disposition is mandatory; agent silence on a
+  finding is treated as a process violation.
 - **Status transitions and traceability reconciliation** — happen
   asynchronously in Phase D (after reviews), not in a synchronous gate.
 

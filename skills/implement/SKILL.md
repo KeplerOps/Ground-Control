@@ -340,7 +340,15 @@ This step normally lands as a **verification pass** rather than a fix/verify loo
    5. After the finding is resolved (or marked `wontfix`/`not-applicable` by user direction), post a one-line decision comment on the GitHub issue thread linking back to the PR review comment. `defer` is not a valid decision — the workflow's contract is "fix every finding before PR is ready"; deferring a finding violates that contract.
 7. After all findings are resolved, commit and push the fixes (one commit per fix cycle, message `Fix review findings (codex, cycle <N>)`), then re-invoke `gc_codex_review` to confirm no new issues surfaced.
 
-8. **Hard cap: 2 iterations of `gc_codex_review`.** No escape clause. Past cycle 2 codex hits diminishing returns and starts repeating out-of-scope findings. After the second invocation, if findings remain, STOP, post the remaining findings + fix history as an issue comment, escalate to the user.
+8. **Hard cap: 2 iterations of `gc_codex_review`.** No escape clause.
+
+   **Read this carefully — the cap is *NOT* permission to skip fixing cycle 2 findings.** The contract is:
+
+   - Cycle 1 → review → **fix every finding** → push.
+   - Cycle 2 → review → **fix every finding** → push.
+   - Cycle 3 is forbidden. After fixing cycle 2's findings you do **not** run a 3rd `gc_codex_review` to verify the fixes. The fixes ship without further codex verification, and any residual concern is escalated to the user as an issue-thread comment listing the remaining-after-cycle-2 findings.
+
+   The cap exists because cycle 3+ codex passes hit diminishing returns and start repeating out-of-scope findings — not because cycle 2 fixes themselves are optional. (See issue #794: this contract is currently advisory; once the MCP server enforces the cap, `gc_codex_review` will refuse a 3rd invocation directly.)
 
 **Tool shape**: `gc_codex_verify_finding` accepts only `repo_path`, `pr_number`, and `comment_id`. It reads the comment directly from GitHub; do not paraphrase the finding through the tool.
 
@@ -367,8 +375,8 @@ Semantically, moving a requirement from DRAFT to ACTIVE is the point at which th
 
 For each UID in `in_scope_requirements[]`:
 - **First, classify the requirement against the actual diff:**
-  - **Materially implemented** — the diff contains the production code (and tests) that satisfies the requirement's clauses. Continue to the transition step below.
-  - **Forward-looking** — the diff documents or references the requirement but does not deliver it (e.g., a schema field that an unimplemented future feature will consume). Use a `DOCUMENTS` link in Step 16 instead of `IMPLEMENTS`, and leave the status DRAFT. Surface this decision as a comment on the issue. Skip the rest of this loop for that UID.
+  - **Materially implemented** — the diff contains the artifacts-of-record that satisfy the requirement's clauses. Artifacts include production code, tests, schema/migration files, configuration files, ADRs, workflow definitions, skill prose, and any other deliverable the requirement statement specifies. The test is "does the diff *deliver* what this requirement promises," not "is the diff Java." Continue to the transition step below.
+  - **Forward-looking** — the diff documents or references the requirement but does not deliver it (e.g., a schema field that an unimplemented future feature will consume, or a design note that anticipates work in a later wave). Use a `DOCUMENTS` link in Step 16 instead of `IMPLEMENTS`, and leave the status DRAFT. Surface this decision as a comment on the issue. Skip the rest of this loop for that UID.
 - **Only after classification**, transition the materially-implemented requirements:
   - Use `gc_transition_status` to transition the requirement from `DRAFT` to `ACTIVE`.
   - If the requirement was already `ACTIVE`, skip it.
