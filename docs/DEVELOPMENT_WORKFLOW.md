@@ -51,11 +51,9 @@ project: aces-sdl
 
 `AGENTS.md` should still carry a brief `Ground Control Context` section that points agents at `.ground-control.yaml` and `.gc/`, so repo newcomers know where the workflow config lives.
 
-### User Touchpoints
-1. **Plan approval** — user reviews and approves the implementation plan
-2. **PR review and merge** — user reviews the final PR and merges to dev
+### User Touchpoint
 
-Everything between these two checkpoints is automated.
+Per ADR-029, the workflow has **one** synchronous human touchpoint: PR review and merge to `dev`. Plans are posted to the GitHub issue thread as comments and the agent proceeds without waiting; review findings and decisions on findings are also recorded on the issue thread. Everything before merge is automated.
 
 ### High-level flow
 
@@ -66,7 +64,7 @@ flowchart TB
   S2[2 · Read issue body + comments]
   S3[3 · Codex architecture preflight]
   S4[4 · Explore codebase + consult knowledge base]
-  S5{{5 · User approves plan}}
+  S5[5 · Post plan as issue comment]
   S6[6 · TDD implementation]
   S7[7 · pre-commit run]
   S8[8 · Completion gate · make policy + make check + CHANGELOG]
@@ -89,7 +87,7 @@ flowchart TB
   S2 --> S3
   S3 --> S4
   S4 --> S5
-  S5 -->|approved| S6
+  S5 --> S6
   S6 --> S7
   S7 --> S8
   S8 --> S9
@@ -115,12 +113,12 @@ flowchart TB
   S19 -->|drift| S17
 
   classDef user fill:#fff7cc,stroke:#c9a900,color:#000
-  class S5,Start,End user
+  class Start,End user
 ```
 
 **How it reads:**
 
-- **Yellow** nodes are user touchpoints. Per ADR-029, the workflow has **one** synchronous human touchpoint: PR merge. Plans are posted to the GitHub issue thread (not gated by `EnterPlanMode`); review findings and decisions on findings are also recorded on the issue thread. Earlier docs and the diagram may still show a "plan approval" yellow node — interpret that as the plan-comment step, which proceeds without waiting.
+- **Yellow** nodes are user touchpoints. Per ADR-029, the workflow has **one** synchronous human touchpoint: PR merge (the `End` node). Plans are posted to the GitHub issue thread (S5) and the agent proceeds without waiting; review findings and decisions on findings are also recorded on the issue thread.
 - **Entry is always by issue.** Step 1 resolves the input to a GitHub issue (either directly or via a UID → issue shim) and parses the `## Requirements` section from the issue body into `in_scope_requirements[]`. The list may be empty (bug fix / refactor) or contain one or many UIDs (grouped implementation). Everything downstream treats the issue as the authoritative context and the list as the set of requirements to be transitioned to `ACTIVE` on completion.
 - **Steps 1–4** gather context and run the codex architecture preflight before any code is written. Step 4 also consults the repo knowledge base via the index if one is present.
 - **Step 6** is TDD (red → green → refactor per clause). Steps 7–8 are the local quality gate.

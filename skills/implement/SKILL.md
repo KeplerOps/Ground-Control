@@ -120,7 +120,7 @@ Explore the codebase to determine whether the work described in the issue is alr
   }
   ```
 
-  For each concern the new code will touch, find and read the project's existing implementation. Use the existing helper. If you genuinely need a new one, justify the new helper in the plan (Step 4) and note why the existing one didn't fit. Re-implementing what's already there is the failure mode Step 12.5 is designed to catch — catch it here first.
+  For each concern the new code will touch, find and read the project's existing implementation. Use the existing helper. If you genuinely need a new one, justify the new helper in the plan (Step 4) and note why the existing one didn't fit. Re-implementing what's already there is the failure mode Step 12 (codex review, cross-cutting reviewer) is designed to catch — catch it here first so you don't spend a review cycle on it.
 - For each requirement in `in_scope_requirements[]`, review its existing traceability links (IMPLEMENTS, TESTS) via `gc_get_traceability` on the requirement UUID. Some or all clauses may already be satisfied.
 - Reuse the architecture-preflight guidance from Step 2.5 while assessing existing coverage and planning changes.
 
@@ -329,7 +329,7 @@ This step normally lands as a **verification pass** rather than a fix/verify loo
    - `base_branch`: `{cfg.workflow.base_branch|default dev}`
    - `pr_number`: the PR number from step 2
 4. The tool returns `{pr_number, finding_count, comments: [{comment_id, thread_id, reviewer, path, line, title, html_url}, ...], reviewers, core_review_text, security_review_text}`. Codex has already posted each finding as an inline PR review comment.
-5. If `finding_count` is 0, skip to Step 12.5.
+5. If `finding_count` is 0, skip to Step 13.
 6. Otherwise, for EACH entry in `comments`, run the following fix/verify loop:
    1. Read the comment body if needed: `gh api /repos/<owner>/<repo>/pulls/comments/<comment_id>`.
    2. Fix the finding locally. Apply the **Review loop rules** above.
@@ -337,24 +337,16 @@ This step normally lands as a **verification pass** rather than a fix/verify loo
    4. Call `gc_codex_verify_finding` with `repo_path`, `pr_number`, and the `comment_id`. Codex will read your local changes and decide:
       - **`status: "resolved"`** — the review thread has already been marked resolved on GitHub. Move on.
       - **`status: "unresolved"`** — codex posted a threaded reply with `reply_body`. Fix per those directions and re-invoke `gc_codex_verify_finding`. **Per-finding cap: 2 verify calls.** If a third would be needed, STOP, post the finding + fix history as an issue comment, escalate.
-   5. After the finding is resolved (or marked `wontfix`/`defer`/`not-applicable` by user direction), post a one-line decision comment on the GitHub issue thread linking back to the PR review comment.
+   5. After the finding is resolved (or marked `wontfix`/`not-applicable` by user direction), post a one-line decision comment on the GitHub issue thread linking back to the PR review comment. `defer` is not a valid decision — the workflow's contract is "fix every finding before PR is ready"; deferring a finding violates that contract.
 7. After all findings are resolved, commit and push the fixes (one commit per fix cycle, message `Fix review findings (codex, cycle <N>)`), then re-invoke `gc_codex_review` to confirm no new issues surfaced.
 
 8. **Hard cap: 2 iterations of `gc_codex_review`.** No escape clause. Past cycle 2 codex hits diminishing returns and starts repeating out-of-scope findings. After the second invocation, if findings remain, STOP, post the remaining findings + fix history as an issue comment, escalate to the user.
 
 **Tool shape**: `gc_codex_verify_finding` accepts only `repo_path`, `pr_number`, and `comment_id`. It reads the comment directly from GitHub; do not paraphrase the finding through the tool.
 
-### Step 12.5: Refactor & Cross-Cutting Concerns Review
-
-This review is the corrective for two systemic failure modes that bloat the codebase if left unchecked: **god classes / god methods / god functions / oversized files**, and **rebuilding helpers locally** instead of using the cross-cutting concerns the codebase already has.
-
-**Status: pending until `gc_codex_review` exposes a refactor reviewer set.** ADR-027's reviewer-of-record boundary requires that all review and verification flow through `gc_codex_*` MCP tools (stable prompt, codex identity, GitHub-comment bookkeeping, verify-finding flow). Direct `codex exec` or subagent fallbacks bypass that boundary and are forbidden. Until the MCP tool gains the refactor reviewer set, Step 12.5 runs as a no-op gap.
-
-When `gc_codex_review` adds a refactor reviewer set (e.g., `reviewer_set: "refactor"`), this step activates with the same fix/verify loop machinery as Step 12 — fix every finding, hard-cap 2 iterations, decisions recorded on the issue thread.
-
 ### Step 13: Test Quality Review
 
-1. Invoke the `review-tests` skill. **Today this skill ships only as a Claude Code skill** (it is not yet under the canonical `skills/` directory because that move is out of scope for this PR — see CHANGELOG / ADR-027 follow-ons). Claude Code drivers call it via the `Skill` tool with `skill="review-tests"`. Codex drivers run an equivalent prompt manually until `review-tests` migrates to `skills/review-tests/SKILL.md`; track the migration as a follow-up issue.
+1. Invoke the `review-tests` skill at `skills/review-tests/SKILL.md`. Claude Code drivers call it via the `Skill` tool with `skill="review-tests"`. Codex drivers invoke it via `~/.codex/prompts/review-tests.md` (installed by `bin/install-skills.sh`). The same canonical content drives both — no driver-specific divergence.
 2. Apply the **Review loop rules**: fix every finding, pre-existing or not, including "warning" level. Re-invoke after each fix cycle.
 3. **Cycle cap: 5 iterations.** After the fifth, escalate to the user.
 
@@ -374,10 +366,13 @@ The status transition MUST happen BEFORE traceability reconciliation (Step 16). 
 Semantically, moving a requirement from DRAFT to ACTIVE is the point at which the team commits to its statement. Once real code exists pointing at it, the requirement is no longer a proposal — it's a contract.
 
 For each UID in `in_scope_requirements[]`:
-- Use `gc_transition_status` to transition the requirement from `DRAFT` to `ACTIVE`.
-- If the requirement was already `ACTIVE`, skip it.
-- If the requirement was in any other state (`DEPRECATED`, `ARCHIVED`), STOP and surface the anomaly to the user — transitioning out of those states is a user decision.
-- If the requirement is forward-looking and the diff does not materially implement it (it's documented or referenced but not delivered), use a `DOCUMENTS` link in Step 16 instead of `IMPLEMENTS`, and leave the status DRAFT. Surface this decision as a comment on the issue.
+- **First, classify the requirement against the actual diff:**
+  - **Materially implemented** — the diff contains the production code (and tests) that satisfies the requirement's clauses. Continue to the transition step below.
+  - **Forward-looking** — the diff documents or references the requirement but does not deliver it (e.g., a schema field that an unimplemented future feature will consume). Use a `DOCUMENTS` link in Step 16 instead of `IMPLEMENTS`, and leave the status DRAFT. Surface this decision as a comment on the issue. Skip the rest of this loop for that UID.
+- **Only after classification**, transition the materially-implemented requirements:
+  - Use `gc_transition_status` to transition the requirement from `DRAFT` to `ACTIVE`.
+  - If the requirement was already `ACTIVE`, skip it.
+  - If the requirement was in any other state (`DEPRECATED`, `ARCHIVED`), STOP and surface the anomaly to the user — transitioning out of those states is a user decision.
 
 If `in_scope_requirements[]` is empty, this step is a no-op. Proceed to Step 16 anyway — reconciliation still needs to run to catch drift on other requirements whose files this diff touched.
 
@@ -389,12 +384,12 @@ Now that CI and all reviews are green AND every materially-implemented in-scope 
 
 1. **Compute the touched file set.** Run `git diff --name-status <base-ref>...HEAD`. Cache the full list.
 
-   Resolve `<base-ref>` in this order:
-   1. `origin/dev` (verify with `git rev-parse --verify origin/dev`).
-   2. `dev` (verify with `git rev-parse --verify dev`).
-   3. `origin/main` (fallback).
+   Resolve `<base-ref>` using the configured base branch (`{cfg.workflow.base_branch|default dev}`) in this order:
+   1. `origin/{cfg.workflow.base_branch|default dev}` (verify with `git rev-parse --verify`).
+   2. `{cfg.workflow.base_branch|default dev}` (local, verify with `git rev-parse --verify`).
+   3. `origin/main` (fallback for repos that don't use `dev`).
    4. `main` (fallback).
-   5. If none resolve, run `git fetch origin dev` and retry. If the fetch fails (no network/no remote), STOP and surface a clear error.
+   5. If none resolve, run `git fetch origin {cfg.workflow.base_branch|default dev}` and retry. If the fetch fails (no network/no remote), STOP and surface a clear error.
 
 2. **Process deleted and renamed files first.**
    For every deleted file `path`:

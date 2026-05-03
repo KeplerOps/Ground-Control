@@ -1217,6 +1217,24 @@ function emptyWorkflowConfig() {
   };
 }
 
+// `workflow.base_branch` is rendered into shell-evaluated `gh` commands by
+// the implement skill (e.g. `gh issue develop --base <branch>`,
+// `gh pr create --base <branch>`, and the `git rev-parse --verify` /
+// `git fetch origin <branch>` lines in Step 16 reconciliation). A malicious
+// or malformed value is therefore a shell-injection vector. Constrain it to
+// a strict allowlist that satisfies `git check-ref-format` AND contains
+// nothing the shell would interpret.
+function isSafeGitRefName(s) {
+  if (typeof s !== "string" || s === "") return false;
+  if (!/^[A-Za-z0-9._/-]+$/.test(s)) return false;
+  if (s.startsWith("/") || s.endsWith("/")) return false;
+  if (s.startsWith(".") || s.endsWith(".")) return false;
+  if (s.endsWith(".lock")) return false;
+  if (s.includes("..")) return false;
+  if (s.includes("//")) return false;
+  return true;
+}
+
 function normalizeWorkflowConfig(raw) {
   if (raw == null || typeof raw !== "object") {
     return { ok: true, value: emptyWorkflowConfig() };
@@ -1236,6 +1254,12 @@ function normalizeWorkflowConfig(raw) {
     if (v == null) continue;
     if (typeof v !== "string" || v.trim() === "") {
       errors.push(`workflow.${key} must be a non-empty string when set`);
+      continue;
+    }
+    if (key === "base_branch" && !isSafeGitRefName(v)) {
+      errors.push(
+        `workflow.base_branch '${v}' is not a safe Git ref name; allowed characters are [A-Za-z0-9._/-] and the value must satisfy git check-ref-format`,
+      );
       continue;
     }
     value[key] = v;

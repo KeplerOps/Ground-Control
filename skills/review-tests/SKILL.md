@@ -7,13 +7,17 @@ description: Review test files for quality — catches shallow coverage tests, i
 
 You are reviewing test files changed in the current branch. Your job is to identify **tests that provide false assurance** — tests that pass but would still pass if the implementation were broken.
 
+This skill is invoked by the `implement` workflow at Step 13. It is agent-neutral: Claude Code drivers call it via the `Skill` tool with `skill="review-tests"`; Codex drivers invoke it via `~/.codex/prompts/review-tests.md`. Both targets are populated by `bin/install-skills.sh` from the canonical source at `skills/review-tests/SKILL.md`.
+
 ## How to Find Changed Test Files
 
+The base branch is configurable per-repo via `.ground-control.yaml` under `workflow.base_branch` (default: `dev`). Resolve the placeholder before running the diff:
+
 ```bash
-git diff --name-only origin/dev...HEAD | grep -iE '(test_|_test\.|tests/|Test\.)'
+git diff --name-only origin/{cfg.workflow.base_branch|default dev}...HEAD | grep -iE '(test_|_test\.|tests/|Test\.)'
 ```
 
-If the base branch is `main` instead of `dev`, adjust accordingly. Read every changed test file. For each, also read the source file it tests so you understand what behavior should be verified.
+If `origin/<base>` is not available (no remote, fetch needed), retry with the local ref `{cfg.workflow.base_branch|default dev}`. Read every changed test file. For each, also read the source file it tests so you understand what behavior should be verified.
 
 ## What to Flag
 
@@ -62,8 +66,6 @@ Fix: <specific fix, not vague advice>
 
 ## After Review
 
-If you found CRITICAL issues: fix them all before proceeding. Rewrite the tests to actually verify behavior.
-
-If you found only WARNINGS: fix them unless doing so would significantly increase scope. Note any deferred warnings in the PR description.
+Fix every finding — both `CRITICAL` and `WARNING`. The implement workflow's contract is "fix every finding before PR is ready"; deferral is not a valid decision. If a fix is genuinely out of scope (e.g., it would require touching 5+ files outside the current feature scope), STOP and consult the user; do not silently mark it deferred.
 
 If the tests are solid: report "Test quality review: no issues found" and proceed.

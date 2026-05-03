@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and aptl. The skill is agent-neutral: it runs from Claude Code or
   Codex against the same content. Codex remains the reviewer of record
   via `gc_codex_*` MCP tools regardless of driver.
+- Canonical `skills/review-tests/SKILL.md`, migrated from
+  `.claude/skills/review-tests/SKILL.md`. Same agent-neutral packaging
+  story: `bin/install-skills.sh` ships the same content to Claude Code
+  and Codex. The base-branch reference inside the skill now reads from
+  `workflow.base_branch` like the implement skill does.
 - `bin/install-skills.sh` distributes `skills/*` to `~/.claude/skills/`
   (Claude Code) and `~/.codex/prompts/*.md` (Codex). Symlinks by default
   so the agent always reads the latest source-of-truth from the repo;
@@ -42,14 +47,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   drops from two to one. PR merge is the only synchronous human gate.
   Plan approval is no longer a synchronous gate — the plan is posted to
   the GitHub issue as a comment and the workflow proceeds directly to
-  TDD. Review findings and decisions on findings (fix / wontfix / defer
-  / not-applicable, each with a one-line rationale) are recorded as
+  TDD. Review findings and decisions on findings (fix / wontfix /
+  not-applicable, each with a one-line rationale) are recorded as
   comments on the issue thread so the durable record survives PR
-  merge/close. ADR-021 is amended (not superseded). Codex review loops
-  are hard-capped at two cycles.
+  merge/close. `defer` is not a valid decision: the workflow's contract
+  is "fix every finding before PR is ready". ADR-021 is amended (not
+  superseded). Codex review loops are hard-capped at two cycles.
 - ADR-021 carries an inline amendment note pointing at ADR-029.
 - `docs/DEVELOPMENT_WORKFLOW.md` updates the human-touchpoint guidance
   to reflect the single PR-merge gate.
+
+### Fixed
+
+- `workflow.base_branch` is now validated against an allowlist of safe
+  Git ref names in `normalizeWorkflowConfig`. Previously the value was
+  rendered into shell-evaluated `gh` and `git` commands by the implement
+  skill (Steps 1, 9, 16) without sanitization, so a hostile or malformed
+  `.ground-control.yaml` could inject shell commands. Allowed characters
+  are `[A-Za-z0-9._/-]` and the value must satisfy `git check-ref-format`.
+- `/implement` Step 16 (traceability reconciliation) now resolves the
+  base ref via `workflow.base_branch` instead of hardcoding
+  `origin/dev` / `dev`. Repos configured with a non-`dev` base were
+  reconciling against the wrong branch.
+- `/implement` Step 15 reordered: classify each in-scope requirement as
+  materially-implemented vs forward-looking BEFORE transitioning, so
+  forward-looking requirements stay DRAFT and don't get prematurely
+  promoted to ACTIVE. The previous wording transitioned every UID first
+  and then noted the forward-looking exception.
+- `/implement` Step 12.5 removed. The step was a documented no-op gap
+  pending tooling that may never ship; an unimplemented "required gate"
+  is worse than no gate. Cross-cutting-concerns review remains covered
+  by Step 3 (assess existing helpers before writing new code) and
+  Step 12 (codex review with the cross-cutting reviewer set).
+- `/implement` Step 13 is now agent-neutral. `review-tests` migrated
+  to `skills/review-tests/SKILL.md` so the same canonical content
+  drives Claude Code (`Skill` tool) and Codex
+  (`~/.codex/prompts/review-tests.md`, populated by
+  `bin/install-skills.sh`).
+- `defer` removed from the review-finding decision vocabulary in the
+  implement skill, the review-tests skill, and the CHANGELOG narrative.
+  The workflow's stated contract is "fix every finding before PR is
+  ready"; allowing `defer` was an explicit bypass.
+- `docs/DEVELOPMENT_WORKFLOW.md` Mermaid diagram and User Touchpoints
+  section updated to reflect ADR-029's single-touchpoint model. The
+  S5 node is now `Post plan as issue comment` (white, not yellow), the
+  approval edge is unconditional, and the prior hedge ("interpret stale
+  plan-approval node") is gone.
 
 ### Removed
 
@@ -57,6 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `skills/implement/SKILL.md`. Run `bin/install-skills.sh` to install
   the canonical skill into `~/.claude/skills/` (and `~/.codex/prompts/`
   for Codex driver use).
+- `.claude/skills/review-tests/SKILL.md` — replaced by the canonical
+  `skills/review-tests/SKILL.md`. Same install path as above.
 
 - `bin/policy --pr-body-file <path>` and `--pr-number <n>` modes so the
   PR-body template check can run from a local draft or a fetched
