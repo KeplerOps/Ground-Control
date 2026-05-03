@@ -2,6 +2,7 @@ package com.keplerops.groundcontrol.shared.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -39,6 +40,30 @@ public class ApiSecurityConfig {
     @Bean
     public IpAllowlistFilter ipAllowlistFilter(SecurityProperties properties, ObjectMapper objectMapper) {
         return new IpAllowlistFilter(properties, objectMapper);
+    }
+
+    /**
+     * Spring Boot auto-registers any {@link jakarta.servlet.Filter} bean with the servlet
+     * container. Both filters above are also wired into the {@link SecurityFilterChain} below;
+     * leaving servlet auto-registration on would run them twice (once outside the security
+     * chain). Disabling auto-registration keeps the filters scoped to the chain only.
+     */
+    @Bean
+    public FilterRegistrationBean<BearerTokenAuthFilter> bearerTokenAuthFilterRegistration(
+            BearerTokenAuthFilter filter) {
+        return disableServletAutoRegistration(filter);
+    }
+
+    @Bean
+    public FilterRegistrationBean<IpAllowlistFilter> ipAllowlistFilterRegistration(IpAllowlistFilter filter) {
+        return disableServletAutoRegistration(filter);
+    }
+
+    private static <F extends jakarta.servlet.Filter> FilterRegistrationBean<F> disableServletAutoRegistration(
+            F filter) {
+        var registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
     }
 
     @Bean

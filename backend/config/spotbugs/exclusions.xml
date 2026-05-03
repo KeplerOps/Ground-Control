@@ -61,6 +61,14 @@
         <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
     </Match>
 
+    <!-- ActorFilter constructor resolves SecurityProperties via ObjectProvider.getIfAvailable;
+         that call propagates BeansException on a misconfigured context, which is the desired
+         fail-fast behavior. CT_CONSTRUCTOR_THROW would otherwise flag the indirect throw. -->
+    <Match>
+        <Class name="com.keplerops.groundcontrol.shared.web.ActorFilter" />
+        <Bug pattern="CT_CONSTRUCTOR_THROW" />
+    </Match>
+
     <!-- Spring Security filters and HTTP handlers store the injected SecurityProperties /
          ObjectMapper bean by reference — that is the standard Spring DI pattern. -->
     <Match>

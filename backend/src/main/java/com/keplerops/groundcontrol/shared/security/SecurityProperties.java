@@ -13,7 +13,7 @@ import org.springframework.security.web.util.matcher.IpAddressMatcher;
  * <p>Driven from {@code groundcontrol.security.*} — operators rotate credentials, adjust the IP
  * allowlist, or toggle OpenAPI exposure without code changes.
  */
-@ConfigurationProperties(prefix = "groundcontrol.security")
+@ConfigurationProperties(prefix = "groundcontrol.security", ignoreUnknownFields = false)
 public class SecurityProperties {
 
     private boolean enabled = true;
