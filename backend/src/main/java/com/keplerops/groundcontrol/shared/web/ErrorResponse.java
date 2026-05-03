@@ -1,14 +1,19 @@
-package com.keplerops.groundcontrol.api;
+package com.keplerops.groundcontrol.shared.web;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.Map;
 
 /**
- * Structured error response envelope.
+ * Structured error response envelope used across HTTP responses.
  *
  * <pre>
  * {"error": {"code": "not_found", "message": "...", "detail": null}}
  * </pre>
+ *
+ * <p>Lives in {@code shared.web} because both the {@code api.GlobalExceptionHandler} and the
+ * {@code shared.security} filter chain handlers need to emit it. Keeping the envelope in the
+ * shared HTTP package avoids a {@code shared -> api} dependency for the security entry point and
+ * access-denied handler.
  */
 public record ErrorResponse(ErrorBody error) {
 

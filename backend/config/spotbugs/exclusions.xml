@@ -37,11 +37,47 @@
         <Bug pattern="EI_EXPOSE_REP2" />
     </Match>
 
-    <!-- Spring-managed shared components (security filters, properties, web) store
-         injected dependencies and expose @ConfigurationProperties lists by design. -->
+    <!-- ErrorResponse is a JSON envelope record that carries a Map<String, Object> detail
+         block. The Map ref is exposed via the record accessor by design — same as the
+         api/* records that were already excluded. -->
     <Match>
-        <Package name="~com\.keplerops\.groundcontrol\.shared\..*" />
+        <Class name="com.keplerops.groundcontrol.shared.web.ErrorResponse" />
         <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.keplerops.groundcontrol.shared.web.ErrorResponse$ErrorBody" />
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
+    </Match>
+
+    <!-- @ConfigurationProperties POJO returns/accepts a mutable list by design — Spring's
+         relaxed binding requires the live list during binding. EI_EXPOSE_REP applies to the
+         outer class and the nested ApiCredential record-style class. -->
+    <Match>
+        <Class name="com.keplerops.groundcontrol.shared.security.SecurityProperties" />
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.keplerops.groundcontrol.shared.security.SecurityProperties$ApiCredential" />
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
+    </Match>
+
+    <!-- Spring Security filters and HTTP handlers store the injected SecurityProperties /
+         ObjectMapper bean by reference — that is the standard Spring DI pattern. -->
+    <Match>
+        <Class name="com.keplerops.groundcontrol.shared.security.BearerTokenAuthFilter" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.keplerops.groundcontrol.shared.security.IpAllowlistFilter" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.keplerops.groundcontrol.shared.security.ApiAuthenticationEntryPoint" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.keplerops.groundcontrol.shared.security.ApiAccessDeniedHandler" />
+        <Bug pattern="EI_EXPOSE_REP2" />
     </Match>
 
     <!-- Constructors that validate inputs and throw are by-design -->

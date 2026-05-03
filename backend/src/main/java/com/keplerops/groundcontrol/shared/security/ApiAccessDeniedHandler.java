@@ -1,7 +1,7 @@
 package com.keplerops.groundcontrol.shared.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.keplerops.groundcontrol.api.ErrorResponse;
+import com.keplerops.groundcontrol.shared.web.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;

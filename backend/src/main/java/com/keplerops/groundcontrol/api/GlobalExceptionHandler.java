@@ -6,6 +6,7 @@ import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.GroundControlException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.shared.web.ErrorResponse;
 import java.util.HashMap;
 import java.util.Map;
 import org.slf4j.Logger;

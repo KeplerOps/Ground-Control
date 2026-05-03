@@ -1,7 +1,7 @@
 package com.keplerops.groundcontrol.shared.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.keplerops.groundcontrol.api.ErrorResponse;
+import com.keplerops.groundcontrol.shared.web.ErrorResponse;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

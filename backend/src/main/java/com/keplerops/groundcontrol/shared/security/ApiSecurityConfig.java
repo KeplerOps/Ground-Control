@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -65,7 +66,10 @@ public class ApiSecurityConfig {
         // signed-in browser. ADR-026 documents this; do not re-enable CSRF without
         // simultaneously moving to cookie-based sessions and re-evaluating the model.
         http.csrf(csrf -> csrf.disable())
-                .cors(cors -> cors.disable())
+                // Use Spring Security's CORS support so the registered MVC CorsConfigurationSource
+                // is honored on preflight requests. With cors.disable() preflight OPTIONS calls hit
+                // the security chain before MVC and would be rejected for protected routes.
+                .cors(Customizer.withDefaults())
                 .formLogin(form -> form.disable())
                 .httpBasic(basic -> basic.disable())
                 .logout(logout -> logout.disable())
@@ -111,10 +115,21 @@ public class ApiSecurityConfig {
                     .hasRole(ROLE_ADMIN)
                     .requestMatchers("/api/v1/pack-registry/**")
                     .hasRole(ROLE_ADMIN)
+                    .requestMatchers("/api/v1/trust-policies/**")
+                    .hasRole(ROLE_ADMIN)
+                    .requestMatchers("/api/v1/pack-install-records/**")
+                    .hasRole(ROLE_ADMIN)
                     .requestMatchers("/api/v1/**")
                     .authenticated()
+                    .requestMatchers("/actuator/**")
+                    .denyAll()
+                    // SPA static assets and client-side routes (anything not under /api or
+                    // /actuator) are served anonymously — without an auth token the API calls
+                    // they make will return 401, but the shell HTML/CSS/JS must load so a
+                    // login UI can render. The SpaController forwards non-API routes to
+                    // index.html; static resources are served from the classpath.
                     .anyRequest()
-                    .denyAll();
+                    .permitAll();
         });
 
         return http.build();
