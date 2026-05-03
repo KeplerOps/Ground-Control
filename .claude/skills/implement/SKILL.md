@@ -91,8 +91,17 @@ Preflight MUST cover every in-scope requirement, not just the first one. The pre
 
 Explore the codebase to determine whether the work described in the issue is already covered by existing code:
 - Search for relevant classes, methods, tests, and configurations touching the subsystems the issue describes.
-- Consult the repository knowledge base (see the Ground Control agent knowledge system design — `docs/notes/agent-knowledge-system-design.md`) during exploration when one is present. Grep the knowledge index for keywords matching the issue's subject area and read any pages that match.
+- Consult the repository's existing documentation during exploration. Ground Control keeps design context in `docs/` and `architecture/` — ADRs (`architecture/adrs/`), architecture overview (`docs/architecture/ARCHITECTURE.md`), the agent knowledge base (`docs/knowledge/index.md`, `docs/knowledge/SCHEMA.md`), and design notes (`docs/notes/`, including `agent-knowledge-system-design.md`). Coding standards live at `docs/CODING_STANDARDS.md` and the workflow reference at `docs/WORKFLOW.md` / `docs/DEVELOPMENT_WORKFLOW.md`. Grep these for keywords matching the issue's subject area and read any pages that match before designing changes.
 - Check if the described behavior already exists.
+- **Before designing new code, inventory the existing cross-cutting concerns the change will need.** Do not skip this — it is the single biggest defense against re-implementing helpers that already exist. For each concern the new code will touch, find and read the project's existing implementation:
+  - Logger (project's chosen logging library; structured-logging conventions; SLF4J patterns in the Java backend)
+  - Validation / schemas (Bean Validation annotations, Spring `@Validated`, Ground Control schema definitions, JSON Schema files, frontend Zod schemas)
+  - Error types and error-response builders (`api/` exception handlers, `ProblemDetail`/`ResponseStatusException` patterns)
+  - Authentication / authorization helpers
+  - Configuration loaders and environment-variable access (`@ConfigurationProperties`, Spring profiles)
+  - HTTP client wrappers, JPA repository/session helpers, retry/backoff utilities
+  - Test fixtures, factory helpers, and mock builders (`@WebMvcTest`, `@DataJpaTest`, ArchUnit harnesses)
+  Use the existing helper. If you genuinely need a new one, justify the new helper in the plan (Step 4) and note why the existing one didn't fit. Re-implementing what's already there is the failure mode Step 12.5 is designed to catch — catch it here first.
 - For each requirement in `in_scope_requirements[]`, review its existing traceability links (IMPLEMENTS, TESTS) via `gc_get_traceability` on the requirement UUID. Some or all clauses may already be satisfied.
 - Reuse the architecture-preflight guidance from Step 2.5 while assessing existing coverage and planning changes.
 
@@ -120,7 +129,7 @@ After plan approval, implement using **TDD**. This is not optional:
 3. **Refactor with the test green.** Clean up duplication, extract helpers, rename for clarity — but only with the safety net of green tests. Re-run the test after each refactor.
 4. **Repeat per clause / acceptance criterion / edge case.** Do not write a batch of production code first and then "fill in tests" afterwards — that is not TDD, it is post-hoc test-shaped coverage and fails to drive the design.
 5. **Edge cases and failure modes get tests too.** Validation errors, boundary inputs, conflict states, not-found paths, status transitions. If a behavior matters enough to ship, it matters enough for a red-green cycle.
-6. **Integration / @WebMvcTest layers**: same loop. Write the failing controller / repository / migration test before the production code that satisfies it. Repository-policy rules from `.ground-control.yaml` (e.g., `@WebMvcTest` for new controllers) are TDD targets, not afterthoughts.
+6. **Integration / `@WebMvcTest` / `@DataJpaTest` layers**: same loop. Write the failing controller / repository / migration test before the production code that satisfies it. Repository-policy rules from `.ground-control.yaml` (e.g., `@WebMvcTest` for new controllers, ArchUnit boundary checks) are TDD targets, not afterthoughts.
 7. **If you discover during TDD that the plan is wrong**, stop and revise the plan rather than bending tests to match a flawed design. The tests are telling you something — listen to them.
 
 Pre-existing tests around touched code must stay green at every step. If a refactor breaks an unrelated test, fix the root cause; do not silence the test.
@@ -141,10 +150,10 @@ Before declaring implementation complete, build a mapping from every clause of e
 Present the mapping as a checklist with the requirement UID (or `issue`) as the source label:
 
 ```
-- [ ] GC-X004 clause: "..." → Satisfied by: file.java:line
-- [ ] GC-X004 clause: "..." → Satisfied by: file.java:line
-- [ ] GC-X005 clause: "..." → Satisfied by: file.java:line
-- [ ] issue acceptance: "..." → Satisfied by: file.java:line
+- [ ] GC-X004 clause: "..." → Satisfied by: backend/src/main/java/com/keplerops/groundcontrol/.../File.java:line
+- [ ] GC-X004 clause: "..." → Satisfied by: backend/src/test/java/com/keplerops/groundcontrol/.../FileTest.java:line
+- [ ] GC-X005 clause: "..." → Satisfied by: frontend/src/.../component.tsx:line
+- [ ] issue acceptance: "..." → Satisfied by: architecture/adrs/0XX-name.md:line
 ```
 
 Do not proceed until every clause and criterion is checked off.
@@ -238,7 +247,7 @@ Otherwise:
    - Request every page until all issues are retrieved (`ps=500` plus `p=2,3,...` until `total` is covered). Do not truncate.
    - Repeat the same query with `types=SECURITY_HOTSPOT` via `api/hotspots/search?projectKey=...&pullRequest=...&status=TO_REVIEW` so security hotspots are not missed — they are a separate endpoint from plain issues.
 
-4. **Fix ALL open issues the query returns — code-smell, bug, vulnerability, and security hotspot, regardless of severity (INFO through BLOCKER).** This follows the same "fix everything, no triage" rule as the review loop (see `Review loop rules` below): no "low priority", "out of scope", "follow-up PR", or "style-only" deferrals. If you believe a specific finding should be left unfixed (false positive, intentional pattern, etc.), STOP and ask the user for explicit permission before marking it resolved in SonarCloud or skipping it.
+4. **Fix every open issue the query returns — code-smell, bug, vulnerability, and security hotspot, every severity from INFO to BLOCKER, pre-existing or not.** Same rule as the review loop below. If you think a finding is dangerous to fix, unwise in context, or a false positive, STOP and ask the user. Wait for their answer; do not push commits while the question is open.
 
 5. For each fix cycle:
    - Apply the fixes.
@@ -253,15 +262,14 @@ Otherwise:
 
 ## Review loop rules (apply to every review step in this phase)
 
-Every review step below (Codex cross-model, test quality review) follows the **same loop**:
+Every review step below (Codex cross-model, refactor & cross-cutting concerns, test quality review) follows the **same loop**:
 
 1. **Invoke the review.**
 2. **Read the FULL output.** Do not stop after the first few findings.
-3. **Fix ALL issues the reviewer identifies — blocking or not, severity-rated or not, "nitpick" or not.** There is no triage bucket. "Low priority", "nice to have", "follow-up PR", "out of scope" are not valid reasons to skip a finding.
-4. **If you cannot or believe you should not fix a specific finding**, you MUST stop and ask the user for explicit permission to leave it unfixed. Do not decide unilaterally. State the finding, why you think it should be skipped, and wait for the user's answer. Resume only after they explicitly confirm.
-5. **Re-run the SAME review after fixing.** Do not assume your fixes are complete — the re-run is the verification.
-6. **Repeat until the reviewer reports zero findings, OR the cycle cap is hit.**
-7. **Cycle cap: 5 iterations per review step.** If a review still reports findings after 5 invoke→fix→re-run cycles, STOP and escalate to the user with the full history of findings, fixes, and remaining issues. Do not loop indefinitely.
+3. **Fix every finding, pre-existing or not.** If you think a finding is dangerous to fix, unwise in context, or a false positive, STOP and ask the user. Wait for their answer; do not push commits while the question is open.
+4. **Re-run the SAME review after fixing.** Do not assume your fixes are complete — the re-run is the verification.
+5. **Repeat until the reviewer reports zero findings, OR the cycle cap is hit.**
+6. **Cycle cap: 5 iterations per review step.** If a review still reports findings after 5 invoke→fix→re-run cycles, STOP and escalate to the user with the full history of findings, fixes, and remaining issues. Do not loop indefinitely.
 
 For every cycle, after applying fixes, commit and push BEFORE re-running the review so the reviewer sees the updated tree. Format every fix commit as `Fix review findings (<reviewer>, cycle <N>)` so the loop history is visible in git log.
 
@@ -276,25 +284,72 @@ For every cycle, after applying fixes, commit and push BEFORE re-running the rev
    - `base_branch`: `dev`
    - `pr_number`: the PR number from step 2
 4. The tool returns `{pr_number, finding_count, comments: [{comment_id, thread_id, reviewer, path, line, title, html_url}, ...], reviewers, core_review_text, security_review_text}`. Each comment carries a `reviewer` field (`core` or `security`) so you can triage attention, but the fix/verify loop below is the same regardless. Codex has already posted each finding as an inline PR review comment — you do NOT need to post anything yourself.
-5. If `finding_count` is 0, skip to Step 13.
+5. If `finding_count` is 0, skip to Step 12.5.
 6. Otherwise, for EACH entry in `comments`, run the following fix/verify loop:
    1. Read the comment body if needed: `gh api /repos/<owner>/<repo>/pulls/comments/<comment_id>`.
-   2. Fix the finding locally. Apply the same "fix every finding, no triage, ask user permission if you will not fix" rules from the **Review loop rules** section above.
+   2. Fix the finding locally. Apply the **Review loop rules** above: fix every finding, pre-existing or not; STOP and ask the user only if you think a specific finding is dangerous to fix, unwise in context, or a false positive.
    3. Run the local completion gate to make sure nothing regressed locally.
    4. Call `gc_codex_verify_finding` with `repo_path`, `pr_number`, and the `comment_id`. Codex will read your local changes and decide:
       - **`status: "resolved"`** — the review thread has already been marked resolved on GitHub. Move on to the next comment.
       - **`status: "unresolved"`** — codex posted a threaded reply with `reply_body` containing concrete new directions. Read `reply_body`, fix per those directions, and re-invoke `gc_codex_verify_finding`. **Per-finding cap: 2 verify calls.** If the third call would be needed, STOP and escalate to the user with the finding, your fix history, and the latest `reply_body`.
 7. After all findings in the returned `comments` list are marked `resolved`, commit and push the fixes (one commit per fix cycle, message `Fix review findings (codex, cycle <N>)`), then re-invoke `gc_codex_review` with the same arguments to confirm no new issues surfaced after your fixes.
-8. **Overall step cap: 5 iterations of `gc_codex_review`.** If the fifth invocation still returns findings, STOP and escalate to the user.
+8. **Overall step cap: 3 iterations of `gc_codex_review`.** Tightened from 5 — if the third invocation still returns findings, the diff has structural issues that need a human conversation, not another auto-fix pass. STOP and escalate to the user with the full history of findings, fixes, and remaining issues.
 
 **Tool shape**: `gc_codex_verify_finding` accepts only `repo_path`, `pr_number`, and `comment_id`. It reads the comment directly from GitHub; do not try to paraphrase the finding or pass additional context through the tool.
+
+### Step 12.5: Refactor & Cross-Cutting Concerns Review
+
+This review is the corrective for two systemic failure modes that bloat the codebase if left unchecked: **god classes / god methods / god functions / oversized files**, and **rebuilding helpers locally** instead of using the cross-cutting concerns the codebase already has (project logger, validation schemas, error types, config loaders, HTTP/DB session wrappers, test fixtures). Both compound silently if every PR adds another instance.
+
+**Every finding gets fixed, pre-existing or not.** This applies to bloat in any file the PR touched: "it was already like that" is not a valid skip — the goal is to sort the codebase out as we go, not to ratchet quality down by deferring. If you think a specific finding is dangerous to fix, unwise in context, or a false positive, STOP and ask the user. Wait for their answer; do not push commits while the question is open.
+
+#### Run the review
+
+Run a refactor-focused codex review against the PR diff. Mechanism (in order of preference):
+
+1. **`gc_codex_review`** if it exposes a refactor reviewer set (`reviewer_set: "refactor"` or equivalent). Same fix/verify loop machinery as Step 12.
+2. **Direct codex invocation** via Bash (`codex exec`) using the prompt template below. Post findings as PR review comments yourself; track them through the same fix loop.
+3. **Subagent fallback** via the Agent tool (`subagent_type: general-purpose`) with the prompt template below. Have the subagent return findings as a structured markdown list; you walk the list applying fixes.
+
+Use the same prompt regardless of mechanism:
+
+```
+Review PR #<N> (diff: `gh pr diff <N>`, branch: <branch-name>) for refactor and cross-cutting-concerns issues. Anchor every finding to a specific file:line range.
+
+Scope: every PRODUCTION file the PR added or modified (skip pure test files, doc files, and configuration). Pre-existing bloat in those files IS in scope — if a file the PR touched contains a god unit or a duplicated helper, surface it regardless of whether the PR introduced it.
+
+For each file, check:
+
+1. **God units.** Flag any single file > 400 LOC, any function/method > 80 LOC or with cyclomatic complexity ≥ 10, any class with > 15 public methods, any unit carrying multiple unrelated responsibilities. For each, propose a concrete extraction: which lines move where, what the resulting unit's single responsibility is.
+
+2. **Cross-cutting concern reuse.** SEARCH THE REPO before flagging — if the existing helper exists, name it (file:line). Check that the PR's new code uses, not re-implements:
+   - The project's logger (SLF4J on the Java side; the frontend's chosen logging approach)
+   - Validation schemas (Bean Validation, Spring `@Validated`, Ground Control schema definitions, Zod on the frontend)
+   - Error types and error-response builders (`ProblemDetail`/`ResponseStatusException`, exception handlers)
+   - Auth / authz helpers
+   - Configuration loaders (`@ConfigurationProperties`, env-var access)
+   - HTTP client / JPA repository / session wrappers, retry / backoff utilities
+   - Test fixtures, factory helpers, mock builders (`@WebMvcTest`, `@DataJpaTest`, ArchUnit harnesses)
+   For each duplication, show the offending new code AND the existing helper that should be used instead.
+
+3. **Modularity & testability.** Flag code that mixes I/O with pure logic (extract pure functions / pure domain methods), code that requires heavy mocking to test, code with implicit shared mutable state. Suggest the explicit-interface refactor. Domain-layer code must stay free of Spring web imports per ArchUnit; flag any leakage.
+
+Return findings as markdown, one per finding:
+- `file:line-range` — `category` — concrete fix (specific extraction targets, specific existing helper file:line to reuse).
+```
+
+#### Fix loop
+
+Apply the **Review loop rules** (above Step 12). Fix every finding the review surfaces. After fixes, commit with message `Refactor per review (cycle <N>)` and re-run the review. If you genuinely believe a specific finding should be left unfixed, STOP and ask the user — do not decide unilaterally — but the default answer is always fix.
+
+**Cycle cap: 2 iterations.** Tight by design — if a second pass still surfaces findings, the diff has structural issues that need a design conversation, not another auto-fix pass. STOP and escalate to the user with the full finding history.
 
 ### Step 13: Test Quality Review
 
 **CRITICAL: You MUST use the Skill tool to invoke the review-tests skill.**
 
 1. Call the Skill tool with `skill="review-tests"` to invoke the test quality review.
-2. Apply the **Review loop rules** above: fix every finding, ask user permission for anything you will not fix (including "warning" level — the review loop rules apply to warnings too, there is no triage bucket), re-invoke `skill="review-tests"` after each fix cycle, cap at 5 cycles.
+2. Apply the **Review loop rules** above: fix every finding, pre-existing or not, including "warning" level. STOP and ask the user only if you think a specific finding is dangerous to fix, unwise in context, or a false positive. Re-invoke `skill="review-tests"` after each fix cycle, cap at 5 cycles.
 
 ### Step 14: Final CI re-verification
 
@@ -367,7 +422,7 @@ Now that CI and all reviews are green AND every in-scope requirement is ACTIVE, 
      - **Configuration requirements** (repo config, workflow config, policy files, ground-control.yaml sections) — IMPLEMENTS points at the config file or schema file that encodes the requirement.
      - **Workflow requirements** (CI steps, hooks, policy rules) — IMPLEMENTS points at the workflow file, hook script, or policy script.
      If the diff does not touch any file that implements a given in-scope requirement, either add the implementation (go back to Step 4) or the requirement is not actually in scope and should be removed from the issue body before reconciliation proceeds.
-   - **TESTS coverage is conditional.** Add a TESTS link when the diff introduces or touches an automated test that verifies the requirement — unit test, integration test, `@WebMvcTest`, policy test, property test, or any other form of executable verification. TESTS is NOT required when the requirement is satisfied purely by documentation, configuration, or structural invariants that have no executable behavior to test (for example: "SCHEMA.md shall document the source-citation rule", "the repo shall declare its knowledge base location in `.ground-control.yaml`"). In that case the IMPLEMENTS link alone is the complete coverage record.
+   - **TESTS coverage is conditional.** Add a TESTS link when the diff introduces or touches an automated test that verifies the requirement — unit test, integration test, `@WebMvcTest`, `@DataJpaTest`, ArchUnit test, property test, or any other form of executable verification. TESTS is NOT required when the requirement is satisfied purely by documentation, configuration, or structural invariants that have no executable behavior to test (for example: "SCHEMA.md shall document the source-citation rule", "the repo shall declare its knowledge base location in `.ground-control.yaml`"). In that case the IMPLEMENTS link alone is the complete coverage record.
    - **Do not fabricate test links** just to satisfy this step. If a requirement has testable behavior and no test was added, go back to Step 4.4 (TDD) and add the missing test; do not paper over the gap with a link to an unrelated file.
    - **Never link the diff to a requirement it does not satisfy** just to satisfy this step. Ripping out real coverage and linking a plausible-looking neighbor is worse than leaving a gap — STOP and surface the mismatch to the user instead.
 
