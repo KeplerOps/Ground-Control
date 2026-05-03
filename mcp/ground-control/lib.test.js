@@ -1942,28 +1942,36 @@ describe("parseCodexReviewCycleMarkers", () => {
 });
 
 describe("evaluateCodexReviewCycleCap", () => {
-  it("allows cycle 1 when no priors exist", () => {
+  it("allows cycle 1 when no priors exist and surfaces a fix-and-push next_action", () => {
     const result = evaluateCodexReviewCycleCap({ priorCount: 0, prNumber: 792 });
     assert.equal(result.ok, true);
     assert.equal(result.nextCycle, 1);
     assert.equal(result.cap, CODEX_REVIEW_HARD_CAP);
+    assert.equal(result.next_action, "fix_all_findings_and_push");
+    assert.notEqual(result.override, true);
   });
 
-  it("allows cycle 2 after one prior", () => {
+  it("allows cycle 2 after one prior and signals the summarize-and-escalate discipline", () => {
     const result = evaluateCodexReviewCycleCap({ priorCount: 1, prNumber: 792 });
     assert.equal(result.ok, true);
     assert.equal(result.nextCycle, 2);
+    // Cycle 2's next_action is the gap that #794 was filed to close — agents
+    // must fix all findings AND post a summary AND escalate, not stop early
+    // to ask whether to fix.
+    assert.equal(result.next_action, "fix_all_findings_then_summarize_and_escalate");
   });
 
-  it("refuses cycle 3 (cap reached)", () => {
+  it("refuses cycle 3 (cap reached) and tells the agent what to do instead", () => {
     const result = evaluateCodexReviewCycleCap({ priorCount: 2, prNumber: 792 });
     assert.equal(result.ok, false);
     assert.equal(result.error, "codex_review_cap_reached");
     assert.equal(result.prior_cycles, 2);
     assert.equal(result.cap, 2);
     assert.equal(result.pr_number, 792);
+    assert.equal(result.next_action, "post_summary_and_escalate_to_user");
     assert.match(result.message, /hard cap reached/);
-    assert.match(result.message, /escalated to the user/);
+    assert.match(result.message, /escalate to the user/);
+    assert.match(result.message, /override_cap=true/);
   });
 
   it("refuses higher counts the same way (cap is a floor, not equality)", () => {
@@ -1979,6 +1987,48 @@ describe("evaluateCodexReviewCycleCap", () => {
     const refused = evaluateCodexReviewCycleCap({ priorCount: 5, prNumber: 1, hardCap: 5 });
     assert.equal(refused.ok, false);
     assert.equal(refused.cap, 5);
+  });
+
+  it("allows cycle 3 when overrideCap=true with a non-empty overrideReason", () => {
+    const result = evaluateCodexReviewCycleCap({
+      priorCount: 2,
+      prNumber: 792,
+      overrideCap: true,
+      overrideReason: "user said 'yes run cycle 3 to verify' on 2026-05-04",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.override, true);
+    assert.equal(result.nextCycle, 3);
+    assert.match(result.override_reason, /yes run cycle 3 to verify/);
+  });
+
+  it("rejects overrideCap=true without an overrideReason (audit requirement)", () => {
+    const noReason = evaluateCodexReviewCycleCap({ priorCount: 2, prNumber: 1, overrideCap: true });
+    assert.equal(noReason.ok, false);
+    assert.equal(noReason.error, "codex_review_override_missing_reason");
+
+    const emptyReason = evaluateCodexReviewCycleCap({
+      priorCount: 2,
+      prNumber: 1,
+      overrideCap: true,
+      overrideReason: "   ",
+    });
+    assert.equal(emptyReason.ok, false);
+    assert.equal(emptyReason.error, "codex_review_override_missing_reason");
+  });
+
+  it("override applies even within the cap (allows arbitrary mid-flight overrides)", () => {
+    // A user could authorize a cycle even when the cap hasn't been reached
+    // yet (e.g., to skip ahead). The override path doesn't second-guess.
+    const result = evaluateCodexReviewCycleCap({
+      priorCount: 0,
+      prNumber: 792,
+      overrideCap: true,
+      overrideReason: "user wants cycle 1 marked as override for some reason",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.override, true);
+    assert.equal(result.nextCycle, 1);
   });
 
   it("throws on garbage priorCount (defensive, surfaces a real bug rather than counting nothing)", () => {
@@ -2009,6 +2059,37 @@ describe("buildCodexReviewCycleMarker", () => {
     // and a marker for a different PR is not counted
     const other = buildCodexReviewCycleMarker({ prNumber: 999, cycleNumber: 1 });
     assert.equal(parseCodexReviewCycleMarkers([m1, m2, other], 50), 2);
+  });
+
+  it("renders an override marker distinguishable from regular cycle markers", () => {
+    const reason = 'user authorized cycle 3 to verify cycle-2 fixes';
+    const marker = buildCodexReviewCycleMarker({
+      prNumber: 792,
+      cycleNumber: 3,
+      override: true,
+      overrideReason: reason,
+    });
+    // Override markers carry override="true" and a quoted reason= attribute.
+    assert.match(marker, /override="true"/);
+    assert.match(marker, /reason="[^"]+"/);
+    assert.match(marker, /USER-AUTHORIZED OVERRIDE/);
+    assert.match(marker, new RegExp(reason));
+    // And they still round-trip through the cycle parser (so they count).
+    assert.equal(parseCodexReviewCycleMarkers([marker], 792), 1);
+  });
+
+  it("escapes quotes in override reasons so the comment HTML stays parseable", () => {
+    const tricky = 'user said "yes do it" then ran off';
+    const marker = buildCodexReviewCycleMarker({
+      prNumber: 1,
+      cycleNumber: 3,
+      override: true,
+      overrideReason: tricky,
+    });
+    // JSON.stringify escapes the embedded quotes; the marker must still
+    // contain the prefix and round-trip.
+    assert.match(marker, /reason="user said \\"yes do it\\" then ran off"/);
+    assert.equal(parseCodexReviewCycleMarkers([marker], 1), 1);
   });
 });
 

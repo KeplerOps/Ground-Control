@@ -66,13 +66,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as a PR issue-comment. The next invocation reads the markers and
   refuses a 3rd cycle on the same PR with a structured error:
   `{ok: false, error: "codex_review_cap_reached", message,
-  prior_cycles, cap}`. Successful returns surface `cycle` and `cap` so
-  the agent sees its position. Pre-push uncommitted reviews
-  (Step 6.5) are not capped here — they have a separate cycle limit
-  and no PR yet; left for a follow-up MVP. Three new pure-function
-  exports back the enforcement: `parseCodexReviewCycleMarkers`,
-  `evaluateCodexReviewCycleCap`, `buildCodexReviewCycleMarker`. 14
-  new unit tests in `lib.test.js`.
+  prior_cycles, cap, next_action}`. Successful returns surface
+  `cycle`, `cap`, and `next_action` so the agent sees its position
+  and the discipline expected at each cycle (e.g.,
+  `fix_all_findings_then_summarize_and_escalate` on cycle 2). The
+  cap-reached refusal returns
+  `next_action: "post_summary_and_escalate_to_user"`. Pre-push
+  uncommitted reviews (Step 6.5) are not capped here — they have a
+  separate cycle limit and no PR yet; left for a follow-up MVP.
+- `gc_codex_review` accepts `override_cap=true` + `override_reason`
+  for user-authorized cycle 3+ (the agent cannot self-authorize: the
+  override_reason must quote the user's authorization, captured in
+  the conversation, and is logged on the marker for audit). Override
+  cycles are recorded as override markers
+  (`<!-- gc:codex-review-cycle ... override="true" reason="..." -->`)
+  distinguishable from regular ones. Without the override, the cap
+  refuses cycle 3+ unconditionally.
+- `next_action` field on `gc_codex_review` results: closes the
+  specific behavior bug where agents stop at cycle 2 to ask "should
+  I fix these?" instead of fixing and escalating. The mechanical
+  signal now points at the discipline; skill prose is reinforced
+  rather than alone.
+- Pure-function exports backing the enforcement:
+  `parseCodexReviewCycleMarkers`, `evaluateCodexReviewCycleCap` (now
+  with `overrideCap` / `overrideReason` params), and
+  `buildCodexReviewCycleMarker` (now with `override` / `overrideReason`
+  knobs). 19 unit tests cover happy path, override path, refusal
+  path, missing-reason rejection, override-marker round-trip, and
+  reasons containing embedded quotes.
 
 ### Fixed
 

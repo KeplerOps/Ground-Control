@@ -340,17 +340,24 @@ This step normally lands as a **verification pass** rather than a fix/verify loo
    5. After the finding is resolved (or marked `wontfix`/`not-applicable` by user direction), post a one-line decision comment on the GitHub issue thread linking back to the PR review comment. `defer` is not a valid decision — the workflow's contract is "fix every finding before PR is ready"; deferring a finding violates that contract.
 7. After all findings are resolved, commit and push the fixes (one commit per fix cycle, message `Fix review findings (codex, cycle <N>)`), then re-invoke `gc_codex_review` to confirm no new issues surfaced.
 
-8. **Hard cap: 2 iterations of `gc_codex_review`.** No escape clause.
+8. **Hard cap: 2 iterations of `gc_codex_review`** (with a user-authorized override; see below).
 
-   **Read this carefully — the cap is *NOT* permission to skip fixing cycle 2 findings.** The contract is:
+   **The cap is *NOT* permission to skip fixing findings, and stopping at a cycle-2 finding to ask "should I fix this?" is itself a process violation.** You ran the review *because* findings should be fixed; pausing to ask before fixing is asking the user to do work they delegated. The contract is:
 
-   - Cycle 1 → review → **fix every finding** → push.
-   - Cycle 2 → review → **fix every finding** → push.
-   - Cycle 3 is forbidden. After fixing cycle 2's findings you do **not** run a 3rd `gc_codex_review` to verify the fixes. The fixes ship without further codex verification, and any residual concern is escalated to the user as an issue-thread comment listing the remaining-after-cycle-2 findings.
+   - **Cycle 1**: review → **fix every finding without asking** → push.
+   - **Cycle 2**: review → **fix every finding without asking** → push → **then** post a summary comment to the issue thread listing every finding from both cycles and how it was addressed → **then** escalate to the user with the summary and ask: *"Cycle 2 fixes complete. Should I run cycle 3 to verify the fixes, or ship as-is? See <summary-comment-url>."* The user makes the judgment call on cycle 3.
+   - **Cycle 3** is the user's decision, not yours. If the user authorizes it, invoke `gc_codex_review` with `override_cap=true` and `override_reason="<one-line quote of the user's authorization>"`. Without that override, `gc_codex_review` refuses cycle 3 with a structured error.
 
    The cap exists because cycle 3+ codex passes hit diminishing returns and start repeating out-of-scope findings — not because cycle 2 fixes themselves are optional.
 
-   **The cap is enforced by the MCP server, not by this prose.** `gc_codex_review` posts a machine-readable marker comment to the PR after each successful invocation and refuses a 3rd invocation for the same PR with a structured error: `{ok: false, error: "codex_review_cap_reached", message, prior_cycles, cap}`. The agent literally cannot run cycle 3; it must escalate. Each successful return also surfaces `cycle` and `cap` so the agent can see "cycle 1 of 2" or "cycle 2 of 2" and self-pace. (See issue #794 for the enforcement design.)
+   **The cap is enforced by the MCP server, not by this prose.** `gc_codex_review` posts a machine-readable marker comment to the PR after each successful invocation. The next invocation:
+
+   - Reads existing markers and counts cycles for this PR.
+   - If `priorCount < 2` and `override_cap` is not set: allows the run, returns `cycle` and `cap` in the result, and posts a new marker.
+   - If `priorCount >= 2` and `override_cap` is not set: refuses with `{ok: false, error: "codex_review_cap_reached", message, prior_cycles, cap, next_action}`. `next_action` instructs the agent to escalate to the user with a summary; the agent literally cannot run cycle 3 without authorization.
+   - If `override_cap === true`: requires `override_reason` (a non-empty string). The run proceeds and the result includes `override: true` plus the reason. The marker for that cycle is recorded as an override marker so audits can distinguish authorized cycle-3+ runs from regular ones.
+
+   Successful returns also surface `next_action` — `"fix_findings_and_push"` for cycle 1, `"fix_findings_then_summarize_and_escalate"` for cycle 2, etc. Follow the next_action verbatim. (See issue #794 for the enforcement design.)
 
 **Tool shape**: `gc_codex_verify_finding` accepts only `repo_path`, `pr_number`, and `comment_id`. It reads the comment directly from GitHub; do not paraphrase the finding through the tool.
 

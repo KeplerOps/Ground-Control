@@ -2179,8 +2179,12 @@ function buildPostingInstructions({ prNumber, reviewerLabel }) {
 
 export const CODEX_REVIEW_HARD_CAP = 2;
 export const CODEX_REVIEW_CYCLE_MARKER_PREFIX = "<!-- gc:codex-review-cycle";
+// Tolerate optional attrs (override="true", reason="...") between pr and the
+// close marker so override-cycle markers parse the same way as regular ones.
+// Reason values may contain JSON-escaped quotes (\"), so the trailing chunk
+// matches anything up to the comment close.
 const CODEX_REVIEW_CYCLE_MARKER_RE =
-  /<!--\s*gc:codex-review-cycle\s+cycle="(\d+)"\s+pr="(\d+)"\s+-->/;
+  /<!--\s*gc:codex-review-cycle\s+cycle="(\d+)"\s+pr="(\d+)"[^]*?-->/;
 
 // Pure: counts how many cycle markers are present in a list of issue-comment
 // bodies for a given PR. Tolerates extra whitespace and unrelated markers.
@@ -2198,36 +2202,100 @@ export function parseCodexReviewCycleMarkers(commentBodies, prNumber) {
 }
 
 // Pure: given the prior cycle count, decide whether the next cycle is allowed.
-// Returns either { ok: true, nextCycle } or { ok: false, error, ... }. Keeping
-// this separate from the subprocess plumbing keeps it cheap to test.
-export function evaluateCodexReviewCycleCap({ priorCount, prNumber, hardCap = CODEX_REVIEW_HARD_CAP }) {
+// Returns either { ok: true, nextCycle, ... } or { ok: false, error, ... }.
+// Keeping this separate from the subprocess plumbing keeps it cheap to test.
+//
+// The cap can be overridden by the user (not the agent) by setting
+// overrideCap=true with an explicit overrideReason. The agent's contract is
+// that override_cap=true is only legitimate when the user authorized cycle 3+
+// in the same conversation; the override_reason must quote that authorization.
+// We do not (cannot) verify the human-side semantics here — but we do require
+// a non-empty reason so audits can tell legitimate overrides from accidents.
+export function evaluateCodexReviewCycleCap({
+  priorCount,
+  prNumber,
+  hardCap = CODEX_REVIEW_HARD_CAP,
+  overrideCap = false,
+  overrideReason = null,
+}) {
   if (typeof priorCount !== "number" || !Number.isFinite(priorCount) || priorCount < 0) {
     throw new Error(`evaluateCodexReviewCycleCap: priorCount must be a non-negative number, got ${priorCount}`);
   }
+
+  if (overrideCap === true) {
+    if (typeof overrideReason !== "string" || overrideReason.trim() === "") {
+      return {
+        ok: false,
+        error: "codex_review_override_missing_reason",
+        message:
+          "override_cap=true requires a non-empty override_reason quoting the user's authorization. " +
+          "Audits cannot distinguish legitimate overrides from accidental ones without a reason.",
+        pr_number: prNumber,
+        prior_cycles: priorCount,
+        cap: hardCap,
+      };
+    }
+    return {
+      ok: true,
+      nextCycle: priorCount + 1,
+      cap: hardCap,
+      override: true,
+      override_reason: overrideReason.trim(),
+    };
+  }
+
   if (priorCount >= hardCap) {
     return {
       ok: false,
       error: "codex_review_cap_reached",
       message:
         `gc_codex_review hard cap reached (${hardCap} cycles) for PR #${prNumber}. ` +
-        `Per GC-O007 / ADR-029, residual concerns must be escalated to the user as an issue-thread comment, ` +
-        `not addressed in a third cycle. Push fix commits first if you have new code to review; ` +
-        `the cap is per-PR, not per-commit.`,
+        `Per GC-O007 / ADR-029, after cycle ${hardCap} you must (a) post a summary of findings + fixes ` +
+        `to the issue thread, then (b) escalate to the user and ask whether to run cycle ${hardCap + 1} ` +
+        `or ship as-is. Do not address findings by silently re-invoking codex. If the user authorizes ` +
+        `another cycle, retry with override_cap=true and override_reason="<their authorization>".`,
       pr_number: prNumber,
       prior_cycles: priorCount,
       cap: hardCap,
+      next_action: "post_summary_and_escalate_to_user",
     };
   }
-  return { ok: true, nextCycle: priorCount + 1, cap: hardCap };
+
+  // Cycle 1 returns next_action that nudges toward "fix findings"; cycle 2
+  // returns the stronger nudge that includes the summarize-and-escalate
+  // discipline (the gap that #794 was specifically filed to close).
+  const nextCycle = priorCount + 1;
+  return {
+    ok: true,
+    nextCycle,
+    cap: hardCap,
+    next_action:
+      nextCycle === hardCap
+        ? "fix_all_findings_then_summarize_and_escalate"
+        : "fix_all_findings_and_push",
+  };
 }
 
-export function buildCodexReviewCycleMarker({ prNumber, cycleNumber }) {
+export function buildCodexReviewCycleMarker({ prNumber, cycleNumber, override = false, overrideReason = null }) {
+  const overrideAttr = override === true ? ' override="true"' : "";
+  const reasonAttr =
+    override === true && typeof overrideReason === "string" && overrideReason.trim() !== ""
+      ? ` reason=${JSON.stringify(overrideReason.trim())}`
+      : "";
+  const headline = override
+    ? `_gc_codex_review cycle ${cycleNumber} (USER-AUTHORIZED OVERRIDE past cap ${CODEX_REVIEW_HARD_CAP}) complete for PR #${prNumber}._`
+    : `_gc_codex_review cycle ${cycleNumber} of ${CODEX_REVIEW_HARD_CAP} complete for PR #${prNumber}._`;
+  const reasonLine =
+    override && typeof overrideReason === "string" && overrideReason.trim() !== ""
+      ? `\nOverride reason: ${overrideReason.trim()}`
+      : "";
   return [
-    `${CODEX_REVIEW_CYCLE_MARKER_PREFIX} cycle="${cycleNumber}" pr="${prNumber}" -->`,
+    `${CODEX_REVIEW_CYCLE_MARKER_PREFIX} cycle="${cycleNumber}" pr="${prNumber}"${overrideAttr}${reasonAttr} -->`,
     "",
-    `_gc_codex_review cycle ${cycleNumber} of ${CODEX_REVIEW_HARD_CAP} complete for PR #${prNumber}._ ` +
-      "Posted by the MCP server to enforce the hard-cap-2 contract (issue #794). " +
-      "Do not edit or delete — used by the next `gc_codex_review` invocation to count cycles.",
+    headline +
+      " Posted by the MCP server to enforce the hard-cap-2 contract (issue #794). " +
+      "Do not edit or delete — used by the next `gc_codex_review` invocation to count cycles." +
+      reasonLine,
   ].join("\n");
 }
 
@@ -2437,8 +2505,15 @@ async function readPriorCodexReviewCycleCount(repoRoot, owner, name, prNumber) {
 }
 
 // Post the cycle marker as a PR issue-comment so the next invocation sees it.
-async function postCodexReviewCycleMarker(repoRoot, owner, name, prNumber, cycleNumber) {
-  const body = buildCodexReviewCycleMarker({ prNumber, cycleNumber });
+// `extras` carries override/overrideReason so override-cycle markers are
+// distinguishable from regular ones in the issue thread.
+async function postCodexReviewCycleMarker(repoRoot, owner, name, prNumber, cycleNumber, extras = {}) {
+  const body = buildCodexReviewCycleMarker({
+    prNumber,
+    cycleNumber,
+    override: extras.override === true,
+    overrideReason: extras.overrideReason ?? null,
+  });
   await execFile(
     "gh",
     [
@@ -2687,7 +2762,14 @@ async function enrichCommentsList({ repoRoot, owner, name, prNumber, commentIds,
   return comments;
 }
 
-export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted = false, prNumber = null }) {
+export async function runCodexReview({
+  repoPath,
+  baseBranch = "dev",
+  uncommitted = false,
+  prNumber = null,
+  overrideCap = false,
+  overrideReason = null,
+}) {
   const repoRoot = await ensureGitRepo(repoPath);
 
   let effectivePr = prNumber;
@@ -2697,13 +2779,20 @@ export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted
 
   // Hard-cap-2 enforcement (issue #794 MVP-1). Only applies to post-push
   // reviews tied to a PR; pre-push uncommitted reviews use a separate cap and
-  // have no PR yet. If the cap is exceeded, refuse without consuming a codex
-  // run.
+  // have no PR yet. If the cap is exceeded and overrideCap is false, refuse
+  // without consuming a codex run. overrideCap=true requires a non-empty
+  // overrideReason quoting the user's authorization (the agent cannot
+  // self-authorize).
   let cycleOwnership = null;
   if (!uncommitted && effectivePr != null) {
     const { owner, name } = await getOwnerRepo(repoRoot);
     const priorCount = await readPriorCodexReviewCycleCount(repoRoot, owner, name, effectivePr);
-    const decision = evaluateCodexReviewCycleCap({ priorCount, prNumber: effectivePr });
+    const decision = evaluateCodexReviewCycleCap({
+      priorCount,
+      prNumber: effectivePr,
+      overrideCap,
+      overrideReason,
+    });
     if (!decision.ok) {
       return {
         repo_path: repoRoot,
@@ -2715,12 +2804,22 @@ export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted
         message: decision.message,
         prior_cycles: decision.prior_cycles,
         cap: decision.cap,
+        next_action: decision.next_action ?? null,
         finding_count: 0,
         comments: [],
         reviewers: [],
       };
     }
-    cycleOwnership = { owner, name, prNumber: effectivePr, cycleNumber: decision.nextCycle, cap: decision.cap };
+    cycleOwnership = {
+      owner,
+      name,
+      prNumber: effectivePr,
+      cycleNumber: decision.nextCycle,
+      cap: decision.cap,
+      nextAction: decision.next_action ?? null,
+      override: decision.override === true,
+      overrideReason: decision.override_reason ?? null,
+    };
   }
 
   // Compute the diff once and reuse it across both reviewers.
@@ -2801,6 +2900,7 @@ export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted
         cycleOwnership.name,
         cycleOwnership.prNumber,
         cycleOwnership.cycleNumber,
+        { override: cycleOwnership.override, overrideReason: cycleOwnership.overrideReason },
       );
     } catch (markerError) {
       // Surface as warning text; do not throw.
@@ -2826,6 +2926,9 @@ export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted
     ],
     cycle: cycleOwnership ? cycleOwnership.cycleNumber : null,
     cap: cycleOwnership ? cycleOwnership.cap : null,
+    next_action: cycleOwnership ? cycleOwnership.nextAction : null,
+    override: cycleOwnership && cycleOwnership.override === true ? true : false,
+    override_reason: cycleOwnership ? cycleOwnership.overrideReason : null,
   };
 }
 
