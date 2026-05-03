@@ -9,6 +9,174 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Canonical `skills/implement/SKILL.md` at the repo root (closes #791,
+  GC-O007, GC-O009). One source of truth for the agentic implement
+  workflow, parameterized at runtime by the per-repo
+  `.ground-control.yaml`. Replaces the per-repo `.claude/skills/implement/`
+  copies that previously diverged across Ground-Control, shifter, pulsar,
+  and aptl. The skill is agent-neutral: it runs from Claude Code or
+  Codex against the same content. Codex remains the reviewer of record
+  via `gc_codex_*` MCP tools regardless of driver.
+- Canonical `skills/review-tests/SKILL.md`, migrated from
+  `.claude/skills/review-tests/SKILL.md`. Same agent-neutral packaging
+  story: `bin/install-skills.sh` ships the same content to Claude Code
+  and Codex. The base-branch reference inside the skill now reads from
+  `workflow.base_branch` like the implement skill does.
+- `bin/install-skills.sh` distributes `skills/*` to `~/.claude/skills/`
+  (Claude Code) and `~/.codex/prompts/*.md` (Codex). Symlinks by default
+  so the agent always reads the latest source-of-truth from the repo;
+  `--copy` for environments without symlink support; `--no-codex` to
+  skip the Codex install target if the host doesn't have it.
+- `.ground-control.yaml` gains four optional blocks consumed by the
+  canonical skill via `gc_get_repo_ground_control_context`:
+  `docs.{adr_dir, architecture_overview, coding_standards,
+  workflow_reference, knowledge_base}`, `example_paths.{source, test}`,
+  `requirements.uid_examples`, and `cross_cutting_concerns.description`.
+  All four are optional; missing blocks fall back to defaults baked
+  into the skill prose via `{cfg.X|default Y}` placeholders.
+- `mcp/ground-control/lib.js` extends `parseGroundControlYaml` with the
+  four new normalize functions and updates `buildSuggestedGroundControlYaml`
+  with commented examples of the new sections.
+- ADR-027 (Agent-Neutral Implement Workflow Packaging),
+  ADR-028 (Temporal Workflow Orchestration Boundary; forward-looking for
+  GC-O009), and ADR-029 (Issue-Thread Gate Model) document the design.
+
+### Changed
+
+- **GC-O007 amended (ADR-029)**: the workflow's human-touchpoint count
+  drops from two to one. PR merge is the only synchronous human gate.
+  Plan approval is no longer a synchronous gate — the plan is posted to
+  the GitHub issue as a comment and the workflow proceeds directly to
+  TDD. Review findings and decisions on findings (fix / wontfix /
+  not-applicable, each with a one-line rationale) are recorded as
+  comments on the issue thread so the durable record survives PR
+  merge/close. `defer` is not a valid decision: the workflow's contract
+  is "fix every finding before PR is ready". ADR-021 is amended (not
+  superseded). Codex review loops are hard-capped at two cycles.
+- ADR-021 carries an inline amendment note pointing at ADR-029.
+- `docs/DEVELOPMENT_WORKFLOW.md` updates the human-touchpoint guidance
+  to reflect the single PR-merge gate.
+
+### Added
+
+- `gc_codex_review` enforces the GC-O007 hard-cap-2 contract on the
+  MCP-server side instead of relying on skill prose (closes #794
+  MVP-1). After each successful post-push review the tool posts a
+  machine-readable cycle marker (`<!-- gc:codex-review-cycle ... -->`)
+  as a PR issue-comment. The next invocation reads the markers and
+  refuses a 3rd cycle on the same PR with a structured error:
+  `{ok: false, error: "codex_review_cap_reached", message,
+  prior_cycles, cap, next_action}`. Successful returns surface
+  `cycle`, `cap`, and `next_action` so the agent sees its position
+  and the discipline expected at each cycle (e.g.,
+  `fix_all_findings_then_summarize_and_escalate` on cycle 2). The
+  cap-reached refusal returns
+  `next_action: "post_summary_and_escalate_to_user"`. Pre-push
+  uncommitted reviews (Step 6.5) are not capped here — they have a
+  separate cycle limit and no PR yet; left for a follow-up MVP.
+- `gc_codex_review` accepts `override_cap=true` + `override_reason`
+  for user-authorized cycle 3+ (the agent cannot self-authorize: the
+  override_reason must quote the user's authorization, captured in
+  the conversation, and is logged on the marker for audit). Override
+  cycles are recorded as override markers
+  (`<!-- gc:codex-review-cycle ... override="true" reason="..." -->`)
+  distinguishable from regular ones. Without the override, the cap
+  refuses cycle 3+ unconditionally.
+- `next_action` field on `gc_codex_review` results: closes the
+  specific behavior bug where agents stop at cycle 2 to ask "should
+  I fix these?" instead of fixing and escalating. The mechanical
+  signal now points at the discipline; skill prose is reinforced
+  rather than alone.
+- Pure-function exports backing the enforcement:
+  `parseCodexReviewCycleMarkers`, `evaluateCodexReviewCycleCap` (now
+  with `overrideCap` / `overrideReason` params), and
+  `buildCodexReviewCycleMarker` (now with `override` / `overrideReason`
+  knobs). 19 unit tests cover happy path, override path, refusal
+  path, missing-reason rejection, override-marker round-trip, and
+  reasons containing embedded quotes.
+- Plan-before-review ordering gate on `gc_codex_review` (#794
+  extension). Post-push reviews look up the PR's closing-issue refs
+  via `gh pr view --json closingIssuesReferences` and refuse unless
+  at least one of those issues carries a `plan` phase marker.
+  Closes the same ordering hole MVP-2 closes for preflight→plan,
+  but for plan→review. PRs that close no issues skip the gate
+  (legitimate refactor/chore PRs without an issue). Override is
+  available via `override_phase_gate=true` +
+  `override_phase_reason` for trivial cases the user explicitly
+  authorizes.
+- Per-finding hard-cap-2 enforcement on `gc_codex_verify_finding`
+  (#794 extension). Same template as the MVP-1 cycle cap but
+  keyed per `(PR, comment_id)`. After 2 verify cycles per finding,
+  the tool refuses cycle 3+ unless `override_cap=true` with
+  `override_reason`. Override cycles are recorded with
+  `override="true"` in the marker for audit. Three new
+  pure-function exports back the enforcement:
+  `parseCodexVerifyCycleMarkers`, `evaluateCodexVerifyCycleCap`,
+  `buildCodexVerifyCycleMarker`. Successful returns surface
+  `cycle`, `cap`, `next_action`, `override`, `override_reason`.
+- `gc_post_implementation_plan` MCP tool (closes #794 MVP-2). Posts
+  the implementation plan as an issue-thread comment per ADR-029,
+  but refuses unless a `preflight` phase marker exists for the
+  issue. `gc_codex_architecture_preflight` now writes that marker
+  on success. This closes the specific ordering bug where agents
+  repeatedly tried to defer preflight until after planning — the
+  MCP server now refuses to accept the plan until preflight has
+  run. Override is available with `override=true` +
+  `override_reason` for cases where the user explicitly authorizes
+  skipping preflight (e.g., trivial bug fixes); reason is logged
+  on the marker for audit. Three new pure-function exports back
+  the enforcement: `parsePhaseMarkers`, `evaluatePhasePrerequisite`,
+  `buildPhaseMarker`. 14 new unit tests cover the parser, the cap
+  evaluator, and the marker builder; covering missing-prerequisite
+  refusal, multiple-prerequisite reporting, duplicate-marker
+  collapsing, and other-issue isolation.
+
+### Fixed
+
+- `workflow.base_branch` is now validated against an allowlist of safe
+  Git ref names in `normalizeWorkflowConfig`. Previously the value was
+  rendered into shell-evaluated `gh` and `git` commands by the implement
+  skill (Steps 1, 9, 16) without sanitization, so a hostile or malformed
+  `.ground-control.yaml` could inject shell commands. Allowed characters
+  are `[A-Za-z0-9._/-]` and the value must satisfy `git check-ref-format`.
+- `/implement` Step 16 (traceability reconciliation) now resolves the
+  base ref via `workflow.base_branch` instead of hardcoding
+  `origin/dev` / `dev`. Repos configured with a non-`dev` base were
+  reconciling against the wrong branch.
+- `/implement` Step 15 reordered: classify each in-scope requirement as
+  materially-implemented vs forward-looking BEFORE transitioning, so
+  forward-looking requirements stay DRAFT and don't get prematurely
+  promoted to ACTIVE. The previous wording transitioned every UID first
+  and then noted the forward-looking exception.
+- `/implement` Step 12.5 removed. The step was a documented no-op gap
+  pending tooling that may never ship; an unimplemented "required gate"
+  is worse than no gate. Cross-cutting-concerns review remains covered
+  by Step 3 (assess existing helpers before writing new code) and
+  Step 12 (codex review with the cross-cutting reviewer set).
+- `/implement` Step 13 is now agent-neutral. `review-tests` migrated
+  to `skills/review-tests/SKILL.md` so the same canonical content
+  drives Claude Code (`Skill` tool) and Codex
+  (`~/.codex/prompts/review-tests.md`, populated by
+  `bin/install-skills.sh`).
+- `defer` removed from the review-finding decision vocabulary in the
+  implement skill, the review-tests skill, and the CHANGELOG narrative.
+  The workflow's stated contract is "fix every finding before PR is
+  ready"; allowing `defer` was an explicit bypass.
+- `docs/DEVELOPMENT_WORKFLOW.md` Mermaid diagram and User Touchpoints
+  section updated to reflect ADR-029's single-touchpoint model. The
+  S5 node is now `Post plan as issue comment` (white, not yellow), the
+  approval edge is unconditional, and the prior hedge ("interpret stale
+  plan-approval node") is gone.
+
+### Removed
+
+- `.claude/skills/implement/SKILL.md` — replaced by the canonical
+  `skills/implement/SKILL.md`. Run `bin/install-skills.sh` to install
+  the canonical skill into `~/.claude/skills/` (and `~/.codex/prompts/`
+  for Codex driver use).
+- `.claude/skills/review-tests/SKILL.md` — replaced by the canonical
+  `skills/review-tests/SKILL.md`. Same install path as above.
+
 - `bin/policy --pr-body-file <path>` and `--pr-number <n>` modes so the
   PR-body template check can run from a local draft or a fetched
   GitHub PR body. Backed by a new `scripts/check-pr-body.sh` pre-push

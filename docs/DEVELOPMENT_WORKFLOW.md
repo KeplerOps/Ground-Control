@@ -51,11 +51,9 @@ project: aces-sdl
 
 `AGENTS.md` should still carry a brief `Ground Control Context` section that points agents at `.ground-control.yaml` and `.gc/`, so repo newcomers know where the workflow config lives.
 
-### User Touchpoints
-1. **Plan approval** — user reviews and approves the implementation plan
-2. **PR review and merge** — user reviews the final PR and merges to dev
+### User Touchpoint
 
-Everything between these two checkpoints is automated.
+Per ADR-029, the workflow has **one** synchronous human touchpoint: PR review and merge to `dev`. Plans are posted to the GitHub issue thread as comments and the agent proceeds without waiting; review findings and decisions on findings are also recorded on the issue thread. Everything before merge is automated.
 
 ### High-level flow
 
@@ -66,7 +64,7 @@ flowchart TB
   S2[2 · Read issue body + comments]
   S3[3 · Codex architecture preflight]
   S4[4 · Explore codebase + consult knowledge base]
-  S5{{5 · User approves plan}}
+  S5[5 · Post plan as issue comment]
   S6[6 · TDD implementation]
   S7[7 · pre-commit run]
   S8[8 · Completion gate · make policy + make check + CHANGELOG]
@@ -78,8 +76,8 @@ flowchart TB
   S14[14 · Per-finding fix + gc_codex_verify_finding]
   S15[15 · /review-tests]
   S16[16 · Final CI re-verify]
-  S17[17 · Reconcile traceability against diff]
-  S18[18 · Transition in-scope requirements DRAFT → ACTIVE]
+  S17[17 · Transition in-scope requirements DRAFT → ACTIVE]
+  S18[18 · Reconcile traceability against diff]
   S19[19 · Verify GC state landed]
   S20[20 · Report — DO NOT MERGE]
   End([User reviews PR and merges])
@@ -89,7 +87,7 @@ flowchart TB
   S2 --> S3
   S3 --> S4
   S4 --> S5
-  S5 -->|approved| S6
+  S5 --> S6
   S6 --> S7
   S7 --> S8
   S8 --> S9
@@ -112,22 +110,23 @@ flowchart TB
   S14 -->|re-run, cap 2| S13
   S15 -->|findings| S9
   S16 -->|red| S9
-  S19 -->|drift| S17
+  S19 -->|drift| S18
 
   classDef user fill:#fff7cc,stroke:#c9a900,color:#000
-  class S5,Start,End user
+  class Start,End user
 ```
 
 **How it reads:**
 
-- **Yellow** nodes are user touchpoints. The loop halts at plan approval (step 5) and at the final report (step 20); everything in between runs without asking for input.
+- **Yellow** nodes are user touchpoints. Per ADR-029, the workflow has **one** synchronous human touchpoint: PR merge (the `End` node). Plans are posted to the GitHub issue thread (S5) and the agent proceeds without waiting; review findings and decisions on findings are also recorded on the issue thread.
 - **Entry is always by issue.** Step 1 resolves the input to a GitHub issue (either directly or via a UID → issue shim) and parses the `## Requirements` section from the issue body into `in_scope_requirements[]`. The list may be empty (bug fix / refactor) or contain one or many UIDs (grouped implementation). Everything downstream treats the issue as the authoritative context and the list as the set of requirements to be transitioned to `ACTIVE` on completion.
 - **Steps 1–4** gather context and run the codex architecture preflight before any code is written. Step 4 also consults the repo knowledge base via the index if one is present.
 - **Step 6** is TDD (red → green → refactor per clause). Steps 7–8 are the local quality gate.
 - **Steps 9–12** commit, push, open the PR, and block on CI + SonarCloud before any reviewer looks at the code.
 - **Steps 13–16** are the review phase: `gc_codex_review` posts inline comments, `gc_codex_verify_finding` drives the per-finding fix loop (loop 14 → 13 re-runs the whole review after fixes, cap 2), then `/review-tests` catches false-assurance tests, then one final CI pass.
-- **Step 17 is traceability reconciliation, not link creation.** It walks every added/modified/renamed/deleted file in the diff, finds existing IMPLEMENTS/TESTS links pointing at each, and updates/deletes/creates links so the Ground Control graph matches reality after the change. Runs with zero in-scope requirements still reconcile, because a bug fix may have touched files linked to other requirements whose links are now stale. Deleting the sole implementation of a requirement is escalated to the user rather than silently removing the link.
-- **Steps 18–19** transition each in-scope requirement to `ACTIVE` and re-verify Ground Control state matches reality. Zero in-scope requirements → Step 18 is a no-op; Step 19 still audits the reconciliation from Step 17. These steps run LAST, after every reviewer has signed off, so Ground Control never runs ahead of code that hasn't passed review.
+- **Step 17 transitions each in-scope requirement to `ACTIVE`.** This MUST happen BEFORE Step 18's traceability reconciliation: the Ground Control API enforces `IMPLEMENTS-only-on-ACTIVE`, so reconciling first against a still-DRAFT requirement silently fails. Forward-looking requirements (the diff documents/references but does not deliver) stay DRAFT and use `DOCUMENTS` links instead in Step 18.
+- **Step 18 is traceability reconciliation, not link creation.** It walks every added/modified/renamed/deleted file in the diff, finds existing IMPLEMENTS/TESTS links pointing at each, and updates/deletes/creates links so the Ground Control graph matches reality after the change. Runs with zero in-scope requirements still reconcile, because a bug fix may have touched files linked to other requirements whose links are now stale. Deleting the sole implementation of a requirement is escalated to the user rather than silently removing the link.
+- **Step 19** re-verifies Ground Control state matches reality after Steps 17–18. These three steps run LAST, after every reviewer has signed off, so Ground Control never runs ahead of code that hasn't passed review. Zero in-scope requirements → Step 17 is a no-op; Step 18 still reconciles; Step 19 still audits.
 - **Every downstream failure loops back to step 9** (stage + commit + push), which is the single re-entry point for fix commits. The completion gate (step 8) and the GC verify (step 19) are the only two loops that target earlier steps, because they correspond to local-only and GC-only state respectively.
 
 Claude does NOT merge. The user reviews the PR and merges.

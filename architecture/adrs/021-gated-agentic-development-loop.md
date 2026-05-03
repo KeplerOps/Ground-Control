@@ -18,12 +18,14 @@ If the skill is modified, gates can be weakened or removed without any formal re
 
 Codify the gated agentic development loop as a first-class requirement (GC-O007) with four mandatory phases:
 
-1. **Phase A — Plan and Implement**: Fetch requirement, create GitHub issue, explore codebase, produce plan for human approval, implement, verify clause-by-clause.
-2. **Phase B — Quality Gate**: Hard completion gate requiring build success (`make check`), CHANGELOG update, traceability links (IMPLEMENTS + TESTS), requirement status ACTIVE, and clause-by-clause mapping.
-3. **Phase C — Stage, Commit, Push**: Stage files, pre-commit retry loop (max 5), push to feature branch.
-4. **Phase D — Multi-Reviewer Ship Pipeline**: Create PR, CI monitor, SonarCloud quality gate, Codex cross-model review, Claude `/review` and `/security-review` skills, fix all findings, present for human merge.
+> **Amended by ADR-029 (2026-05-03):** the human-touchpoint count drops from two to one (PR merge only). Plan approval is no longer a synchronous gate; the plan is posted as a comment on the GitHub issue thread and the workflow proceeds directly to TDD. Decisions on review findings are also recorded as issue comments. Phase B's traceability and status-transition requirements move to Phase D (after reviews). Codex review loops are hard-capped at two cycles. The phase structure (A/B/C/D) and gate ordering below are otherwise preserved. Read ADR-029 for the full new gate model.
 
-**Human touchpoints**: Exactly two — plan approval (Phase A) and PR merge (Phase D).
+1. **Phase A — Plan and Implement**: Fetch requirement, create GitHub issue, explore codebase, produce plan ~~for human approval~~ *posted as an issue comment per ADR-029*, implement, verify clause-by-clause.
+2. **Phase B — Quality Gate**: Hard completion gate requiring build success (`make check`), CHANGELOG update, ~~traceability links (IMPLEMENTS + TESTS)~~ *(moved to Phase D per ADR-029)*, ~~requirement status ACTIVE~~ *(moved to Phase D per ADR-029)*, and clause-by-clause mapping.
+3. **Phase C — Stage, Commit, Push**: Stage files, pre-commit retry loop (max 5), push to feature branch.
+4. **Phase D — Multi-Reviewer Ship Pipeline**: Create PR, CI monitor, SonarCloud quality gate, Codex cross-model review *(hard-capped at 2 cycles per ADR-029)*, Claude `/review` and `/security-review` skills, fix all findings, transition requirement to ACTIVE, reconcile traceability links, present for human merge.
+
+**Human touchpoints**: ~~Exactly two — plan approval (Phase A) and PR merge (Phase D)~~ *Per ADR-029, exactly one — PR merge (Phase D). Plan, review findings, and decisions on findings are recorded as comments on the GitHub issue thread.*
 
 **Zero-deferral policy**: All reviewer findings are fixed before the PR is presented. No findings are deferred to follow-up work.
 

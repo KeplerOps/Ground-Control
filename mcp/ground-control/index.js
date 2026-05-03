@@ -72,6 +72,7 @@ import {
   runCodexArchitecturePreflight,
   runCodexReview,
   runCodexVerifyFinding,
+  runPostImplementationPlan,
   embedRequirement,
   getEmbeddingStatus,
   embedProject,
@@ -748,14 +749,18 @@ server.tool(
 
 server.tool(
   "gc_codex_review",
-  "Run Codex against the current branch with a production-readiness review prompt. Codex enumerates all material findings (no triage) and, when a pull request is available, posts each finding as an inline PR review comment. Returns the list of posted comment ids, enriched with GraphQL review-thread ids and a short file/line/title preview so the coding agent can drive a fix/verify loop via gc_codex_verify_finding. Auto-detects the PR number for the current branch via `gh pr view` when pr_number is omitted.",
+  "Run Codex against the current branch with a production-readiness review prompt. Codex enumerates all material findings (no triage) and, when a pull request is available, posts each finding as an inline PR review comment. Returns the list of posted comment ids, enriched with GraphQL review-thread ids and a short file/line/title preview so the coding agent can drive a fix/verify loop via gc_codex_verify_finding. Auto-detects the PR number for the current branch via `gh pr view` when pr_number is omitted. Hard-cap-2 enforcement (issue #794): post-push reviews are capped at two cycles per PR; the tool refuses cycle 3+ unless override_cap=true with a non-empty override_reason quoting the user's authorization.",
   {
     repo_path: z.string().describe("Absolute path to the target Git repository"),
     base_branch: z.string().optional().describe("Base branch to review against (defaults to 'dev')"),
     uncommitted: z.boolean().optional().describe("Review staged/unstaged/untracked changes instead of committed branch history"),
     pr_number: z.number().int().positive().optional().describe("Pull request number to post findings to. When omitted and uncommitted is false, the tool auto-detects via `gh pr view --json number`. When no PR can be found, codex emits findings inline without posting."),
+    override_cap: z.boolean().optional().describe("Override the hard-cap-2 cycle limit. Only legitimate when the user has explicitly authorized cycle 3+ in the conversation. Requires override_reason."),
+    override_reason: z.string().optional().describe("Required when override_cap=true. Quote the user's authorization (e.g. 'user said: yes run cycle 3 to verify'). Stored in the marker for audit."),
+    override_phase_gate: z.boolean().optional().describe("Override the plan-before-review ordering gate. Only legitimate when the user explicitly authorized skipping planning (e.g., trivial bug fix). Requires override_phase_reason."),
+    override_phase_reason: z.string().optional().describe("Required when override_phase_gate=true. Quote the user's authorization. Logged for audit."),
   },
-  async ({ repo_path, base_branch, uncommitted, pr_number }) => {
+  async ({ repo_path, base_branch, uncommitted, pr_number, override_cap, override_reason, override_phase_gate, override_phase_reason }) => {
     try {
       return ok(JSON.stringify(
         await runCodexReview({
@@ -763,6 +768,10 @@ server.tool(
           baseBranch: base_branch || "dev",
           uncommitted: Boolean(uncommitted),
           prNumber: pr_number != null ? pr_number : null,
+          overrideCap: Boolean(override_cap),
+          overrideReason: override_reason ?? null,
+          overridePhaseGate: Boolean(override_phase_gate),
+          overridePhaseReason: override_phase_reason ?? null,
         }),
         null,
         2,
@@ -775,19 +784,52 @@ server.tool(
 
 server.tool(
   "gc_codex_verify_finding",
-  "Ask Codex to verify whether a specific PR review finding has been resolved in the local working tree. Takes repo_path, pr_number, and the REST comment_id returned from gc_codex_review. Codex reads the original comment directly from GitHub (only comments from allowlisted authors are accepted), reads the anchored file, and decides RESOLVED or UNRESOLVED. If RESOLVED, the review thread is marked resolved via GraphQL. If UNRESOLVED, a threaded reply with concrete new directions is posted to the original comment and returned to the caller.",
+  "Ask Codex to verify whether a specific PR review finding has been resolved in the local working tree. Takes repo_path, pr_number, and the REST comment_id returned from gc_codex_review. Codex reads the original comment directly from GitHub (only comments from allowlisted authors are accepted), reads the anchored file, and decides RESOLVED or UNRESOLVED. If RESOLVED, the review thread is marked resolved via GraphQL. If UNRESOLVED, a threaded reply with concrete new directions is posted to the original comment and returned to the caller. Per-finding hard cap of 2 verify calls per (PR, comment_id); refuses cycle 3+ unless override_cap=true with override_reason quoting the user's authorization.",
   {
     repo_path: z.string().describe("Absolute path to the target Git repository"),
     pr_number: z.number().int().positive().describe("Pull request number the comment belongs to"),
     comment_id: z.number().int().positive().describe("REST comment id (as returned in the gc_codex_review comments list) of the finding to verify"),
+    override_cap: z.boolean().optional().describe("Override the per-finding hard-cap-2. Only legitimate when the user explicitly authorized cycle 3+ for this finding. Requires override_reason."),
+    override_reason: z.string().optional().describe("Required when override_cap=true. Quote the user's authorization. Logged on the marker for audit."),
   },
-  async ({ repo_path, pr_number, comment_id }) => {
+  async ({ repo_path, pr_number, comment_id, override_cap, override_reason }) => {
     try {
       return ok(JSON.stringify(
         await runCodexVerifyFinding({
           repoPath: repo_path,
           prNumber: pr_number,
           commentId: comment_id,
+          overrideCap: Boolean(override_cap),
+          overrideReason: override_reason ?? null,
+        }),
+        null,
+        2,
+      ));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_post_implementation_plan",
+  "Post the implementation plan as a comment on the GitHub issue thread (per ADR-029, the issue is the durable record). Enforces the preflight-before-planning ordering from #794 MVP-2: refuses unless a 'preflight' phase marker exists for the issue (gc_codex_architecture_preflight writes that marker on success). On a successful post, also writes a 'plan' phase marker so downstream tools can confirm planning happened. Override is available for cases where the user explicitly authorizes skipping preflight, but the override_reason must quote the authorization for audit.",
+  {
+    repo_path: z.string().describe("Absolute path to the target Git repository"),
+    issue_number: z.number().int().positive().describe("GitHub issue number the plan is for"),
+    plan_body: z.string().min(1).describe("Plan body in Markdown. Posted verbatim as a comment on the issue, alongside the phase marker."),
+    override: z.boolean().optional().describe("Skip the preflight prerequisite check. Only legitimate when the user has explicitly authorized skipping preflight (e.g., trivial bug fixes). Requires override_reason."),
+    override_reason: z.string().optional().describe("Required when override=true. Quote the user's authorization. Stored alongside the marker for audit."),
+  },
+  async ({ repo_path, issue_number, plan_body, override, override_reason }) => {
+    try {
+      return ok(JSON.stringify(
+        await runPostImplementationPlan({
+          repoPath: repo_path,
+          issueNumber: issue_number,
+          planBody: plan_body,
+          override: Boolean(override),
+          overrideReason: override_reason ?? null,
         }),
         null,
         2,
