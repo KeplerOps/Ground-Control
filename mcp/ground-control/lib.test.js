@@ -16,7 +16,10 @@ import {
   buildCodexArchitectureExecArgs,
   buildCodexReviewCorePrompt,
   buildCodexSecurityReviewPrompt,
-  buildCodexReviewArgs,
+  buildCodexReviewExecArgs,
+  buildDiffBlock,
+  selectDiffMode,
+  execFileWithInput,
   parseCodexReviewTail,
   dedupFindings,
   buildCodexVerifyPrompt,
@@ -1152,6 +1155,22 @@ describe("buildCodexReviewCorePrompt", () => {
     });
     assert.ok(prompt.includes("empty diff"));
   });
+
+  it("switches to manifest preamble and block when diffMode='manifest'", () => {
+    const prompt = buildCodexReviewCorePrompt({
+      baseBranch: "dev",
+      uncommitted: false,
+      prNumber: 520,
+      diffText: "irrelevant",
+      diffMode: "manifest",
+      diffManifest: "10\t2\tFoo.java",
+      baseRefDescriptor: "origin/dev",
+    });
+    assert.ok(prompt.includes("manifest of changed files"));
+    assert.ok(prompt.includes("<<<DIFF-MANIFEST"));
+    assert.ok(prompt.includes("git diff origin/dev...HEAD -- <path>"));
+    assert.ok(!prompt.includes("do not re-derive it from git"));
+  });
 });
 
 describe("buildCodexSecurityReviewPrompt", () => {
@@ -1238,17 +1257,122 @@ describe("dedupFindings", () => {
   });
 });
 
-describe("buildCodexReviewArgs", () => {
-  it("builds args for a committed branch review without --base", () => {
-    // --base <BRANCH> is mutually exclusive with [PROMPT] in codex review,
-    // so the baseBranch is communicated via the prompt text instead.
-    const args = buildCodexReviewArgs({ uncommitted: false });
-    assert.deepEqual(args, ["review", "-"]);
+describe("execFileWithInput", () => {
+  it("rejects with ETIMEDOUT and kills the child when timeoutMs elapses", async () => {
+    // sleep 30s but expect the timeout to fire after ~150ms.
+    const start = Date.now();
+    let err;
+    try {
+      await execFileWithInput("sleep", ["30"], {
+        timeoutMs: 150,
+        killGraceMs: 100,
+      });
+    } catch (e) {
+      err = e;
+    }
+    const elapsed = Date.now() - start;
+    assert.ok(err, "expected the call to reject");
+    assert.equal(err.code, "ETIMEDOUT");
+    assert.equal(err.killed, true);
+    assert.match(err.message, /sleep did not exit within 150ms/);
+    assert.ok(elapsed < 5000, `timeout did not fire promptly (took ${elapsed}ms)`);
   });
 
-  it("adds the uncommitted flag when requested", () => {
-    const args = buildCodexReviewArgs({ uncommitted: true });
-    assert.deepEqual(args, ["review", "--uncommitted", "-"]);
+  it("returns stdout/stderr cleanly when the child exits before the timeout", async () => {
+    const { stdout } = await execFileWithInput("printf", ["hello"], {
+      timeoutMs: 5000,
+    });
+    assert.equal(stdout, "hello");
+  });
+
+  it("does not arm a timer when timeoutMs is omitted", async () => {
+    const { stdout } = await execFileWithInput("printf", ["ok"], {});
+    assert.equal(stdout, "ok");
+  });
+});
+
+describe("buildCodexReviewExecArgs", () => {
+  it("uses codex exec with workspace-write sandbox, cwd, output capture, and stdin prompt", () => {
+    // We dropped `codex review` because it could hang after emitting the
+    // structured tail when invoked with a stdin prompt. `codex exec` matches
+    // the architecture preflight and verify-finding callers, both of which
+    // exit cleanly. The diff is computed by the caller and inlined into the
+    // prompt, so we no longer need codex's own --uncommitted/--base flags.
+    const args = buildCodexReviewExecArgs({
+      repoPath: "/tmp/repo",
+      outputPath: "/tmp/out.txt",
+    });
+
+    assert.deepEqual(args, [
+      "exec",
+      "--sandbox",
+      "workspace-write",
+      "-C",
+      "/tmp/repo",
+      "--output-last-message",
+      "/tmp/out.txt",
+      "-",
+    ]);
+  });
+});
+
+describe("buildDiffBlock", () => {
+  it("inlines the diff in inline mode", () => {
+    const lines = buildDiffBlock({ diffText: "diff --git a/Foo.java b/Foo.java\n+x", mode: "inline" });
+    assert.equal(lines[0], "<<<DIFF");
+    assert.equal(lines[lines.length - 1], "DIFF>>>");
+    assert.ok(lines.join("\n").includes("diff --git a/Foo.java"));
+  });
+
+  it("emits an empty-diff marker when the diff text is empty in inline mode", () => {
+    const lines = buildDiffBlock({ diffText: "", mode: "inline" });
+    assert.ok(lines.join("\n").includes("empty diff"));
+  });
+
+  it("switches to a manifest block with fetch instructions in manifest mode", () => {
+    const lines = buildDiffBlock({
+      diffText: "ignored when manifest mode is active",
+      mode: "manifest",
+      manifest: "10\t2\tFoo.java\n5\t0\tBar.java",
+      baseRefDescriptor: "origin/dev",
+    });
+    const text = lines.join("\n");
+    assert.ok(text.includes("<<<DIFF-MANIFEST"));
+    assert.ok(text.includes("DIFF-MANIFEST>>>"));
+    assert.ok(text.includes("Foo.java"));
+    assert.ok(text.includes("git diff origin/dev...HEAD -- <path>"));
+    assert.ok(!text.includes("<<<DIFF\n"));
+  });
+
+  it("falls back to <base-ref> when manifest mode is invoked without a baseRefDescriptor", () => {
+    const lines = buildDiffBlock({
+      diffText: "",
+      mode: "manifest",
+      manifest: "1\t1\tFoo.java",
+      baseRefDescriptor: null,
+    });
+    assert.ok(lines.join("\n").includes("git diff <base-ref>...HEAD"));
+  });
+});
+
+describe("selectDiffMode", () => {
+  it("returns 'inline' for diffs under the cap", () => {
+    assert.equal(selectDiffMode({ diffText: "x".repeat(100), maxBytes: 1024 }), "inline");
+  });
+
+  it("returns 'manifest' for diffs over the cap", () => {
+    assert.equal(selectDiffMode({ diffText: "x".repeat(2048), maxBytes: 1024 }), "manifest");
+  });
+
+  it("returns 'inline' when the cap is disabled (0)", () => {
+    assert.equal(selectDiffMode({ diffText: "x".repeat(10_000_000), maxBytes: 0 }), "inline");
+  });
+
+  it("counts UTF-8 byte length, not character length", () => {
+    // 4-byte UTF-8 character (a single grapheme but 4 bytes per codepoint).
+    const fourByteChar = "𝟘"; // U+1D7D8 MATHEMATICAL DOUBLE-STRUCK DIGIT ZERO
+    const diffText = fourByteChar.repeat(300); // 1200 bytes, 300 chars
+    assert.equal(selectDiffMode({ diffText, maxBytes: 1024 }), "manifest");
   });
 });
 

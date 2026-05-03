@@ -208,14 +208,15 @@ If any check fails, fix it before proceeding. Do NOT move to Phase C until every
 
 ### Step 10: CI Monitor
 
-1. Find the latest workflow run: `gh run list --branch <branch> --limit 1 --json status,conclusion,databaseId`
-2. If the run is in progress, watch it: `gh run watch <id>`
-3. If it failed:
-   - Get failed logs: `gh run view <id> --log-failed`
-   - Diagnose and fix the issue.
-   - `git add`, `git commit`, `git push`.
-   - Go back to step 1 of this phase.
-4. If it succeeded, proceed.
+`gh run watch` blocks indefinitely if no runner picks up the job — a real failure mode on this repo since CI is routed to a self-hosted runner pool. Use a bounded poll instead so the workflow surfaces stuck-queued conditions instead of hanging silently.
+
+1. Find the latest workflow run: `gh run list --branch <branch> --limit 1 --json status,conclusion,databaseId,createdAt`. Cache the `databaseId` as `<id>` and the `createdAt` timestamp.
+2. **Poll** `gh run view <id> --json status,conclusion` every 15 seconds. Track wall-clock elapsed time since you started polling.
+3. **Queued-too-long guard.** If `status` is still `"queued"` after **5 minutes** of polling, STOP and report to the user that no runner accepted the job — most likely cause is that no `[self-hosted, linux, x64]` runner is online or available. Suggest they check the runner pool (`gh api /repos/<owner>/<repo>/actions/runners`) and confirm a runner is `online` and `idle`. Do NOT wait silently past this point.
+4. **In-progress cap.** If `status` is `"in_progress"`, keep polling. Total wall-clock cap including the queued window is **45 minutes**. If the run has not reached `"completed"` by then, STOP and surface the run URL to the user — something is wrong with the runner or the workflow.
+5. When `status` becomes `"completed"`:
+   - If `conclusion` is `"success"`, proceed.
+   - Otherwise, get failed logs: `gh run view <id> --log-failed`. Diagnose, fix, `git add`, `git commit`, `git push`, and go back to step 1 of this phase.
 
 ### Step 11: SonarCloud
 
@@ -266,7 +267,7 @@ For every cycle, after applying fixes, commit and push BEFORE re-running the rev
 
 ### Step 12: Cross-Model Review (Codex)
 
-`gc_codex_review` runs two focused codex reviewers in parallel — a core production-readiness reviewer and a dedicated application-security reviewer — against a single pre-computed diff. Both post their findings as inline PR review comments with a reviewer-tagged title (`[core]` or `[security]`). The tool returns a single deduplicated list; you then drive a per-finding fix/verify loop via `gc_codex_verify_finding`, which handles the GitHub API bookkeeping for you.
+`gc_codex_review` runs two focused codex reviewers — a core production-readiness reviewer and a dedicated application-security reviewer — against a single pre-computed diff. By default the reviewers run sequentially (set `GC_CODEX_REVIEW_PARALLEL=2` to opt back into parallel execution). Both post their findings as inline PR review comments with a reviewer-tagged title (`[core]` or `[security]`). The tool returns a single deduplicated list; you then drive a per-finding fix/verify loop via `gc_codex_verify_finding`, which handles the GitHub API bookkeeping for you.
 
 1. Run `pwd` to capture the absolute repository root.
 2. Determine the pull request number for the current branch: `gh pr view --json number`. Cache it.

@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   policy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -37,7 +37,7 @@ jobs:
         run: python3 bin/policy --skip-pr-body
 
   policy-live:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     needs: [policy]
     if: vars.GC_BASE_URL != ''
     steps:
@@ -57,7 +57,7 @@ jobs:
   # Backend — build → test → integration (linear, always runs)
   # ---------------------------------------------------------------------------
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     needs: [policy]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -72,7 +72,7 @@ jobs:
         run: cd backend && ./gradlew spotlessCheck --no-daemon
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     needs: [build]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -91,7 +91,7 @@ jobs:
           path: backend/build/reports/tests/test/
 
   integration:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     needs: [build, test]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -113,7 +113,7 @@ jobs:
   # SonarCloud — runs after test for coverage data, fails CI if quality gate red
   # ---------------------------------------------------------------------------
   sonar:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     needs: [test]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -139,7 +139,7 @@ jobs:
   # Verification (branches off test, runs in parallel with integration)
   # ---------------------------------------------------------------------------
   verify:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     needs: [test]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -155,7 +155,7 @@ jobs:
   # Docker — builds after integration tests and verification both complete
   # ---------------------------------------------------------------------------
   docker:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     needs: [integration, verify]
     if: |
       github.event_name == 'push'
@@ -209,7 +209,7 @@ jobs:
   # Smoke test — validates Docker image starts, Flyway migrates, health is UP
   # ---------------------------------------------------------------------------
   smoke:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     needs: [docker]
     if: needs.docker.result == 'success'
     services:
@@ -258,7 +258,7 @@ jobs:
   # Deploy — pushes to main trigger deploy to EC2 via SSM SendCommand
   # ---------------------------------------------------------------------------
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     needs: [smoke]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: dev

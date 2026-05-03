@@ -63,18 +63,81 @@ export function buildSuggestedGroundControlYaml(project = "your-project-id") {
   ].join("\n");
 }
 
-async function execFileWithInput(file, args, { input, ...options } = {}) {
+// Default timeout for codex invocations. Codex can legitimately run for many
+// minutes on a large diff, but it should never run forever. The default is
+// generous; override with GC_CODEX_TIMEOUT_MS for slower environments. Set to
+// 0 (or anything non-positive) to disable the timeout entirely.
+export const DEFAULT_CODEX_TIMEOUT_MS = (() => {
+  const raw = Number.parseInt(process.env.GC_CODEX_TIMEOUT_MS || "", 10);
+  if (!Number.isInteger(raw)) return 1200000; // 20 minutes
+  return raw;
+})();
+
+const KILL_GRACE_MS_DEFAULT = 5000;
+
+export async function execFileWithInput(
+  file,
+  args,
+  {
+    input,
+    timeoutMs,
+    killSignal = "SIGTERM",
+    killGraceMs = KILL_GRACE_MS_DEFAULT,
+    ...options
+  } = {},
+) {
   return await new Promise((resolve, reject) => {
+    let timedOut = false;
+    let killTimer = null;
+    let graceTimer = null;
+    let settled = false;
+
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (killTimer) clearTimeout(killTimer);
+      if (graceTimer) clearTimeout(graceTimer);
+      fn(value);
+    };
+
     const child = execFileCb(file, args, options, (error, stdout, stderr) => {
+      if (timedOut) {
+        const e = new Error(
+          `${file} did not exit within ${timeoutMs}ms (sent ${killSignal}, then SIGKILL after ${killGraceMs}ms grace)`,
+        );
+        e.code = "ETIMEDOUT";
+        e.killed = true;
+        e.stdout = stdout;
+        e.stderr = stderr;
+        finish(reject, e);
+        return;
+      }
       if (error) {
         error.stdout = stdout;
         error.stderr = stderr;
-        reject(error);
+        finish(reject, error);
         return;
       }
-
-      resolve({ stdout, stderr });
+      finish(resolve, { stdout, stderr });
     });
+
+    if (timeoutMs && timeoutMs > 0) {
+      killTimer = setTimeout(() => {
+        timedOut = true;
+        try {
+          child.kill(killSignal);
+        } catch {
+          // Already exited between the timer firing and the kill call.
+        }
+        graceTimer = setTimeout(() => {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // Already exited.
+          }
+        }, killGraceMs);
+      }, timeoutMs);
+    }
 
     if (input != null) {
       child.stdin.end(input);
@@ -1756,6 +1819,7 @@ export async function runCodexArchitecturePreflight({
         cwd: repoRoot,
         maxBuffer: 10 * 1024 * 1024,
         env: { ...process.env, NO_COLOR: "1" },
+        timeoutMs: DEFAULT_CODEX_TIMEOUT_MS,
       },
     );
 
@@ -1776,7 +1840,13 @@ export async function runCodexArchitecturePreflight({
   }
 }
 
-function buildCommonReviewPreamble({ baseBranch, uncommitted }) {
+function buildCommonReviewPreamble({ baseBranch, uncommitted, diffMode = "inline" }) {
+  if (diffMode === "manifest") {
+    if (uncommitted) {
+      return "Review the staged, unstaged, and untracked changes in the working tree of this repository. The diff was too large to inline; a manifest of changed files (with added/deleted line counts) is provided below inside <<<DIFF-MANIFEST…DIFF-MANIFEST>>> delimiters. Use your shell tool to fetch per-file diffs as you need them.";
+    }
+    return `Review the changes on the current branch against \`${baseBranch}\`. The diff was too large to inline; a manifest of changed files (with added/deleted line counts) is provided below inside <<<DIFF-MANIFEST…DIFF-MANIFEST>>> delimiters. Use your shell tool to fetch per-file diffs as you need them.`;
+  }
   if (uncommitted) {
     return "Review the staged, unstaged, and untracked changes in the working tree of this repository. The authoritative diff is provided below inside <<<DIFF…DIFF>>> delimiters — do not re-derive it from git yourself.";
   }
@@ -1805,16 +1875,44 @@ function buildPostingInstructions({ prNumber, reviewerLabel }) {
   ];
 }
 
-function buildDiffBlock(diffText) {
+// Maximum bytes of diff text to inline into a codex review prompt. Beyond
+// this, we switch to a manifest (file list + numstat) and instruct codex to
+// fetch per-file diffs via shell. Keeps prompt size bounded so review latency
+// is predictable on long-lived branches with very large diffs. Override with
+// GC_CODEX_REVIEW_MAX_DIFF_BYTES; set to 0 to disable the cap.
+export const DEFAULT_CODEX_REVIEW_MAX_DIFF_BYTES = (() => {
+  const raw = Number.parseInt(process.env.GC_CODEX_REVIEW_MAX_DIFF_BYTES || "", 10);
+  if (!Number.isInteger(raw)) return 256 * 1024; // 256 KiB
+  return raw;
+})();
+
+export function buildDiffBlock({ diffText, mode = "inline", manifest = null, baseRefDescriptor = null }) {
+  if (mode === "manifest") {
+    return [
+      "<<<DIFF-MANIFEST",
+      manifest && manifest.trim() !== "" ? manifest : "(empty manifest)",
+      "DIFF-MANIFEST>>>",
+      "",
+      `The full diff was too large to inline. The manifest above lists every changed file with its added/deleted line counts. To inspect any file's actual diff, run \`git diff ${baseRefDescriptor || "<base-ref>"}...HEAD -- <path>\` or \`git show HEAD -- <path>\` from the workspace via your shell tool. Read every file you flag a finding on; do not infer behavior from the filename or numstat alone.`,
+    ];
+  }
   if (!diffText || diffText.trim() === "") {
     return ["<<<DIFF", "(empty diff — nothing changed against the base branch)", "DIFF>>>"];
   }
   return ["<<<DIFF", diffText, "DIFF>>>"];
 }
 
-export function buildCodexReviewCorePrompt({ baseBranch, uncommitted, prNumber, diffText }) {
+export function buildCodexReviewCorePrompt({
+  baseBranch,
+  uncommitted,
+  prNumber,
+  diffText,
+  diffMode = "inline",
+  diffManifest = null,
+  baseRefDescriptor = null,
+}) {
   const lines = [
-    buildCommonReviewPreamble({ baseBranch, uncommitted }),
+    buildCommonReviewPreamble({ baseBranch, uncommitted, diffMode }),
     "",
     "Review the code in this PR for production-readiness. Accept nothing less.",
     "",
@@ -1837,14 +1935,22 @@ export function buildCodexReviewCorePrompt({ baseBranch, uncommitted, prNumber, 
     "",
     ...buildPostingInstructions({ prNumber, reviewerLabel: "core" }),
     "",
-    ...buildDiffBlock(diffText),
+    ...buildDiffBlock({ diffText, mode: diffMode, manifest: diffManifest, baseRefDescriptor }),
   ];
   return lines.join("\n");
 }
 
-export function buildCodexSecurityReviewPrompt({ baseBranch, uncommitted, prNumber, diffText }) {
+export function buildCodexSecurityReviewPrompt({
+  baseBranch,
+  uncommitted,
+  prNumber,
+  diffText,
+  diffMode = "inline",
+  diffManifest = null,
+  baseRefDescriptor = null,
+}) {
   const lines = [
-    buildCommonReviewPreamble({ baseBranch, uncommitted }),
+    buildCommonReviewPreamble({ baseBranch, uncommitted, diffMode }),
     "",
     "You are a senior application-security engineer reviewing this PR. Focus exclusively on concrete, exploitable security issues introduced by the diff. Do not comment on maintainability, style, performance, or architecture except where they directly enable a security flaw.",
     "",
@@ -1876,22 +1982,34 @@ export function buildCodexSecurityReviewPrompt({ baseBranch, uncommitted, prNumb
     "",
     ...buildPostingInstructions({ prNumber, reviewerLabel: "security" }),
     "",
-    ...buildDiffBlock(diffText),
+    ...buildDiffBlock({ diffText, mode: diffMode, manifest: diffManifest, baseRefDescriptor }),
   ];
   return lines.join("\n");
 }
 
-export function buildCodexReviewArgs({ uncommitted }) {
-  // Note: codex review's `--base <BRANCH>` is mutually exclusive with `[PROMPT]`
-  // in the CLI, so we cannot pass both. We drop `--base` and instead instruct
-  // codex to run the diff itself via the prompt. `--uncommitted` is still
-  // compatible with a custom prompt.
-  const args = ["review"];
-  if (uncommitted) {
-    args.push("--uncommitted");
-  }
-  args.push("-");
-  return args;
+// Build args for a single codex review run. We use `codex exec` (not the
+// `codex review` subcommand) for two reasons: `codex exec` exposes `-C`,
+// `--sandbox`, and `--output-last-message` for predictable scripted runs, and
+// `codex review` was observed to occasionally not exit cleanly after emitting
+// the structured tail when invoked with a stdin prompt — the resulting hangs
+// blocked the implement workflow indefinitely. The diff itself is inlined
+// (or summarised) by the caller in the prompt, so we no longer need codex's
+// own diff machinery via `--uncommitted` / `--base`.
+//
+// `workspace-write` matches the architecture preflight sandbox and lets the
+// model run the `gh api ... POST .../comments` calls the prompt instructs it
+// to make.
+export function buildCodexReviewExecArgs({ repoPath, outputPath }) {
+  return [
+    "exec",
+    "--sandbox",
+    "workspace-write",
+    "-C",
+    repoPath,
+    "--output-last-message",
+    outputPath,
+    "-",
+  ];
 }
 
 // Parses the structured tail line `COMMENT_IDS=[1,2,3]` from codex's stdout.
@@ -1956,7 +2074,10 @@ async function fetchReviewCommentById(repoRoot, owner, name, commentId) {
 }
 
 // One GraphQL round-trip to map REST comment ids → review thread node ids.
-// Pages through `reviewThreads` so PRs with many threads still resolve.
+// Pages through `reviewThreads` so PRs with many threads still resolve. Hard-
+// caps total pages at 100 (10,000 threads at 100/page) so a malformed or
+// looping response cannot stall the workflow indefinitely.
+const ENRICH_THREAD_PAGE_CAP = 100;
 export async function enrichCommentsWithThreadIds({ repoRoot, owner, name, prNumber, commentIds }) {
   if (!commentIds || commentIds.length === 0) {
     return new Map();
@@ -1964,8 +2085,16 @@ export async function enrichCommentsWithThreadIds({ repoRoot, owner, name, prNum
   const wanted = new Set(commentIds);
   const result = new Map();
   let cursor = null;
+  let pages = 0;
 
   while (result.size < wanted.size) {
+    if (pages >= ENRICH_THREAD_PAGE_CAP) {
+      // Don't throw — the caller is happy to receive partial mapping (missing
+      // entries become null thread_ids in the returned comment list). Just
+      // stop paging so we cannot loop forever.
+      break;
+    }
+    pages += 1;
     const query = `
       query($owner:String!, $name:String!, $pr:Int!, $cursor:String) {
         repository(owner:$owner, name:$name) {
@@ -2007,15 +2136,37 @@ export async function enrichCommentsWithThreadIds({ repoRoot, owner, name, prNum
   return result;
 }
 
+// Returns { diffText, manifest, baseRefDescriptor }. For an `uncommitted`
+// review, baseRefDescriptor is null because there is no base ref — codex
+// should use `git diff` / `git diff --staged` directly. For a branch review,
+// baseRefDescriptor is the resolved ref (e.g. `origin/dev`) so the prompt can
+// tell codex how to fetch per-file diffs in manifest mode.
 async function computeReviewDiff(repoRoot, baseBranch, uncommitted) {
   if (uncommitted) {
-    // Concatenate staged + unstaged + untracked so codex sees everything.
     const staged = await execFile("git", ["-C", repoRoot, "diff", "--staged"], { maxBuffer: 50 * 1024 * 1024 });
     const unstaged = await execFile("git", ["-C", repoRoot, "diff"], { maxBuffer: 50 * 1024 * 1024 });
-    return `${staged.stdout}\n${unstaged.stdout}`.trim();
+    const stagedManifest = await execFile(
+      "git",
+      ["-C", repoRoot, "diff", "--staged", "--numstat"],
+      { maxBuffer: 10 * 1024 * 1024 },
+    );
+    const unstagedManifest = await execFile(
+      "git",
+      ["-C", repoRoot, "diff", "--numstat"],
+      { maxBuffer: 10 * 1024 * 1024 },
+    );
+    return {
+      diffText: `${staged.stdout}\n${unstaged.stdout}`.trim(),
+      manifest: [
+        "# staged",
+        stagedManifest.stdout.trim() || "(none)",
+        "",
+        "# unstaged",
+        unstagedManifest.stdout.trim() || "(none)",
+      ].join("\n"),
+      baseRefDescriptor: null,
+    };
   }
-  // Prefer the remote-tracking ref when it exists and is ahead of the local
-  // ref, otherwise fall back to the local base ref, and finally to main.
   const candidates = [`origin/${baseBranch}`, baseBranch, "origin/main", "main"];
   for (const ref of candidates) {
     try {
@@ -2025,7 +2176,16 @@ async function computeReviewDiff(repoRoot, baseBranch, uncommitted) {
         ["-C", repoRoot, "diff", `${ref}...HEAD`],
         { maxBuffer: 50 * 1024 * 1024 },
       );
-      return stdout;
+      const manifest = await execFile(
+        "git",
+        ["-C", repoRoot, "diff", `${ref}...HEAD`, "--numstat"],
+        { maxBuffer: 10 * 1024 * 1024 },
+      );
+      return {
+        diffText: stdout,
+        manifest: manifest.stdout.trim() || "(no files changed)",
+        baseRefDescriptor: ref,
+      };
     } catch {
       continue;
     }
@@ -2033,15 +2193,45 @@ async function computeReviewDiff(repoRoot, baseBranch, uncommitted) {
   throw new Error(`Unable to compute review diff: none of ${candidates.join(", ")} exist in ${repoRoot}`);
 }
 
-async function runSingleCodexReview({ repoRoot, prompt, args }) {
-  const { stdout } = await execFileWithInput("codex", args, {
-    input: prompt,
-    cwd: repoRoot,
-    maxBuffer: 10 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: "1" },
-  });
-  return stdout;
+// Decide whether to inline the full diff or fall back to manifest mode based
+// on the configured byte cap. Exported so the tests can exercise the policy.
+export function selectDiffMode({ diffText, maxBytes = DEFAULT_CODEX_REVIEW_MAX_DIFF_BYTES }) {
+  if (!maxBytes || maxBytes <= 0) return "inline";
+  if (Buffer.byteLength(diffText || "", "utf8") > maxBytes) return "manifest";
+  return "inline";
 }
+
+async function runSingleCodexReview({ repoRoot, prompt }) {
+  const tempDir = mkdtempSync(join(tmpdir(), "gc-codex-review-"));
+  const outputPath = join(tempDir, "codex-last-message.txt");
+  try {
+    await execFileWithInput(
+      "codex",
+      buildCodexReviewExecArgs({ repoPath: repoRoot, outputPath }),
+      {
+        input: prompt,
+        cwd: repoRoot,
+        maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env, NO_COLOR: "1" },
+        timeoutMs: DEFAULT_CODEX_TIMEOUT_MS,
+      },
+    );
+    return readGeneratedCodexSummary(outputPath);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+// Default for whether to run the two reviewers in parallel. Sequential is the
+// default because two concurrent codex processes contend for CPU, file
+// descriptors, and provider rate limits — and on a single-machine workflow
+// the wall-clock difference is small. Set GC_CODEX_REVIEW_PARALLEL=2 to
+// re-enable the old parallel behavior. Values other than 1 or 2 fall back to
+// 1 (sequential).
+export const DEFAULT_CODEX_REVIEW_PARALLEL = (() => {
+  const raw = Number.parseInt(process.env.GC_CODEX_REVIEW_PARALLEL || "", 10);
+  return raw === 2 ? 2 : 1;
+})();
 
 // Dedup key combines path, line, and a short prefix of the body so two
 // reviewers flagging the same underlying issue at the same location produce
@@ -2106,35 +2296,43 @@ export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted
   }
 
   // Compute the diff once and reuse it across both reviewers.
-  const diffText = await computeReviewDiff(repoRoot, baseBranch, uncommitted);
+  const { diffText, manifest, baseRefDescriptor } = await computeReviewDiff(
+    repoRoot,
+    baseBranch,
+    uncommitted,
+  );
+  const diffMode = selectDiffMode({ diffText });
 
-  const corePrompt = buildCodexReviewCorePrompt({
+  const promptArgs = {
     baseBranch,
     uncommitted,
     prNumber: effectivePr,
     diffText,
-  });
-  const securityPrompt = buildCodexSecurityReviewPrompt({
-    baseBranch,
-    uncommitted,
-    prNumber: effectivePr,
-    diffText,
-  });
-  const args = buildCodexReviewArgs({ uncommitted });
+    diffMode,
+    diffManifest: manifest,
+    baseRefDescriptor,
+  };
+  const corePrompt = buildCodexReviewCorePrompt(promptArgs);
+  const securityPrompt = buildCodexSecurityReviewPrompt(promptArgs);
 
-  let coreStdout;
-  let securityStdout;
+  let coreOutput;
+  let securityOutput;
   try {
-    [coreStdout, securityStdout] = await Promise.all([
-      runSingleCodexReview({ repoRoot, prompt: corePrompt, args }),
-      runSingleCodexReview({ repoRoot, prompt: securityPrompt, args }),
-    ]);
+    if (DEFAULT_CODEX_REVIEW_PARALLEL === 2) {
+      [coreOutput, securityOutput] = await Promise.all([
+        runSingleCodexReview({ repoRoot, prompt: corePrompt }),
+        runSingleCodexReview({ repoRoot, prompt: securityPrompt }),
+      ]);
+    } else {
+      coreOutput = await runSingleCodexReview({ repoRoot, prompt: corePrompt });
+      securityOutput = await runSingleCodexReview({ repoRoot, prompt: securityPrompt });
+    }
   } catch (error) {
     throw new Error(`Codex review failed: ${formatCommandFailure("codex", error)}`);
   }
 
-  const core = parseCodexReviewTail(coreStdout);
-  const security = parseCodexReviewTail(securityStdout);
+  const core = parseCodexReviewTail(coreOutput);
+  const security = parseCodexReviewTail(securityOutput);
 
   let owner = null;
   let name = null;
@@ -2389,6 +2587,7 @@ export async function runCodexVerifyFinding({ repoPath, prNumber, commentId }) {
         cwd: repoRoot,
         maxBuffer: 10 * 1024 * 1024,
         env: { ...process.env, NO_COLOR: "1" },
+        timeoutMs: DEFAULT_CODEX_TIMEOUT_MS,
       },
     ));
   } catch (error) {
