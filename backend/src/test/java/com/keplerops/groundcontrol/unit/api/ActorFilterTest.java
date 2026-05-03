@@ -39,24 +39,30 @@ class ActorFilterTest {
             this.value = value;
         }
 
+        // All ObjectProvider lookup methods delegate to one helper so the test stub stays a
+        // simple "always return value" without four byte-identical method bodies.
+        private T value() {
+            return value;
+        }
+
         @Override
         public T getObject(Object... args) {
-            return value;
+            return value();
         }
 
         @Override
         public T getObject() {
-            return value;
+            return value();
         }
 
         @Override
         public T getIfAvailable() {
-            return value;
+            return value();
         }
 
         @Override
         public T getIfUnique() {
-            return value;
+            return value();
         }
     }
 
