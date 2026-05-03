@@ -26,6 +26,8 @@ import org.springframework.security.web.access.intercept.AuthorizationFilter;
 @EnableConfigurationProperties(SecurityProperties.class)
 public class ApiSecurityConfig {
 
+    private static final String ROLE_ADMIN = "ADMIN";
+
     @Bean
     public BearerTokenAuthFilter bearerTokenAuthFilter(SecurityProperties properties) {
         return new BearerTokenAuthFilter(properties);
@@ -55,6 +57,13 @@ public class ApiSecurityConfig {
             ApiAuthenticationEntryPoint authenticationEntryPoint,
             ApiAccessDeniedHandler accessDeniedHandler)
             throws Exception {
+        // CSRF is disabled by design: this is a stateless REST API authenticated by
+        // Authorization: Bearer <token>. There are no session cookies, no form-login
+        // flow, and no logout endpoint — the three things a CSRF attack relies on to
+        // ride a user's authenticated session. Bearer tokens are explicit per request,
+        // so a malicious cross-origin page cannot trigger an authenticated call from a
+        // signed-in browser. ADR-026 documents this; do not re-enable CSRF without
+        // simultaneously moving to cookie-based sessions and re-evaluating the model.
         http.csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.disable())
                 .formLogin(form -> form.disable())
@@ -95,13 +104,13 @@ public class ApiSecurityConfig {
                         .authenticated();
             }
             auth.requestMatchers("/api/v1/admin/**")
-                    .hasRole("ADMIN")
+                    .hasRole(ROLE_ADMIN)
                     .requestMatchers("/api/v1/embeddings/**")
-                    .hasRole("ADMIN")
+                    .hasRole(ROLE_ADMIN)
                     .requestMatchers("/api/v1/analysis/sweep/**")
-                    .hasRole("ADMIN")
+                    .hasRole(ROLE_ADMIN)
                     .requestMatchers("/api/v1/pack-registry/**")
-                    .hasRole("ADMIN")
+                    .hasRole(ROLE_ADMIN)
                     .requestMatchers("/api/v1/**")
                     .authenticated()
                     .anyRequest()

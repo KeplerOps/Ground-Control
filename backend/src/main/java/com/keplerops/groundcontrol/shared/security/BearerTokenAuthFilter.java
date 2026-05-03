@@ -23,6 +23,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * <p>Constant-time token compare via {@link MessageDigest#isEqual} mirrors the existing pack
  * registry guard convention. Tokens are never logged.
  */
+@SuppressWarnings("java:S125") // JML block comments (/*@ ... @*/) are contracts, not commented-out code
 public class BearerTokenAuthFilter extends OncePerRequestFilter {
 
     private static final String AUTHORIZATION_HEADER = "Authorization";

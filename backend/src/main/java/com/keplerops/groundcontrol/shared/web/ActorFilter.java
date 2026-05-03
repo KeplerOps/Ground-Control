@@ -31,6 +31,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  */
 @Component
 @Order(Ordered.LOWEST_PRECEDENCE - 100)
+@SuppressWarnings("java:S125") // JML block comments (/*@ ... @*/) are contracts, not commented-out code
 public class ActorFilter extends OncePerRequestFilter {
 
     private static final String ACTOR_HEADER = "X-Actor";

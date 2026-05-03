@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
  * in dev profile) without a valid admin principal in scope.
  */
 @Component
+@SuppressWarnings("java:S125") // JML block comments (/*@ ... @*/) are contracts, not commented-out code
 public class PackRegistryAccessGuard {
 
     private static final String ADMIN_AUTHORITY = "ROLE_ADMIN";

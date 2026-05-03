@@ -14,9 +14,13 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.List;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -78,9 +82,14 @@ class BearerTokenAuthFilterTest {
         assertThat(auth.getAuthorities()).extracting(Object::toString).containsExactly("ROLE_ADMIN");
     }
 
-    @Test
-    void noHeader_leavesContextEmpty_andContinuesChain() throws Exception {
+    @ParameterizedTest(name = "[{index}] {0}")
+    @MethodSource("rejectedAuthorizationHeaders")
+    void unauthorizedHeader_leavesContextEmpty_andContinuesChain(String description, String headerValue)
+            throws Exception {
         var request = new MockHttpServletRequest();
+        if (headerValue != null) {
+            request.addHeader("Authorization", headerValue);
+        }
 
         filter.doFilter(request, response, chain);
 
@@ -88,37 +97,12 @@ class BearerTokenAuthFilterTest {
         verify(chain).doFilter(request, response);
     }
 
-    @Test
-    void wrongScheme_leavesContextEmpty() throws Exception {
-        var request = new MockHttpServletRequest();
-        request.addHeader("Authorization", "Basic dXNlcjpwYXNz");
-
-        filter.doFilter(request, response, chain);
-
-        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
-        verify(chain).doFilter(request, response);
-    }
-
-    @Test
-    void invalidToken_leavesContextEmpty() throws Exception {
-        var request = new MockHttpServletRequest();
-        request.addHeader("Authorization", "Bearer wrong-token");
-
-        filter.doFilter(request, response, chain);
-
-        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
-        verify(chain).doFilter(request, response);
-    }
-
-    @Test
-    void emptyTokenAfterBearer_leavesContextEmpty() throws Exception {
-        var request = new MockHttpServletRequest();
-        request.addHeader("Authorization", "Bearer ");
-
-        filter.doFilter(request, response, chain);
-
-        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
-        verify(chain).doFilter(request, response);
+    static Stream<Arguments> rejectedAuthorizationHeaders() {
+        return Stream.of(
+                Arguments.of("no header at all", null),
+                Arguments.of("wrong scheme (Basic)", "Basic dXNlcjpwYXNz"),
+                Arguments.of("Bearer with unknown token", "Bearer wrong-token"),
+                Arguments.of("Bearer with empty token", "Bearer "));
     }
 
     @Test
