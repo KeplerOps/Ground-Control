@@ -35,7 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   over the `X-Actor` request header. The header remains a fallback when
   `groundcontrol.security.enabled=false` (dev/test) but can no longer
   spoof identity in production.
-
 - `.github/workflows/ci.yml` — `docker` now `needs: [integration, verify, sonar]` instead of `[integration, verify]`. The `sonar` job is part of the gate, not informational: a quality-gate failure must block the deploy chain (`docker → smoke → deploy`). Without this, the post-merge dev push for #536 produced `sonar:failure` while `docker:success` proceeded toward `smoke`/`deploy`.
 
 ### Fixed
