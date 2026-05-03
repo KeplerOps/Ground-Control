@@ -8,6 +8,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.keplerops.groundcontrol.shared.security.ApiSecurityConfig;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -115,33 +117,17 @@ class ApiSecurityConfigTest {
                     .andExpect(content().string("admin-ok"));
         }
 
-        @Test
-        void userTokenOnEmbeddings_returns403() throws Exception {
-            mockMvc.perform(get("/api/v1/embeddings/echo").header("Authorization", "Bearer user-token-aaa"))
-                    .andExpect(status().isForbidden());
-        }
-
-        @Test
-        void userTokenOnAnalysisSweep_returns403() throws Exception {
-            mockMvc.perform(get("/api/v1/analysis/sweep/echo").header("Authorization", "Bearer user-token-aaa"))
-                    .andExpect(status().isForbidden());
-        }
-
-        @Test
-        void userTokenOnPackRegistry_returns403() throws Exception {
-            mockMvc.perform(get("/api/v1/pack-registry/echo").header("Authorization", "Bearer user-token-aaa"))
-                    .andExpect(status().isForbidden());
-        }
-
-        @Test
-        void userTokenOnTrustPolicies_returns403() throws Exception {
-            mockMvc.perform(get("/api/v1/trust-policies/echo").header("Authorization", "Bearer user-token-aaa"))
-                    .andExpect(status().isForbidden());
-        }
-
-        @Test
-        void userTokenOnPackInstallRecords_returns403() throws Exception {
-            mockMvc.perform(get("/api/v1/pack-install-records/echo").header("Authorization", "Bearer user-token-aaa"))
+        @ParameterizedTest(name = "[{index}] USER on {0} returns 403")
+        @ValueSource(
+                strings = {
+                    "/api/v1/embeddings/echo",
+                    "/api/v1/analysis/sweep/echo",
+                    "/api/v1/pack-registry/echo",
+                    "/api/v1/trust-policies/echo",
+                    "/api/v1/pack-install-records/echo"
+                })
+        void userTokenOnAdminPath_returns403(String adminPath) throws Exception {
+            mockMvc.perform(get(adminPath).header("Authorization", "Bearer user-token-aaa"))
                     .andExpect(status().isForbidden());
         }
 

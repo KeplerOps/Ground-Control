@@ -2,7 +2,6 @@ package com.keplerops.groundcontrol.unit.api.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -151,6 +150,5 @@ class BearerTokenAuthFilterTest {
         filter.doFilter(request, resp, localChain);
 
         verify(localChain, times(1)).doFilter(request, resp);
-        verify(localChain, never()).doFilter(null, null);
     }
 }

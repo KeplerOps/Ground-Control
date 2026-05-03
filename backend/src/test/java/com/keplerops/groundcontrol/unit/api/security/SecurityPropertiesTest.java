@@ -7,8 +7,13 @@ import com.keplerops.groundcontrol.shared.security.SecurityProperties;
 import com.keplerops.groundcontrol.shared.security.SecurityProperties.ApiCredential;
 import com.keplerops.groundcontrol.shared.security.SecurityProperties.Role;
 import java.util.List;
+import java.util.function.Consumer;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 class SecurityPropertiesTest {
 
@@ -40,39 +45,29 @@ class SecurityPropertiesTest {
     @Nested
     class CredentialValidation {
 
-        @Test
-        void blankPrincipalName_rejected() {
+        @ParameterizedTest(name = "[{index}] {0}")
+        @MethodSource("invalidCredentials")
+        void invalidCredential_rejectedWithDescriptiveMessage(
+                String description, Consumer<ApiCredential> fieldMutator, String expectedMessageFragment) {
             var cred = new ApiCredential();
-            cred.setPrincipalName(" ");
+            cred.setPrincipalName("alice");
             cred.setToken("t1");
             cred.setRole(Role.USER);
+            fieldMutator.accept(cred);
 
             assertThatThrownBy(cred::validate)
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("principalName");
+                    .hasMessageContaining(expectedMessageFragment);
         }
 
-        @Test
-        void blankToken_rejected() {
-            var cred = new ApiCredential();
-            cred.setPrincipalName("alice");
-            cred.setToken("");
-            cred.setRole(Role.ADMIN);
-
-            assertThatThrownBy(cred::validate)
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("token");
-        }
-
-        @Test
-        void nullRole_rejected() {
-            var cred = new ApiCredential();
-            cred.setPrincipalName("alice");
-            cred.setToken("t1");
-
-            assertThatThrownBy(cred::validate)
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("role");
+        static Stream<Arguments> invalidCredentials() {
+            Consumer<ApiCredential> blankPrincipal = c -> c.setPrincipalName(" ");
+            Consumer<ApiCredential> blankToken = c -> c.setToken("");
+            Consumer<ApiCredential> nullRole = c -> c.setRole(null);
+            return Stream.of(
+                    Arguments.of("blank principalName is rejected", blankPrincipal, "principalName"),
+                    Arguments.of("blank token is rejected", blankToken, "token"),
+                    Arguments.of("null role is rejected", nullRole, "role"));
         }
 
         @Test
