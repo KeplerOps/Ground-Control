@@ -37,6 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   spoof identity in production.
 - `.github/workflows/ci.yml` — `docker` now `needs: [integration, verify, sonar]` instead of `[integration, verify]`. The `sonar` job is part of the gate, not informational: a quality-gate failure must block the deploy chain (`docker → smoke → deploy`). Without this, the post-merge dev push for #536 produced `sonar:failure` while `docker:success` proceeded toward `smoke`/`deploy`.
 
+### Removed
+
+- `ground-control.pack-registry.security.admin-credentials`,
+  `ground-control.pack-registry.security.authentication-header`, and
+  `ground-control.pack-registry.security.token-scheme` — superseded by
+  the unified `groundcontrol.security` model (see ADR-026). Operators
+  using the old keys MUST migrate their admin token entries into
+  `groundcontrol.security.credentials` with `role: ADMIN` before
+  upgrading. The pack-signing block
+  (`ground-control.pack-registry.security.trusted-signers`) is unchanged.
+
 ### Fixed
 
 - `gc_codex_review` no longer hangs indefinitely. Three independent
