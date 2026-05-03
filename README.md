@@ -72,6 +72,18 @@ make frontend-install   # Install Node dependencies (first time only)
 make frontend-dev       # Vite dev server on http://localhost:5173 (proxies /api to :8000)
 ```
 
+### Production Deployments
+
+The `dev` and `test` profiles disable the API access control layer for
+zero-friction local work. **Production deployments MUST configure**
+`groundcontrol.security.credentials` (and optionally
+`groundcontrol.security.ip-allowlist`) before exposing the backend
+beyond loopback. With `GC_SECURITY_ENABLED=true` and an empty credential
+list, every authenticated route returns 401. See
+[ADR-026](architecture/adrs/026-rest-api-access-control.md) and
+[`docs/deployment/DEPLOYMENT.md`](docs/deployment/DEPLOYMENT.md) for the
+full configuration reference.
+
 ### MCP Server (Claude Code)
 
 Configured in `.mcp.json`, works automatically with Claude Code. Start the

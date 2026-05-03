@@ -7,9 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `bin/policy --pr-body-file <path>` and `--pr-number <n>` modes so the
+  PR-body template check can run from a local draft or a fetched
+  GitHub PR body. Backed by a new `scripts/check-pr-body.sh` pre-push
+  hook (registered via `pre-commit install --hook-type pre-push`)
+  that catches missing template sections before the push triggers a
+  CI run that would fail at the policy job.
+- New `Step 6.5: Pre-push Codex Review (uncommitted)` in the
+  `/implement` skill. Runs `gc_codex_review` with `uncommitted=true`
+  against the staged diff before the first push so each fix iterates
+  through codex locally (~5 min) instead of through CI (~10–15 min).
+  Step 12 becomes a verification pass against the merge commit
+  rather than the loop driver.
+- REST API access control via Spring Security (closes #243, GC-P011). All
+  `/api/v1/**` endpoints now require `Authorization: Bearer <token>` against
+  the configured `groundcontrol.security.credentials` list; admin paths
+  (`/api/v1/admin/**`, `/api/v1/embeddings/**`, `/api/v1/analysis/sweep/**`,
+  `/api/v1/pack-registry/**`) require `ROLE_ADMIN`. Optional CIDR allowlist
+  via `groundcontrol.security.ip-allowlist`. Only `/actuator/health` and
+  `/actuator/info` are anonymous; OpenAPI schema is gated by
+  `groundcontrol.security.openapi-public` (default `false`). Filter chain,
+  configuration model, and rationale documented in
+  `architecture/adrs/026-rest-api-access-control.md`. The `dev` and `test`
+  profiles ship with `groundcontrol.security.enabled=false` so local dev
+  and the existing test suite are unaffected.
+
 ### Changed
 
+- Pack registry admin authentication is now part of the unified
+  `groundcontrol.security` model. `ground-control.pack-registry.security.admin-credentials`,
+  `authentication-header`, and `token-scheme` are removed; deployments
+  must move admin entries into `groundcontrol.security.credentials` with
+  `role: ADMIN`. Pack-signing settings (`trusted-signers`) are unchanged.
+  `PackRegistryAccessGuard` no longer parses tokens — it reads the
+  authenticated principal from `SecurityContextHolder` for audit fields.
+- `ActorFilter` prefers the authenticated `SecurityContext` principal name
+  over the `X-Actor` request header. The header remains a fallback when
+  `groundcontrol.security.enabled=false` (dev/test) but can no longer
+  spoof identity in production.
 - `.github/workflows/ci.yml` — `docker` now `needs: [integration, verify, sonar]` instead of `[integration, verify]`. The `sonar` job is part of the gate, not informational: a quality-gate failure must block the deploy chain (`docker → smoke → deploy`). Without this, the post-merge dev push for #536 produced `sonar:failure` while `docker:success` proceeded toward `smoke`/`deploy`.
+
+### Removed
+
+- `ground-control.pack-registry.security.admin-credentials`,
+  `ground-control.pack-registry.security.authentication-header`, and
+  `ground-control.pack-registry.security.token-scheme` — superseded by
+  the unified `groundcontrol.security` model (see ADR-026). Operators
+  using the old keys MUST migrate their admin token entries into
+  `groundcontrol.security.credentials` with `role: ADMIN` before
+  upgrading. The pack-signing block
+  (`ground-control.pack-registry.security.trusted-signers`) is unchanged.
 
 ### Fixed
 

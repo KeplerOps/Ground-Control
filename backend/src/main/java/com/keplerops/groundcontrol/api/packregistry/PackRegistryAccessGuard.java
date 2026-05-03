@@ -1,60 +1,68 @@
 package com.keplerops.groundcontrol.api.packregistry;
 
+import com.keplerops.groundcontrol.domain.audit.ActorHolder;
 import com.keplerops.groundcontrol.domain.exception.AuthenticationException;
-import com.keplerops.groundcontrol.domain.packregistry.service.PackRegistrySecurityProperties;
-import jakarta.servlet.http.HttpServletRequest;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
+import com.keplerops.groundcontrol.shared.security.SecurityProperties;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
+/**
+ * Returns the authenticated admin principal name for pack-registry audit fields.
+ *
+ * <p>The actual authentication and {@code ROLE_ADMIN} authorization are performed by
+ * {@link com.keplerops.groundcontrol.shared.security.ApiSecurityConfig} earlier in the filter
+ * chain. This guard exists only to bridge from Spring Security's {@link SecurityContextHolder} to
+ * the controller's audit identity, and to fail closed if security has been bypassed (for example
+ * in dev profile) without a valid admin principal in scope.
+ *
+ * <p>When {@code groundcontrol.security.enabled=false} (dev/test profile), the security chain
+ * does not populate the SecurityContext. The guard then falls back to {@link ActorHolder}, which
+ * {@code ActorFilter} populates from the {@code X-Actor} request header (or {@code "anonymous"}
+ * if absent). This keeps the local pack registry usable without forcing operators to mint admin
+ * tokens just to develop, while production (security enabled) still enforces ROLE_ADMIN.
+ */
 @Component
+@SuppressWarnings("java:S125") // JML block comments (/*@ ... @*/) are contracts, not commented-out code
 public class PackRegistryAccessGuard {
 
-    private final PackRegistrySecurityProperties securityProperties;
+    private static final String ADMIN_AUTHORITY = "ROLE_ADMIN";
 
-    public PackRegistryAccessGuard(PackRegistrySecurityProperties securityProperties) {
+    private final SecurityProperties securityProperties;
+
+    public PackRegistryAccessGuard(SecurityProperties securityProperties) {
         this.securityProperties = securityProperties;
     }
 
-    /*@ requires request != null;
-    @ ensures \result != null; @*/
-    public String requireAdminActor(HttpServletRequest request) {
-        if (securityProperties.getAdminCredentials().isEmpty()) {
-            throw new AuthenticationException("Pack registry admin authentication is not configured");
+    /*@ ensures \result != null && !\result.isBlank(); @*/
+    public String requireAdminActor() {
+        if (!securityProperties.isEnabled()) {
+            String actor = ActorHolder.get();
+            return actor != null && !actor.isBlank() ? actor : "anonymous";
         }
-
-        var headerValue = request.getHeader(securityProperties.getAuthenticationHeader());
-        if (headerValue == null || headerValue.isBlank()) {
-            throw new AuthenticationException("Pack registry admin credentials are required");
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            throw new AuthenticationException("Pack registry admin authentication is required");
         }
-
-        var expectedScheme = securityProperties.getTokenScheme();
-        var prefix = expectedScheme + " ";
-        if (!headerValue.regionMatches(true, 0, prefix, 0, prefix.length())) {
-            throw new AuthenticationException(
-                    "Pack registry admin credentials must use the " + expectedScheme + " scheme");
+        String name = auth.getName();
+        if (name == null || name.isBlank()) {
+            throw new AuthenticationException("Pack registry admin authentication is required");
         }
-
-        var token = headerValue.substring(prefix.length()).trim();
-        if (token.isEmpty()) {
-            throw new AuthenticationException("Pack registry admin token is missing");
+        if (!hasAdminAuthority(auth)) {
+            throw new AuthenticationException("Pack registry endpoints require the admin role");
         }
-
-        for (var credential : securityProperties.getAdminCredentials()) {
-            if (!hasText(credential.getPrincipalName()) || !hasText(credential.getToken())) {
-                continue;
-            }
-            if (MessageDigest.isEqual(
-                    token.getBytes(StandardCharsets.UTF_8),
-                    credential.getToken().getBytes(StandardCharsets.UTF_8))) {
-                return credential.getPrincipalName().trim();
-            }
-        }
-
-        throw new AuthenticationException("Invalid pack registry admin token");
+        return name;
     }
 
-    private boolean hasText(String value) {
-        return value != null && !value.isBlank();
+    /*@ requires auth != null;
+    @ pure @*/
+    private static boolean hasAdminAuthority(Authentication auth) {
+        for (GrantedAuthority granted : auth.getAuthorities()) {
+            if (ADMIN_AUTHORITY.equals(granted.getAuthority())) {
+                return true;
+            }
+        }
+        return false;
     }
 }

@@ -571,15 +571,43 @@ export function parseErrorBody(text) {
   return { code: null, message: text, detail: null };
 }
 
-function requiresPackRegistryAdmin(path) {
+function requiresAdminRole(path) {
   return path.startsWith("/api/v1/pack-registry")
     || path.startsWith("/api/v1/trust-policies")
-    || path.startsWith("/api/v1/pack-install-records");
+    || path.startsWith("/api/v1/pack-install-records")
+    || path.startsWith("/api/v1/admin/")
+    || path.startsWith("/api/v1/embeddings")
+    || path.startsWith("/api/v1/analysis/sweep");
 }
 
-function addPackRegistryAdminHeader(path, headers) {
-  const token = process.env.GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN;
-  if (requiresPackRegistryAdmin(path) && token) {
+// Forwards a bearer token on `/api/v1/**` requests so the MCP server can talk
+// to a Ground Control deployment with `groundcontrol.security.enabled=true`.
+//
+// Resolution order:
+//   - On admin-only paths: prefer GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN
+//     when set (it's, by definition, an ADMIN-role token), then fall back to
+//     GROUND_CONTROL_API_TOKEN. Picking the admin token first prevents a
+//     deployment that has both vars configured but a USER-only generic token
+//     from getting 403s on admin endpoints.
+//   - On non-admin paths: use GROUND_CONTROL_API_TOKEN if set, otherwise fall
+//     back to GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN. An ADMIN credential is
+//     valid for all `/api/v1/**` paths under the unified security model
+//     (ADR-026), so deployments that migrated from the legacy admin-only var
+//     keep working for ordinary requirement / project / graph reads.
+// When neither is set the header is omitted (dev profile / disabled security).
+function addAuthorizationHeader(path, headers) {
+  if (!path.startsWith("/api/v1/")) {
+    return;
+  }
+  const apiToken = process.env.GROUND_CONTROL_API_TOKEN;
+  const adminToken = process.env.GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN;
+  let token;
+  if (requiresAdminRole(path)) {
+    token = adminToken || apiToken;
+  } else {
+    token = apiToken || adminToken;
+  }
+  if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
 }
@@ -598,7 +626,7 @@ async function request(method, path, { body, params, formData } = {}) {
   } else {
     options.headers = { "X-Actor": "mcp-server" };
   }
-  addPackRegistryAdminHeader(path, options.headers);
+  addAuthorizationHeader(path, options.headers);
 
   const res = await fetch(url, options);
 

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from tools.policy.checks import (
     REPO_ROOT,
+    check_pr_body,
     parse_args,
     run_adr_guard,
     run_controller_contracts,
@@ -49,10 +50,36 @@ class PolicyChecksTest(unittest.TestCase):
             violations = run_pr_body_check(event_path)
             self.assertTrue(any(item.code == "pr-template-sections" for item in violations))
 
+    def test_check_pr_body_accepts_string_directly(self):
+        violations = check_pr_body("## Summary\n\nMissing policy sections")
+        codes = {item.code for item in violations}
+        self.assertIn("pr-template-sections", codes)
+
+    def test_check_pr_body_passes_for_well_formed_body(self):
+        body = (
+            "## Summary\n\nFix.\n"
+            "## Requirement UIDs\n\n- GC-X001\n"
+            "## ADR Impact\n\nADR-026 added.\n"
+            "## Ground Control Checks\n\n"
+            "- [x] `make policy` passes\n"
+            "- [x] `gc_evaluate_quality_gates` passes or is unchanged by this repo-only change\n"
+            "- [x] `gc_run_sweep` reviewed or intentionally deferred with reason\n"
+            "## Traceability\n\n- IMPLEMENTS: foo\n- TESTS: bar\n"
+        )
+        self.assertEqual(check_pr_body(body), [])
+
     def test_parse_args_accepts_pre_commit_positional_files(self):
         args = parse_args(["--skip-pr-body", "docs/WORKFLOW.md", "mcp/ground-control/lib.js"])
         self.assertEqual(args.paths, ["docs/WORKFLOW.md", "mcp/ground-control/lib.js"])
         self.assertIsNone(args.files)
+
+    def test_parse_args_accepts_pr_body_file(self):
+        args = parse_args(["--pr-body-file", "/tmp/pr-body.md"])
+        self.assertEqual(args.pr_body_file, "/tmp/pr-body.md")
+
+    def test_parse_args_accepts_pr_number(self):
+        args = parse_args(["--pr-number", "790"])
+        self.assertEqual(args.pr_number, 790)
 
 
 if __name__ == "__main__":

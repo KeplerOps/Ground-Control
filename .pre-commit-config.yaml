@@ -87,6 +87,14 @@ repos:
         files: ^(AGENTS\.md|\.claude/|\.github/|architecture/|backend/|docs/|mcp/|specs/|tools/)
         pass_filenames: false
 
+      - id: pr-body-policy
+        name: pr body template (only on push, when a PR exists)
+        entry: scripts/check-pr-body.sh
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+
       - id: gradle-check
         name: gradle check (build + test + static analysis + coverage)
         entry: bash -c 'cd backend && ./gradlew check -q'

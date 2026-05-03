@@ -4,37 +4,16 @@ import java.util.ArrayList;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-@ConfigurationProperties(prefix = "ground-control.pack-registry.security")
+/**
+ * Pack registry signing configuration. Admin authentication for pack registry endpoints is now
+ * handled by the unified {@code groundcontrol.security} layer (Spring Security with bearer
+ * tokens); this properties class only carries the list of trusted signers used by
+ * {@link PackIntegrityVerifier} to validate signed pack imports.
+ */
+@ConfigurationProperties(prefix = "ground-control.pack-registry.security", ignoreUnknownFields = false)
 public class PackRegistrySecurityProperties {
 
-    private String authenticationHeader = "Authorization";
-    private String tokenScheme = "Bearer";
-    private List<AdminCredential> adminCredentials = new ArrayList<>();
     private List<TrustedSigner> trustedSigners = new ArrayList<>();
-
-    public String getAuthenticationHeader() {
-        return authenticationHeader;
-    }
-
-    public void setAuthenticationHeader(String authenticationHeader) {
-        this.authenticationHeader = authenticationHeader;
-    }
-
-    public String getTokenScheme() {
-        return tokenScheme;
-    }
-
-    public void setTokenScheme(String tokenScheme) {
-        this.tokenScheme = tokenScheme;
-    }
-
-    public List<AdminCredential> getAdminCredentials() {
-        return adminCredentials;
-    }
-
-    public void setAdminCredentials(List<AdminCredential> adminCredentials) {
-        this.adminCredentials = adminCredentials != null ? adminCredentials : new ArrayList<>();
-    }
 
     public List<TrustedSigner> getTrustedSigners() {
         return trustedSigners;
@@ -42,28 +21,6 @@ public class PackRegistrySecurityProperties {
 
     public void setTrustedSigners(List<TrustedSigner> trustedSigners) {
         this.trustedSigners = trustedSigners != null ? trustedSigners : new ArrayList<>();
-    }
-
-    public static class AdminCredential {
-
-        private String principalName;
-        private String token;
-
-        public String getPrincipalName() {
-            return principalName;
-        }
-
-        public void setPrincipalName(String principalName) {
-            this.principalName = principalName;
-        }
-
-        public String getToken() {
-            return token;
-        }
-
-        public void setToken(String token) {
-            this.token = token;
-        }
     }
 
     public static class TrustedSigner {

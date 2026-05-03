@@ -15,9 +15,16 @@ catalog_path="${tmp_dir}/catalog.json"
 curl -fsSL "${RAW_BASE_URL}/packs/catalog.json" -o "${catalog_path}"
 
 spring_json="$(aws ssm get-parameter --region "${AWS_REGION}" --name "${PARAM_PATH}" --with-decryption --query 'Parameter.Value' --output text)"
-auth_token="$(printf '%s' "${spring_json}" | jq -r '.["ground-control"]["pack-registry"]["security"]["admin-credentials"][0].token // empty')"
+# Resolve an ADMIN-role bearer token from the unified groundcontrol.security
+# credentials list (ADR-026 / GC-P011).
+auth_token="$(printf '%s' "${spring_json}" | jq -r '
+  (.groundcontrol.security.credentials // [])
+    | map(select(.role == "ADMIN"))
+    | .[0].token // empty
+')"
 if [ -z "${auth_token}" ]; then
-  echo "Could not resolve pack-registry admin token from ${PARAM_PATH}."
+  echo "Could not resolve an ADMIN-role token from ${PARAM_PATH}."
+  echo "Expected SSM parameter shape: {\"groundcontrol\":{\"security\":{\"credentials\":[{\"principal-name\":\"...\",\"token\":\"...\",\"role\":\"ADMIN\"}]}}}"
   exit 1
 fi
 

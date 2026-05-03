@@ -2,10 +2,10 @@ package com.keplerops.groundcontrol.unit.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.keplerops.groundcontrol.api.ErrorResponse;
 import com.keplerops.groundcontrol.api.GlobalExceptionHandler;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import com.keplerops.groundcontrol.shared.web.ErrorResponse;
 import java.io.Serializable;
 import java.util.LinkedHashMap;
 import java.util.List;
