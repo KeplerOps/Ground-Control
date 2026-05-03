@@ -4,7 +4,6 @@ import com.keplerops.groundcontrol.domain.packregistry.service.InstallPackComman
 import com.keplerops.groundcontrol.domain.packregistry.service.PackInstallOrchestrator;
 import com.keplerops.groundcontrol.domain.packregistry.state.InstallOutcome;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -35,10 +34,8 @@ public class PackInstallRecordController {
 
     @PostMapping("/install")
     public ResponseEntity<PackInstallRecordResponse> install(
-            @Valid @RequestBody InstallPackRequest request,
-            @RequestParam(required = false) String project,
-            HttpServletRequest httpRequest) {
-        var performedBy = accessGuard.requireAdminActor(httpRequest);
+            @Valid @RequestBody InstallPackRequest request, @RequestParam(required = false) String project) {
+        var performedBy = accessGuard.requireAdminActor();
         var projectId = projectService.resolveProjectId(project);
         var result = orchestrator.installPack(
                 new InstallPackCommand(projectId, request.packId(), request.versionConstraint(), performedBy));
@@ -49,10 +46,8 @@ public class PackInstallRecordController {
 
     @PostMapping("/upgrade")
     public ResponseEntity<PackInstallRecordResponse> upgrade(
-            @Valid @RequestBody InstallPackRequest request,
-            @RequestParam(required = false) String project,
-            HttpServletRequest httpRequest) {
-        var performedBy = accessGuard.requireAdminActor(httpRequest);
+            @Valid @RequestBody InstallPackRequest request, @RequestParam(required = false) String project) {
+        var performedBy = accessGuard.requireAdminActor();
         var projectId = projectService.resolveProjectId(project);
         var result = orchestrator.upgradePack(
                 new InstallPackCommand(projectId, request.packId(), request.versionConstraint(), performedBy));
@@ -63,10 +58,8 @@ public class PackInstallRecordController {
 
     @GetMapping
     public List<PackInstallRecordResponse> list(
-            @RequestParam(required = false) String project,
-            @RequestParam(required = false) String packId,
-            HttpServletRequest httpRequest) {
-        accessGuard.requireAdminActor(httpRequest);
+            @RequestParam(required = false) String project, @RequestParam(required = false) String packId) {
+        accessGuard.requireAdminActor();
         var projectId = projectService.resolveProjectId(project);
         var records = packId != null
                 ? orchestrator.listInstallRecords(projectId, packId)
@@ -75,8 +68,8 @@ public class PackInstallRecordController {
     }
 
     @GetMapping("/{id}")
-    public PackInstallRecordResponse get(@PathVariable UUID id, HttpServletRequest httpRequest) {
-        accessGuard.requireAdminActor(httpRequest);
+    public PackInstallRecordResponse get(@PathVariable UUID id) {
+        accessGuard.requireAdminActor();
         return PackInstallRecordResponse.from(orchestrator.getInstallRecord(id));
     }
 

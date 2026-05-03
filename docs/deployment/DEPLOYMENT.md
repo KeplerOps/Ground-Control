@@ -53,6 +53,45 @@ All settings use the `GC_` prefix. See `.env.example`.
 | `GC_EMBEDDING_DIMENSIONS` | `1536` | Embedding vector dimensions |
 | `GC_EMBEDDING_BATCH_SIZE` | `100` | Max texts per batch embedding request |
 | `GC_EMBEDDING_SIMILARITY_THRESHOLD` | `0.85` | Default cosine similarity threshold |
+| `GC_SECURITY_ENABLED` | `true` | Master switch for the API access control layer (ADR-026, GC-P011). The `dev` and `test` profiles override this to `false`. |
+| `GC_SECURITY_OPENAPI_PUBLIC` | `false` | When `true`, `/api/openapi.json` and `/api/docs/**` are reachable anonymously. Otherwise authenticated. |
+| `GROUNDCONTROL_SECURITY_CREDENTIALS_<N>_PRINCIPAL_NAME` | _(unset)_ | Principal name written to audit fields when this token authenticates. |
+| `GROUNDCONTROL_SECURITY_CREDENTIALS_<N>_TOKEN` | _(unset)_ | Bearer token presented as `Authorization: Bearer <token>`. |
+| `GROUNDCONTROL_SECURITY_CREDENTIALS_<N>_ROLE` | _(unset)_ | `USER` or `ADMIN`. Admin roles are required for `/api/v1/admin/**`, `/api/v1/embeddings/**`, `/api/v1/analysis/sweep/**`, `/api/v1/pack-registry/**`. |
+| `GROUNDCONTROL_SECURITY_IP_ALLOWLIST_<N>` | _(unset)_ | Optional CIDR. Empty list = no IP gating. `X-Forwarded-For` is NOT honored — proxies must terminate the IP gate or set the source IP via `RemoteIpFilter`. |
+
+### Authentication & Network Access (ADR-026)
+
+Production deployments MUST configure `groundcontrol.security.credentials`
+(or supply equivalent `GROUNDCONTROL_SECURITY_CREDENTIALS_*` env vars).
+With `GC_SECURITY_ENABLED=true` and an empty credential list, every
+authenticated route returns 401.
+
+Authority matrix:
+
+| Path | Required authority |
+|------|--------------------|
+| `/actuator/health`, `/actuator/info` | anonymous |
+| `/error` | anonymous |
+| `/api/openapi.json`, `/api/docs/**`, `/v3/api-docs/**`, `/swagger-ui/**` | gated by `GC_SECURITY_OPENAPI_PUBLIC` |
+| `/api/v1/admin/**` | `ROLE_ADMIN` |
+| `/api/v1/embeddings/**` | `ROLE_ADMIN` |
+| `/api/v1/analysis/sweep/**` | `ROLE_ADMIN` |
+| `/api/v1/pack-registry/**` | `ROLE_ADMIN` |
+| Other `/api/v1/**` | authenticated (USER or ADMIN) |
+| Anything else | denyAll |
+
+Clients send `Authorization: Bearer <token>` on every request. Tokens are
+compared with `MessageDigest.isEqual` for constant-time compare; rotation
+is a config edit + restart.
+
+Migrating from pre-#243 deployments:
+
+- `ground-control.pack-registry.security.admin-credentials` is removed.
+  Move admin entries into `groundcontrol.security.credentials` with
+  `role: ADMIN`. The pack-signing block (`trusted-signers`) is unchanged.
+- The `X-Actor` header is no longer a self-service identity claim when
+  security is enabled; the authenticated principal name is used for audit.
 
 ### Makefile Targets
 

@@ -4,7 +4,6 @@ import com.keplerops.groundcontrol.domain.packregistry.service.CreateTrustPolicy
 import com.keplerops.groundcontrol.domain.packregistry.service.TrustPolicyService;
 import com.keplerops.groundcontrol.domain.packregistry.service.UpdateTrustPolicyCommand;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -38,10 +37,8 @@ public class TrustPolicyController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public TrustPolicyResponse create(
-            @Valid @RequestBody CreateTrustPolicyRequest request,
-            @RequestParam(required = false) String project,
-            HttpServletRequest httpRequest) {
-        accessGuard.requireAdminActor(httpRequest);
+            @Valid @RequestBody CreateTrustPolicyRequest request, @RequestParam(required = false) String project) {
+        accessGuard.requireAdminActor();
         var projectId = projectService.resolveProjectId(project);
         var result = trustPolicyService.create(new CreateTrustPolicyCommand(
                 projectId,
@@ -55,9 +52,8 @@ public class TrustPolicyController {
     }
 
     @GetMapping
-    public List<TrustPolicyResponse> list(
-            @RequestParam(required = false) String project, HttpServletRequest httpRequest) {
-        accessGuard.requireAdminActor(httpRequest);
+    public List<TrustPolicyResponse> list(@RequestParam(required = false) String project) {
+        accessGuard.requireAdminActor();
         var projectId = projectService.resolveProjectId(project);
         return trustPolicyService.list(projectId).stream()
                 .map(TrustPolicyResponse::from)
@@ -65,17 +61,14 @@ public class TrustPolicyController {
     }
 
     @GetMapping("/{id}")
-    public TrustPolicyResponse get(@PathVariable UUID id, HttpServletRequest httpRequest) {
-        accessGuard.requireAdminActor(httpRequest);
+    public TrustPolicyResponse get(@PathVariable UUID id) {
+        accessGuard.requireAdminActor();
         return TrustPolicyResponse.from(trustPolicyService.get(id));
     }
 
     @PutMapping("/{id}")
-    public TrustPolicyResponse update(
-            @PathVariable UUID id,
-            @Valid @RequestBody UpdateTrustPolicyRequest request,
-            HttpServletRequest httpRequest) {
-        accessGuard.requireAdminActor(httpRequest);
+    public TrustPolicyResponse update(@PathVariable UUID id, @Valid @RequestBody UpdateTrustPolicyRequest request) {
+        accessGuard.requireAdminActor();
         var result = trustPolicyService.update(
                 id,
                 new UpdateTrustPolicyCommand(
@@ -90,8 +83,8 @@ public class TrustPolicyController {
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable UUID id, HttpServletRequest httpRequest) {
-        accessGuard.requireAdminActor(httpRequest);
+    public void delete(@PathVariable UUID id) {
+        accessGuard.requireAdminActor();
         trustPolicyService.delete(id);
     }
 }

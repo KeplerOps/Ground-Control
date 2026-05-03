@@ -9,15 +9,28 @@ import java.io.IOException;
 import org.slf4j.MDC;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * Populates ActorHolder and MDC with the actor identity from X-Actor header.
- * Defaults to "anonymous" if the header is missing or blank.
+ * Populates {@link ActorHolder} and the SLF4J MDC with the calling actor's identity for the
+ * lifetime of the request.
+ *
+ * <p>Resolution order:
+ * <ol>
+ *   <li>Authenticated principal from {@link SecurityContextHolder} — set by the bearer token
+ *       filter when security is enabled.</li>
+ *   <li>{@code X-Actor} header — fallback when security is disabled (dev profile, test profile).</li>
+ *   <li>{@code "anonymous"} — default when neither is present.</li>
+ * </ol>
+ *
+ * <p>Runs after {@code AuthorizationFilter} so the security chain has had a chance to populate
+ * the context. Order is set high enough to still wrap controllers.
  */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 1)
+@Order(Ordered.LOWEST_PRECEDENCE - 100)
 public class ActorFilter extends OncePerRequestFilter {
 
     private static final String ACTOR_HEADER = "X-Actor";
@@ -27,10 +40,7 @@ public class ActorFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        String actor = request.getHeader(ACTOR_HEADER);
-        if (actor == null || actor.isBlank()) {
-            actor = DEFAULT_ACTOR;
-        }
+        String actor = resolveActor(request);
         ActorHolder.set(actor);
         MDC.put(MDC_ACTOR, actor);
         try {
@@ -39,5 +49,23 @@ public class ActorFilter extends OncePerRequestFilter {
             ActorHolder.clear();
             MDC.remove(MDC_ACTOR);
         }
+    }
+
+    /*@ requires request != null;
+    @ ensures \result != null && !\result.isBlank();
+    @ pure @*/
+    private static String resolveActor(HttpServletRequest request) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null
+                && auth.isAuthenticated()
+                && auth.getName() != null
+                && !auth.getName().isBlank()) {
+            return auth.getName();
+        }
+        String header = request.getHeader(ACTOR_HEADER);
+        if (header != null && !header.isBlank()) {
+            return header;
+        }
+        return DEFAULT_ACTOR;
     }
 }

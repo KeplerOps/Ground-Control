@@ -571,16 +571,34 @@ export function parseErrorBody(text) {
   return { code: null, message: text, detail: null };
 }
 
-function requiresPackRegistryAdmin(path) {
+function requiresAdminRole(path) {
   return path.startsWith("/api/v1/pack-registry")
     || path.startsWith("/api/v1/trust-policies")
-    || path.startsWith("/api/v1/pack-install-records");
+    || path.startsWith("/api/v1/pack-install-records")
+    || path.startsWith("/api/v1/admin/")
+    || path.startsWith("/api/v1/embeddings")
+    || path.startsWith("/api/v1/analysis/sweep");
 }
 
-function addPackRegistryAdminHeader(path, headers) {
-  const token = process.env.GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN;
-  if (requiresPackRegistryAdmin(path) && token) {
-    headers.Authorization = `Bearer ${token}`;
+// Forwards a bearer token on `/api/v1/**` requests so the MCP server can talk
+// to a Ground Control deployment with `groundcontrol.security.enabled=true`.
+// Resolution order:
+//   1. GROUND_CONTROL_API_TOKEN — generic token (USER or ADMIN role).
+//   2. GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN — admin-role legacy var,
+//      forwarded only for paths that require ADMIN.
+// When neither is set the header is omitted (dev profile / disabled security).
+function addAuthorizationHeader(path, headers) {
+  if (!path.startsWith("/api/v1/")) {
+    return;
+  }
+  const apiToken = process.env.GROUND_CONTROL_API_TOKEN;
+  if (apiToken) {
+    headers.Authorization = `Bearer ${apiToken}`;
+    return;
+  }
+  const adminToken = process.env.GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN;
+  if (adminToken && requiresAdminRole(path)) {
+    headers.Authorization = `Bearer ${adminToken}`;
   }
 }
 
@@ -598,7 +616,7 @@ async function request(method, path, { body, params, formData } = {}) {
   } else {
     options.headers = { "X-Actor": "mcp-server" };
   }
-  addPackRegistryAdminHeader(path, options.headers);
+  addAuthorizationHeader(path, options.headers);
 
   const res = await fetch(url, options);
 

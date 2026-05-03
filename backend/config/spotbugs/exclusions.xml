@@ -37,6 +37,13 @@
         <Bug pattern="EI_EXPOSE_REP2" />
     </Match>
 
+    <!-- Spring-managed shared components (security filters, properties, web) store
+         injected dependencies and expose @ConfigurationProperties lists by design. -->
+    <Match>
+        <Package name="~com\.keplerops\.groundcontrol\.shared\..*" />
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
+    </Match>
+
     <!-- Constructors that validate inputs and throw are by-design -->
     <Match>
         <Package name="~com\.keplerops\.groundcontrol\.domain\.exception" />

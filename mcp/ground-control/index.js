@@ -1,5 +1,17 @@
 #!/usr/bin/env node
 // Ground Control MCP Server
+//
+// Environment variables consumed by this server (see mcp/ground-control/lib.js):
+//   GC_BASE_URL                              Base URL of the Ground Control backend
+//                                             (default: http://localhost:8000).
+//   GROUND_CONTROL_API_TOKEN                 Bearer token forwarded on every
+//                                             /api/v1/** request when the backend
+//                                             has groundcontrol.security.enabled=true
+//                                             (ADR-026 / GC-P011).
+//   GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN Legacy admin-only token; forwarded only
+//                                             on paths requiring ROLE_ADMIN. Used as
+//                                             a fallback when GROUND_CONTROL_API_TOKEN
+//                                             is unset.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";

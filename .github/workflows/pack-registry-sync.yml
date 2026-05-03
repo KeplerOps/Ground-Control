@@ -43,10 +43,15 @@ jobs:
             exit 1
           fi
 
+          # Stores the bearer token as an ADMIN credential under the unified
+          # groundcontrol.security tree (ADR-026 / GC-P011). Pre-#243 this
+          # parameter held ground-control.pack-registry.security.admin-credentials;
+          # it is now consumed by both the application Spring Security layer and
+          # the deploy/scripts/sync_pack_catalog.sh helper.
           SPRING_JSON="$(jq -nc \
             --arg principal "${PACK_REGISTRY_ADMIN_PRINCIPAL}" \
             --arg token "${GC_PACK_REGISTRY_ADMIN_TOKEN}" \
-            '{"ground-control":{"pack-registry":{"security":{"admin-credentials":[{"principal-name":$principal,"token":$token}]}}}}')"
+            '{"groundcontrol":{"security":{"credentials":[{"principal-name":$principal,"token":$token,"role":"ADMIN"}]}}}')"
 
           aws ssm put-parameter \
             --name "${PACK_REGISTRY_SECURITY_PARAM}" \

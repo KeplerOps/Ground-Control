@@ -5,3 +5,8 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
+
+groundcontrol:
+  security:
+    enabled: false
+    openapi-public: true

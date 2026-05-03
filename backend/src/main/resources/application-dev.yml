@@ -2,6 +2,11 @@ spring:
   jpa:
     show-sql: true
 
+groundcontrol:
+  security:
+    enabled: false
+    openapi-public: true
+
 logging:
   level:
     com.keplerops.groundcontrol: DEBUG

@@ -1,6 +1,30 @@
 # Ground Control REST API
 
-REST API for direct HTTP usage. Pre-alpha, localhost only, no authentication.
+REST API for direct HTTP usage. Pre-alpha. The `dev` profile disables
+authentication for local work; **production deployments require it**
+(see [ADR-026](../architecture/adrs/026-rest-api-access-control.md) and
+[`docs/deployment/DEPLOYMENT.md`](deployment/DEPLOYMENT.md)).
+
+## Authentication
+
+When `groundcontrol.security.enabled=true`:
+
+- Send `Authorization: Bearer <token>` on every `/api/v1/**` request.
+- `/api/v1/admin/**`, `/api/v1/embeddings/**`, `/api/v1/analysis/sweep/**`,
+  and `/api/v1/pack-registry/**` require a token whose configured `role`
+  is `ADMIN`. Other `/api/v1/**` paths accept any authenticated token.
+- `/actuator/health` and `/actuator/info` are anonymous; the OpenAPI
+  schema is gated by `groundcontrol.security.openapi-public`.
+- An optional CIDR allowlist (`groundcontrol.security.ip-allowlist`)
+  rejects out-of-range source addresses with 403 `access_denied` before
+  the token check runs.
+
+Errors use the standard envelope:
+
+```
+401 → {"error": {"code": "authentication_required", "message": "..."}}
+403 → {"error": {"code": "access_denied", "message": "..."}}
+```
 
 ## Base URL
 
@@ -787,11 +811,12 @@ Response wraps results in a Spring Page object with `content`, `totalElements`,
 
 ### Pack Registry
 
-All pack registry, trust policy, and pack install record routes require a pack
-registry admin token: `Authorization: Bearer <token>`. Tokens and their audit
-principal names are configured with
-`ground-control.pack-registry.security.admin-credentials`. The repo-local MCP
-helper forwards `GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN` when set.
+All pack registry, trust policy, and pack install record routes require an
+ADMIN-role bearer token: `Authorization: Bearer <token>`. Tokens and their
+audit principal names are configured under the unified
+`groundcontrol.security.credentials` list (`role: ADMIN`); see ADR-026 and
+the deployment env-var reference. The repo-local MCP helper forwards
+`GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN` when set.
 
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
