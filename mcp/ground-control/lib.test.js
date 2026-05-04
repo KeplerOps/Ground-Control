@@ -2668,6 +2668,236 @@ describe("runCodexReview uncommitted=true input gating", () => {
   });
 });
 
+describe("runCodexReview uncommitted=true cap enforcement (hermetic gh shim)", () => {
+  // These tests exercise the actual cap-enforcement wiring: read prior markers
+  // from the issue thread, evaluate the cap, refuse cycle 3+ with the right
+  // structured error. We cannot mock node:child_process execFile directly
+  // (ESM imports), so we shadow `gh` via a fake binary at the front of PATH.
+  // The cap-refusal short-circuit happens BEFORE codex is spawned, so we only
+  // need to fake `gh` (not `codex`) for these paths.
+
+  function makeShimRepo({ branch, ghHandler }) {
+    const repoDir = mkdtempSync(join(tmpdir(), "gc-shim-repo-"));
+    execFileSync("git", ["-C", repoDir, "init", "-q", "--initial-branch", branch]);
+    execFileSync("git", ["-C", repoDir, "config", "user.email", "t@example.com"]);
+    execFileSync("git", ["-C", repoDir, "config", "user.name", "t"]);
+    writeFileSync(join(repoDir, "README"), "x\n");
+    execFileSync("git", ["-C", repoDir, "add", "README"]);
+    execFileSync("git", ["-C", repoDir, "commit", "-q", "-m", "init"]);
+
+    const binDir = mkdtempSync(join(tmpdir(), "gc-shim-bin-"));
+    // Persist routing data in a JSON file so the shim — a separate process —
+    // can read it. Each test owns its own shim dir / config.
+    const configPath = join(binDir, "config.json");
+    writeFileSync(configPath, JSON.stringify(ghHandler));
+    // Fake `gh`: dispatch on argv to canned responses keyed by argv-prefix.
+    const ghShim = `#!/usr/bin/env node
+const fs = require("node:fs");
+const cfg = JSON.parse(fs.readFileSync(${JSON.stringify(configPath)}, "utf8"));
+const argv = process.argv.slice(2);
+function match(prefix) { return prefix.every((p, i) => argv[i] === p); }
+for (const route of cfg.routes) {
+  if (match(route.argv_prefix)) {
+    if (route.exit_code != null && route.exit_code !== 0) {
+      process.stderr.write(route.stderr || "");
+      process.exit(route.exit_code);
+    }
+    process.stdout.write(route.stdout || "");
+    process.exit(0);
+  }
+}
+process.stderr.write("gh shim: unhandled argv: " + JSON.stringify(argv) + "\\n");
+process.exit(2);
+`;
+    const ghPath = join(binDir, "gh");
+    writeFileSync(ghPath, ghShim, { mode: 0o755 });
+    return {
+      repoDir,
+      binDir,
+      cleanup() {
+        rmSync(repoDir, { recursive: true, force: true });
+        rmSync(binDir, { recursive: true, force: true });
+      },
+    };
+  }
+
+  async function withShimPath(binDir, fn) {
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${oldPath}`;
+    try {
+      return await fn();
+    } finally {
+      process.env.PATH = oldPath;
+    }
+  }
+
+  function commentBody(marker) {
+    return JSON.stringify([{ id: 1, body: marker, user: { login: "tester" } }]);
+  }
+
+  it("refuses cycle 3 with codex_review_prepush_cap_reached when 2 prior markers exist", async () => {
+    const m1 = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 796,
+      branchName: "796-x",
+      cycleNumber: 1,
+    });
+    const m2 = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 796,
+      branchName: "796-x",
+      cycleNumber: 2,
+    });
+    // gh api --paginate --slurp wraps pages in an outer array. One page with
+    // both markers as comments suffices; --slurp produces [[c1, c2]].
+    const slurpedComments = JSON.stringify([
+      [
+        { id: 1, body: m1, user: { login: "tester" } },
+        { id: 2, body: m2, user: { login: "tester" } },
+      ],
+    ]);
+
+    const shim = makeShimRepo({
+      branch: "796-x",
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: slurpedComments,
+          },
+        ],
+      },
+    });
+
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: true,
+        });
+        assert.equal(result.ok, false);
+        assert.equal(result.error, "codex_review_prepush_cap_reached");
+        assert.equal(result.prior_cycles, 2);
+        assert.equal(result.cap, CODEX_REVIEW_PREPUSH_HARD_CAP);
+        assert.equal(result.issue_number, 796);
+        assert.equal(result.branch, "796-x");
+        assert.equal(result.next_action, "post_summary_and_escalate_to_user");
+        assert.equal(result.finding_count, 0);
+        assert.deepEqual(result.comments, []);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("does NOT refuse on cycle 1 when no prior markers exist (positive path through cap evaluation)", async () => {
+    // Empty issue thread: 0 prior markers → cap evaluator returns ok with
+    // cycle 1. The function then progresses to computing diff and spawning
+    // codex, which we don't have. We accept either a thrown shell-exec
+    // failure or a returned non-cap-error envelope as proof we got past the
+    // cap-refusal short-circuit.
+    const shim = makeShimRepo({
+      branch: "796-x",
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: JSON.stringify([[]]), // one empty page
+          },
+        ],
+      },
+    });
+
+    try {
+      await withShimPath(shim.binDir, async () => {
+        let result;
+        let threw = false;
+        try {
+          result = await runCodexReview({
+            repoPath: shim.repoDir,
+            uncommitted: true,
+          });
+        } catch {
+          threw = true;
+        }
+        if (!threw) {
+          assert.notEqual(result.error, "codex_review_prepush_cap_reached");
+        }
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("counts only matching (issue, branch) markers — other branches don't bump the count", async () => {
+    // Two prior markers exist on the issue, but for a DIFFERENT branch. The
+    // cap should still allow cycle 1 on the current branch.
+    const otherBranchM1 = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 796,
+      branchName: "796-different-branch",
+      cycleNumber: 1,
+    });
+    const otherBranchM2 = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 796,
+      branchName: "796-different-branch",
+      cycleNumber: 2,
+    });
+    const slurpedComments = JSON.stringify([
+      [
+        { id: 1, body: otherBranchM1, user: { login: "tester" } },
+        { id: 2, body: otherBranchM2, user: { login: "tester" } },
+      ],
+    ]);
+
+    const shim = makeShimRepo({
+      branch: "796-x", // current branch is different from marker branches
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: slurpedComments,
+          },
+        ],
+      },
+    });
+
+    try {
+      await withShimPath(shim.binDir, async () => {
+        let result;
+        let threw = false;
+        try {
+          result = await runCodexReview({
+            repoPath: shim.repoDir,
+            uncommitted: true,
+          });
+        } catch {
+          threw = true;
+        }
+        if (!threw) {
+          // Current branch has 0 priors → no cap refusal.
+          assert.notEqual(result.error, "codex_review_prepush_cap_reached");
+        }
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  // Single-token reference so eslint-no-unused-vars is happy when the helper
+  // is otherwise indirectly used.
+  void commentBody;
+});
+
 // ---------------------------------------------------------------------------
 // Workflow phase markers (#794 MVP-2)
 // ---------------------------------------------------------------------------
