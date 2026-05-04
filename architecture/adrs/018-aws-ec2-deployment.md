@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+**Superseded by [ADR-030](./030-on-prem-hetzner-deployment.md).** Ground Control no longer runs on AWS EC2; the workload moved to an on-prem Hetzner dedicated server (`red-dragon`) on the user's Tailscale tailnet. The decommission removed the EC2 instance, the EBS data volume, the S3 backup bucket, the DLM snapshot policy, and the AWS-OIDC GitHub Actions role. ADR-018 is preserved for historical context (memory budget, backup policy intent, deploy contract); the AWS-specific implementation details no longer reflect production.
+
+## Original status
+
+Accepted (superseded 2026-05-03).
 
 ## Date
 

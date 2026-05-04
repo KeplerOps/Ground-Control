@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- ADR-030 "On-prem Hetzner Deployment" — documents the new production deployment architecture (red-dragon, Hetzner dedicated, Tailscale-only), the runner→red-dragon tailnet path, the SSH authorization model (`gc-deploy` user with `command="/opt/gc/deploy.sh",restrict <ed25519-pubkey>`), what ADR-018 retains and sheds, and the migration timeline.
 - Canonical `skills/implement/SKILL.md` at the repo root (closes #791,
   GC-O007, GC-O009). One source of truth for the agentic implement
   workflow, parameterized at runtime by the per-repo
@@ -43,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Production deployment moved off AWS to on-prem Hetzner (red-dragon).** ADR-030 supersedes ADR-018. The `t3a.small` EC2 instance, EBS data volume, ECR repo, S3 backup bucket, DLM snapshot policy, IAM roles/policies, SSM parameters, S3 terraform-state bucket, DynamoDB lock table, and GitHub Actions OIDC provider are all destroyed. The catalyst-dev AWS account no longer hosts Ground-Control resources. ~$17/mo to $0 marginal.
+- **`ci.yml` `deploy` job rewritten end-to-end.** Old: AWS OIDC → SSM `SendCommand` against an EC2 tagged `Project=ground-control` → run `/opt/gc/deploy.sh`. New: install the `RED_DRAGON_DEPLOY_KEY` and `RED_DRAGON_KNOWN_HOSTS` secrets, wait briefly for the runner VM's tailnet to come up, then `ssh gc-deploy@red-dragon` (forced command on the remote runs `/opt/gc/deploy.sh`). The runner reaches red-dragon over the user's tailnet via fabricator's tailscale-on-runner-VMs change ([KeplerOps/fabricator PR #14](https://github.com/KeplerOps/fabricator/pull/14)).
+- **`docker` job drops ECR push.** GHCR-only. The `aws-actions/configure-aws-credentials` step and the `Login to ECR` step are removed; `metadata-action` produces only `ghcr.io/keplerops/ground-control` tags.
+- `docs/deployment/DEPLOYMENT.md` "AWS Deployment (EC2 + Tailscale)" section replaced with "Hetzner Deployment (red-dragon + Tailscale)" — covers the `/opt/gc/` layout, deploy contract (forced-command SSH, the two new GitHub secrets, fabricator runner tailnet path), the cutover dump that migrated production data, the planned on-prem backup mechanism (rsync-over-tailnet to aurora — wiring lands in a follow-up), monitoring, and the host-setup runbook for disaster recovery.
+- ADR-018 "AWS EC2 Deployment" status changed to `Superseded by ADR-030`. Body preserved as historical context.
+- `architecture/adrs/README.md` index entry for ADR-018 updated; ADR-030 added.
 - **GC-O007 amended (ADR-029)**: the workflow's human-touchpoint count
   drops from two to one. PR merge is the only synchronous human gate.
   Plan approval is no longer a synchronous gate — the plan is posted to
@@ -170,6 +177,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- `deploy/terraform/` — the entire Terraform module tree for the AWS
+  deployment (bootstrap + dev environment + modules/compute / networking
+  / backup / secrets). Resources are destroyed; the module is no longer
+  needed. Git history preserves the prior layout for anyone needing to
+  reconstruct it.
 - `.claude/skills/implement/SKILL.md` — replaced by the canonical
   `skills/implement/SKILL.md`. Run `bin/install-skills.sh` to install
   the canonical skill into `~/.claude/skills/` (and `~/.codex/prompts/`

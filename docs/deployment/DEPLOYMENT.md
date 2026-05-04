@@ -169,178 +169,159 @@ docker compose down -v # stop services, delete all data
 
 ---
 
-## AWS Deployment (EC2 + Tailscale)
+## Hetzner Deployment (`red-dragon` + Tailscale)
 
-Ground Control runs on a single EC2 instance in the `catalyst-dev` AWS account, accessible only via Tailscale. See [ADR-018](../../architecture/adrs/018-aws-ec2-deployment.md) for the full decision record.
+Ground Control runs on `red-dragon` (Hetzner dedicated, AMD Ryzen 7 3700X / 128 GB / 2× 1 TB NVMe), accessible only via Tailscale. The full decision record is [ADR-030](../../architecture/adrs/030-on-prem-hetzner-deployment.md). [ADR-018](../../architecture/adrs/018-aws-ec2-deployment.md) is preserved as the historical AWS predecessor.
 
 ### Architecture
 
-- **Instance**: `t3a.small` (2 vCPU, 2 GB RAM) running Amazon Linux 2023
-- **Access**: Tailscale only — zero public ingress. `http://gc-dev:8000` via MagicDNS
-- **Storage**: Root EBS (8 GB gp3) + data EBS (20 GB gp3, encrypted) at `/data`
-- **Backup**: EBS snapshots (daily, 7-day retention) + pg_dump to S3 (3×/day, 30-day retention) — see [ADR-025](../../architecture/adrs/025-backup-policy.md) for policy rationale (GC-P021)
-- **Cost**: ~$17/mo on-demand
+- **Host**: `red-dragon` (single tailnet-resident host, Ubuntu, Docker Engine 29.x, Compose v5.x).
+- **Access**: Tailscale only. sshd binds to `100.98.28.66:22` (the tailnet IP) — no public ingress. Application reachable on tailnet at `http://red-dragon:8000`.
+- **Storage**: `/data/postgres` (bind-mounted into the db container) and `/data/backups` (pg_dump artifacts). Both on red-dragon's main NVMe.
+- **Image registry**: GHCR (`ghcr.io/keplerops/ground-control`). Pulled by `docker compose pull` on each deploy.
+- **Backups**: 3×/day `pg_dump` cron to `/data/backups/`, 30-day local retention. Off-box copy via rsync over the tailnet to `aurora`. Policy is GC-P021 / [ADR-025](../../architecture/adrs/025-backup-policy.md).
+- **Cost**: $0 marginal (red-dragon is paid for unrelated reasons).
 
-### Prerequisites
+### `/opt/gc/` layout
 
-1. AWS CLI configured with `catalyst-dev` profile
-2. Tailscale account with a reusable auth key
-3. Terraform >= 1.9
+The compose stack on red-dragon lives at `/opt/gc/`:
 
-### Initial Setup
+| Path | Owner | Purpose |
+|------|-------|---------|
+| `/opt/gc/docker-compose.yml` | `atomik` | Compose stack (db + backend). Mirrors `deploy/docker/docker-compose.prod.yml` in this repo. |
+| `/opt/gc/.env` | `atomik` (mode 600) | Environment file consumed by compose. Carries DB credentials, GHCR image reference, embedding API keys. Not in git. |
+| `/opt/gc/deploy.sh` | `root` (mode 755) | Forced-command target invoked over SSH by the `gc-deploy` user. Pulls the latest image, brings the stack up, verifies `/actuator/health`. |
+| `/data/postgres/` | `999:999` | Postgres data directory (bind-mount). |
+| `/data/backups/` | `atomik` | pg_dump artifacts. |
 
-#### 1. Store secrets in SSM
+### Deploy contract
 
-Before running Terraform, manually store secrets in SSM Parameter Store:
+#### Automatic
 
-```bash
-aws ssm put-parameter \
-  --name "/gc/dev/tailscale_auth_key" \
-  --type SecureString \
-  --value "tskey-auth-..." \
-  --profile catalyst-dev
+Every push to `main` that passes CI + smoke triggers the `deploy` job in `.github/workflows/ci.yml`. The job runs on a fabricator-managed runner (which joins the tailnet at first boot via [`KeplerOps/fabricator` PR #14](https://github.com/KeplerOps/fabricator/pull/14)) and SSHes `gc-deploy@red-dragon`. The `gc-deploy` user's `authorized_keys` carries a single forced-command entry:
 
-aws ssm put-parameter \
-  --name "/gc/dev/db_password" \
-  --type SecureString \
-  --value "$(openssl rand -base64 24)" \
-  --profile catalyst-dev
+```
+command="/opt/gc/deploy.sh",restrict <ed25519-pubkey>
 ```
 
-#### 2. Bootstrap (first time only)
+`restrict` disables PTY, port forwarding, X11, agent forwarding, user-rc — the deploy key cannot do anything except run the deploy script. SSH exit code is the deploy script's exit code.
 
-```bash
-cd deploy/terraform/bootstrap
-terraform init
-terraform apply
-```
+The two GitHub repo secrets that drive this:
 
-This creates the S3 state backend, DynamoDB lock table, and GitHub Actions OIDC role.
+- `RED_DRAGON_DEPLOY_KEY` — the ed25519 private key for `gc-deploy`.
+- `RED_DRAGON_KNOWN_HOSTS` — host-key fingerprints for `red-dragon` (`StrictHostKeyChecking=yes`).
 
-#### 3. Deploy infrastructure
+The `tag:fabricator-runner` → `tag:gc-host:tcp:22` tailnet ACL constrains the runner's reach to the deploy port. No other tailnet device is reachable from a runner.
 
-```bash
-cd deploy/terraform/environments/dev
-terraform init
-terraform apply
-```
+#### Manual
 
-This creates the EC2 instance, security group, EBS data volume, S3 backup bucket, and DLM snapshot policy. Cloud-init handles Docker/Tailscale/compose setup automatically.
-
-#### 4. Verify
-
-```bash
-# Tailscale shows the instance
-tailscale status | grep gc-dev
-
-# SSH works via Tailscale
-ssh gc-dev
-
-# Application is healthy
-curl http://gc-dev:8000/actuator/health
-
-# Dashboard data available
-curl http://gc-dev:8000/api/v1/analysis/dashboard-stats?project=ground-control
-```
-
-### Deploying Updates
-
-**Automatic:** Every push to `main` that passes CI + smoke test triggers a deploy via SSM `SendCommand`. The `deploy` job in `ci.yml` finds the EC2 instance by tag, runs `/opt/gc/deploy.sh`, and streams the result.
-
-**Manual** (if needed):
+From any tailnet host:
 
 ```bash
 # Deploy latest image
-ssh gc-dev /opt/gc/deploy.sh
+ssh gc-deploy@red-dragon                     # forced command runs deploy.sh
 
-# Deploy a specific tag
-ssh gc-dev /opt/gc/deploy.sh v0.58.0
-
-# Or use the Makefile target
-make deploy
+# Operator-side compose ops (run as your normal tailnet identity, not gc-deploy)
+ssh red-dragon 'cd /opt/gc && docker compose ps'
+ssh red-dragon 'cd /opt/gc && docker compose logs --tail=200 backend'
 ```
 
-### Data Migration
+### Data Migration (historical)
 
-To migrate data from local to EC2:
+The cutover from gc-dev (EC2) to red-dragon was performed 2026-05-03:
 
 ```bash
-# Dump local database
-docker compose exec db pg_dump -Fc -U gc ground_control > gc-local.dump
+# Dump on gc-dev
+ssh ec2-user@gc-dev 'sudo docker compose -f /opt/gc/docker-compose.yml --env-file /opt/gc/.env \
+  exec -T db pg_dump -Fc -U gc ground_control' > /data/backups/gc-cutover.dump
 
-# Copy to EC2
-scp gc-local.dump gc-dev:/data/backups/
-
-# Restore on EC2
-ssh gc-dev 'docker compose -f /opt/gc/docker-compose.yml exec -T db \
-  pg_restore -U gc -d ground_control --clean --if-exists < /data/backups/gc-local.dump'
+# Restore on red-dragon
+docker cp /data/backups/gc-cutover.dump gc-db-1:/tmp/cutover.dump
+docker exec gc-db-1 pg_restore -U gc -d ground_control --clean --if-exists --no-owner --no-acl -j 4 /tmp/cutover.dump
 ```
+
+Apache AGE extension state (`ag_graph`, `ag_label`) emits ignorable duplicate-key errors during restore — those tables are pre-populated by the AGE extension at db init. Application data restores cleanly.
 
 ### Backup and Recovery
 
-Ground Control uses two complementary backup strategies: **logical backups** (pg_dump to S3) for portable, table-level restore and **block-level backups** (EBS snapshots) for fast full-volume recovery. Both run automatically and are configurable via Terraform.
+The legacy AWS path (DLM snapshots + S3 dumps) is gone. The on-prem path is:
 
-The authoritative operator runbook is **[docs/operations/backup-restore.md](../operations/backup-restore.md)** — it walks a cold operator through every recovery scenario without assuming prior exposure to the stack. The ADR behind the current policy is [ADR-025](../../architecture/adrs/025-backup-policy.md).
+| Layer | Mechanism | Cadence | Retention |
+|-------|-----------|---------|-----------|
+| Local logical | `pg_dump -Fc` from inside the db container → `/data/backups/` | 3×/day (03/11/19 UTC) | 30 days local |
+| Off-box logical | `rsync` over tailnet to `aurora:/var/backups/groundcontrol/` | After each pg_dump | per-aurora retention policy |
+| Restore drill | `pg_restore` of the newest dump into a throwaway db | Weekly | log retained 30 days |
 
-#### Backup Configuration
+GC-P021 requires backup ≥ 3×/day with off-box durability. The `assert-backup-policy.sh` gate (pre-commit / `make policy`) enforces the policy floor on whatever values the repo declares; lowering cadence below 3×/day will fail the gate.
 
-| Parameter | Default | Terraform Variable | Description |
-|-----------|---------|-------------------|-------------|
-| Backup schedule | `0 3,11,19 * * *` (03:00 / 11:00 / 19:00 UTC, 3×/day) | `backup_cron` | Cron expression for pg_dump frequency. GC-P021 requires ≥ 3×/day; do not lower. |
-| S3 retention | 30 days | `s3_retention_days` | How long S3 dumps are kept |
-| Local dump retention | 4 files | `local_retention_count` | Number of pg_dump files kept on EC2. GC-P021 requires ≥ 24 h; at 3×/day this means ≥ 4 files. |
-| EBS snapshot retention | 7 snapshots | `snapshot_retention_count` | Number of daily EBS snapshots kept |
-| EBS snapshot schedule | Daily 04:00 UTC | DLM policy (fixed) | Block-level volume snapshots |
-| Restore-test schedule | Daily 05:00 UTC | fixed in `user-data.sh.tftpl` | Automated verification of the newest dump |
-
-To change backup frequency, set the Terraform variable and redeploy.
-Any override must remain ≥ 3×/day to stay GC-P021 compliant — the
-`scripts/assert-backup-policy.sh` gate (run by pre-commit and
-`make policy`) will fail the build otherwise.
-
-#### Point-in-Time Restore
-
-Point-in-time restore granularity equals the backup frequency. Each pg_dump is a consistent database snapshot at the moment it was taken. To restore to a specific point in time, select the backup with the closest timestamp before your target time. The default `0 3,11,19 * * *` schedule gives an RPO of approximately 8 hours.
-
-#### Manual Backup / Restore / Verification
-
-Quick reference (full procedures live in the operator runbook):
+The operator runbook is [docs/operations/backup-restore.md](../operations/backup-restore.md). Manual ops:
 
 ```bash
-ssh gc-dev /opt/gc/backup.sh                                  # ad-hoc backup
-ssh gc-dev /opt/gc/restore.sh --list                          # enumerate backups
-ssh gc-dev /opt/gc/restore.sh --from-s3 pg-dumps/gc-...dump   # restore
-ssh gc-dev /opt/gc/test-restore.sh                            # verify newest dump
-ssh gc-dev cat /var/log/gc-restore-test.log                   # daily verification log
-scripts/test-backup-restore-locally.sh                        # self-contained local loop
+ssh red-dragon /opt/gc/backup.sh                  # ad-hoc backup
+ssh red-dragon /opt/gc/restore.sh --list          # enumerate
+ssh red-dragon /opt/gc/restore.sh /data/backups/<name>.dump
+ssh red-dragon /opt/gc/test-restore.sh            # verify newest dump against a throwaway db
 ```
-
-For restore-from-EBS-snapshot, credential rotation, full-loss rebuild,
-or AGE graph rematerialization, follow the operator runbook rather than
-ad-hoc commands.
-
-**Automated verification checks** (executed daily at 05:00 UTC):
-
-- PostgreSQL responds to `pg_isready`
-- Public tables exist in the restored database
-- `flyway_schema_history` contains migrations, including V010 (`create_age_graph`)
-- The Apache AGE extension is installed
-- Core Ground Control tables exist (`project`, `requirement`, `requirement_relation`, `traceability_link`, `document`, `section`, `threat_model`)
-- `create_graph('requirements_verify')` succeeds — proves AGE is operationally usable against restored data
 
 ### Monitoring
 
-- **Health checks**: Docker healthcheck on both `db` (`pg_isready`) and `backend` (`/actuator/health`)
-- **Watchdog**: Cron runs every 5 min, restarts backend on health failure. Logs to `/var/log/gc-watchdog.log`
-- **Init log**: `/var/log/gc-init.log` — cloud-init output for troubleshooting first boot
-- **Backup log**: `/var/log/gc-backup.log` — backup cron output
-- **Restore test log**: `/var/log/gc-restore-test.log` — weekly restore test output
+- **Container health** — `docker compose ps` on `/opt/gc/` shows `(healthy)` for both `db` (`pg_isready`) and `backend` (`/actuator/health`).
+- **Logs** — `docker compose logs backend` / `db`. Compose's default log driver retains in-memory; for persistence, the host's journald captures the docker daemon output.
+- **Restart policy** — `restart: unless-stopped` on both services covers the container-crash case. There is no separate watchdog cron; the legacy ADR-018 watchdog was AWS-specific and has not been ported. If health degrades without the container exiting, the next deploy's health gate or operator inspection will catch it.
 
-### Terraform Modules
+### Initial host setup (one-time, historical)
 
-| Module | Purpose |
-|--------|---------|
-| `modules/compute/` | EC2 instance, IAM instance profile, EBS data volume, cloud-init |
-| `modules/networking/` | Zero-ingress security group (Tailscale only) |
-| `modules/backup/` | S3 backup bucket, DLM EBS snapshot policy |
-| `modules/secrets/` | SSM parameters (Tailscale key, DB password) |
+The setup performed on red-dragon during cutover, captured for disaster-recovery reproduction:
+
+```bash
+# Directory layout
+sudo mkdir -p /opt/gc /data/postgres /data/backups
+sudo chown -R 999:999 /data/postgres
+sudo chown atomik:atomik /opt/gc /data/backups
+
+# Compose + env (env mirrors gc-dev's, but GC_IMAGE points at GHCR)
+sudo cp deploy/docker/docker-compose.prod.yml /opt/gc/docker-compose.yml
+sudo install -o atomik -g atomik -m 600 /dev/stdin /opt/gc/.env <<'EOF'
+GC_DATABASE_URL=jdbc:postgresql://db:5432/ground_control
+GC_DATABASE_USER=gc
+GC_DATABASE_PASSWORD=...
+GC_SERVER_PORT=8000
+GC_CACHE_TYPE=none
+JAVA_TOOL_OPTIONS=-Xmx512m -Xms256m
+POSTGRES_DB=ground_control
+POSTGRES_USER=gc
+POSTGRES_PASSWORD=...
+GC_IMAGE=ghcr.io/keplerops/ground-control:latest
+GC_EMBEDDING_PROVIDER=openai
+GC_EMBEDDING_API_KEY=...
+EOF
+
+# Deploy user (CI's SSH target, forced-command only)
+sudo useradd -m -s /bin/bash gc-deploy
+sudo usermod -aG docker gc-deploy
+sudo install -d -o gc-deploy -g gc-deploy -m 700 /home/gc-deploy/.ssh
+sudo install -o gc-deploy -g gc-deploy -m 600 /dev/stdin /home/gc-deploy/.ssh/authorized_keys <<EOF
+command="/opt/gc/deploy.sh",restrict <ed25519-pubkey>
+EOF
+
+# Deploy script
+sudo install -o root -g root -m 755 /dev/stdin /opt/gc/deploy.sh <<'SH'
+#!/bin/bash
+set -euo pipefail
+cd /opt/gc
+docker compose --env-file .env pull
+docker compose --env-file .env up -d
+for i in $(seq 1 30); do
+  if curl -sf http://localhost:8000/actuator/health 2>/dev/null | grep -q '"UP"'; then
+    echo "Deploy complete - application is UP"; exit 0
+  fi; sleep 2
+done
+echo "ERROR: health check did not pass within 60s"
+docker compose --env-file .env logs --tail=50 backend
+exit 1
+SH
+
+# First start
+gh auth token | docker login ghcr.io -u <github-user> --password-stdin
+cd /opt/gc && docker compose --env-file .env up -d
+```

@@ -173,23 +173,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4
-        with:
-          role-to-assume: arn:aws:iam::516608939870:role/github-actions-terraform
-          aws-region: us-east-2
-
-      - name: Login to ECR
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
-        with:
-          registry: 516608939870.dkr.ecr.us-east-2.amazonaws.com
-
       - id: meta
         uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5
         with:
           images: |
             ghcr.io/keplerops/ground-control
-            516608939870.dkr.ecr.us-east-2.amazonaws.com/ground-control
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -257,7 +245,11 @@ jobs:
           exit 1
 
   # ---------------------------------------------------------------------------
-  # Deploy — pushes to main trigger deploy to EC2 via SSM SendCommand
+  # Deploy — pushes to main SSH into red-dragon (Hetzner, tailnet-only) and
+  # invoke a forced-command deploy script that pulls the latest GHCR image
+  # and brings the compose stack up. The runner reaches red-dragon over the
+  # tailnet via fabricator-side Tailscale integration — no public SSH on
+  # red-dragon. See ADR-030.
   # ---------------------------------------------------------------------------
   deploy:
     runs-on: [self-hosted, linux, x64]
@@ -265,144 +257,42 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: dev
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4
-        with:
-          role-to-assume: arn:aws:iam::516608939870:role/github-actions-terraform
-          aws-region: us-east-2
-
-      - name: Find EC2 instance
-        id: ec2
-        run: |
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Project,Values=ground-control" \
-                      "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].InstanceId' \
-            --output text)
-          if [ "$INSTANCE_ID" = "None" ] || [ -z "$INSTANCE_ID" ]; then
-            echo "No running ground-control instance found"
-            exit 1
-          fi
-          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
-
-      # GC-P021: refresh /opt/gc ops scripts + cron files before every deploy.
-      # The EC2 resource has ignore_changes=[user_data], so Terraform cannot
-      # rewrite /opt/gc on updates; SSM is the only path that keeps the live
-      # instance aligned with the repo. install-ops-scripts.sh is idempotent
-      # and enforces the GC-P021 cadence / retention floors on input.
-      - name: Refresh ops scripts via SSM (GC-P021)
-        id: ssm-install-ops
-        run: |
-          INSTALL_B64=$(base64 -w0 deploy/scripts/install-ops-scripts.sh)
-          CMD="export GC_BACKUP_BUCKET='groundcontrol-backups-catalyst-dev'; export GC_BACKUP_CRON='0 3,11,19 * * *'; export GC_LOCAL_RETENTION_COUNT=4; echo '${INSTALL_B64}' | base64 -d | bash"
-          jq -n --arg cmd "$CMD" '{commands: [$cmd]}' > /tmp/ssm-install-ops.json
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters file:///tmp/ssm-install-ops.json \
-            --timeout-seconds 300 \
-            --query 'Command.CommandId' \
-            --output text)
-          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+      - name: Install deploy SSH key
         env:
-          INSTANCE_ID: ${{ steps.ec2.outputs.instance_id }}
-
-      - name: Wait for ops-script refresh to complete
+          DEPLOY_KEY: ${{ secrets.RED_DRAGON_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.RED_DRAGON_KNOWN_HOSTS }}
         run: |
-          for i in $(seq 1 60); do
-            STATUS=$(aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "$INSTANCE_ID" \
-              --query 'Status' \
-              --output text 2>/dev/null || echo "Pending")
-            case "$STATUS" in
-              Success)
-                echo "install-ops-scripts succeeded"
-                aws ssm get-command-invocation \
-                  --command-id "$COMMAND_ID" \
-                  --instance-id "$INSTANCE_ID" \
-                  --query 'StandardOutputContent' \
-                  --output text
-                exit 0
-                ;;
-              Failed|TimedOut|Cancelled)
-                echo "install-ops-scripts failed with status: $STATUS"
-                echo "--- stdout ---"
-                aws ssm get-command-invocation \
-                  --command-id "$COMMAND_ID" \
-                  --instance-id "$INSTANCE_ID" \
-                  --query 'StandardOutputContent' \
-                  --output text
-                echo "--- stderr ---"
-                aws ssm get-command-invocation \
-                  --command-id "$COMMAND_ID" \
-                  --instance-id "$INSTANCE_ID" \
-                  --query 'StandardErrorContent' \
-                  --output text
-                exit 1
-                ;;
-            esac
-            sleep 5
+          install -d -m 700 ~/.ssh
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/red-dragon-deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/red-dragon-known-hosts
+
+      - name: Wait for tailnet readiness
+        # The runner VM joins the tailnet at first boot via fabricator's
+        # cloud-init; tailscaled is normally ready by the time this job
+        # starts, but cap the wait at 30s so a misconfigured runner fails
+        # loudly instead of stalling the deploy job.
+        run: |
+          for i in $(seq 1 30); do
+            if tailscale status >/dev/null 2>&1; then
+              echo "tailnet ready"
+              exit 0
+            fi
+            sleep 1
           done
-          echo "Timed out waiting for install-ops-scripts"
+          echo "ERROR: tailnet did not come up within 30s — runner may be missing the FABRICATOR_TAILSCALE_AUTHKEY env on aurora"
           exit 1
-        env:
-          COMMAND_ID: ${{ steps.ssm-install-ops.outputs.command_id }}
-          INSTANCE_ID: ${{ steps.ec2.outputs.instance_id }}
 
-      - name: Deploy via SSM
-        id: ssm
+      - name: Deploy via SSH (gc-deploy@red-dragon, forced command)
         run: |
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["/opt/gc/deploy.sh"]' \
-            --timeout-seconds 660 \
-            --query 'Command.CommandId' \
-            --output text)
-          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
-        env:
-          INSTANCE_ID: ${{ steps.ec2.outputs.instance_id }}
-
-      - name: Wait for deploy to complete
-        run: |
-          for i in $(seq 1 140); do
-            STATUS=$(aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "$INSTANCE_ID" \
-              --query 'Status' \
-              --output text 2>/dev/null || echo "Pending")
-            case "$STATUS" in
-              Success)
-                echo "Deploy succeeded"
-                aws ssm get-command-invocation \
-                  --command-id "$COMMAND_ID" \
-                  --instance-id "$INSTANCE_ID" \
-                  --query 'StandardOutputContent' \
-                  --output text
-                exit 0
-                ;;
-              Failed|TimedOut|Cancelled)
-                echo "Deploy failed with status: $STATUS"
-                echo "--- stdout ---"
-                aws ssm get-command-invocation \
-                  --command-id "$COMMAND_ID" \
-                  --instance-id "$INSTANCE_ID" \
-                  --query 'StandardOutputContent' \
-                  --output text
-                echo "--- stderr ---"
-                aws ssm get-command-invocation \
-                  --command-id "$COMMAND_ID" \
-                  --instance-id "$INSTANCE_ID" \
-                  --query 'StandardErrorContent' \
-                  --output text
-                exit 1
-                ;;
-            esac
-            sleep 5
-          done
-          echo "Timed out waiting for deploy"
-          exit 1
-        env:
-          COMMAND_ID: ${{ steps.ssm.outputs.command_id }}
-          INSTANCE_ID: ${{ steps.ec2.outputs.instance_id }}
+          ssh \
+            -i ~/.ssh/red-dragon-deploy \
+            -o UserKnownHostsFile=~/.ssh/red-dragon-known-hosts \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 \
+            gc-deploy@red-dragon
+          # No command argument is sent — the gc-deploy authorized_keys
+          # entry uses ``command="/opt/gc/deploy.sh",restrict``, which forces
+          # the deploy script and ignores any argv. SSH exit code is the
+          # deploy script's exit code.

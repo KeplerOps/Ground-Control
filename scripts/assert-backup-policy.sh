@@ -1,28 +1,33 @@
 #!/bin/bash
-# Assert that the Ground Control backup/restore infrastructure meets GC-P021:
-#   - backup cadence >= 3/day
-#   - local_retention_count guarantees >= 24h of backups (>= 4 files at 3x/day)
-#   - restore-test cron runs at least daily
-#   - test-restore.sh contains the AGE/core-table/graph/V010 sentinel checks
-#   - deploy/scripts/*.sh and deploy/terraform/modules/compute/user-data.sh.tftpl
-#     remain in sync on cadence + verification details
+# Assert that the Ground Control backup/restore infrastructure meets GC-P021.
 #
-# This script is intentionally structural (grep-based) rather than a full
-# Terraform parse — the goal is a fast, dependency-free gate that runs in
-# pre-commit, `make policy`, and CI. It fails loudly the moment the repo
-# drifts away from GC-P021 defaults.
+# History: this script grew up around the AWS EC2 deployment (ADR-018) and
+# encoded structural assertions across deploy/terraform/modules/, the
+# user-data.sh.tftpl cloud-init template, the tfvars.example, the canonical
+# /opt/gc backup scripts, and the CI deploy job's SSM SendCommand path.
+# When ADR-030 moved production to red-dragon (Hetzner, on-prem) the AWS
+# resources were destroyed, deploy/terraform/ was removed from the repo,
+# and the CI deploy job switched from SSM SendCommand to SSH.
+#
+# Until the red-dragon backup mechanism (rsync-over-tailnet to aurora) is
+# wired up in a follow-up, the only GC-P021 anchors that still apply are
+# the script-level ones in deploy/scripts/. The AWS-specific assertions
+# below have been removed; the smoke-test of install-ops-scripts.sh is
+# preserved because the installer itself still validates >= 3x/day cadence
+# and >= 4-file retention against its inputs (the policy floor on the
+# installer remains the right gate for any future caller).
+#
+# When the red-dragon mechanism lands, this script regrows assertions for
+# the new files (backup cron on the host, rsync target reachability,
+# restore-test cadence). The script-level sentinel checks here transfer
+# directly.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-BACKUP_MODULE_VARS="${REPO_ROOT}/deploy/terraform/modules/backup/variables.tf"
-DEV_ENV_VARS="${REPO_ROOT}/deploy/terraform/environments/dev/variables.tf"
-USER_DATA_TFTPL="${REPO_ROOT}/deploy/terraform/modules/compute/user-data.sh.tftpl"
-TFVARS_EXAMPLE="${REPO_ROOT}/deploy/terraform/environments/dev/terraform.tfvars.example"
 TEST_RESTORE_SCRIPT="${REPO_ROOT}/deploy/scripts/test-restore.sh"
 BACKUP_SCRIPT="${REPO_ROOT}/deploy/scripts/backup.sh"
 INSTALL_OPS_SCRIPT="${REPO_ROOT}/deploy/scripts/install-ops-scripts.sh"
-CI_WORKFLOW="${REPO_ROOT}/.github/workflows/ci.yml"
 
 errors=0
 fail() {
@@ -30,50 +35,10 @@ fail() {
   errors=$((errors + 1))
 }
 
-# 1. Backup module + dev env root defaults. The live deployment only sees
-#    the dev env's forwarded default, so both layers must carry GC-P021 values.
-for file in "${BACKUP_MODULE_VARS}" "${DEV_ENV_VARS}"; do
-  label="${file#${REPO_ROOT}/}"
-  if ! grep -q 'default *= *"0 3,11,19 \* \* \*"' "${file}"; then
-    fail "backup_cron default in ${label} must be \"0 3,11,19 * * *\" (3x/day per GC-P021)"
-  fi
-  retention_default="$(awk '
-    /^variable "local_retention_count"/ { inblock = 1 }
-    inblock && /default *= *[0-9]+/ {
-      match($0, /default *= *[0-9]+/); value = substr($0, RSTART, RLENGTH);
-      gsub(/[^0-9]/, "", value); print value; exit
-    }
-  ' "${file}")"
-  if [[ -z "${retention_default}" ]]; then
-    fail "could not parse local_retention_count default from ${label}"
-  elif [[ "${retention_default}" -lt 4 ]]; then
-    fail "local_retention_count default in ${label} is ${retention_default}; GC-P021 requires >= 4 (>= 24h at 3x/day cadence)"
-  fi
-done
-
-# 2. user-data cron lines: backup schedule + daily restore test.
-if ! grep -q '/etc/cron.d/gc-backup' "${USER_DATA_TFTPL}"; then
-  fail "${USER_DATA_TFTPL#${REPO_ROOT}/} no longer writes /etc/cron.d/gc-backup"
-fi
-if ! grep -q '0 5 \* \* \* root /opt/gc/test-restore.sh' "${USER_DATA_TFTPL}"; then
-  fail "restore-test cron in ${USER_DATA_TFTPL#${REPO_ROOT}/} must run daily (0 5 * * *) per GC-P021"
-fi
-if grep -q '0 5 \* \* 0 root /opt/gc/test-restore.sh' "${USER_DATA_TFTPL}"; then
-  fail "weekly restore-test cron (0 5 * * 0) still present in ${USER_DATA_TFTPL#${REPO_ROOT}/}; GC-P021 requires >= daily verification"
-fi
-
-# 3. tfvars.example must document the new defaults so operators aren't misled.
-if ! grep -q 'backup_cron *= *"0 3,11,19 \* \* \*"' "${TFVARS_EXAMPLE}"; then
-  fail "${TFVARS_EXAMPLE#${REPO_ROOT}/} must show backup_cron = \"0 3,11,19 * * *\" as the example value"
-fi
-if ! grep -q 'local_retention_count *= *4' "${TFVARS_EXAMPLE}"; then
-  fail "${TFVARS_EXAMPLE#${REPO_ROOT}/} must show local_retention_count = 4 as the example value"
-fi
-
-# 4. test-restore.sh, the inlined user-data copy, AND the canonical installer
-#    must all carry the new checks. Sentinel strings are stable across all
-#    three files so drift between them is caught here.
-for file in "${TEST_RESTORE_SCRIPT}" "${USER_DATA_TFTPL}" "${INSTALL_OPS_SCRIPT}"; do
+# Sentinel checks on the canonical /opt/gc scripts. test-restore.sh and the
+# installer must carry the AGE/core-table/graph/V010 verification surface
+# so a missing extension or schema regression fails the daily restore test.
+for file in "${TEST_RESTORE_SCRIPT}" "${INSTALL_OPS_SCRIPT}"; do
   label="${file#${REPO_ROOT}/}"
   grep -q 'extname *= *.age.' "${file}"           || fail "${label} missing AGE extension load check (pg_extension query)"
   grep -q 'AGE extension present' "${file}"       || fail "${label} missing AGE-extension sentinel log line"
@@ -84,8 +49,8 @@ for file in "${TEST_RESTORE_SCRIPT}" "${USER_DATA_TFTPL}" "${INSTALL_OPS_SCRIPT}
     || fail "${label} must invoke create_graph('requirements_verify') to prove AGE is operational"
 done
 
-# 5. Keep the repo-copy scripts in sync with the user-data template on cadence
-#    comments so reviewers can see them together in diffs.
+# Repo-copy scripts must reference GC-P021 in a comment header so reviewers
+# scanning a diff can see the policy anchor in the script itself.
 if ! grep -q 'GC-P021' "${BACKUP_SCRIPT}"; then
   fail "${BACKUP_SCRIPT#${REPO_ROOT}/} header must reference GC-P021 so the policy anchor is visible in the script itself"
 fi
@@ -96,22 +61,11 @@ if ! grep -q 'GC-P021' "${INSTALL_OPS_SCRIPT}"; then
   fail "${INSTALL_OPS_SCRIPT#${REPO_ROOT}/} must reference GC-P021 so the policy anchor is visible in the installer"
 fi
 
-# 6. The CI deploy job must run install-ops-scripts.sh on every deploy so
-#    the live EC2 instance picks up /opt/gc script updates. This is the
-#    fix for codex P1: ignore_changes=[user_data] blocks Terraform from
-#    propagating script edits.
-if [ -f "${CI_WORKFLOW}" ]; then
-  if ! grep -q 'deploy/scripts/install-ops-scripts.sh' "${CI_WORKFLOW}"; then
-    fail "${CI_WORKFLOW#${REPO_ROOT}/} must run deploy/scripts/install-ops-scripts.sh during the deploy job (GC-P021 script rollout)"
-  fi
-  if ! grep -q 'ssm-install-ops' "${CI_WORKFLOW}"; then
-    fail "${CI_WORKFLOW#${REPO_ROOT}/} must wire the install-ops step (id=ssm-install-ops) in the deploy job"
-  fi
-fi
-
-# 7. Run the installer against an ephemeral prefix and prove it (a) refuses
-#    non-compliant inputs and (b) writes the expected artifacts. This catches
-#    bit-rot the grep-based sentinel checks cannot see.
+# Run the installer against an ephemeral prefix and prove it (a) refuses
+# non-compliant inputs and (b) writes the expected artifacts. The installer
+# itself enforces the GC-P021 floor on cadence and retention, so a bug
+# there would silently weaken policy regardless of which deployment it
+# eventually targets.
 tmp_prefix="$(mktemp -d -t gc-install-ops-XXXXXXXX)"
 trap 'rm -rf "${tmp_prefix}"' EXIT
 
@@ -158,4 +112,4 @@ if [[ "${errors}" -gt 0 ]]; then
   exit 1
 fi
 
-echo "assert-backup-policy.sh: OK"
+echo "assert-backup-policy.sh: OK (script-level anchors only — red-dragon mechanism assertions land in the follow-up)"
