@@ -35,6 +35,13 @@ import {
   buildCodexVerifyCycleMarker,
   CODEX_VERIFY_HARD_CAP,
   CODEX_VERIFY_CYCLE_MARKER_PREFIX,
+  parseCodexReviewPrePushCycleMarkers,
+  evaluateCodexReviewPrePushCycleCap,
+  buildCodexReviewPrePushCycleMarker,
+  deriveIssueNumberFromBranch,
+  CODEX_REVIEW_PREPUSH_HARD_CAP,
+  CODEX_REVIEW_PREPUSH_MARKER_PREFIX,
+  runCodexReview,
   dedupFindings,
   buildCodexVerifyPrompt,
   parseCodexVerifyTail,
@@ -2009,6 +2016,7 @@ describe("evaluateCodexReviewCycleCap", () => {
     assert.equal(result.override, true);
     assert.equal(result.nextCycle, 3);
     assert.match(result.override_reason, /yes run cycle 3 to verify/);
+    assert.equal(result.next_action, "fix_findings_then_summarize_and_escalate");
   });
 
   it("rejects overrideCap=true without an overrideReason (audit requirement)", () => {
@@ -2179,6 +2187,10 @@ describe("evaluateCodexVerifyCycleCap", () => {
     assert.equal(goodOverride.ok, true);
     assert.equal(goodOverride.override, true);
     assert.equal(goodOverride.nextCycle, 3);
+    assert.equal(
+      goodOverride.next_action,
+      "fix_finding_then_escalate_if_still_unresolved",
+    );
   });
 
   it("throws on garbage priorCount (defensive)", () => {
@@ -2206,6 +2218,453 @@ describe("buildCodexVerifyCycleMarker", () => {
     assert.match(m, /USER-AUTHORIZED OVERRIDE/);
     assert.match(m, new RegExp(reason));
     assert.equal(parseCodexVerifyCycleMarkers([m], 1, 7), 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gc_codex_review pre-push cycle enforcement (#796)
+//
+// Pre-push reviews (`uncommitted=true`) hit the same diminishing-returns wall
+// as post-push reviews, so they inherit GC-O007's hard-cap-2. The marker is a
+// new, disjoint family from the post-push one — anchored to (issue, branch)
+// instead of (PR) — so the two parsers never accidentally cross-count.
+// ---------------------------------------------------------------------------
+
+describe("deriveIssueNumberFromBranch", () => {
+  it("extracts the leading integer from a gh-issue-develop-style branch", () => {
+    assert.equal(deriveIssueNumberFromBranch("796-cap-pre-push"), 796);
+    assert.equal(deriveIssueNumberFromBranch("1-x"), 1);
+  });
+
+  it("returns the integer when the branch is just digits", () => {
+    assert.equal(deriveIssueNumberFromBranch("796"), 796);
+  });
+
+  it("returns null when the branch does not start with digits", () => {
+    assert.equal(deriveIssueNumberFromBranch("feature/796-x"), null);
+    assert.equal(deriveIssueNumberFromBranch("dev"), null);
+    assert.equal(deriveIssueNumberFromBranch("main"), null);
+    assert.equal(deriveIssueNumberFromBranch("release-2.0"), null);
+  });
+
+  it("returns null on empty / non-string / nullish input", () => {
+    assert.equal(deriveIssueNumberFromBranch(""), null);
+    assert.equal(deriveIssueNumberFromBranch(null), null);
+    assert.equal(deriveIssueNumberFromBranch(undefined), null);
+    assert.equal(deriveIssueNumberFromBranch(42), null);
+  });
+
+  it("rejects zero or negative leading values (issue numbers are positive)", () => {
+    assert.equal(deriveIssueNumberFromBranch("0-foo"), null);
+    assert.equal(deriveIssueNumberFromBranch("-1-foo"), null);
+  });
+});
+
+describe("parseCodexReviewPrePushCycleMarkers", () => {
+  it("returns 0 when no comments contain markers", () => {
+    const bodies = ["random comment", "another", "## summary"];
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 796, "796-foo"), 0);
+  });
+
+  it("counts markers for the matching (issue, branch) pair", () => {
+    const bodies = [
+      'cycle 1: <!-- gc:codex-prepush-cycle issue="796" branch="796-foo" cycle="1" -->',
+      "unrelated",
+      'cycle 2: <!-- gc:codex-prepush-cycle issue="796" branch="796-foo" cycle="2" -->',
+    ];
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 796, "796-foo"), 2);
+  });
+
+  it("ignores markers for other issues", () => {
+    const bodies = [
+      '<!-- gc:codex-prepush-cycle issue="100" branch="796-foo" cycle="1" -->',
+      '<!-- gc:codex-prepush-cycle issue="796" branch="796-foo" cycle="1" -->',
+    ];
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 796, "796-foo"), 1);
+  });
+
+  it("ignores markers for other branches on the same issue", () => {
+    const bodies = [
+      '<!-- gc:codex-prepush-cycle issue="796" branch="796-foo" cycle="1" -->',
+      '<!-- gc:codex-prepush-cycle issue="796" branch="796-bar" cycle="1" -->',
+    ];
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 796, "796-foo"), 1);
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 796, "796-bar"), 1);
+  });
+
+  it("does not cross-count post-push cycle markers (different family)", () => {
+    const bodies = [
+      '<!-- gc:codex-review-cycle cycle="1" pr="500" -->',
+      '<!-- gc:codex-review-cycle cycle="2" pr="500" -->',
+    ];
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 500, "500-anything"), 0);
+  });
+
+  it("ignores malformed markers (missing attrs, unquoted, garbled)", () => {
+    const bodies = [
+      "<!-- gc:codex-prepush-cycle -->",
+      '<!-- gc:codex-prepush-cycle issue="796" branch="796-foo" -->', // no cycle
+      '<!-- gc:codex-prepush-cycle issue="796" cycle="1" -->', // no branch
+      '<!-- gc:codex-prepush-cycle branch="796-foo" cycle="1" -->', // no issue
+      "<!-- gc:codex-prepush-cycle issue=796 branch=796-foo cycle=1 -->", // unquoted
+    ];
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 796, "796-foo"), 0);
+  });
+
+  it("tolerates non-string entries and non-array input", () => {
+    assert.equal(parseCodexReviewPrePushCycleMarkers(["a", 42, null], 1, "x"), 0);
+    assert.equal(parseCodexReviewPrePushCycleMarkers(null, 1, "x"), 0);
+    assert.equal(parseCodexReviewPrePushCycleMarkers("not an array", 1, "x"), 0);
+  });
+
+  it("rejects empty / non-string branch input as 0 (defensive)", () => {
+    const bodies = ['<!-- gc:codex-prepush-cycle issue="1" branch="x" cycle="1" -->'];
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 1, ""), 0);
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 1, null), 0);
+  });
+});
+
+describe("evaluateCodexReviewPrePushCycleCap", () => {
+  it("allows cycle 1 with a fix-and-push next_action", () => {
+    const r = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 0,
+      issueNumber: 796,
+      branchName: "796-foo",
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.nextCycle, 1);
+    assert.equal(r.cap, CODEX_REVIEW_PREPUSH_HARD_CAP);
+    assert.equal(r.next_action, "fix_all_findings_and_restage");
+    assert.notEqual(r.override, true);
+  });
+
+  it("allows cycle 2 with the summarize-and-escalate discipline", () => {
+    const r = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 1,
+      issueNumber: 796,
+      branchName: "796-foo",
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.nextCycle, 2);
+    assert.equal(r.next_action, "fix_all_findings_then_summarize_and_escalate");
+  });
+
+  it("refuses cycle 3 with codex_review_prepush_cap_reached", () => {
+    const r = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 2,
+      issueNumber: 796,
+      branchName: "796-foo",
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.error, "codex_review_prepush_cap_reached");
+    assert.equal(r.prior_cycles, 2);
+    assert.equal(r.cap, 2);
+    assert.equal(r.issue_number, 796);
+    assert.equal(r.branch, "796-foo");
+    assert.equal(r.next_action, "post_summary_and_escalate_to_user");
+    assert.match(r.message, /hard cap reached/);
+    assert.match(r.message, /escalate to the user/);
+    assert.match(r.message, /override_cap=true/);
+  });
+
+  it("refuses higher counts the same way (cap is a floor)", () => {
+    const r = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 9,
+      issueNumber: 1,
+      branchName: "1-x",
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.prior_cycles, 9);
+  });
+
+  it("respects an override hardCap (used by tests / future per-tool caps)", () => {
+    const allowed = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 2,
+      issueNumber: 1,
+      branchName: "1-x",
+      hardCap: 5,
+    });
+    assert.equal(allowed.ok, true);
+    assert.equal(allowed.nextCycle, 3);
+    const refused = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 5,
+      issueNumber: 1,
+      branchName: "1-x",
+      hardCap: 5,
+    });
+    assert.equal(refused.ok, false);
+    assert.equal(refused.cap, 5);
+  });
+
+  it("allows cycle 3 when overrideCap=true with a non-empty overrideReason", () => {
+    const r = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 2,
+      issueNumber: 796,
+      branchName: "796-foo",
+      overrideCap: true,
+      overrideReason: "user said 'yes run cycle 3 to verify' on 2026-05-04",
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.override, true);
+    assert.equal(r.nextCycle, 3);
+    assert.match(r.override_reason, /yes run cycle 3 to verify/);
+    assert.equal(r.next_action, "fix_findings_then_summarize_and_escalate");
+  });
+
+  it("rejects overrideCap=true without an overrideReason (audit requirement)", () => {
+    const r1 = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 2,
+      issueNumber: 1,
+      branchName: "1-x",
+      overrideCap: true,
+    });
+    assert.equal(r1.ok, false);
+    assert.equal(r1.error, "codex_review_prepush_override_missing_reason");
+
+    const r2 = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 2,
+      issueNumber: 1,
+      branchName: "1-x",
+      overrideCap: true,
+      overrideReason: "   ",
+    });
+    assert.equal(r2.ok, false);
+    assert.equal(r2.error, "codex_review_prepush_override_missing_reason");
+  });
+
+  it("override applies even within the cap (allows arbitrary mid-flight overrides)", () => {
+    const r = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 0,
+      issueNumber: 796,
+      branchName: "796-foo",
+      overrideCap: true,
+      overrideReason: "user wants cycle 1 marked as override for some reason",
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.override, true);
+    assert.equal(r.nextCycle, 1);
+  });
+
+  it("throws on garbage priorCount (defensive)", () => {
+    assert.throws(() =>
+      evaluateCodexReviewPrePushCycleCap({
+        priorCount: -1,
+        issueNumber: 1,
+        branchName: "x",
+      }),
+    );
+    assert.throws(() =>
+      evaluateCodexReviewPrePushCycleCap({
+        priorCount: NaN,
+        issueNumber: 1,
+        branchName: "x",
+      }),
+    );
+    assert.throws(() =>
+      evaluateCodexReviewPrePushCycleCap({
+        priorCount: "1",
+        issueNumber: 1,
+        branchName: "x",
+      }),
+    );
+  });
+});
+
+describe("buildCodexReviewPrePushCycleMarker", () => {
+  it("produces a marker that round-trips through parseCodexReviewPrePushCycleMarkers", () => {
+    const marker = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 796,
+      branchName: "796-foo",
+      cycleNumber: 1,
+    });
+    assert.ok(marker.startsWith(CODEX_REVIEW_PREPUSH_MARKER_PREFIX));
+    assert.equal(parseCodexReviewPrePushCycleMarkers([marker], 796, "796-foo"), 1);
+  });
+
+  it("includes the cycle, cap, issue, and branch in the human-readable body", () => {
+    const marker = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 796,
+      branchName: "796-foo",
+      cycleNumber: 2,
+    });
+    assert.match(marker, /cycle 2 of 2/);
+    assert.match(marker, /issue #796/);
+    assert.match(marker, /796-foo/);
+    assert.match(marker, /issue #796\b/); // attribution stays scoped
+  });
+
+  it("two markers from the same (issue, branch) are both counted", () => {
+    const m1 = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 50,
+      branchName: "50-x",
+      cycleNumber: 1,
+    });
+    const m2 = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 50,
+      branchName: "50-x",
+      cycleNumber: 2,
+    });
+    assert.equal(parseCodexReviewPrePushCycleMarkers([m1, m2], 50, "50-x"), 2);
+    const other = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 999,
+      branchName: "999-x",
+      cycleNumber: 1,
+    });
+    assert.equal(parseCodexReviewPrePushCycleMarkers([m1, m2, other], 50, "50-x"), 2);
+  });
+
+  it("renders an override marker distinguishable from regular cycle markers", () => {
+    const reason = "user authorized cycle 3 to verify cycle-2 fixes";
+    const marker = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 796,
+      branchName: "796-foo",
+      cycleNumber: 3,
+      override: true,
+      overrideReason: reason,
+    });
+    assert.match(marker, /override="true"/);
+    assert.match(marker, /reason="[^"]+"/);
+    assert.match(marker, /USER-AUTHORIZED OVERRIDE/);
+    assert.match(marker, new RegExp(reason));
+    assert.equal(parseCodexReviewPrePushCycleMarkers([marker], 796, "796-foo"), 1);
+  });
+
+  it("escapes quotes in override reasons so the comment HTML stays parseable", () => {
+    const tricky = 'user said "yes do it" then ran off';
+    const marker = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 1,
+      branchName: "1-x",
+      cycleNumber: 3,
+      override: true,
+      overrideReason: tricky,
+    });
+    assert.match(marker, /reason="user said \\"yes do it\\" then ran off"/);
+    assert.equal(parseCodexReviewPrePushCycleMarkers([marker], 1, "1-x"), 1);
+  });
+
+  it("supports branches with slashes via JSON-encoded branch attribute", () => {
+    const marker = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 200,
+      branchName: "feat/200-cool",
+      cycleNumber: 1,
+    });
+    // The JSON-encoded form keeps slashes as-is (no escaping needed) and the
+    // marker still round-trips for the exact same branch string.
+    assert.equal(
+      parseCodexReviewPrePushCycleMarkers([marker], 200, "feat/200-cool"),
+      1,
+    );
+    // And does NOT match a different branch.
+    assert.equal(
+      parseCodexReviewPrePushCycleMarkers([marker], 200, "feat/200-other"),
+      0,
+    );
+  });
+
+  it("attribution mentions the enforcement issue (#796) so reviewers can audit", () => {
+    const marker = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 1,
+      branchName: "1-x",
+      cycleNumber: 1,
+    });
+    assert.match(marker, /issue #796/);
+  });
+});
+
+describe("runCodexReview uncommitted=true input gating", () => {
+  // These tests exercise the uncommitted=true decision tree before any gh /
+  // codex shells out. The refusal paths (detached HEAD, missing issue) are the
+  // most important pre-flight checks because they are the only thing standing
+  // between an unresolvable input and a half-completed run that no marker can
+  // anchor.
+  function makeTempRepo({ branch = "main", detached = false } = {}) {
+    const dir = mkdtempSync(join(tmpdir(), "gc-prepush-test-"));
+    execFileSync("git", ["-C", dir, "init", "-q", "--initial-branch", branch]);
+    execFileSync("git", ["-C", dir, "config", "user.email", "test@example.com"]);
+    execFileSync("git", ["-C", dir, "config", "user.name", "test"]);
+    // Need at least one commit so HEAD points somewhere we can detach onto.
+    writeFileSync(join(dir, "README"), "x\n");
+    execFileSync("git", ["-C", dir, "add", "README"]);
+    execFileSync("git", ["-C", dir, "commit", "-q", "-m", "init"]);
+    if (detached) {
+      const sha = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"]).toString().trim();
+      execFileSync("git", ["-C", dir, "-c", "advice.detachedHead=false", "checkout", "-q", sha]);
+    }
+    return dir;
+  }
+
+  it("refuses with prepush_branch_unresolved on detached HEAD before invoking gh/codex", async () => {
+    const dir = makeTempRepo({ detached: true });
+    try {
+      const result = await runCodexReview({ repoPath: dir, uncommitted: true });
+      assert.equal(result.ok, false);
+      assert.equal(result.error, "prepush_branch_unresolved");
+      assert.equal(result.next_action, "checkout_named_feature_branch");
+      assert.equal(result.finding_count, 0);
+      assert.deepEqual(result.comments, []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses with prepush_issue_unresolved when the branch has no numeric prefix and no issue_number is passed", async () => {
+    const dir = makeTempRepo({ branch: "feature-x" });
+    try {
+      const result = await runCodexReview({ repoPath: dir, uncommitted: true });
+      assert.equal(result.ok, false);
+      assert.equal(result.error, "prepush_issue_unresolved");
+      assert.equal(result.branch, "feature-x");
+      assert.equal(result.next_action, "pass_issue_number_or_use_numeric_branch_prefix");
+      assert.equal(result.finding_count, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("derives the issue number from a numeric-prefix branch and proceeds past the input gates", async () => {
+    // We cannot test the full happy path in unit-test scope (it shells out to
+    // gh and codex), but we can confirm that with a numeric-prefix branch the
+    // gate accepts the input and the failure surface is no longer one of the
+    // input-resolution errors. The next failure on this code path will come
+    // from `gh repo view` (no remote configured), which proves we got past
+    // the input gates.
+    const dir = makeTempRepo({ branch: "796-x" });
+    try {
+      let result;
+      let threw = false;
+      try {
+        result = await runCodexReview({ repoPath: dir, uncommitted: true });
+      } catch {
+        // gh/codex shelling out throws on a no-remote repo; that's fine — we
+        // explicitly want to confirm we got *past* the input gates.
+        threw = true;
+      }
+      if (!threw) {
+        assert.notEqual(result.error, "prepush_issue_unresolved");
+        assert.notEqual(result.error, "prepush_branch_unresolved");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts an explicit issue_number even when the branch has no numeric prefix", async () => {
+    const dir = makeTempRepo({ branch: "feature-x" });
+    try {
+      let result;
+      let threw = false;
+      try {
+        result = await runCodexReview({ repoPath: dir, uncommitted: true, issueNumber: 796 });
+      } catch {
+        threw = true;
+      }
+      if (!threw) {
+        assert.notEqual(result.error, "prepush_issue_unresolved");
+        assert.notEqual(result.error, "prepush_branch_unresolved");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

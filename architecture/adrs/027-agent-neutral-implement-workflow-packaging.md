@@ -153,8 +153,9 @@ engine.
   invariant.
 - After ADR-029 removes the synchronous plan-approval gate, agent silence on
   review-finding decisions becomes the new accountability risk. ADR-029
-  mitigates by mandating that every finding decision (fix / wontfix / defer /
-  not-applicable) is recorded as a comment on the issue thread.
+  mitigates by mandating that every finding decision (fix / wontfix /
+  not-applicable) is recorded as a comment on the issue thread. `defer` is not
+  a valid decision under GC-O007.
 
 ## Non-Goals
 

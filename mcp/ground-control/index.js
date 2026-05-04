@@ -749,18 +749,19 @@ server.tool(
 
 server.tool(
   "gc_codex_review",
-  "Run Codex against the current branch with a production-readiness review prompt. Codex enumerates all material findings (no triage) and, when a pull request is available, posts each finding as an inline PR review comment. Returns the list of posted comment ids, enriched with GraphQL review-thread ids and a short file/line/title preview so the coding agent can drive a fix/verify loop via gc_codex_verify_finding. Auto-detects the PR number for the current branch via `gh pr view` when pr_number is omitted. Hard-cap-2 enforcement (issue #794): post-push reviews are capped at two cycles per PR; the tool refuses cycle 3+ unless override_cap=true with a non-empty override_reason quoting the user's authorization.",
+  "Run Codex against the current branch with a production-readiness review prompt. Codex enumerates all material findings (no triage) and, when a pull request is available, posts each finding as an inline PR review comment. Returns the list of posted comment ids, enriched with GraphQL review-thread ids and a short file/line/title preview so the coding agent can drive a fix/verify loop via gc_codex_verify_finding. Auto-detects the PR number for the current branch via `gh pr view` when pr_number is omitted. Hard-cap-2 enforcement: post-push reviews are capped at two cycles per PR (issue #794); pre-push reviews (uncommitted=true) are capped at two cycles per (issue, branch) pair anchored to the resolved GitHub issue thread (issue #796). The tool refuses cycle 3+ unless override_cap=true with a non-empty override_reason quoting the user's authorization.",
   {
     repo_path: z.string().describe("Absolute path to the target Git repository"),
     base_branch: z.string().optional().describe("Base branch to review against (defaults to 'dev')"),
     uncommitted: z.boolean().optional().describe("Review staged/unstaged/untracked changes instead of committed branch history"),
     pr_number: z.number().int().positive().optional().describe("Pull request number to post findings to. When omitted and uncommitted is false, the tool auto-detects via `gh pr view --json number`. When no PR can be found, codex emits findings inline without posting."),
-    override_cap: z.boolean().optional().describe("Override the hard-cap-2 cycle limit. Only legitimate when the user has explicitly authorized cycle 3+ in the conversation. Requires override_reason."),
+    issue_number: z.number().int().positive().optional().describe("GitHub issue number used to anchor the pre-push cycle counter (uncommitted=true). When omitted, the tool derives it from the current branch's leading numeric prefix (e.g. '796-cap-pre-push' → 796). If neither resolves, the tool refuses with a structured error. Ignored for post-push reviews."),
+    override_cap: z.boolean().optional().describe("Override the hard-cap-2 cycle limit (post-push and pre-push). Only legitimate when the user has explicitly authorized cycle 3+ in the conversation. Requires override_reason."),
     override_reason: z.string().optional().describe("Required when override_cap=true. Quote the user's authorization (e.g. 'user said: yes run cycle 3 to verify'). Stored in the marker for audit."),
     override_phase_gate: z.boolean().optional().describe("Override the plan-before-review ordering gate. Only legitimate when the user explicitly authorized skipping planning (e.g., trivial bug fix). Requires override_phase_reason."),
     override_phase_reason: z.string().optional().describe("Required when override_phase_gate=true. Quote the user's authorization. Logged for audit."),
   },
-  async ({ repo_path, base_branch, uncommitted, pr_number, override_cap, override_reason, override_phase_gate, override_phase_reason }) => {
+  async ({ repo_path, base_branch, uncommitted, pr_number, issue_number, override_cap, override_reason, override_phase_gate, override_phase_reason }) => {
     try {
       return ok(JSON.stringify(
         await runCodexReview({
@@ -768,6 +769,7 @@ server.tool(
           baseBranch: base_branch || "dev",
           uncommitted: Boolean(uncommitted),
           prNumber: pr_number != null ? pr_number : null,
+          issueNumber: issue_number != null ? issue_number : null,
           overrideCap: Boolean(override_cap),
           overrideReason: override_reason ?? null,
           overridePhaseGate: Boolean(override_phase_gate),

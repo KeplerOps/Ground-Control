@@ -80,6 +80,22 @@ effect. Reviews route through `gc_codex_review`, `gc_codex_verify_finding`,
 and `gc_codex_architecture_preflight` regardless of which agent runtime
 drives the workflow.
 
+### Pre-push review cycle state
+
+Pre-push `gc_codex_review` runs with `uncommitted=true` are the same Codex
+review loop as the post-push PR review, just before a PR number exists. They
+therefore inherit GC-O007's hard two-cycle cap and no cycle-3 verification pass.
+Any older workflow text or issue prose that refers to a five-cycle Codex cap is
+stale and must not drive implementation without a new ADR amending GC-O007.
+
+Because the pre-push review has no PR issue number, its durable cycle state is
+anchored to the GitHub issue resolved at workflow Step 1 plus the current branch
+name. The marker belongs to the same issue-thread marker family as plan,
+phase, review-cycle, and verify-cycle markers. Implementations must reuse the
+existing issue-comment read/post helpers, marker parser/evaluator pattern, and
+structured refusal result style; they must not add a local state file, git
+notes, database row, Temporal state, or driver-local counter for this cap.
+
 ## Consequences
 
 ### Positive
