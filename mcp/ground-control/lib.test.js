@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -20,7 +20,9 @@ import {
   buildDiffBlock,
   selectDiffMode,
   execFileWithInput,
-  parseCodexReviewTail,
+  parseCodexReviewFindingsTail,
+  validateFindingPath,
+  postCodexReviewFindings,
   parseCodexReviewCycleMarkers,
   evaluateCodexReviewCycleCap,
   buildCodexReviewCycleMarker,
@@ -1520,28 +1522,58 @@ describe("buildCodexReviewCorePrompt", () => {
     assert.ok(!/- Security —/.test(prompt));
   });
 
-  it("instructs codex to post inline PR comments with a [core] title prefix", () => {
+  it("instructs codex to emit findings as JSON in the FINDINGS block (not by calling gh)", () => {
     const prompt = buildCodexReviewCorePrompt({
       baseBranch: "dev",
       uncommitted: false,
       prNumber: 520,
       diffText: diff,
     });
-    assert.ok(prompt.includes("/repos/{owner}/{repo}/pulls/520/comments"));
-    assert.ok(prompt.includes("[core]"));
-    assert.ok(prompt.includes("COMMENT_IDS=["));
+    // Issue #793: codex returns structured payloads; MCP performs the GitHub
+    // writes from the host. Codex must NOT call gh / curl / git from its
+    // sandbox to post comments.
+    assert.ok(prompt.includes("===FINDINGS==="));
+    assert.ok(prompt.includes("===END==="));
+    assert.ok(prompt.includes("Do NOT invoke `gh`"));
+    assert.ok(!prompt.includes("/repos/{owner}/{repo}/pulls/"));
+    assert.ok(!prompt.includes("COMMENT_IDS"));
   });
 
-  it("falls back to inline-only findings when no PR number is provided", () => {
+  it("documents the per-finding JSON schema for the [core] reviewer", () => {
     const prompt = buildCodexReviewCorePrompt({
+      baseBranch: "dev",
+      uncommitted: false,
+      prNumber: 520,
+      diffText: diff,
+    });
+    // The reviewer label is mentioned (the MCP prepends `[core]` when posting),
+    // but each documented field of the schema must be in the prompt so codex
+    // emits well-formed payloads.
+    assert.ok(prompt.includes("[core]"));
+    for (const field of ["`path`", "`line`", "`title`", "`body`"]) {
+      assert.ok(prompt.includes(field), `prompt missing field reference ${field}`);
+    }
+  });
+
+  it("uses the same JSON shape regardless of whether a PR exists", () => {
+    // The MCP server decides whether to post (based on prNumber); codex's
+    // emission shape is constant. This is intentional — it's the inversion
+    // the bug fix introduces.
+    const withPr = buildCodexReviewCorePrompt({
+      baseBranch: "dev",
+      uncommitted: false,
+      prNumber: 520,
+      diffText: diff,
+    });
+    const noPr = buildCodexReviewCorePrompt({
       baseBranch: "dev",
       uncommitted: false,
       prNumber: null,
       diffText: diff,
     });
-    assert.ok(!prompt.includes("/repos/{owner}/{repo}/pulls/"));
-    assert.ok(prompt.includes("did not supply a pull request number"));
-    assert.ok(prompt.includes("COMMENT_IDS=[]"));
+    assert.ok(withPr.includes("===FINDINGS==="));
+    assert.ok(noPr.includes("===FINDINGS==="));
+    assert.ok(!noPr.includes("did not supply a pull request number"));
   });
 
   it("switches the preamble for uncommitted reviews", () => {
@@ -1634,6 +1666,21 @@ describe("buildCodexSecurityReviewPrompt", () => {
     assert.ok(prompt.includes("<<<DIFF"));
     assert.ok(prompt.includes("if (token == null)"));
   });
+
+  it("instructs codex to emit findings as JSON in the FINDINGS block (not by calling gh)", () => {
+    const prompt = buildCodexSecurityReviewPrompt({
+      baseBranch: "dev",
+      uncommitted: false,
+      prNumber: 520,
+      diffText: diff,
+    });
+    // Same architecture inversion as the core reviewer — see issue #793.
+    assert.ok(prompt.includes("===FINDINGS==="));
+    assert.ok(prompt.includes("===END==="));
+    assert.ok(prompt.includes("Do NOT invoke `gh`"));
+    assert.ok(!prompt.includes("/repos/{owner}/{repo}/pulls/"));
+    assert.ok(!prompt.includes("COMMENT_IDS"));
+  });
 });
 
 describe("dedupFindings", () => {
@@ -1701,12 +1748,17 @@ describe("execFileWithInput", () => {
 });
 
 describe("buildCodexReviewExecArgs", () => {
-  it("uses codex exec with workspace-write sandbox, cwd, output capture, and stdin prompt", () => {
+  it("uses codex exec with read-only sandbox, cwd, output capture, and stdin prompt", () => {
     // We dropped `codex review` because it could hang after emitting the
     // structured tail when invoked with a stdin prompt. `codex exec` matches
     // the architecture preflight and verify-finding callers, both of which
     // exit cleanly. The diff is computed by the caller and inlined into the
     // prompt, so we no longer need codex's own --uncommitted/--base flags.
+    //
+    // Issue #793 / ADR-027 Privileged Side-Effect Boundary: codex returns a
+    // structured findings payload and the MCP server performs the GitHub
+    // writes from the host. Codex therefore needs no write access — the
+    // sandbox is read-only.
     const args = buildCodexReviewExecArgs({
       repoPath: "/tmp/repo",
       outputPath: "/tmp/out.txt",
@@ -1715,7 +1767,7 @@ describe("buildCodexReviewExecArgs", () => {
     assert.deepEqual(args, [
       "exec",
       "--sandbox",
-      "workspace-write",
+      "read-only",
       "-C",
       "/tmp/repo",
       "--output-last-message",
@@ -1785,36 +1837,502 @@ describe("selectDiffMode", () => {
   });
 });
 
-describe("parseCodexReviewTail", () => {
-  it("parses a well-formed COMMENT_IDS tail and strips it from the body", () => {
-    const stdout = [
-      "Posted 3 inline findings.",
-      "- src/foo.java:42 bad thing",
-      "- src/bar.java:88 other thing",
-      "COMMENT_IDS=[101,102,103]",
-    ].join("\n") + "\n";
-    const { commentIds, body } = parseCodexReviewTail(stdout);
-    assert.deepEqual(commentIds, [101, 102, 103]);
-    assert.ok(!body.includes("COMMENT_IDS="));
-    assert.ok(body.includes("Posted 3 inline findings."));
+describe("validateFindingPath", () => {
+  // Tests use a synthetic repoRoot (the path need not exist on disk because the
+  // validator is lexical — it never opens the file). This is intentional:
+  // codex review findings frequently reference newly-added files in the diff
+  // that may or may not exist in the working tree at validation time.
+  const repoRoot = "/tmp/gc-test-repo";
+
+  it("accepts a plain repo-relative path", () => {
+    assert.equal(validateFindingPath("src/foo.java", repoRoot), "src/foo.java");
   });
 
-  it("parses an empty COMMENT_IDS tail", () => {
-    const { commentIds, body } = parseCodexReviewTail("No findings.\nCOMMENT_IDS=[]");
-    assert.deepEqual(commentIds, []);
-    assert.ok(body.includes("No findings."));
+  it("accepts a deeply nested repo-relative path", () => {
+    assert.equal(
+      validateFindingPath("backend/src/main/java/com/keplerops/Foo.java", repoRoot),
+      "backend/src/main/java/com/keplerops/Foo.java",
+    );
   });
 
-  it("throws when the tail line is missing", () => {
-    assert.throws(() => parseCodexReviewTail("some prose\nwith no tail"), /COMMENT_IDS=\[/);
+  it("rejects non-string input", () => {
+    assert.throws(() => validateFindingPath(null, repoRoot), /must be a non-empty string/);
+    assert.throws(() => validateFindingPath(42, repoRoot), /must be a non-empty string/);
+    assert.throws(() => validateFindingPath(undefined, repoRoot), /must be a non-empty string/);
   });
 
-  it("throws when an id is malformed", () => {
-    assert.throws(() => parseCodexReviewTail("COMMENT_IDS=[1,abc,3]"), /malformed comment id/);
+  it("rejects empty / whitespace strings", () => {
+    assert.throws(() => validateFindingPath("", repoRoot), /must be a non-empty string/);
+    assert.throws(() => validateFindingPath("   ", repoRoot), /must be a non-empty string/);
+  });
+
+  it("rejects absolute paths", () => {
+    assert.throws(() => validateFindingPath("/etc/passwd", repoRoot), /must be a repo-relative path/);
+    assert.throws(() => validateFindingPath("/tmp/gc-test-repo/src/foo.java", repoRoot), /must be a repo-relative path/);
+  });
+
+  it("rejects parent-directory traversal segments", () => {
+    // The new lexical `..` check fires before the containment check; either
+    // message proves the path was rejected for the right reason.
+    const traversalRejection = /\.\.|inside the repository root/;
+    assert.throws(() => validateFindingPath("../etc/passwd", repoRoot), traversalRejection);
+    assert.throws(() => validateFindingPath("foo/../../bar", repoRoot), traversalRejection);
+    assert.throws(() => validateFindingPath("..", repoRoot), traversalRejection);
+  });
+
+  it("rejects '..' as ANY segment even when normalization stays inside the repo", () => {
+    // Defense-in-depth: a path like 'src/../README.md' lexically contains a
+    // `..` segment but normalizes back inside the repo. The schema/README
+    // documents 'no `..` segments' precisely so codex never emits this shape;
+    // the validator must reject it before normalization, not after, to match
+    // the documented contract and avoid POSTs against odd-looking paths.
+    assert.throws(() => validateFindingPath("src/../README.md", repoRoot), /\.\./);
+    assert.throws(() => validateFindingPath("a/b/../c", repoRoot), /\.\./);
+  });
+});
+
+describe("parseCodexReviewFindingsTail", () => {
+  const repoRoot = "/tmp/gc-test-repo";
+
+  it("parses a well-formed FINDINGS block and strips it from the body", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "The handler does not validate the `name` parameter against length limits." },
+      { path: "src/bar.java", line: 88, title: "Bypass of existing helper", body: "Uses raw JdbcTemplate instead of the project's ScopedRequirementRepository." },
+    ]);
+    const stdout = `**Findings**\n\n- src/foo.java:42 missing validation\n- src/bar.java:88 bypass\n\n===FINDINGS===\n${findingsJson}\n===END===\n`;
+    const { findings, body } = parseCodexReviewFindingsTail(stdout, repoRoot);
+    assert.equal(findings.length, 2);
+    assert.deepEqual(findings[0], {
+      path: "src/foo.java",
+      line: 42,
+      title: "Missing input validation",
+      body: "The handler does not validate the `name` parameter against length limits.",
+    });
+    assert.equal(findings[1].path, "src/bar.java");
+    assert.ok(!body.includes("===FINDINGS==="));
+    assert.ok(!body.includes("===END==="));
+    assert.ok(body.includes("**Findings**"));
+  });
+
+  it("parses an empty FINDINGS block", () => {
+    const stdout = "Reviewed the diff. No issues found.\n\n===FINDINGS===\n[]\n===END===\n";
+    const { findings, body } = parseCodexReviewFindingsTail(stdout, repoRoot);
+    assert.deepEqual(findings, []);
+    assert.ok(body.includes("No issues found"));
+    assert.ok(!body.includes("===FINDINGS==="));
+  });
+
+  it("rejects line: null until file-level posting is implemented (review-cycle-1 finding)", () => {
+    // Codex review (cycle 1) flagged that the schema documented `line: null`
+    // for file-level comments but the poster only omits `line`, while
+    // GitHub's API for file-level review comments needs subject_type=file.
+    // Until that posting path is implemented properly, the validator rejects
+    // null lines so codex never emits findings the poster cannot post.
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: null, title: "File-scope concern", body: "Whole-file maintainability note." },
+    ]);
+    const stdout = `prose\n===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /line/);
+  });
+
+  it("throws when the FINDINGS block is missing", () => {
+    assert.throws(
+      () => parseCodexReviewFindingsTail("only prose, no tail block here", repoRoot),
+      /===FINDINGS===/,
+    );
+  });
+
+  it("throws when the JSON is malformed", () => {
+    const stdout = "===FINDINGS===\n[{not valid json},]\n===END===";
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /JSON|parse/i);
+  });
+
+  it("throws when the JSON is not an array", () => {
+    const stdout = '===FINDINGS===\n{"path": "src/foo.java"}\n===END===';
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /array/i);
+  });
+
+  it("throws when a finding is missing `path`", () => {
+    const findingsJson = JSON.stringify([
+      { line: 42, title: "x", body: "y" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /path/);
+  });
+
+  it("throws when a finding is missing `title`", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, body: "y" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /title/);
+  });
+
+  it("throws when a finding is missing `body`", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /body/);
+  });
+
+  it("throws when a finding is missing `line`", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", title: "x", body: "y" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /line/);
+  });
+
+  it("throws when `line` is zero or negative", () => {
+    for (const badLine of [0, -1, -42]) {
+      const findingsJson = JSON.stringify([
+        { path: "src/foo.java", line: badLine, title: "x", body: "y" },
+      ]);
+      const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+      assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /line/);
+    }
+  });
+
+  it("throws when `line` is not an integer", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: "42", title: "x", body: "y" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /line/);
+  });
+
+  it("throws when `title` is empty", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "", body: "y" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /title/);
+  });
+
+  it("throws when `title` exceeds 200 chars", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x".repeat(201), body: "y" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /title/);
+  });
+
+  it("throws when `body` is empty", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /body/);
+  });
+
+  it("throws when `body` exceeds 65535 chars (GitHub's body cap)", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "y".repeat(65536) },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /body/);
+  });
+
+  it("throws when a `path` escapes the repo via traversal", () => {
+    const findingsJson = JSON.stringify([
+      { path: "../etc/passwd", line: 1, title: "x", body: "y" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /\.\.|repository root|repo-relative/);
+  });
+
+  it("throws when a `path` is absolute", () => {
+    const findingsJson = JSON.stringify([
+      { path: "/etc/passwd", line: 1, title: "x", body: "y" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /repo-relative/);
   });
 
   it("throws when a non-string value is passed", () => {
-    assert.throws(() => parseCodexReviewTail(null), /not a string/);
+    assert.throws(() => parseCodexReviewFindingsTail(null, repoRoot), /not a string/);
+    assert.throws(() => parseCodexReviewFindingsTail(undefined, repoRoot), /not a string/);
+  });
+
+  it("includes the finding index in the error so codex output is debuggable", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "y" },
+      { path: "src/bar.java", line: 99, title: "ok", body: "" }, // bad: empty body
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /\b1\b/); // finding index 1
+  });
+});
+
+describe("postCodexReviewFindings", () => {
+  // Issue #793: codex returns structured findings, MCP performs the GitHub
+  // writes. These tests exercise the MCP-side poster directly with a hermetic
+  // gh shim so we can assert the request shape sent to GitHub and the
+  // per-finding result envelope returned to runCodexReview without needing a
+  // live PR.
+
+  function makeGhShim({ ghHandler }) {
+    const repoDir = mkdtempSync(join(tmpdir(), "gc-post-repo-"));
+    execFileSync("git", ["-C", repoDir, "init", "-q", "--initial-branch", "dev"]);
+    const binDir = mkdtempSync(join(tmpdir(), "gc-post-bin-"));
+    const cfgPath = join(binDir, "config.json");
+    const logPath = join(binDir, "calls.log");
+    writeFileSync(cfgPath, JSON.stringify(ghHandler));
+    writeFileSync(logPath, "");
+    const ghShim = `#!/usr/bin/env node
+const fs = require("node:fs");
+const cfg = JSON.parse(fs.readFileSync(${JSON.stringify(cfgPath)}, "utf8"));
+const argv = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(argv) + "\\n");
+function match(prefix) { return prefix.every((p, i) => argv[i] === p); }
+for (const route of cfg.routes) {
+  if (match(route.argv_prefix)) {
+    if (route.exit_code != null && route.exit_code !== 0) {
+      process.stderr.write(route.stderr || "");
+      process.exit(route.exit_code);
+    }
+    process.stdout.write(route.stdout || "");
+    process.exit(0);
+  }
+}
+process.stderr.write("gh shim: unhandled argv: " + JSON.stringify(argv) + "\\n");
+process.exit(2);
+`;
+    writeFileSync(join(binDir, "gh"), ghShim, { mode: 0o755 });
+    return {
+      repoDir,
+      binDir,
+      readCalls() {
+        return readFileSync(logPath, "utf8")
+          .split("\n")
+          .filter((line) => line.trim() !== "")
+          .map((line) => JSON.parse(line));
+      },
+      cleanup() {
+        rmSync(repoDir, { recursive: true, force: true });
+        rmSync(binDir, { recursive: true, force: true });
+      },
+    };
+  }
+
+  async function withShimPath(binDir, fn) {
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${oldPath}`;
+    try {
+      return await fn();
+    } finally {
+      process.env.PATH = oldPath;
+    }
+  }
+
+  it("returns [] without invoking gh when prNumber is null", async () => {
+    const shim = makeGhShim({ ghHandler: { routes: [] } });
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const results = await postCodexReviewFindings({
+          repoRoot: shim.repoDir,
+          owner: "fake",
+          name: "repo",
+          prNumber: null,
+          reviewerLabel: "core",
+          findings: [{ path: "src/foo.java", line: 42, title: "x", body: "y" }],
+        });
+        assert.deepEqual(results, []);
+        assert.equal(shim.readCalls().length, 0);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("returns [] when findings is empty (no head-SHA fetch, no POSTs)", async () => {
+    const shim = makeGhShim({ ghHandler: { routes: [] } });
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const results = await postCodexReviewFindings({
+          repoRoot: shim.repoDir,
+          owner: "fake",
+          name: "repo",
+          prNumber: 520,
+          reviewerLabel: "core",
+          findings: [],
+        });
+        assert.deepEqual(results, []);
+        assert.equal(shim.readCalls().length, 0);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("fetches the PR head SHA, posts each finding with the [core] prefix, and returns ok results", async () => {
+    const shim = makeGhShim({
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "headRefOid"],
+            stdout: JSON.stringify({ headRefOid: "deadbeef1234567890" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "POST"],
+            stdout: JSON.stringify({ id: 9001, html_url: "https://example.test/pr/520#discussion_r9001" }),
+          },
+        ],
+      },
+    });
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const results = await postCodexReviewFindings({
+          repoRoot: shim.repoDir,
+          owner: "fake",
+          name: "repo",
+          prNumber: 520,
+          reviewerLabel: "core",
+          findings: [
+            { path: "src/foo.java", line: 42, title: "Missing input validation", body: "Detail A" },
+            { path: "src/bar.java", line: 99, title: "Bypasses helper", body: "Detail B" },
+          ],
+        });
+        assert.equal(results.length, 2);
+        for (const r of results) {
+          assert.equal(r.ok, true);
+          assert.equal(r.comment_id, 9001);
+          assert.match(r.html_url, /example\.test/);
+        }
+        const calls = shim.readCalls();
+        // Expect 1 head-SHA fetch + 2 POST calls = 3 invocations.
+        assert.equal(calls.length, 3);
+        assert.deepEqual(calls[0], ["pr", "view", "520", "--json", "headRefOid"]);
+        for (const postCall of calls.slice(1)) {
+          assert.equal(postCall[0], "api");
+          assert.equal(postCall[1], "--method");
+          assert.equal(postCall[2], "POST");
+          assert.equal(postCall[3], "/repos/fake/repo/pulls/520/comments");
+          // commit_id derived from gh pr view; path/line/side/body passed via -f.
+          assert.ok(postCall.includes("commit_id=deadbeef1234567890"));
+          assert.ok(postCall.includes("side=RIGHT"));
+          // The reviewer label is prepended by the MCP poster.
+          assert.ok(postCall.some((arg) => arg.startsWith("body=[core]")));
+        }
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("returns per-finding error envelopes when a POST fails (does not throw)", async () => {
+    const shim = makeGhShim({
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "headRefOid"],
+            stdout: JSON.stringify({ headRefOid: "abc1234" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "POST"],
+            exit_code: 1,
+            stderr: "HTTP 422: line not in diff hunk\n",
+          },
+        ],
+      },
+    });
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const results = await postCodexReviewFindings({
+          repoRoot: shim.repoDir,
+          owner: "fake",
+          name: "repo",
+          prNumber: 520,
+          reviewerLabel: "core",
+          findings: [
+            { path: "src/foo.java", line: 42, title: "x", body: "y" },
+            { path: "src/bar.java", line: 99, title: "x2", body: "y2" },
+          ],
+        });
+        assert.equal(results.length, 2);
+        for (const r of results) {
+          assert.equal(r.ok, false);
+          assert.match(r.error, /line not in diff hunk|422/);
+        }
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("treats a POST response with no numeric `id` as a per-finding failure (review-cycle-1 finding)", async () => {
+    // Codex review (cycle 1) flagged that an API response with no numeric
+    // `.id` was being marked ok=true with comment_id=null, hiding broken
+    // poster/API responses as successful writes. Treat missing/non-integer
+    // `id` as a per-finding POST failure so it appears in post_failures
+    // and cannot masquerade as a durable PR finding.
+    const shim = makeGhShim({
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "headRefOid"],
+            stdout: JSON.stringify({ headRefOid: "abc1234" }),
+          },
+          {
+            // Response is JSON but missing the `id` field entirely.
+            argv_prefix: ["api", "--method", "POST"],
+            stdout: JSON.stringify({ html_url: "https://example.test/c/x" }),
+          },
+        ],
+      },
+    });
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const results = await postCodexReviewFindings({
+          repoRoot: shim.repoDir,
+          owner: "fake",
+          name: "repo",
+          prNumber: 520,
+          reviewerLabel: "core",
+          findings: [{ path: "src/foo.java", line: 42, title: "x", body: "y" }],
+        });
+        assert.equal(results.length, 1);
+        assert.equal(results[0].ok, false);
+        assert.match(results[0].error, /no numeric .*id|comment id/i);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("uses the [security] prefix when reviewerLabel is 'security'", async () => {
+    const shim = makeGhShim({
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "headRefOid"],
+            stdout: JSON.stringify({ headRefOid: "abc1234" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "POST"],
+            stdout: JSON.stringify({ id: 8002, html_url: "https://example.test/c/8002" }),
+          },
+        ],
+      },
+    });
+    try {
+      await withShimPath(shim.binDir, async () => {
+        await postCodexReviewFindings({
+          repoRoot: shim.repoDir,
+          owner: "fake",
+          name: "repo",
+          prNumber: 520,
+          reviewerLabel: "security",
+          findings: [{ path: "src/Auth.java", line: 100, title: "Auth bypass", body: "Detail" }],
+        });
+        const calls = shim.readCalls();
+        assert.equal(calls.length, 2);
+        assert.ok(calls[1].some((arg) => arg.startsWith("body=[security]")));
+      });
+    } finally {
+      shim.cleanup();
+    }
   });
 });
 
@@ -2848,7 +3366,7 @@ process.exit(2);
 
 describe("runCodexReview uncommitted=true marker-post path (hermetic codex+gh shims)", () => {
   // These tests exercise the post-codex marker-write path. Codex is shimmed to
-  // emit an empty COMMENT_IDS=[] tail (clean review). gh is shimmed for the
+  // emit an empty ===FINDINGS===\n[]\n===END=== tail (clean review). gh is shimmed for the
   // entire flow: repo view, paginated slurped comments read, and the issue-
   // comment POST (the marker write). Test 1 succeeds the POST; Test 2 fails
   // the POST and asserts the prepush_cycle_record_failed envelope shape.
@@ -2901,7 +3419,7 @@ for (let i = 0; i < args.length; i++) {
 let stdinBuf = "";
 process.stdin.on("data", (chunk) => { stdinBuf += chunk.toString(); });
 process.stdin.on("end", () => {
-  const tail = cfg.tail || "**Findings**\\n\\nNo issues found.\\n\\nCOMMENT_IDS=[]\\n";
+  const tail = cfg.tail || "**Findings**\\n\\nNo issues found.\\n\\n===FINDINGS===\\n[]\\n===END===\\n";
   if (outputPath) fs.writeFileSync(outputPath, tail);
   process.stdout.write(tail);
   process.exit(cfg.exit_code || 0);
@@ -2949,7 +3467,7 @@ process.stdin.on("end", () => {
           },
         ],
       },
-      codexHandler: { tail: "Clean review.\n\nCOMMENT_IDS=[]\n" },
+      codexHandler: { tail: "Clean review.\n\n===FINDINGS===\n[]\n===END===\n" },
     });
 
     try {
@@ -2968,6 +3486,11 @@ process.stdin.on("end", () => {
         // pre-run "fix..." hint is overridden when there are no findings.
         assert.equal(result.next_action, "proceed_clean");
         assert.equal(result.override, false);
+        // Issue #793: the new tail format must round-trip cleanly. parse_errors
+        // populated would mean the test passed for the wrong reason
+        // (silent fallback to zero findings), so assert it explicitly.
+        assert.deepEqual(result.parse_errors, []);
+        assert.deepEqual(result.post_failures, []);
       });
     } finally {
       shim.cleanup();
@@ -2997,7 +3520,7 @@ process.stdin.on("end", () => {
           },
         ],
       },
-      codexHandler: { tail: "Clean review.\n\nCOMMENT_IDS=[]\n" },
+      codexHandler: { tail: "Clean review.\n\n===FINDINGS===\n[]\n===END===\n" },
     });
 
     try {
@@ -3014,6 +3537,373 @@ process.stdin.on("end", () => {
         assert.equal(result.cycle, 1);
         assert.equal(result.finding_count, 0);
         assert.equal(result.next_action, "proceed_clean");
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  // Helper: post-push reviews compute diffs against a base ref
+  // (`origin/dev`, `dev`, `origin/main`, `main`); the makeFullShimRepo helper
+  // only creates the feature branch. Create a `dev` ref pointing at the
+  // initial commit so computeReviewDiff resolves.
+  function ensureBaseRef(repoDir) {
+    execFileSync("git", ["-C", repoDir, "update-ref", "refs/heads/dev", "HEAD"]);
+  }
+
+  it("(post-push) posts each codex finding via MCP and surfaces comment ids", async () => {
+    // End-to-end coverage of issue #793: codex emits two findings as a JSON
+    // payload, MCP performs the POSTs from the host, the response contains
+    // the comment ids and is free of post_failures / parse_errors.
+    //
+    // The shim accepts a sequence of GitHub interactions:
+    //   1. `gh repo view --json nameWithOwner` (resolve owner/name)
+    //   2. `gh api ... GET /repos/.../issues/<pr>/comments` (cycle marker counter)
+    //   3. `gh pr view --json closingIssuesReferences` (plan-gate lookup)
+    //   4. `gh api ... GET .../issues/<issue>/comments` (plan phase marker)
+    //   5. `gh pr view <pr> --json headRefOid` (head-SHA fetch for posting)
+    //   6. N x `gh api --method POST .../pulls/<pr>/comments` (one per finding)
+    //   7. `gh api graphql ...` (thread-id enrichment)
+    //   8. `gh api --method POST .../issues/<pr>/comments` (cycle marker)
+    //
+    // Routes are matched by argv prefix in declaration order; the first
+    // matching route wins. The comment-marker GET (step 2) and the issue-
+    // marker GET (step 4) share the `["api","--method","GET","--paginate"]`
+    // prefix and both return empty pages — that's fine, the canned response
+    // works for both.
+    const findingsTail = "===FINDINGS===\n" + JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "Detail A" },
+      { path: "src/bar.java", line: 88, title: "Bypasses ScopedRequirementRepository", body: "Detail B" },
+    ]) + "\n===END===\n";
+    // Closing-issues fetch is part of the post-push gate; return one closing
+    // issue (#998) that has a `plan` phase marker on its thread.
+    const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
+
+    const shim = makeFullShimRepo({
+      branch: "998-add-thing",
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            // Closing-issues lookup for the plan-gate.
+            argv_prefix: ["pr", "view", "520", "--json", "closingIssuesReferences"],
+            stdout: JSON.stringify({ closingIssuesReferences: [{ number: 998 }] }),
+          },
+          {
+            // Comment-thread reads (cycle marker count + plan marker check).
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: JSON.stringify([[{ id: 1, body: planMarker, user: { login: "tester" } }]]),
+          },
+          {
+            // Head-SHA fetch for posting findings.
+            argv_prefix: ["pr", "view", "520", "--json", "headRefOid"],
+            stdout: JSON.stringify({ headRefOid: "abc1234567" }),
+          },
+          {
+            // GraphQL thread-id enrichment.
+            argv_prefix: ["api", "graphql"],
+            stdout: JSON.stringify({
+              data: {
+                repository: {
+                  pullRequest: {
+                    reviewThreads: {
+                      pageInfo: { hasNextPage: false, endCursor: null },
+                      nodes: [
+                        { id: "thread-1", comments: { nodes: [{ databaseId: 7001 }] } },
+                        { id: "thread-2", comments: { nodes: [{ databaseId: 7002 }] } },
+                      ],
+                    },
+                  },
+                },
+              },
+            }),
+          },
+          {
+            // POSTs: inline comment posts AND the cycle marker post both go
+            // through `api --method POST`. The cycle marker handler comes
+            // after the inline-comment posts in declaration order, but since
+            // routing is first-match, both POST shapes hit this single route.
+            // That's OK — both POSTs succeed and the response shape is the
+            // same (id + html_url).
+            argv_prefix: ["api", "--method", "POST"],
+            stdout: JSON.stringify({ id: 7001, html_url: "https://example.test/c/7001" }),
+          },
+        ],
+      },
+      codexHandler: { tail: findingsTail },
+    });
+    ensureBaseRef(shim.repoDir);
+
+    try {
+      await withShimPathFull(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: false,
+          prNumber: 520,
+        });
+        assert.equal(result.pr_number, 520);
+        assert.deepEqual(result.parse_errors, []);
+        assert.deepEqual(result.post_failures, []);
+        // Both reviewers (core, security) emit the same two findings against
+        // the same shimmed prompt response. dedupFindings keys on path + line +
+        // title-prefix; the [core] / [security] title prefixes are different,
+        // so the entries don't collapse. Expect 2 findings × 2 reviewers = 4
+        // entries.
+        assert.equal(result.finding_count, 4);
+        const reviewers = new Set(result.comments.map((c) =>
+          c.title.startsWith("[core]") ? "core" : c.title.startsWith("[security]") ? "security" : null,
+        ));
+        assert.deepEqual([...reviewers].sort(), ["core", "security"]);
+        for (const c of result.comments) {
+          assert.equal(c.comment_id, 7001);
+          assert.match(c.html_url, /example\.test/);
+        }
+        assert.equal(result.cycle, 1);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("(post-push) reports per-finding error envelopes when comment POST fails", async () => {
+    // Variant of the previous test: head-SHA fetch succeeds but the inline
+    // comment POSTs fail (HTTP 422). Findings are still surfaced; the
+    // post_failures envelope records each per-reviewer per-finding failure
+    // so the calling agent sees the partial-write condition.
+    const findingsTail = "===FINDINGS===\n" + JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "Detail" },
+    ]) + "\n===END===\n";
+    const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
+
+    const shim = makeFullShimRepo({
+      branch: "998-add-thing",
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "closingIssuesReferences"],
+            stdout: JSON.stringify({ closingIssuesReferences: [{ number: 998 }] }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: JSON.stringify([[{ id: 1, body: planMarker, user: { login: "tester" } }]]),
+          },
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "headRefOid"],
+            stdout: JSON.stringify({ headRefOid: "abc1234567" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "POST"],
+            exit_code: 1,
+            stderr: "HTTP 422: line 42 not in PR diff hunk\n",
+          },
+        ],
+      },
+      codexHandler: { tail: findingsTail },
+    });
+    ensureBaseRef(shim.repoDir);
+
+    try {
+      await withShimPathFull(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: false,
+          prNumber: 520,
+        });
+        // 1 finding x 2 reviewers (core + security) → 2 POST attempts → 2
+        // failures.
+        assert.equal(result.post_failures.length, 2);
+        for (const f of result.post_failures) {
+          assert.equal(f.path, "src/foo.java");
+          assert.equal(f.line, 42);
+          assert.match(f.error, /HTTP 422|not in PR diff hunk/);
+          assert.ok(f.reviewer === "core" || f.reviewer === "security");
+        }
+        // Failed POSTs don't appear in `comments` — the verify-finding loop
+        // can't operate on them. They live ONLY in post_failures.
+        assert.equal(result.finding_count, 0);
+        assert.deepEqual(result.comments, []);
+        assert.deepEqual(result.parse_errors, []);
+        // Partial failure is signalled at the response level so the agent
+        // doesn't treat the run as complete.
+        assert.equal(result.ok, false);
+        assert.equal(result.error, "review_partial_failure");
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("(post-push) returns ok=false with structured next_action when parse_errors are present (review-cycle-2 finding)", async () => {
+    // Codex review (cycle 2) flagged that even with parse_errors populated,
+    // runCodexReview returns success-shaped output. The call must signal a
+    // structured failure so the agent treats it as such — partial reviewer
+    // output is not a complete review.
+    const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
+
+    const shim = makeFullShimRepo({
+      branch: "998-add-thing",
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "closingIssuesReferences"],
+            stdout: JSON.stringify({ closingIssuesReferences: [{ number: 998 }] }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: JSON.stringify([[{ id: 1, body: planMarker, user: { login: "tester" } }]]),
+          },
+          {
+            argv_prefix: ["api", "--method", "POST"],
+            stdout: JSON.stringify({ id: 1234, html_url: "https://example.test/c/1234" }),
+          },
+        ],
+      },
+      codexHandler: { tail: "Findings:\n- src/foo.java:42 missing validation\n(no tail block)\n" },
+    });
+    ensureBaseRef(shim.repoDir);
+
+    try {
+      await withShimPathFull(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: false,
+          prNumber: 520,
+        });
+        assert.equal(result.ok, false);
+        assert.equal(result.error, "review_partial_failure");
+        assert.equal(result.next_action, "address_parse_or_post_failures");
+        assert.equal(result.parse_errors.length, 2);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("(post-push) excludes failed POSTs from `comments` and returns ok=false (review-cycle-2 finding)", async () => {
+    // Codex review (cycle 2) flagged that failed POSTs were surfaced in the
+    // verifiable `comments` list with comment_id=null, even though the
+    // verify-finding loop cannot operate on them. The contract: `comments`
+    // contains only successfully-posted findings; post failures live ONLY in
+    // post_failures, and the response is ok=false so the agent doesn't treat
+    // the run as complete.
+    const findingsTail = "===FINDINGS===\n" + JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "y" },
+    ]) + "\n===END===\n";
+    const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
+
+    const shim = makeFullShimRepo({
+      branch: "998-add-thing",
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "closingIssuesReferences"],
+            stdout: JSON.stringify({ closingIssuesReferences: [{ number: 998 }] }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: JSON.stringify([[{ id: 1, body: planMarker, user: { login: "tester" } }]]),
+          },
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "headRefOid"],
+            stdout: JSON.stringify({ headRefOid: "abc1234" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "POST"],
+            exit_code: 1,
+            stderr: "HTTP 422\n",
+          },
+        ],
+      },
+      codexHandler: { tail: findingsTail },
+    });
+    ensureBaseRef(shim.repoDir);
+
+    try {
+      await withShimPathFull(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: false,
+          prNumber: 520,
+        });
+        // post_failures is the source of truth for failed POSTs.
+        assert.equal(result.post_failures.length, 2);
+        // comments contains ONLY successfully-posted findings (none here).
+        assert.equal(result.comments.length, 0);
+        assert.equal(result.finding_count, 0);
+        assert.equal(result.ok, false);
+        assert.equal(result.error, "review_partial_failure");
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("(post-push) does NOT signal proceed_clean when parse_errors are present (review-cycle-1 finding)", async () => {
+    // Codex review (cycle 1) flagged that parseReviewerTailSafely silently
+    // converts parse failures to zero findings, then comments.length===0
+    // forces next_action to "proceed_clean". That lets a malformed reviewer
+    // output advance the workflow as if it were clean. When parse_errors is
+    // populated, the next_action must NOT be proceed_clean — the review is
+    // not durable.
+    const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
+
+    const shim = makeFullShimRepo({
+      branch: "998-add-thing",
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "closingIssuesReferences"],
+            stdout: JSON.stringify({ closingIssuesReferences: [{ number: 998 }] }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: JSON.stringify([[{ id: 1, body: planMarker, user: { login: "tester" } }]]),
+          },
+          {
+            argv_prefix: ["api", "--method", "POST"],
+            stdout: JSON.stringify({ id: 1234, html_url: "https://example.test/c/1234" }),
+          },
+        ],
+      },
+      // Codex emits prose only — NO ===FINDINGS===…===END=== block. The safe
+      // parser captures the parse failure into parse_errors but returns 0
+      // findings.
+      codexHandler: { tail: "Findings:\n- src/foo.java:42 missing validation\n(no tail block)\n" },
+    });
+    ensureBaseRef(shim.repoDir);
+
+    try {
+      await withShimPathFull(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: false,
+          prNumber: 520,
+        });
+        // parse_errors carries one entry per reviewer that failed to parse
+        // (both core and security reviewers see the same malformed tail).
+        assert.equal(result.parse_errors.length, 2);
+        // The signal must NOT be proceed_clean — there's no proof the review
+        // was actually clean.
+        assert.notEqual(result.next_action, "proceed_clean");
       });
     } finally {
       shim.cleanup();
@@ -3041,7 +3931,7 @@ process.stdin.on("end", () => {
           },
         ],
       },
-      codexHandler: { tail: "Clean review.\n\nCOMMENT_IDS=[]\n" },
+      codexHandler: { tail: "Clean review.\n\n===FINDINGS===\n[]\n===END===\n" },
     });
 
     try {

@@ -7,8 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `gc_codex_review` no longer relies on Codex calling `gh` from inside its
+  sandbox to post inline PR review comments. Codex's sandbox does not carry
+  GitHub credentials, so the prior architecture silently lost findings — they
+  never landed on the durable PR thread that ADR-029 designates as the source
+  of truth. Codex now returns findings as a structured JSON payload inside a
+  `===FINDINGS===…===END===` block (validated server-side against schema:
+  `path`/`line`/`title`/`body`, with lexical path containment); the MCP server
+  performs every GitHub write from the host's authenticated `gh`. Tool
+  responses surface both the findings and the per-finding write results,
+  including any partial-write failures (`post_failures`) and per-reviewer
+  parse errors (`parse_errors`). The Codex review sandbox tightens from
+  `workspace-write` to `read-only` since Codex no longer needs to mutate the
+  workspace. Schema documented in `mcp/ground-control/README.md`. Closes #793.
+
 ### Changed
 
+- ADR-027 now explicitly records the Codex/MCP privilege boundary for
+  review workflow side effects: Codex is the planner / reviewer, while the
+  Ground Control MCP layer validates structured payloads and performs
+  durable GitHub writes from the host. `docs/DEVELOPMENT_WORKFLOW.md`
+  now describes `gc_codex_review` the same way, avoiding stale wording
+  that implied sandboxed Codex should post comments itself.
 - **CI default runner switched from self-hosted to github-hosted.**
   `.github/workflows/ci.yml` jobs `policy`, `build`, `test`,
   `integration`, `sonar`, `verify`, `docker`, and `smoke` now run on

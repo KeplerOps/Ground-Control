@@ -115,6 +115,24 @@ The driver agent must not silently replace those calls with its own local review
 mode. If Codex is the driver, it still invokes the MCP review tools so review
 identity, prompts, GitHub comments, and verification bookkeeping stay stable.
 
+### Privileged Side-Effect Boundary
+
+Codex is the planner and reviewer, not the GitHub writer. Any workflow step that
+creates durable GitHub side effects for Codex-authored output must keep the
+privileged write in the Ground Control MCP layer, where the host service owns
+`gh` / token configuration and project-scope validation. Codex may return
+structured review, verification, or preflight payloads, but it must not be
+prompted to invoke `gh` from its sandbox to post PR review comments, issue
+comments, replies, or review-thread mutations.
+
+Implementations must validate Codex payloads server-side before posting:
+schema shape, positive numeric issue / PR / comment identifiers, repository
+resolution, repo-relative paths, line anchors, and existing realpath
+containment guards all remain MCP responsibilities. Tool responses must surface
+both the Codex-produced findings / decisions and the GitHub write results,
+including partial failures, so the issue thread remains the durable record
+without hiding transport errors from the caller.
+
 ### Relation to GC-O009
 
 This packaging is an interim distribution and configuration model. It must keep
