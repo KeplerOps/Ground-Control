@@ -1242,6 +1242,578 @@ export async function runCodexReview({ repoPath, baseBranch = "dev", uncommitted
 }
 
 // ---------------------------------------------------------------------------
+// Research workflow helpers (ADR-024 / ADR-025 / ADR-026)
+// ---------------------------------------------------------------------------
+
+export const RESEARCH_PHASES = [
+  "CHARTER",
+  "LIT_REVIEW",
+  "METHODOLOGY",
+  "PROTOCOL",
+  "SAFETY_PREFLIGHT",
+  "EXECUTION",
+  "ANALYSIS",
+  "SYNTHESIS",
+  "PEER_REVIEW",
+  "PUBLICATION",
+];
+
+export const RESEARCH_MODES = [
+  "LITERATURE",
+  "EXPERIMENTAL",
+  "ADVERSARIAL_LAB",
+  "MIXED",
+];
+
+// Default high-blast-radius technique tags per ADR-026. Operators can extend
+// this list when their lab toolkit grows; the constant is exported so the
+// `/research` skill can reference the same source of truth.
+export const HIGH_BLAST_RADIUS_TECHNIQUES = [
+  "lateral_movement",
+  "credential_theft",
+  "persistence",
+  "destructive_action",
+  "exploitation_unpatched",
+  "social_engineering_humans",
+];
+
+// <PROJECT_PREFIX>-(RQ|H)<NNN+> per ADR-025.
+export const RESEARCH_QUESTION_UID_RE = /^[A-Z][A-Z0-9]*-(RQ|H)\d{3,}$/;
+
+const SOFTWARE_REQUIREMENT_UID_RE = /^[A-Z][A-Z0-9]*-[A-Z]+\d+$/;
+
+export function validateResearchUid(uid) {
+  if (typeof uid !== "string" || uid.length === 0) {
+    return { ok: false, errors: ["uid must be a non-empty string"] };
+  }
+  const match = uid.match(/^([A-Z][A-Z0-9]*)-(RQ|H)(\d{3,})$/);
+  if (!match) {
+    if (SOFTWARE_REQUIREMENT_UID_RE.test(uid)) {
+      return {
+        ok: false,
+        errors: [
+          `uid '${uid}' does not encode a research question. Use the RQ### or H### kind suffix per ADR-025.`,
+        ],
+      };
+    }
+    return {
+      ok: false,
+      errors: [
+        `uid '${uid}' is not a valid research question UID (expected pattern: <PROJECT>-(RQ|H)<NNN>).`,
+      ],
+    };
+  }
+  return {
+    ok: true,
+    kind: match[2],
+    project_prefix: match[1],
+    errors: [],
+  };
+}
+
+export function selectResearchPhases({ mode, from, to, skip = [] } = {}) {
+  const errors = [];
+  if (!RESEARCH_MODES.includes(mode)) {
+    errors.push(
+      `mode '${mode}' is not a valid research mode. Expected one of: ${RESEARCH_MODES.join(", ")}.`,
+    );
+  }
+  const fromIdx = RESEARCH_PHASES.indexOf(from);
+  const toIdx = RESEARCH_PHASES.indexOf(to);
+  if (fromIdx === -1) errors.push(`from '${from}' is not a valid research phase.`);
+  if (toIdx === -1) errors.push(`to '${to}' is not a valid research phase.`);
+  if (fromIdx !== -1 && toIdx !== -1 && fromIdx > toIdx) {
+    errors.push(`from '${from}' must precede to '${to}' in the phase order.`);
+  }
+  for (const s of skip) {
+    if (!RESEARCH_PHASES.includes(s)) {
+      errors.push(`skip phase '${s}' is not a valid research phase.`);
+    }
+  }
+  if (errors.length > 0) return { phases: [], errors };
+
+  const skipSet = new Set(skip);
+  if (mode === "ADVERSARIAL_LAB" && skipSet.has("SAFETY_PREFLIGHT")) {
+    return {
+      phases: [],
+      errors: [
+        "ADVERSARIAL_LAB mode requires SAFETY_PREFLIGHT (ADR-026); it cannot be skipped.",
+      ],
+    };
+  }
+
+  const phases = RESEARCH_PHASES.slice(fromIdx, toIdx + 1).filter((p) => !skipSet.has(p));
+
+  if (mode === "ADVERSARIAL_LAB"
+      && phases.includes("EXECUTION")
+      && !phases.includes("SAFETY_PREFLIGHT")) {
+    const execIdx = phases.indexOf("EXECUTION");
+    phases.splice(execIdx, 0, "SAFETY_PREFLIGHT");
+  }
+
+  return { phases, errors: [] };
+}
+
+export function requiresSafetyPreflight({ mode, techniques = [], optIn = false } = {}) {
+  if (mode === "ADVERSARIAL_LAB") return true;
+  if (optIn) return true;
+  const lowered = new Set(HIGH_BLAST_RADIUS_TECHNIQUES.map((t) => t.toLowerCase()));
+  for (const tech of techniques) {
+    if (typeof tech === "string" && lowered.has(tech.toLowerCase())) return true;
+  }
+  return false;
+}
+
+const SAFETY_PREFLIGHT_REQUIRED_SECTIONS = [
+  ["authorizing_party", /^##\s+Authorizing party\s*$/im],
+  ["authorization_basis", /^##\s+Authorization basis\s*$/im],
+  ["scope_window", /^##\s+Scope window\s*$/im],
+  ["in_scope", /^##\s+In-scope assets\s*$/im],
+  ["out_of_scope", /^##\s+Out-of-scope assets\s*$/im],
+  ["blast_radius", /^##\s+Blast radius\s*$/im],
+  ["data_handling", /^##\s+Data handling\s*$/im],
+  ["abort_conditions", /^##\s+Abort conditions\s*$/im],
+  ["sign_off", /^##\s+Sign-off\s*$/im],
+];
+
+const VAGUE_AUTHORIZER_RE = /\bapproved by (management|leadership|the team|legal)\b/i;
+
+export function parseSafetyPreflightChecklist(text) {
+  if (typeof text !== "string") {
+    return {
+      ok: false,
+      errors: ["input must be a string"],
+      missing: [],
+      sections: {},
+    };
+  }
+
+  const sections = {};
+  const missing = [];
+
+  for (const [key, headingRe] of SAFETY_PREFLIGHT_REQUIRED_SECTIONS) {
+    const headingMatch = headingRe.exec(text);
+    if (!headingMatch) {
+      missing.push(key);
+      continue;
+    }
+    const bodyStart = headingMatch.index + headingMatch[0].length;
+    const remaining = text.slice(bodyStart);
+    const nextHeadingMatch = remaining.match(/^##\s+\S.*$/m);
+    const body = (nextHeadingMatch
+      ? remaining.slice(0, nextHeadingMatch.index)
+      : remaining
+    ).trim();
+    if (!body) {
+      missing.push(key);
+      continue;
+    }
+    sections[key] = body;
+  }
+
+  const errors = [];
+  if (missing.length > 0) {
+    errors.push(`missing required sections: ${missing.join(", ")}`);
+  }
+
+  if (sections.authorizing_party) {
+    const ap = sections.authorizing_party;
+    if (VAGUE_AUTHORIZER_RE.test(ap) || !/\d{4}/.test(ap)) {
+      errors.push(
+        "authorizing party section is vague — name a specific individual and role with a date.",
+      );
+    }
+  }
+
+  if (sections.sign_off && !/signed-off-by/i.test(sections.sign_off)) {
+    errors.push("sign-off section must contain a 'Signed-off-by:' line.");
+  }
+
+  return {
+    ok: errors.length === 0 && missing.length === 0,
+    missing,
+    errors,
+    sections,
+  };
+}
+
+function safeJson(value) {
+  return JSON.stringify(value ?? null, null, 2);
+}
+
+export function buildResearchCharterPrompt({
+  researchQuestion,
+  project,
+  mode,
+  priorContext = "",
+} = {}) {
+  return [
+    "You are Codex co-designing a research charter with the operator before any data collection.",
+    "",
+    "Your job is to produce a charter document that captures every required field clearly and explicitly.",
+    "",
+    `Research question UID: ${researchQuestion?.uid ?? "(missing)"}`,
+    `Ground Control project: ${project ?? "(missing)"}`,
+    `Charter mode: ${mode ?? "(missing)"}`,
+    "",
+    "Required charter sections (every one is mandatory):",
+    "- Research question (one sentence).",
+    "- Hypothesis or null-hypothesis (mark exploratory if neither applies).",
+    "- Scope (in / out enumerated).",
+    "- Success criteria (testable; specify how each will be measured).",
+    "- Threats to validity that the operator already anticipates.",
+    "- Authorization basis: named individual, named role, named scope, dated.",
+    "",
+    "Hard constraints:",
+    "- Do not fabricate authorization, success criteria, or threats to validity.",
+    "- If any required field cannot be derived from the operator, the prior context, or existing artifacts, STOP and surface the gap as a question to the operator. Do not invent.",
+    "- Do not propose execution steps, methodology, or analysis in the charter — those belong to later phases.",
+    "- Honour the project conventions (UID format per ADR-025; reuse existing primitives per ADR-024).",
+    "",
+    "Research question payload:",
+    safeJson(researchQuestion),
+    "",
+    "Prior context supplied by the operator:",
+    priorContext || "(none)",
+    "",
+    "Final response requirements:",
+    "- Print the charter as one document with the section headings above.",
+    "- List any open questions you needed to surface (or 'none').",
+    "- List the files changed (charter document, requirement updates, traceability links).",
+  ].join("\n");
+}
+
+export function buildResearchLitReviewPrompt({
+  researchQuestion,
+  mode,
+  existingLitReviewPath = null,
+} = {}) {
+  const lines = [
+    "You are Codex producing a literature review artifact for a Ground Control research question.",
+    "",
+    `Research question UID: ${researchQuestion?.uid ?? "(missing)"}`,
+    `Charter mode: ${mode ?? "(missing)"}`,
+    "",
+  ];
+
+  if (existingLitReviewPath) {
+    lines.push(
+      `An existing lit review has been supplied at: ${existingLitReviewPath}`,
+      "",
+      "Your job is to:",
+      "- Do not re-run the survey. Treat the supplied document as authoritative.",
+      "- Read it, extract: question(s) addressed, search strategy, inclusion/exclusion criteria, key sources, and synthesis.",
+      "- Map it to the active research question and call out coverage gaps relative to that question.",
+      "- File it as a Document in Ground Control (or link it as DOCUMENTATION traceability) and create traceability links to source artifacts where appropriate.",
+    );
+  } else {
+    lines.push(
+      "Your job is to author a literature review document containing:",
+      "- Question(s) addressed.",
+      "- Search strategy (databases queried, terms used, date range, filters).",
+      "- Inclusion / exclusion criteria.",
+      "- A structured summary of each surveyed source (citation, claim, method, evidence quality).",
+      "- A synthesis section connecting findings to the research question.",
+      "",
+      "Hard constraints:",
+      "- Do not invent citations. If a source is uncertain, mark it 'unverified' rather than dropping it.",
+      "- File the review as a Document in the active Ground Control project.",
+      "- Create TraceabilityLinks (artifact_type=DOCUMENTATION, link_type=DOCUMENTS) from the research question to each surveyed source you can cite.",
+    );
+  }
+
+  lines.push(
+    "",
+    "Always include an explicit gaps list that motivates further research.",
+    "If no gaps are identified, say so plainly so the operator can decide whether to terminate.",
+    "",
+    "Research question payload:",
+    safeJson(researchQuestion),
+    "",
+    "Final response requirements:",
+    "- List files changed.",
+    "- Summarize the gaps and the proposed next phase (methodology / protocol).",
+  );
+
+  return lines.join("\n");
+}
+
+export function buildResearchMethodologyPreflightPrompt({
+  researchQuestion,
+  charterDoc = "",
+  litReviewSummary = "",
+  mode,
+} = {}) {
+  return [
+    "You are Codex co-designing a research methodology before any execution.",
+    "",
+    `Research question UID: ${researchQuestion?.uid ?? "(missing)"}`,
+    `Charter mode: ${mode ?? "(missing)"}`,
+    "",
+    "Charter (verbatim):",
+    charterDoc || "(none provided)",
+    "",
+    "Lit review summary (verbatim):",
+    litReviewSummary || "(none provided)",
+    "",
+    "Hard constraints:",
+    "- Reuse existing instruments, ranges, datasets, and analysis tooling already present in the repo or referenced from prior research before proposing new ones.",
+    "- The methodology must be reproducible: specify versions, seeds, configurations, and target inventories at a level that lets an independent operator re-run the work at the same commit.",
+    "- Document alternatives considered and why they were rejected. Lock the decision in an ADR.",
+    "- Do not write the protocol itself in this phase. The protocol phase is separate.",
+    "- For ADVERSARIAL_LAB mode, anticipate the safety preflight: identify which assets and techniques the protocol will touch so the safety phase has concrete inputs.",
+    "",
+    "Required outputs:",
+    "- An ADR documenting the chosen methodology, its alternatives, and reproducibility guarantees.",
+    "- TraceabilityLinks from the research question to the ADR (artifact_type=ADR, link_type=DOCUMENTS).",
+    "- A short readiness note covering: instruments, datasets, analysis plan, and any open methodology gaps.",
+    "",
+    "Research question payload:",
+    safeJson(researchQuestion),
+    "",
+    "Final response requirements:",
+    "- List files changed.",
+    "- Summarize the chosen approach and the alternatives considered.",
+    "- Summarize the reproducibility guarantees you are committing to.",
+  ].join("\n");
+}
+
+export function buildResearchSafetyPreflightPrompt({
+  researchQuestion,
+  protocolDoc = "",
+  mode,
+  highBlastRadiusTechniques = HIGH_BLAST_RADIUS_TECHNIQUES,
+} = {}) {
+  return [
+    "You are Codex running a Safety / Authorization Preflight for an adversarial / high-blast-radius research run.",
+    "",
+    "This is a hard gate. Execution will not proceed until the preflight artifact is complete and signed off.",
+    "",
+    `Research question UID: ${researchQuestion?.uid ?? "(missing)"}`,
+    `Charter mode: ${mode ?? "(missing)"}`,
+    "",
+    "Protocol under review (verbatim):",
+    protocolDoc || "(none provided)",
+    "",
+    "High-blast-radius techniques the operator must explicitly account for:",
+    ...highBlastRadiusTechniques.map((t) => `- ${t}`),
+    "",
+    "Required preflight sections — every one must be filled with concrete content:",
+    "- Authorizing party: a named individual AND a named role, dated. Reject vague statements such as 'approved by management', 'team approved', or 'we are good'.",
+    "- Authorization basis: contract / SoW / policy / ethics-approval reference, by name, with date.",
+    "- Scope window: explicit start and end dates.",
+    "- In-scope assets: enumerated list of named asset UIDs or external identifiers. Wildcards are not allowed.",
+    "- Out-of-scope assets: enumerated. Production exclusions must be enumerated, not exhorted.",
+    "- Blast radius: worst credible outcome AND concrete containment artifacts (network segment, dedicated identities, snapshot rollback verification, air-gap evidence). 'It will be fine' is rejected.",
+    "- Data handling: classification, retention, and redaction rules.",
+    "- Abort conditions: enumerated triggers and rollback procedure.",
+    "- Sign-off: a 'Signed-off-by:' line by the named authorizing party with a date inside the scope window.",
+    "",
+    "Hard constraints:",
+    "- Do not author, fabricate, or pre-fill the sign-off block on behalf of the operator. Sign-off is a human action.",
+    "- Reject vague authorization language and demand named role and named asset substitutes.",
+    "- If the protocol references any of the high-blast-radius techniques above, call them out explicitly in the blast-radius section.",
+    "",
+    "Research question payload:",
+    safeJson(researchQuestion),
+    "",
+    "Final response requirements:",
+    "- Print the preflight artifact with the section headings above.",
+    "- List every gap that prevents sign-off.",
+    "- Do not declare the gate passed; that is the operator's call after sign-off.",
+  ].join("\n");
+}
+
+export function buildResearchSynthesisReviewPrompt({
+  researchQuestion,
+  charterSummary = "",
+  methodologyAdrUid = "",
+  synthesisSummary = "",
+} = {}) {
+  return [
+    "You are Codex performing a peer review of a completed research run before publication.",
+    "",
+    `Research question UID: ${researchQuestion?.uid ?? "(missing)"}`,
+    `Methodology ADR: ${methodologyAdrUid || "(unspecified)"}`,
+    "",
+    "Charter summary:",
+    charterSummary || "(none)",
+    "",
+    "Synthesis under review:",
+    synthesisSummary || "(none)",
+    "",
+    "Review rules:",
+    "- Enumerate all material issues you can find. Do not stop after a small handful of findings.",
+    "- Do not prioritize, bucket, or silently omit issues. The caller intends to fix everything before publication.",
+    "- Examine: methodology soundness, statistical or analytical errors, missed threats to validity, scope creep, unsupported claims, weak evidence chains, and reproducibility gaps.",
+    "- Verify that each success criterion in the charter has a 'met / not met / inconclusive' verdict cited to specific Observations or VerificationResults.",
+    "- Treat negative results as first-class — do not push the operator toward a positive finding.",
+    "- Include precise file / artifact references for every finding.",
+    "- If there are no findings, say 'No findings' explicitly and mention any residual reproducibility risks.",
+    "",
+    "Research question payload:",
+    safeJson(researchQuestion),
+    "",
+    "Final response requirements:",
+    "- List findings with file or artifact references.",
+    "- Summarize threats to validity that were missed by the charter or methodology.",
+    "- Identify follow-up research questions that the synthesis surfaces.",
+  ].join("\n");
+}
+
+export function buildResearchExecArgs({ repoPath, outputPath } = {}) {
+  return [
+    "exec",
+    "--ephemeral",
+    "--sandbox",
+    "workspace-write",
+    "-C",
+    repoPath,
+    "--output-last-message",
+    outputPath,
+    "-",
+  ];
+}
+
+const CODEX_DRIVEN_RESEARCH_PHASES = new Set([
+  "CHARTER",
+  "LIT_REVIEW",
+  "METHODOLOGY",
+  "SAFETY_PREFLIGHT",
+  "PEER_REVIEW",
+]);
+
+function buildPromptForResearchPhase(phase, requirement, options) {
+  switch (phase) {
+    case "CHARTER":
+      return buildResearchCharterPrompt({
+        researchQuestion: requirement,
+        project: options.project,
+        mode: options.mode,
+        priorContext: options.priorContext,
+      });
+    case "LIT_REVIEW":
+      return buildResearchLitReviewPrompt({
+        researchQuestion: requirement,
+        mode: options.mode,
+        existingLitReviewPath: options.existingLitReviewPath,
+      });
+    case "METHODOLOGY":
+      return buildResearchMethodologyPreflightPrompt({
+        researchQuestion: requirement,
+        charterDoc: options.charterDoc,
+        litReviewSummary: options.litReviewSummary,
+        mode: options.mode,
+      });
+    case "SAFETY_PREFLIGHT":
+      return buildResearchSafetyPreflightPrompt({
+        researchQuestion: requirement,
+        protocolDoc: options.protocolDoc,
+        mode: options.mode,
+        highBlastRadiusTechniques: options.highBlastRadiusTechniques || HIGH_BLAST_RADIUS_TECHNIQUES,
+      });
+    case "PEER_REVIEW":
+      return buildResearchSynthesisReviewPrompt({
+        researchQuestion: requirement,
+        charterSummary: options.charterSummary,
+        methodologyAdrUid: options.methodologyAdrUid,
+        synthesisSummary: options.synthesisSummary,
+      });
+    default:
+      throw new Error(
+        `Research phase '${phase}' is not driven by Codex. Codex-driven phases: ${Array.from(CODEX_DRIVEN_RESEARCH_PHASES).join(", ")}.`,
+      );
+  }
+}
+
+export async function runCodexResearchPhase({
+  phase,
+  requirementUid,
+  project,
+  repoPath,
+  mode,
+  priorContext,
+  existingLitReviewPath,
+  charterDoc,
+  litReviewSummary,
+  protocolDoc,
+  charterSummary,
+  methodologyAdrUid,
+  synthesisSummary,
+  highBlastRadiusTechniques,
+} = {}) {
+  if (!CODEX_DRIVEN_RESEARCH_PHASES.has(phase)) {
+    throw new Error(
+      `Research phase '${phase}' is not driven by Codex. Codex-driven phases: ${Array.from(CODEX_DRIVEN_RESEARCH_PHASES).join(", ")}.`,
+    );
+  }
+  const uidCheck = validateResearchUid(requirementUid);
+  if (!uidCheck.ok) {
+    throw new Error(`Invalid research question UID: ${uidCheck.errors.join("; ")}`);
+  }
+
+  const repoRoot = await ensureGitRepo(repoPath);
+  const requirement = await getRequirementByUid(requirementUid, project);
+  const preexistingChangedFiles = await listWorkingTreeChanges(repoRoot);
+
+  const prompt = buildPromptForResearchPhase(phase, requirement, {
+    project,
+    mode,
+    priorContext,
+    existingLitReviewPath,
+    charterDoc,
+    litReviewSummary,
+    protocolDoc,
+    charterSummary,
+    methodologyAdrUid,
+    synthesisSummary,
+    highBlastRadiusTechniques,
+  });
+
+  const tempDir = mkdtempSync(join(tmpdir(), "gc-codex-research-"));
+  const outputPath = join(tempDir, "codex-last-message.txt");
+
+  try {
+    await execFileWithInput(
+      "codex",
+      buildResearchExecArgs({ repoPath: repoRoot, outputPath }),
+      {
+        input: prompt,
+        cwd: repoRoot,
+        maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env, NO_COLOR: "1" },
+      },
+    );
+
+    const summary = readGeneratedCodexSummary(outputPath);
+    const changedFiles = findNewWorkingTreeChanges(
+      preexistingChangedFiles,
+      await listWorkingTreeChanges(repoRoot),
+    );
+    return {
+      phase,
+      requirement_uid: requirementUid,
+      repo_path: repoRoot,
+      mode: mode || null,
+      preexisting_changed_files: preexistingChangedFiles,
+      changed_files: changedFiles,
+      summary,
+    };
+  } catch (error) {
+    throw new Error(
+      `Codex research ${phase} phase failed: ${formatCommandFailure("codex", error)}`,
+    );
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+export async function readSafetyPreflightChecklist(filePath) {
+  const text = readAbsoluteTextFile(filePath);
+  return parseSafetyPreflightChecklist(text);
+}
+
+// ---------------------------------------------------------------------------
 // Analysis sweep API functions
 // ---------------------------------------------------------------------------
 

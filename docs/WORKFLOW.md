@@ -308,6 +308,20 @@ The graph enables queries that cross-cut the entire lifecycle:
 | Which requirements does this ADR affect? | `gc_get_adr_requirements` |
 | What assets are impacted if this service goes down? | Asset impact analysis |
 
+## Research Workflow
+
+For software-mediated research — literature reviews, experiments, adversarial /
+purple-team lab runs — Ground Control provides a peer of `/implement` called
+`/research`. Like `/implement`, it drives a unit of work end-to-end with
+traceability and review gates, but the unit is a research question and the
+deliverables are evidence and synthesis rather than merged code.
+
+See `docs/research/RESEARCH_WORKFLOW_REQUIREMENTS.md` for the full capability
+requirements, ADR-024 / ADR-025 / ADR-026 for the architectural decisions, and
+`.claude/skills/research/SKILL.md` for the orchestration. Research artifacts
+re-use the existing Requirements, Documents, ADRs, Assets, Observations,
+VerificationResults, and TraceabilityLinks — there is no parallel persistence.
+
 ## MCP Integration
 
 Ground Control exposes its full API as MCP tools. This means an AI agent (Claude Code, Cursor, etc.) can:

@@ -59,6 +59,15 @@ import {
   getRepoGroundControlContext,
   runCodexArchitecturePreflight,
   runCodexReview,
+  RESEARCH_PHASES,
+  RESEARCH_MODES,
+  HIGH_BLAST_RADIUS_TECHNIQUES,
+  validateResearchUid,
+  selectResearchPhases,
+  requiresSafetyPreflight,
+  parseSafetyPreflightChecklist,
+  readSafetyPreflightChecklist,
+  runCodexResearchPhase,
   embedRequirement,
   getEmbeddingStatus,
   embedProject,
@@ -723,6 +732,125 @@ server.tool(
           repoPath: repo_path,
           baseBranch: base_branch || "dev",
           uncommitted: Boolean(uncommitted),
+        }),
+        null,
+        2,
+      ));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Research workflow tools (ADR-024 / ADR-025 / ADR-026)
+// ==========================================================================
+
+server.tool(
+  "gc_research_validate_uid",
+  "Validate a research question or hypothesis UID against the ADR-025 convention. Returns ok=true with kind ('RQ' or 'H') and project_prefix when valid; otherwise returns errors. Pure function; no network calls.",
+  {
+    uid: z.string().describe("Candidate research UID, e.g. 'APTL-RQ001' or 'GC-H042'"),
+  },
+  async ({ uid }) => {
+    try {
+      return ok(JSON.stringify(validateResearchUid(uid), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_research_select_phases",
+  "Compute the ordered list of research workflow phases to run for a given mode and from/to slice, applying skip filtering and forcing SAFETY_PREFLIGHT into the plan when the charter mode requires it (ADR-026). Pure function; no network calls.",
+  {
+    mode: z.enum(RESEARCH_MODES).describe("Charter mode"),
+    from: z.enum(RESEARCH_PHASES).describe("First phase to run (inclusive)"),
+    to: z.enum(RESEARCH_PHASES).describe("Last phase to run (inclusive)"),
+    skip: z.array(z.enum(RESEARCH_PHASES)).optional().describe("Phases to skip (must reference existing artifacts per RW-F003)"),
+  },
+  async ({ mode, from, to, skip }) => {
+    try {
+      return ok(JSON.stringify(selectResearchPhases({ mode, from, to, skip: skip || [] }), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_research_requires_safety_preflight",
+  "Evaluate whether the Safety Preflight phase (ADR-026) is mandatory given the charter mode, the techniques the protocol references, and any explicit operator opt-in. Returns boolean. Pure function; no network calls.",
+  {
+    mode: z.enum(RESEARCH_MODES).describe("Charter mode"),
+    techniques: z.array(z.string()).optional().describe("Technique tags referenced by the protocol"),
+    opt_in: z.boolean().optional().describe("Operator-supplied opt-in for non-adversarial runs that still want the gate"),
+  },
+  async ({ mode, techniques, opt_in }) => {
+    try {
+      return ok(JSON.stringify({
+        required: requiresSafetyPreflight({ mode, techniques: techniques || [], optIn: Boolean(opt_in) }),
+        high_blast_radius_techniques: HIGH_BLAST_RADIUS_TECHNIQUES,
+      }, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_research_parse_safety_preflight_checklist",
+  "Read a Safety Preflight checklist file (ADR-026) and validate that every required section is present, that the authorizing party is named and dated, and that the sign-off line exists. Returns ok=true only when the gate is satisfied.",
+  {
+    file_path: z.string().describe("Absolute path to the safety preflight checklist Markdown file"),
+  },
+  async ({ file_path }) => {
+    try {
+      return ok(JSON.stringify(await readSafetyPreflightChecklist(file_path), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_codex_research_phase",
+  "Run a Codex-driven research workflow phase (CHARTER, LIT_REVIEW, METHODOLOGY, SAFETY_PREFLIGHT, or PEER_REVIEW). Codex builds the appropriate artifact in-repo using the same exec/sandbox pattern as gc_codex_architecture_preflight. PROTOCOL, EXECUTION, ANALYSIS, SYNTHESIS, and PUBLICATION phases are operator-driven and not handled by this tool.",
+  {
+    phase: z
+      .enum(["CHARTER", "LIT_REVIEW", "METHODOLOGY", "SAFETY_PREFLIGHT", "PEER_REVIEW"])
+      .describe("Research phase to run via Codex"),
+    requirement_uid: z.string().describe("Research question UID (must match ADR-025 convention)"),
+    repo_path: z.string().describe("Absolute path to the target Git repository"),
+    project: z.string().optional().describe("Ground Control project identifier (auto-resolved if only one exists)"),
+    mode: z.enum(RESEARCH_MODES).optional().describe("Charter mode driving phase semantics"),
+    prior_context: z.string().optional().describe("CHARTER: free-form context the operator wants Codex to consider"),
+    existing_lit_review_path: z.string().optional().describe("LIT_REVIEW: absolute path to an existing review to ingest instead of re-running"),
+    charter_doc: z.string().optional().describe("METHODOLOGY: charter document text"),
+    lit_review_summary: z.string().optional().describe("METHODOLOGY: lit review summary"),
+    protocol_doc: z.string().optional().describe("SAFETY_PREFLIGHT: protocol document text under review"),
+    charter_summary: z.string().optional().describe("PEER_REVIEW: charter summary"),
+    methodology_adr_uid: z.string().optional().describe("PEER_REVIEW: methodology ADR UID"),
+    synthesis_summary: z.string().optional().describe("PEER_REVIEW: synthesis document summary"),
+  },
+  async (args) => {
+    try {
+      return ok(JSON.stringify(
+        await runCodexResearchPhase({
+          phase: args.phase,
+          requirementUid: args.requirement_uid,
+          project: args.project,
+          repoPath: args.repo_path,
+          mode: args.mode,
+          priorContext: args.prior_context,
+          existingLitReviewPath: args.existing_lit_review_path,
+          charterDoc: args.charter_doc,
+          litReviewSummary: args.lit_review_summary,
+          protocolDoc: args.protocol_doc,
+          charterSummary: args.charter_summary,
+          methodologyAdrUid: args.methodology_adr_uid,
+          synthesisSummary: args.synthesis_summary,
         }),
         null,
         2,

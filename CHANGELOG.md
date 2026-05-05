@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Research workflow capability: `/research` skill mirroring `/implement` for
+  literature reviews, experiments, and adversarial / purple-team lab runs,
+  with composable phases (charter, lit review, methodology, protocol,
+  safety preflight, execution, analysis, synthesis, peer review,
+  publication) and a hard authorization gate for adversarial work
+- Research workflow requirements document
+  (`docs/research/RESEARCH_WORKFLOW_REQUIREMENTS.md`) capturing functional
+  requirements RW-F001..RW-F091 and non-functional requirements
+  RW-N001..RW-N007
+- ADR-024 (Research Workflow as Composable Phases on Existing Primitives),
+  ADR-025 (Research Question and Hypothesis Modeling via Requirement
+  Conventions), and ADR-026 (Safety and Authorization Gate for Adversarial
+  Research)
+- MCP helpers in `mcp/ground-control/lib.js`:
+  `RESEARCH_PHASES`, `RESEARCH_MODES`, `HIGH_BLAST_RADIUS_TECHNIQUES`,
+  `RESEARCH_QUESTION_UID_RE`, `validateResearchUid`,
+  `selectResearchPhases`, `requiresSafetyPreflight`,
+  `parseSafetyPreflightChecklist`, `readSafetyPreflightChecklist`,
+  `buildResearchCharterPrompt`, `buildResearchLitReviewPrompt`,
+  `buildResearchMethodologyPreflightPrompt`,
+  `buildResearchSafetyPreflightPrompt`,
+  `buildResearchSynthesisReviewPrompt`, `buildResearchExecArgs`, and
+  `runCodexResearchPhase`, all unit-tested in `lib.test.js`
+- MCP tools: `gc_research_validate_uid`, `gc_research_select_phases`,
+  `gc_research_requires_safety_preflight`,
+  `gc_research_parse_safety_preflight_checklist`, and
+  `gc_codex_research_phase` for orchestrating the Codex-driven phases
+- ADR README now indexes ADR-023 through ADR-026
+
 ## [0.110.1] - 2026-04-10
 
 ### Added
