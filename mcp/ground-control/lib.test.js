@@ -2612,51 +2612,12 @@ describe("runCodexReview uncommitted=true input gating", () => {
     }
   });
 
-  it("derives the issue number from a numeric-prefix branch and proceeds past the input gates", async () => {
-    // We cannot test the full happy path in unit-test scope (it shells out to
-    // gh and codex), but we can confirm that with a numeric-prefix branch the
-    // gate accepts the input and the failure surface is no longer one of the
-    // input-resolution errors. The next failure on this code path will come
-    // from `gh repo view` (no remote configured), which proves we got past
-    // the input gates.
-    const dir = makeTempRepo({ branch: "796-x" });
-    try {
-      let result;
-      let threw = false;
-      try {
-        result = await runCodexReview({ repoPath: dir, uncommitted: true });
-      } catch {
-        // gh/codex shelling out throws on a no-remote repo; that's fine — we
-        // explicitly want to confirm we got *past* the input gates.
-        threw = true;
-      }
-      if (!threw) {
-        assert.notEqual(result.error, "prepush_issue_unresolved");
-        assert.notEqual(result.error, "prepush_branch_unresolved");
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("accepts an explicit issue_number even when the branch has no numeric prefix", async () => {
-    const dir = makeTempRepo({ branch: "feature-x" });
-    try {
-      let result;
-      let threw = false;
-      try {
-        result = await runCodexReview({ repoPath: dir, uncommitted: true, issueNumber: 796 });
-      } catch {
-        threw = true;
-      }
-      if (!threw) {
-        assert.notEqual(result.error, "prepush_issue_unresolved");
-        assert.notEqual(result.error, "prepush_branch_unresolved");
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+  // Note: the "numeric-prefix branch derives issueNumber" path is exercised by
+  // every test in the cap-enforcement and marker-post suites below (all of
+  // which use a numeric-prefix branch and rely on derivation). A standalone
+  // weak-assertion test for it is subsumed and intentionally not duplicated.
+  // The "explicit issue_number on a non-numeric branch" path is covered by
+  // the strong assertion test at the bottom of the marker-post suite.
 });
 
 describe("runCodexReview uncommitted=true cap enforcement (hermetic gh shim)", () => {
@@ -3007,6 +2968,52 @@ process.stdin.on("end", () => {
         // pre-run "fix..." hint is overridden when there are no findings.
         assert.equal(result.next_action, "proceed_clean");
         assert.equal(result.override, false);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("honors an explicit issue_number even when the branch has no numeric prefix", async () => {
+    // Strong-assertion replacement for the deleted weak input-gating test:
+    // proves that an explicit issue_number is honored when the branch has no
+    // numeric prefix that derivation could pick up. End-to-end through to the
+    // marker POST so we observe the resolved issue_number in the response.
+    const shim = makeFullShimRepo({
+      branch: "feature-x", // no leading digits → derivation returns null
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: JSON.stringify([[]]),
+          },
+          {
+            argv_prefix: ["api", "--method", "POST"],
+            stdout: JSON.stringify({ id: 1, html_url: "https://example.test/c/1" }),
+          },
+        ],
+      },
+      codexHandler: { tail: "Clean review.\n\nCOMMENT_IDS=[]\n" },
+    });
+
+    try {
+      await withShimPathFull(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: true,
+          issueNumber: 4242,
+        });
+        // Explicit issue_number is the resolved issue, not derived from
+        // "feature-x" (which derivation returns null for).
+        assert.equal(result.issue_number, 4242);
+        assert.equal(result.branch, "feature-x");
+        assert.equal(result.cycle, 1);
+        assert.equal(result.finding_count, 0);
+        assert.equal(result.next_action, "proceed_clean");
       });
     } finally {
       shim.cleanup();
