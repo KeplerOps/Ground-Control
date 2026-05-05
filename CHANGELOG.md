@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CI default runner switched from self-hosted to github-hosted.**
+  `.github/workflows/ci.yml` jobs `policy`, `build`, `test`,
+  `integration`, `sonar`, `verify`, `docker`, and `smoke` now run on
+  `ubuntu-latest`. Two jobs stay on the fabricator-managed self-hosted
+  runner pool as deliberate exceptions: `deploy` (SSHes to red-dragon
+  over the tailnet per ADR-030) and `policy-live` (when
+  `vars.GC_BASE_URL` is set it talks to the tailnet-only Ground
+  Control instance; currently the var is unset so the job is skipped,
+  but the runner choice has to match the intended target rather than
+  the empty default). ADR-030 carries a new "CI runner asymmetry"
+  section documenting both exceptions. Motivation: the fabricator
+  template's runner-registration path has been failing intermittently
+  (`runner_offline_wait_timeout` after the runner reports `online`,
+  followed by a 422 on runner removal), leaving CI runs queued
+  indefinitely; github-hosted runners eliminate the failure surface
+  for jobs that don't need tailnet access. Moving the two exception
+  jobs to ubuntu-latest as well would require adding
+  `tailscale/github-action` and a Tailscale OAuth secret, which isn't
+  done here. `pack-registry-sync.yml` is left alone — it's a
+  manual-trigger workflow that targets the decommissioned AWS
+  infrastructure (per ADR-018→ADR-030 supersession) and is dead code
+  awaiting separate cleanup.
 - Canonical `skills/implement/SKILL.md` clarifies two corner cases that
   were under-specified by the previous gate prose (closes #801):
   - **Step 4.4 documentation-only carve-out.** TDD remains mandatory by

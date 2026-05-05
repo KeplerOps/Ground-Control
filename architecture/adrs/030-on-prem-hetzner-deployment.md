@@ -32,6 +32,17 @@ Run Ground Control on `red-dragon` (Hetzner dedicated, AMD Ryzen 7 3700X / 128 G
 - **Deploy path** — push to `main` → CI (`.github/workflows/ci.yml`) → `deploy` job runs on a fabricator-managed runner that joined the tailnet at first boot (per [`KeplerOps/fabricator` PR #14](https://github.com/KeplerOps/fabricator/pull/14)) → SSH to `gc-deploy@red-dragon` → forced command `/opt/gc/deploy.sh` does `docker compose pull && docker compose up -d` and verifies `/actuator/health`. No public ingress is required at any point.
 - **Backups** — `pg_dump -Fc` cron 3×/day to `/data/backups/`, retention 30 days local. Off-box copy via rsync over the tailnet to `aurora` (or another tailnet target — see [ADR-025](./025-backup-policy.md) amendment for current mechanism). EBS DLM snapshots and the S3 bucket from ADR-018 are removed.
 
+### CI runner asymmetry
+
+CI's `policy`, `build`, `test`, `integration`, `sonar`, `verify`, `docker`, and `smoke` jobs run on **github-hosted runners** (`ubuntu-latest`). They have no tailnet dependency and don't justify the operational cost of keeping the fabricator self-hosted pool healthy at all times.
+
+Two jobs are the **deliberate exceptions** and stay on the fabricator-managed self-hosted runner pool because they need to reach the tailnet:
+
+- `deploy` — SSHes to `gc-deploy@red-dragon` (see "Runner → red-dragon network path" below).
+- `policy-live` — when `vars.GC_BASE_URL` is set, it talks to the live Ground Control instance, which is the tailnet-only `red-dragon` deployment. The var is currently unset so the job is skipped, but the runner choice has to match the intended target rather than the empty-default behavior, otherwise enabling the var silently breaks the live policy gate.
+
+If/when this repo adds the `tailscale/github-action` and a Tailscale OAuth secret, both exception jobs can move to `ubuntu-latest` too and the asymmetry disappears.
+
 ### Runner → red-dragon network path
 
 GitHub Actions runs the `deploy` job on a fabricator-provisioned ephemeral VM. Fabricator's cloud-init now installs Tailscale and brings each VM up on the tailnet at first boot (`tailscale up --authkey=… --hostname=fab-<job> --ephemeral --advertise-tags=tag:fabricator-runner --ssh=false`). Devices auto-deauth at shutdown.
