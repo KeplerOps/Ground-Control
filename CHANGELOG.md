@@ -49,8 +49,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     full TDD loop applies, and any documentation in the same diff
     rides along on the back of the executable behavior's tests. The
     carve-out is re-validated against the actual diff at Step 4.5
-    clause-mapping and at Step 6 completion gate; an executable line
-    added during implementation invalidates it retroactively.
+    clause-mapping and at Step 6 completion gate. The Step 6
+    re-validation is a two-check sweep: (a) every changed path must
+    be in the documentation set (`*.md`, ADRs, notes, docs,
+    CHANGELOG, README, skills prose) AND (b) every diff hunk's
+    *content* must be free of executable behavior (no embedded code,
+    no schema/grammar/policy data consumed by a runtime parser, no
+    runnable fixtures). The path check alone isn't sufficient
+    because a doc file can carry executable behavior; an earlier
+    `git diff --name-status` check only saw paths and could miss
+    content-level executable changes, so it's been replaced with
+    this stricter two-step.
   - **Step 15 / Step 16 backfill onto pre-existing artifacts.** Step
     15's "materially implemented" classification now distinguishes
     *case in-diff* (the diff contains the artifacts of record) from
