@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `gc_codex_review` enforces the GC-O007 hard-cap-2 contract on
   pre-push (`uncommitted=true`) reviews as well, closing the
   follow-up gap that #794 MVP-1 left open (closes #796). The cycle
-  counter is anchored to the resolved GitHub issue thread plus the
-  current branch name, in line with the ADR-029 issue-thread durable
-  record. After each successful pre-push run the tool posts a
+  counter is anchored to the resolved GitHub issue thread; the
+  current branch name is recorded in the marker for audit context
+  but is NOT part of the cap key (per #800 cycle-2 review — keying by
+  `(issue, branch)` would let a noncompliant agent rename the branch
+  and start fresh). After each successful pre-push run the tool posts a
   machine-readable marker (`<!-- gc:codex-prepush-cycle issue="..."
   branch="..." cycle="..." -->`); the next invocation reads existing
   markers and refuses cycle 3 with `error:
@@ -38,20 +40,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   --paginate --slurp` so issues with more than 100 comments don't
   hide markers on later pages and silently bypass enforcement
   (this also tightens the post-push and verify cap counts on
-  long-lived issues). Five new pure-function exports back the
+  long-lived issues). Clean cycles (no findings) return
+  `next_action: "proceed_clean"` so the cap-evaluator's pre-run
+  `fix_all_findings_...` hint doesn't mislead the caller after a
+  0-finding review. Five new pure-function exports back the
   enforcement: `parseCodexReviewPrePushCycleMarkers`,
   `evaluateCodexReviewPrePushCycleCap`,
   `buildCodexReviewPrePushCycleMarker`,
   `deriveIssueNumberFromBranch`, and constants
   `CODEX_REVIEW_PREPUSH_HARD_CAP` /
-  `CODEX_REVIEW_PREPUSH_MARKER_PREFIX`. 33 new unit + integration
+  `CODEX_REVIEW_PREPUSH_MARKER_PREFIX`. 35+ new unit + integration
   tests cover the parser, evaluator, marker round-trip (including
-  JSON-encoded branches with slashes and override-with-embedded-
-  quote reasons), branch derivation, the disjoint-family invariant,
-  and the `runCodexReview` `uncommitted=true` decision tree
-  (detached-HEAD refusal, missing-issue refusal, accepted positive
-  paths). Override paths on all three review/verify cap evaluators
-  now return a concrete `next_action` instead of `null`.
+  override-with-embedded-quote reasons and slashes-in-branch),
+  branch derivation, the disjoint-family invariant, the
+  `runCodexReview` `uncommitted=true` decision tree (detached-HEAD
+  refusal, missing-issue refusal, accepted positive paths), per-issue
+  keying (branch rename does NOT bypass cap), and the post-codex
+  marker-write path (success metadata + `prepush_cycle_record_failed`
+  on POST failure) via hermetic gh + codex shims. Override paths on
+  all three review/verify cap evaluators now return a concrete
+  `next_action` instead of `null`.
 - ADR-030 "On-prem Hetzner Deployment" — documents the new production deployment architecture (red-dragon, Hetzner dedicated, Tailscale-only), the runner→red-dragon tailnet path, the SSH authorization model (`gc-deploy` user with `command="/opt/gc/deploy.sh",restrict <ed25519-pubkey>`), what ADR-018 retains and sheds, and the migration timeline.
 - Canonical `skills/implement/SKILL.md` at the repo root (closes #791,
   GC-O007, GC-O009). One source of truth for the agentic implement

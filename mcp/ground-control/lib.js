@@ -2556,26 +2556,30 @@ export function deriveIssueNumberFromBranch(branchName) {
   return n;
 }
 
-// Pure: count pre-push cycle markers for the given (issueNumber, branchName).
-// Branch names are compared after JSON-decoding the attribute value, so that
-// markers built with `branch="feat/200-x"` round-trip exactly. Defensive:
-// non-array input, non-string entries, empty/non-string branchName all return 0.
-export function parseCodexReviewPrePushCycleMarkers(commentBodies, issueNumber, branchName) {
+// Pure: count pre-push cycle markers for the given issueNumber. The marker
+// records the branch for audit context but the cap is anchored by issue
+// alone — a branch rename on the same issue cannot reset the counter. This
+// closes the bypass codex flagged in #800 review cycle 2: an agent
+// renaming `796-x` → `796-x-2` would previously start fresh under
+// (issue, branch) keying. Defensive: non-array input and non-string entries
+// return 0.
+export function parseCodexReviewPrePushCycleMarkers(commentBodies, issueNumber) {
   if (!Array.isArray(commentBodies)) return 0;
-  if (typeof branchName !== "string" || branchName === "") return 0;
   let count = 0;
   for (const body of commentBodies) {
     if (typeof body !== "string") continue;
     for (const m of body.matchAll(CODEX_REVIEW_PREPUSH_MARKER_RE)) {
       const markerIssue = Number.parseInt(m[1], 10);
       if (markerIssue !== issueNumber) continue;
-      let markerBranch;
+      // Validate branch attr is JSON-decodable so malformed markers don't
+      // pollute counts. We don't compare it against any specific branch; the
+      // attribute is audit-only context.
       try {
-        markerBranch = JSON.parse(`"${m[2]}"`);
+        JSON.parse(`"${m[2]}"`);
       } catch {
         continue;
       }
-      if (markerBranch === branchName) count += 1;
+      count += 1;
     }
   }
   return count;
@@ -3091,11 +3095,11 @@ async function postCodexReviewCycleMarker(repoRoot, owner, name, prNumber, cycle
 }
 
 // Read the issue's comments and count prior pre-push cycle markers for the
-// given (issueNumber, branchName). Reuses readIssueCommentBodies because the
-// pre-push markers live on the same issue thread as the phase markers.
-async function readPriorCodexReviewPrePushCycleCount(repoRoot, owner, name, issueNumber, branchName) {
+// given issueNumber. Cap is anchored by issue alone (branch rename does not
+// reset the counter — see parseCodexReviewPrePushCycleMarkers).
+async function readPriorCodexReviewPrePushCycleCount(repoRoot, owner, name, issueNumber) {
   const bodies = await readIssueCommentBodies(repoRoot, owner, name, issueNumber);
-  return parseCodexReviewPrePushCycleMarkers(bodies, issueNumber, branchName);
+  return parseCodexReviewPrePushCycleMarkers(bodies, issueNumber);
 }
 
 // Post the pre-push cycle marker on the resolved issue thread.
@@ -3460,7 +3464,6 @@ export async function runCodexReview({
       owner,
       name,
       effectiveIssue,
-      branchName,
     );
     const decision = evaluateCodexReviewPrePushCycleCap({
       priorCount,
@@ -3742,6 +3745,17 @@ export async function runCodexReview({
   }
 
   const cycleSource = cycleOwnership ?? prePushOwnership ?? null;
+  // When the cycle returned 0 findings, the cap-evaluator's pre-run
+  // next_action ("fix_all_findings_..." / "fix_all_findings_then_summarize_...")
+  // is misleading — there is nothing to fix. Override to a clean signal so the
+  // caller proceeds (and so cycle 2 doesn't carry the cycle-2 escalation cue
+  // when there are no findings to summarize). Refusal envelopes (returned
+  // earlier with their own next_action) and override-cycle metadata are
+  // unaffected.
+  let effectiveNextAction = cycleSource ? cycleSource.nextAction : null;
+  if (cycleSource != null && comments.length === 0) {
+    effectiveNextAction = "proceed_clean";
+  }
   return {
     repo_path: repoRoot,
     base_branch: baseBranch,
@@ -3759,7 +3773,7 @@ export async function runCodexReview({
     ],
     cycle: cycleSource ? cycleSource.cycleNumber : null,
     cap: cycleSource ? cycleSource.cap : null,
-    next_action: cycleSource ? cycleSource.nextAction : null,
+    next_action: effectiveNextAction,
     override: cycleSource && cycleSource.override === true ? true : false,
     override_reason: cycleSource ? cycleSource.overrideReason : null,
   };
