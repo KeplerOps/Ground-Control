@@ -177,7 +177,7 @@ Per-finding schema:
 | `path` | string | yes | repo-relative, no leading `/`, no `..` segments |
 | `line` | integer | yes | positive integer (file-level comments are not yet supported; every finding must anchor to a line in the diff) |
 | `title` | string | yes | non-empty, ≤200 characters |
-| `body` | string | yes | non-empty, ≤65535 characters |
+| `body` | string | yes | non-empty, ≤65322 characters (leaves headroom for the poster's `[reviewerLabel] title\n\n` prefix to keep the rendered comment under GitHub's 65535-char limit) |
 
 The tool response carries both findings and write results, including any per-finding POST failures under `post_failures` (so callers can see partial-write conditions without parsing logs) and any per-reviewer parse errors under `parse_errors`.
 

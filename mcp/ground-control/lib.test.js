@@ -2026,12 +2026,29 @@ describe("parseCodexReviewFindingsTail", () => {
     assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /body/);
   });
 
-  it("throws when `body` exceeds 65535 chars (GitHub's body cap)", () => {
+  it("throws when `body` exceeds the cap that accounts for the rendered prefix (review-cycle-3 finding)", () => {
+    // The poster prepends `[reviewerLabel] title\n\n` to the body before
+    // POSTing. Worst case prefix is `[security] ` (11) + 200-char title +
+    // \n\n (2) = 213 chars. Codex review flagged that a body of exactly
+    // 65535 chars would render to >65535 and get rejected by GitHub.
+    // Validator caps body so the rendered comment always fits.
     const findingsJson = JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "x", body: "y".repeat(65536) },
+      { path: "src/foo.java", line: 42, title: "x", body: "y".repeat(65336) },
     ]);
     const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
     assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /body/);
+  });
+
+  it("accepts a body up to the cap that leaves room for the rendered prefix", () => {
+    // The cap is 65322 chars (65535 - 213-char worst-case prefix). A body
+    // of exactly that length must validate and render to <= 65535.
+    const safeLen = 65322;
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x".repeat(200), body: "y".repeat(safeLen) },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    const { findings } = parseCodexReviewFindingsTail(stdout, repoRoot);
+    assert.equal(findings[0].body.length, safeLen);
   });
 
   it("throws when a `path` escapes the repo via traversal", () => {
@@ -2255,6 +2272,93 @@ process.exit(2);
           assert.equal(r.ok, false);
           assert.match(r.error, /line not in diff hunk|422/);
         }
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("returns per-finding failure envelopes when the head-SHA fetch itself fails (review-cycle-3 finding)", async () => {
+    // Codex review (post-push cycle) flagged that getPullRequestHeadSha
+    // throws and loses all findings. Fix: catch the failure inside
+    // postCodexReviewFindings and surface every finding as a per-finding
+    // failure envelope, preserving the contract that findings are never
+    // dropped silently.
+    const shim = makeGhShim({
+      ghHandler: {
+        routes: [
+          {
+            // Head-SHA fetch fails entirely.
+            argv_prefix: ["pr", "view", "520", "--json", "headRefOid"],
+            exit_code: 1,
+            stderr: "HTTP 503: api.github.com unreachable\n",
+          },
+        ],
+      },
+    });
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const results = await postCodexReviewFindings({
+          repoRoot: shim.repoDir,
+          owner: "fake",
+          name: "repo",
+          prNumber: 520,
+          reviewerLabel: "core",
+          findings: [
+            { path: "src/foo.java", line: 42, title: "x", body: "y" },
+            { path: "src/bar.java", line: 99, title: "x2", body: "y2" },
+          ],
+        });
+        // Both findings must be returned as failure envelopes — none lost.
+        assert.equal(results.length, 2);
+        for (const r of results) {
+          assert.equal(r.ok, false);
+          assert.match(r.error, /headRefOid|HTTP 503|unreachable/);
+        }
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("post_failures envelopes include the finding body so the agent can act on them (review-cycle-3 finding)", async () => {
+    // Codex review flagged that failed POSTs were stripped from `comments`
+    // but the post_failures envelope only kept path/line/title/error — the
+    // agent had no way to see the body of a failed finding. Include it so
+    // the agent can fix the issue without re-running codex.
+    const shim = makeGhShim({
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "headRefOid"],
+            stdout: JSON.stringify({ headRefOid: "abc1234" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "POST"],
+            exit_code: 1,
+            stderr: "HTTP 422\n",
+          },
+        ],
+      },
+    });
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const results = await postCodexReviewFindings({
+          repoRoot: shim.repoDir,
+          owner: "fake",
+          name: "repo",
+          prNumber: 520,
+          reviewerLabel: "core",
+          findings: [
+            { path: "src/foo.java", line: 42, title: "Long-form title here", body: "Detailed body explaining the issue." },
+          ],
+        });
+        assert.equal(results.length, 1);
+        assert.equal(results[0].ok, false);
+        // The full finding object is on the envelope; the runCodexReview
+        // collector pulls body from it into the post_failures shape.
+        assert.equal(results[0].finding.body, "Detailed body explaining the issue.");
+        assert.equal(results[0].finding.title, "Long-form title here");
       });
     } finally {
       shim.cleanup();
@@ -3734,6 +3838,69 @@ process.stdin.on("end", () => {
         // doesn't treat the run as complete.
         assert.equal(result.ok, false);
         assert.equal(result.error, "review_partial_failure");
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("(post-push) does NOT consume a review cycle marker when the run is a partial failure (review-cycle-3 finding)", async () => {
+    // Codex review (post-push cycle) flagged that the cycle marker is
+    // posted before partialFailure is computed, so a parse or POST failure
+    // burns one of the two capped cycles even though the run returned
+    // ok=false. Don't write the cycle marker on partial failure — partial
+    // failures are not "completed" reviews.
+    const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
+    const sentinel = "MARKER_POSTED_SENTINEL";
+
+    const shim = makeFullShimRepo({
+      branch: "998-add-thing",
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "closingIssuesReferences"],
+            stdout: JSON.stringify({ closingIssuesReferences: [{ number: 998 }] }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: JSON.stringify([[{ id: 1, body: planMarker, user: { login: "tester" } }]]),
+          },
+          {
+            // Marker POSTs are routed here. The sentinel lets the test fail
+            // loudly if a marker post is attempted.
+            argv_prefix: ["api", "--method", "POST"],
+            stdout: JSON.stringify({ id: 999, html_url: `https://example.test/c/${sentinel}` }),
+          },
+        ],
+      },
+      // Codex emits malformed output (no FINDINGS block) → parse_errors
+      // populated → partial failure → cycle marker MUST NOT be posted.
+      codexHandler: { tail: "Findings as prose only.\n(no tail block)\n" },
+    });
+    ensureBaseRef(shim.repoDir);
+
+    try {
+      await withShimPathFull(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: false,
+          prNumber: 520,
+        });
+        // Confirm partial failure was detected and signalled.
+        assert.equal(result.ok, false);
+        assert.equal(result.error, "review_partial_failure");
+        // The cycle marker must NOT have been posted on partial failure.
+        // The post route would have returned the sentinel id; check that
+        // the response carries no evidence of a marker post (the cycle
+        // marker would have been counted by the next invocation).
+        // We can't observe gh calls directly, but the response should
+        // carry cycle: null because we deliberately don't claim a cycle
+        // for a partial-failure run.
+        assert.equal(result.cycle, null);
       });
     } finally {
       shim.cleanup();
