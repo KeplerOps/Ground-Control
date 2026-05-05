@@ -7,6 +7,111 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **CI default runner switched from self-hosted to github-hosted.**
+  `.github/workflows/ci.yml` jobs `policy`, `build`, `test`,
+  `integration`, `sonar`, `verify`, `docker`, and `smoke` now run on
+  `ubuntu-latest`. Two jobs stay on the fabricator-managed self-hosted
+  runner pool as deliberate exceptions: `deploy` (SSHes to red-dragon
+  over the tailnet per ADR-030) and `policy-live` (when
+  `vars.GC_BASE_URL` is set it talks to the tailnet-only Ground
+  Control instance; currently the var is unset so the job is skipped,
+  but the runner choice has to match the intended target rather than
+  the empty default). ADR-030 carries a new "CI runner asymmetry"
+  section documenting both exceptions. Motivation: the fabricator
+  template's runner-registration path has been failing intermittently
+  (`runner_offline_wait_timeout` after the runner reports `online`,
+  followed by a 422 on runner removal), leaving CI runs queued
+  indefinitely; github-hosted runners eliminate the failure surface
+  for jobs that don't need tailnet access. Moving the two exception
+  jobs to ubuntu-latest as well would require adding
+  `tailscale/github-action` and a Tailscale OAuth secret, which isn't
+  done here. `pack-registry-sync.yml` is left alone — it's a
+  manual-trigger workflow that targets the decommissioned AWS
+  infrastructure (per ADR-018→ADR-030 supersession) and is dead code
+  awaiting separate cleanup.
+- Canonical `skills/implement/SKILL.md` clarifies two corner cases that
+  were under-specified by the previous gate prose (closes #801):
+  - **Step 4.4 documentation-only carve-out.** TDD remains mandatory by
+    default. A narrow carve-out now permits skipping the red-green loop
+    when the entire diff is documentation (ADR / README / CHANGELOG /
+    skill prose / design notes) AND every clause / acceptance criterion
+    is protected by a named structural gate (policy check, schema
+    validator, lint rule, verifier script, structural invariant test).
+    The skip must be declared in the plan and re-stated as a comment on
+    the issue thread naming the gate. Substring or snapshot tests
+    written only to satisfy TDD wording are explicitly disallowed as
+    gates; if no real gate exists the agent must add one as part of
+    the PR or remove the unprotected clause from scope (no shipping a
+    requirement claim with no durable verification). Any executable
+    line anywhere in the diff invalidates the entire carve-out — the
+    full TDD loop applies, and any documentation in the same diff
+    rides along on the back of the executable behavior's tests. The
+    carve-out is re-validated against the actual diff at Step 4.5
+    clause-mapping and at Step 6 completion gate. The Step 6
+    re-validation is a two-check sweep: (a) every changed path must
+    be in the documentation set (`*.md`, ADRs, notes, docs,
+    CHANGELOG, README, skills prose) AND (b) every diff hunk's
+    *content* must be free of executable behavior (no embedded code,
+    no schema/grammar/policy data consumed by a runtime parser, no
+    runnable fixtures). The path check alone isn't sufficient
+    because a doc file can carry executable behavior; an earlier
+    `git diff --name-status` check only saw paths and could miss
+    content-level executable changes, so it's been replaced with
+    this stricter two-step. The path set also takes the union of
+    committed (`<base-ref>...HEAD`), staged, unstaged, and untracked
+    paths, since Step 6 runs *before* the stage-and-commit step
+    and uncommitted executable changes would otherwise slip past.
+    The pre-existing artifact discovery procedure now uses
+    `git grep` and `git ls-files` instead of `grep -r`, so the
+    candidate set only contains tracked files and the workflow
+    can't backfill traceability links onto untracked / generated /
+    `.gitignore`'d files that were never shipped.
+  - **Step 15 / Step 16 backfill onto pre-existing artifacts.** Step
+    15's "materially implemented" classification now distinguishes
+    *case in-diff* (the diff contains the artifacts of record) from
+    *case pre-existing* (the diff finalizes a requirement whose
+    structural implementation already exists in pre-existing files
+    shipped under a sibling requirement). The case-pre-existing path
+    runs an explicit *pre-existing artifact discovery procedure*
+    BEFORE the DRAFT→ACTIVE transition: subject-area-bounded
+    `git ls-files`/`grep` against the requirement's named subsystems
+    and identifiers produces candidates, the agent reads each
+    candidate against the requirement statement to confirm
+    satisfaction (the MCP reverse lookup answers
+    "what is this already linked to," not "does this satisfy the
+    requirement" — content review is the validation), then
+    `gc_get_traceability_by_artifact` deduplicates against existing
+    links. The surviving candidates are partitioned by intended link
+    type (production code / config / ADR / docs → IMPLEMENTS;
+    automated tests → TESTS), and Step 16 Mode A creates each link
+    using its partition's link type — so an IMPLEMENTS link is never
+    created onto a candidate classified as a test. If discovery's
+    IMPLEMENTS partition is empty after a bounded, validated search,
+    the transition is refused and the user is surfaced — Ground
+    Control never gets promoted-without-coverage. A shared
+    *Backfill rules* block (used by Mode A case pre-existing and
+    Mode B) preserves valid existing links. Mode B retains its
+    original meaning (the literal zero-diff case from Step 4 step 5)
+    and now references the shared rules instead of duplicating them.
+- `architecture/policies/adr-policy.json` `workflow-guardrail-sync` rule
+  now also fires on changes to the canonical `skills/implement/SKILL.md`
+  (the authoritative location per ADR-027). The legacy
+  `.claude/skills/implement/SKILL.md` glob is retained for back-compat.
+  Without this, edits to the canonical workflow source slipped past
+  `make policy` and the ADR-021 sync gate. Covered by a new
+  `tools/tests/test_policy.py` unit test.
+- `docs/DEVELOPMENT_WORKFLOW.md`, `docs/WORKFLOW.md`, and ADR-021 carry
+  short notes describing the carve-out and backfill clarifications and
+  point at the operative SKILL.md prose. `docs/WORKFLOW.md` Phase 3
+  also drops two stale lines from the pre-ADR-029 era: the "user
+  reviews and approves" plan-approval gate (now an asynchronous issue
+  comment) and the link-creation-before-transition step ordering
+  (which contradicted the API's `IMPLEMENTS-only-on-ACTIVE`
+  invariant). The preflight design context lives in
+  `architecture/notes/implement-docs-only-preexisting-traceability-guardrails.md`.
+
 ### Added
 
 - `gc_codex_review` enforces the GC-O007 hard-cap-2 contract on
