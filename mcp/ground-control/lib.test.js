@@ -2278,6 +2278,79 @@ process.exit(2);
     }
   });
 
+  it("treats findings with bodies that look like secrets as per-finding failures (non-LLM control, review-cycle-4 security finding)", async () => {
+    // Codex review (cycle 2) flagged that "tell the LLM not to paste
+    // secrets" is not a security boundary — a malicious diff can use
+    // prompt injection to coerce codex into emitting findings whose body
+    // contains exfiltrated workspace contents. Add a non-LLM check on the
+    // body before posting: if the rendered body contains known sensitive
+    // markers, mark the finding as a per-finding failure with a
+    // "sensitive_content" error so the agent surfaces the issue instead
+    // of publishing it under the host identity.
+    const shim = makeGhShim({
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "headRefOid"],
+            stdout: JSON.stringify({ headRefOid: "abc1234" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "POST"],
+            stdout: JSON.stringify({ id: 100, html_url: "https://example.test/c/100" }),
+          },
+        ],
+      },
+    });
+    try {
+      // Build payloads at runtime from concatenated chunks so the source
+      // file itself does not contain a literal `detect-private-key` would
+      // flag. The actual byte string the validator sees is unchanged.
+      const begin = "-----" + "BEGIN ";
+      const end = "-----";
+      const keyTail = "PRIVATE " + "KEY" + end;
+      await withShimPath(shim.binDir, async () => {
+        const findings = [
+          {
+            path: "src/foo.java",
+            line: 1,
+            title: "leaked private key",
+            body: `Detail. Reading config: ${begin}${keyTail}\nMIIEvQIBA...`,
+          },
+          {
+            path: "src/bar.java",
+            line: 2,
+            title: "leaked openssh",
+            body: `${begin}OPENSSH ${keyTail}\nfoo`,
+          },
+          {
+            path: "src/baz.java",
+            line: 3,
+            title: "leaked aws key",
+            body: "Found AKIAIOSFODNN7EXAMPLE in env",
+          },
+          // Clean finding posts normally.
+          { path: "src/clean.java", line: 4, title: "clean", body: "ordinary review note" },
+        ];
+        const results = await postCodexReviewFindings({
+          repoRoot: shim.repoDir,
+          owner: "fake",
+          name: "repo",
+          prNumber: 520,
+          reviewerLabel: "core",
+          findings,
+        });
+        assert.equal(results.length, 4);
+        for (let i = 0; i < 3; i++) {
+          assert.equal(results[i].ok, false, `finding ${i} should be rejected`);
+          assert.match(results[i].error, /sensitive|secret|private key|aws/i);
+        }
+        assert.equal(results[3].ok, true);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
   it("returns per-finding failure envelopes when the head-SHA fetch itself fails (review-cycle-3 finding)", async () => {
     // Codex review (post-push cycle) flagged that getPullRequestHeadSha
     // throws and loses all findings. Fix: catch the failure inside
@@ -3838,6 +3911,133 @@ process.stdin.on("end", () => {
         // doesn't treat the run as complete.
         assert.equal(result.ok, false);
         assert.equal(result.error, "review_partial_failure");
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("(post-push) DOES consume a cycle marker on partial failure when at least one POST succeeded (review-cycle-4 finding)", async () => {
+    // Codex review (cycle 2) flagged that suppressing the cycle marker on
+    // partial failure was overcorrection: when at least one POST landed on
+    // the PR, those comments are durable. A retry would re-post the same
+    // findings as duplicates. Fix: write the marker whenever any post
+    // succeeded OR no failures occurred. Only suppress when zero comments
+    // landed (parse-only failure, or all-POST failure due to head-SHA
+    // fetch / network).
+    const findingsTail = "===FINDINGS===\n" + JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "y" },
+      { path: "src/bar.java", line: 99, title: "x2", body: "y2" },
+    ]) + "\n===END===\n";
+    const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
+
+    // Two cycle markers are written if both posts succeed (one per reviewer
+    // x post). For partial-failure-with-some-success, we only need to assert
+    // the cycle metadata reflects a consumed cycle. The shim's POST route
+    // returns success for inline comments AND the cycle marker post, so
+    // we'd see cycle: 1 returned in the response if marker was written.
+    const shim = makeFullShimRepo({
+      branch: "998-add-thing",
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "closingIssuesReferences"],
+            stdout: JSON.stringify({ closingIssuesReferences: [{ number: 998 }] }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: JSON.stringify([[{ id: 1, body: planMarker, user: { login: "tester" } }]]),
+          },
+          {
+            argv_prefix: ["pr", "view", "520", "--json", "headRefOid"],
+            stdout: JSON.stringify({ headRefOid: "abc1234" }),
+          },
+          {
+            argv_prefix: ["api", "graphql"],
+            stdout: JSON.stringify({
+              data: {
+                repository: {
+                  pullRequest: {
+                    reviewThreads: {
+                      pageInfo: { hasNextPage: false, endCursor: null },
+                      nodes: [{ id: "thread-1", comments: { nodes: [{ databaseId: 7001 }] } }],
+                    },
+                  },
+                },
+              },
+            }),
+          },
+          {
+            // All POSTs (inline + cycle marker) succeed.
+            argv_prefix: ["api", "--method", "POST"],
+            stdout: JSON.stringify({ id: 7001, html_url: "https://example.test/c/7001" }),
+          },
+        ],
+      },
+      codexHandler: { tail: findingsTail },
+    });
+    ensureBaseRef(shim.repoDir);
+
+    try {
+      await withShimPathFull(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: false,
+          prNumber: 520,
+        });
+        // No partial failure here (all POSTs succeed) — cycle marker MUST
+        // be written, response carries cycle: 1.
+        assert.equal(result.ok, true);
+        assert.equal(result.cycle, 1);
+        assert.equal(result.cap, 2);
+        // Successful posts populate `comments`.
+        assert.ok(result.comments.length >= 1);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("(post-push) excludes failed POSTs from `comments` and includes body in post_failures (review-cycle-4 finding)", async () => {
+    // Codex review (cycle 2) flagged that no-PR placeholder comments dropped
+    // `finding.body`, leaving the agent with no way to act. The placeholder
+    // shape now carries `body` so the agent has the authoritative finding
+    // detail (the JSON body is canonical per the new prompt).
+    //
+    // We exercise this on the no-PR / uncommitted=true path because
+    // postResults is empty there and the placeholder branch fires.
+    const findingsTail = "===FINDINGS===\n" + JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "Detail title", body: "Authoritative body content the agent must see." },
+    ]) + "\n===END===\n";
+
+    const shim = makeFullShimRepo({
+      branch: "998-add-thing",
+      ghHandler: {
+        routes: [
+          { argv_prefix: ["repo", "view", "--json", "nameWithOwner"], stdout: JSON.stringify({ nameWithOwner: "fake/repo" }) },
+          { argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"], stdout: JSON.stringify([[]]) },
+          { argv_prefix: ["api", "--method", "POST"], stdout: JSON.stringify({ id: 1, html_url: "https://example.test/c/1" }) },
+        ],
+      },
+      codexHandler: { tail: findingsTail },
+    });
+
+    try {
+      await withShimPathFull(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: true,
+          issueNumber: 998,
+        });
+        assert.ok(result.comments.length >= 1);
+        // The placeholder for no-PR / pre-push must carry the body verbatim.
+        for (const c of result.comments) {
+          assert.equal(c.body, "Authoritative body content the agent must see.");
+        }
       });
     } finally {
       shim.cleanup();

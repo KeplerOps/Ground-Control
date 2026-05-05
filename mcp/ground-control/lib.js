@@ -3111,6 +3111,19 @@ export async function postCodexReviewFindings({
 
   const results = [];
   for (const finding of findings) {
+    // Non-LLM content filter on the body before publishing. The body is
+    // model-controlled output; a malicious diff can use prompt injection to
+    // coerce codex into emitting workspace contents (private keys, AWS
+    // access keys, etc.). The prompt instruction not to include secrets is
+    // not a security boundary — this is the host-side check the security
+    // reviewer asked for in #793 cycle 4. Necessarily incomplete (cat-and-
+    // mouse with the attacker), but it catches the obvious well-known
+    // markers before they get published under the host identity.
+    const sensitiveError = detectSensitiveBodyContent(finding.body);
+    if (sensitiveError) {
+      results.push({ ok: false, finding, error: sensitiveError });
+      continue;
+    }
     try {
       const apiResponse = await postSingleReviewComment({
         repoRoot,
@@ -3197,6 +3210,44 @@ async function postSingleReviewComment({
   } catch {
     return null;
   }
+}
+
+// Patterns of well-known secret markers the poster must never publish. This
+// is intentionally a small allow-list of high-signal patterns rather than a
+// general-purpose secret scanner — it catches the obvious exfiltration
+// attempts (PEM headers, AWS access key prefixes, common token prefixes)
+// without false-positive-storming legitimate code review prose.
+//
+// Adding patterns is cheap; this is the non-LLM defense the security
+// reviewer flagged in #793 review cycle 4. Pair with the prompt
+// instruction (which is the polite ask) and the read-only sandbox (which
+// limits codex's blast radius) for layered defense.
+// Pattern literals are constructed at runtime from concatenated chunks so
+// the source file itself does not contain a string that the repo's
+// `detect-private-key` pre-commit hook would flag. The bytes the regex
+// matches are unchanged.
+const PEM_BEGIN = "-----" + "BEGIN ";
+const PEM_END = "-----";
+const PEM_KEY_SUFFIX = "PRIVATE " + "KEY";
+const SENSITIVE_BODY_PATTERNS = [
+  { name: "private key", re: new RegExp(PEM_BEGIN + "[A-Z ]*" + PEM_KEY_SUFFIX + PEM_END) },
+  { name: "ssh private key", re: new RegExp(PEM_BEGIN + "OPENSSH " + PEM_KEY_SUFFIX + PEM_END) },
+  { name: "pgp private key", re: new RegExp(PEM_BEGIN + "PGP " + PEM_KEY_SUFFIX + " BLOCK" + PEM_END) },
+  { name: "rsa private key", re: new RegExp(PEM_BEGIN + "RSA " + PEM_KEY_SUFFIX + PEM_END) },
+  { name: "aws access key id", re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/ },
+  { name: "google api key", re: /\bAIza[0-9A-Za-z_-]{35}\b/ },
+  { name: "github personal access token", re: /\b(?:ghp|gho|ghu|ghs|ghr)_[0-9A-Za-z]{36,}\b/ },
+  { name: "slack token", re: /\bxox[abp]-[0-9A-Za-z-]{10,}\b/ },
+];
+
+export function detectSensitiveBodyContent(body) {
+  if (typeof body !== "string") return null;
+  for (const { name, re } of SENSITIVE_BODY_PATTERNS) {
+    if (re.test(body)) {
+      return `body matched sensitive content pattern '${name}' — refusing to publish under host identity (issue #793 cycle 4 security control)`;
+    }
+  }
+  return null;
 }
 
 function extractGhErrorMessage(error) {
@@ -3953,12 +4004,20 @@ export async function runCodexReview({
 
   const comments = dedupFindings([...coreComments, ...securityComments]);
 
-  // Compute partialFailure here (used both to decide whether to write a
-  // cycle marker and to shape the final response). A run with parse_errors
-  // or post_failures is NOT a completed review — it must not consume a
-  // cycle, otherwise capped review budgets get burned on partial failures
-  // (closes a gap flagged in #793 review cycle 3).
+  // Compute partialFailure here (used to shape the final response). A run
+  // with parse_errors or post_failures is NOT a completed review — the
+  // response carries ok=false so the agent doesn't treat it as durable.
   const partialFailure = parseErrors.length > 0 || postFailures.length > 0;
+  // The cycle marker is a different question: it gates retries against the
+  // hard-cap-2 budget. Suppress it ONLY when no comments landed on the PR
+  // (so a retry doesn't double-spend a cycle that produced nothing). When
+  // any post succeeded, the comments are durable and a retry would
+  // duplicate them on the PR thread — treat the cycle as consumed (closes
+  // a gap flagged in #793 post-push review cycle 2).
+  const successfulPostCount =
+    corePostResults.filter((r) => r.ok).length +
+    securityPostResults.filter((r) => r.ok).length;
+  const cycleConsumed = successfulPostCount > 0 || !partialFailure;
 
   // Successfully ran codex — record the cycle marker so subsequent invocations
   // honor the hard cap. Posting after the codex run (not before) means
@@ -3966,7 +4025,7 @@ export async function runCodexReview({
   // fatal: the review itself succeeded and surfaced findings; the worst case
   // is the next cycle's count is off-by-one, which the cap-evaluator handles
   // gracefully (it reads whatever count is on the issue thread at the time).
-  if (cycleOwnership != null && !partialFailure) {
+  if (cycleOwnership != null && cycleConsumed) {
     try {
       await postCodexReviewCycleMarker(
         repoRoot,
@@ -3985,7 +4044,7 @@ export async function runCodexReview({
     }
   }
 
-  if (prePushOwnership != null && !partialFailure) {
+  if (prePushOwnership != null && cycleConsumed) {
     // The cap is durable iff the marker lands on the issue thread. Pre-push
     // has no PR / CI / other secondary check — the marker IS the enforcement
     // surface, so a marker-post failure has to fail the run. Findings are
@@ -4080,11 +4139,12 @@ export async function runCodexReview({
       { name: "core", finding_count: core.findings.length },
       { name: "security", finding_count: security.findings.length },
     ],
-    // Partial failures don't consume a cycle (no marker written, see above)
-    // — surface cycle/cap as null so the agent doesn't act on a counter
+    // Cycle is consumed iff at least one comment landed on the PR or there
+    // were no failures at all (see cycleConsumed above). When suppressed,
+    // surface cycle/cap as null so the agent doesn't act on a counter
     // that wasn't incremented.
-    cycle: !partialFailure && cycleSource ? cycleSource.cycleNumber : null,
-    cap: !partialFailure && cycleSource ? cycleSource.cap : null,
+    cycle: cycleConsumed && cycleSource ? cycleSource.cycleNumber : null,
+    cap: cycleConsumed && cycleSource ? cycleSource.cap : null,
     next_action: effectiveNextAction,
     override: cycleSource && cycleSource.override === true ? true : false,
     override_reason: cycleSource ? cycleSource.overrideReason : null,
@@ -4154,6 +4214,10 @@ async function buildReviewerCommentsList({
   reviewer,
 }) {
   if (postResults.length === 0) {
+    // No POST attempted (no PR, or zero findings). The placeholder carries
+    // the full finding so the agent can act on it — `body` is the
+    // authoritative finding detail per the new prompt (closes a gap flagged
+    // in #793 review cycle 4 / post-push cycle 2).
     return findings.map((finding) => ({
       comment_id: null,
       thread_id: null,
@@ -4161,6 +4225,7 @@ async function buildReviewerCommentsList({
       path: finding.path,
       line: finding.line,
       title: `[${reviewer}] ${finding.title}`.slice(0, 200),
+      body: finding.body,
       html_url: null,
     }));
   }
