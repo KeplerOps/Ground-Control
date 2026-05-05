@@ -59,7 +59,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     because a doc file can carry executable behavior; an earlier
     `git diff --name-status` check only saw paths and could miss
     content-level executable changes, so it's been replaced with
-    this stricter two-step.
+    this stricter two-step. The path set also takes the union of
+    committed (`<base-ref>...HEAD`), staged, unstaged, and untracked
+    paths, since Step 6 runs *before* the stage-and-commit step
+    and uncommitted executable changes would otherwise slip past.
+    The pre-existing artifact discovery procedure now uses
+    `git grep` and `git ls-files` instead of `grep -r`, so the
+    candidate set only contains tracked files and the workflow
+    can't backfill traceability links onto untracked / generated /
+    `.gitignore`'d files that were never shipped.
   - **Step 15 / Step 16 backfill onto pre-existing artifacts.** Step
     15's "materially implemented" classification now distinguishes
     *case in-diff* (the diff contains the artifacts of record) from

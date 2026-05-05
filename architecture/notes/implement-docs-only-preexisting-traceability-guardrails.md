@@ -28,8 +28,12 @@ of truth per ADR-027.
   Do not add another repo scanner, database table, or workflow schema for link
   discovery. The MCP surface answers "is path X already linked?" — it does not
   surface unknown candidates from a requirement statement, so the agent's own
-  bounded `git ls-files` / `grep` against the requirement's named subsystems and
-  identifiers is what feeds candidates into the reverse-lookup.
+  bounded `git ls-files` / `git grep` (NOT `grep -r`) against the requirement's
+  named subsystems and identifiers is what feeds candidates into the
+  reverse-lookup. The `git`-aware variants ensure the candidate set only
+  contains tracked files; `grep -r` would also walk untracked / generated /
+  `.gitignore`'d files and produce traceability candidates for artifacts
+  that were never shipped.
 
 ## Guardrails
 
