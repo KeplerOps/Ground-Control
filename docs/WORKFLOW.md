@@ -175,13 +175,13 @@ Pick the next unblocked requirement from the work order and implement it. Ground
 1. **Fetch requirement** from Ground Control
 2. **Create GitHub issue** and link it via traceability
 3. **Checkout feature branch** via `gh issue develop`
-4. **Plan implementation** — user reviews and approves
-5. **Write code, tests, docs** — clause-by-clause verification against the requirement statement
-6. **Create traceability links:**
-   - `IMPLEMENTS` → code files that satisfy the requirement
+4. **Plan implementation** — posted as a comment on the GitHub issue thread per ADR-029. The workflow proceeds directly to TDD without a synchronous user-approval gate; the user owns review at PR merge.
+5. **Write code, tests, docs** — clause-by-clause verification against the requirement statement. TDD is mandatory except for the narrow documentation-only carve-out documented in `skills/implement/SKILL.md` Step 4.4 (no executable behavior in the diff + every clause/criterion protected by a named structural gate; declared in the plan and re-stated on the issue thread).
+6. **Transition to ACTIVE** once implemented and verified — the API enforces `IMPLEMENTS-only-on-ACTIVE`, so transition MUST happen before the link-creation step.
+7. **Create traceability links** (after the transition above):
+   - `IMPLEMENTS` → code files that satisfy the requirement. When the diff finalizes/documents a requirement whose structural implementation lives in pre-existing files (shipped under a sibling requirement), `IMPLEMENTS` links are backfilled onto those pre-existing artifacts of record, bounded by the requirement's concrete subject matter.
    - `TESTS` → test files that verify the requirement
-   - `DOCUMENTS` → ADRs or design docs that explain the approach
-7. **Transition to ACTIVE** once implemented and verified
+   - `DOCUMENTS` → ADRs or design docs that explain the approach (also used for forward-looking requirements that the diff references but does not yet ship)
 
 Before you stop, run `make policy` alongside the feature-specific verification commands. This catches ADR drift, missing controller/MCP/doc parity, migration companion updates, and PR body omissions before review.
 

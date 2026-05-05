@@ -19,6 +19,10 @@ class PolicyChecksTest(unittest.TestCase):
         violations = run_adr_guard([".claude/skills/implement/SKILL.md"])
         self.assertTrue(any(item.code == "workflow-guardrail-sync" for item in violations))
 
+    def test_adr_guard_fires_on_canonical_implement_skill_path(self):
+        violations = run_adr_guard(["skills/implement/SKILL.md"])
+        self.assertTrue(any(item.code == "workflow-guardrail-sync" for item in violations))
+
     def test_controller_contracts_require_docs_mcp_and_webmvctest(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

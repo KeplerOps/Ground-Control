@@ -155,9 +155,22 @@ Per ADR-029, the plan is **published to the GitHub issue as a comment** and the 
 
 5. **If the work is ALREADY complete** (existing code already satisfies every clause of every in-scope requirement): post a *completion report* on the issue using the same `gh issue comment` mechanism. The report identifies which code satisfies the requirement(s) (with `file:line` references). If `in_scope_requirements[]` is non-empty, verify each requirement is already linked and ACTIVE; if not, continue to Steps 15–16 (transition then reconciliation) to fix the Ground Control state without re-implementing the code.
 
-### Step 4.4: Test-Driven Development (mandatory)
+### Step 4.4: Test-Driven Development (mandatory, with one narrow carve-out)
 
-Once Step 4 has posted the plan, implement using **TDD**. This is not optional:
+Once Step 4 has posted the plan, implement using **TDD**. This is not optional except under the documentation-only carve-out below.
+
+**Documentation-only carve-out.** Skip the red-green loop only when ALL of the following hold:
+
+- The entire planned diff is documentation: ADR, README, CHANGELOG, skill / workflow prose, design notes, or other static text. A single function, helper, schema field, config knob, behavior change, or other executable line in the diff disqualifies the entire carve-out — the full TDD loop applies, and any documentation in the same diff rides along on the back of the executable behavior's tests rather than triggering a separate carve-out path.
+- Every clause of every in-scope requirement AND every acceptance criterion in the issue body is already protected by a **structural gate** — a policy check (e.g., `make policy` rule), schema validator, lint rule, verifier script, structural invariant test, or equivalent automated check that fires on real regression. Reviewer judgment alone (codex review, code review) is not a structural gate; it is a process gate. If you cannot name a structural gate for a clause, the carve-out does NOT apply to that clause; revert to the mandatory loop and write a real test, even if the only behavior you are testing is "the structural invariant exists." If the structural gate is genuinely missing and adding one is in scope, add it (it is the "real fix" path) before declaring the carve-out.
+- The plan (Step 4) explicitly declared the carve-out and named the structural gate that protects each clause/criterion.
+- A second comment on the issue thread re-states the carve-out and the named structural gate, so the durable record is unambiguous (per ADR-029). One issue comment per `/implement` run is fine; bullets per clause are encouraged.
+- A substring or snapshot test against the changed prose ("ADR-007 contains 'AIOPS-ACC-003'") does NOT count as a structural gate. If the only test you can write is one that asserts the doc says what it says, that is the carve-out's failure mode — STOP. Either add a real structural gate as part of this PR (the "real fix" path) or remove the unprotected clause/criterion from the issue's scope and surface that to the user. Do NOT ship a requirement claim with no gate behind it; the workflow's contract is "every clause is verified by something durable," not "the carve-out lets us skip verification."
+- **Re-validate the carve-out against the actual diff at the end of implementation.** The carve-out is checked against the *planned* diff at Step 4 and the *actual* diff at Step 4.5 (clause-by-clause verification) and again at Step 6 (completion gate). If during implementation the diff acquires any executable line — a function, helper, schema field, config knob, behavior change, even a one-liner — the carve-out is invalidated retroactively. Revert to the mandatory red-green loop for the executable portion AND for any clause whose structural gate was only a "no executable behavior" claim. The plan-time declaration is provisional; the actual diff is what counts.
+
+If the carve-out applies, jump to Step 4.5; the loop below does not apply.
+
+For all other diffs, the loop is mandatory:
 
 1. **Write the failing test first.** For each clause of each in-scope requirement AND each acceptance criterion in the issue body, write a unit test that exercises the new behavior. Run the test and confirm it fails for the right reason (missing code, not a typo / wiring issue). A test you never saw fail is not a test — it's a guess.
 2. **Write the minimum production code to make the test pass.** No premature abstraction, no scope creep, no "while I'm here" cleanups. Just enough to flip the failing assertion green.
@@ -210,6 +223,7 @@ Implementation is NOT ready for commit until ALL of the following are verified:
 1. **Completion gate passes** — run `cfg.workflow.completion_command`. If that field is null, fall back to `cfg.workflow.test_command`. If both are null, ask the user what the completion gate command should be for this repo (do not guess). Confirm the command exits successfully.
 2. **CHANGELOG.md updated** — verify it is in `git diff --name-only` if any source files changed.
 3. **Step 4.5 clause mapping was completed** — if you skipped it, go back and do it now.
+4. **If the documentation-only carve-out from Step 4.4 was declared**, re-validate it against the *actual* diff right now: run `git diff --name-status <base-ref>...HEAD` and confirm zero executable lines were added during implementation. Any executable line invalidates the carve-out — revert to the mandatory red-green loop for the executable portion before declaring the gate passed.
 
 If any check fails, fix it before proceeding. Do NOT move to Phase C until every check passes.
 
@@ -394,9 +408,22 @@ Semantically, moving a requirement from DRAFT to ACTIVE is the point at which th
 
 For each UID in `in_scope_requirements[]`:
 - **First, classify the requirement against the actual diff:**
-  - **Materially implemented** — the diff contains the artifacts-of-record that satisfy the requirement's clauses. Artifacts include production code, tests, schema/migration files, configuration files, ADRs, workflow definitions, skill prose, and any other deliverable the requirement statement specifies. The test is "does the diff *deliver* what this requirement promises," not "is the diff Java." Continue to the transition step below.
-  - **Forward-looking** — the diff documents or references the requirement but does not deliver it (e.g., a schema field that an unimplemented future feature will consume, or a design note that anticipates work in a later wave). Use a `DOCUMENTS` link in Step 16 instead of `IMPLEMENTS`, and leave the status DRAFT. Surface this decision as a comment on the issue. Skip the rest of this loop for that UID.
-- **Only after classification**, transition the materially-implemented requirements:
+  - **Materially implemented (case in-diff)** — the diff itself contains the artifacts-of-record that satisfy the requirement's clauses (production code, tests, schema/migration files, configuration files, ADRs, workflow definitions, skill prose, or any other deliverable the requirement statement specifies).
+  - **Materially implemented (case pre-existing)** — the diff finalizes/documents the requirement (e.g., an ADR clarification, CHANGELOG entry, or workflow note marking the requirement complete) while the structural implementation already exists in pre-existing files shipped under a sibling requirement. The test is "does this PR ship the requirement," not "is the implementing code in this diff." For this case, **before transitioning the requirement**, use the discovery procedure below to identify the pre-existing artifact(s) of record. If discovery finds zero implementing files, the case-pre-existing classification is wrong: STOP, surface to the user (the requirement is either forward-looking, has missing implementation, or was misidentified), and do NOT transition.
+  - **Forward-looking** — the diff documents or references the requirement but does not ship it (e.g., a schema field that an unimplemented future feature will consume, or a design note that anticipates work in a later wave). Use a `DOCUMENTS` link in Step 16 instead of `IMPLEMENTS`, and leave the status DRAFT. Surface this decision as a comment on the issue. Skip the rest of this loop for that UID.
+
+- **Pre-existing artifact discovery procedure (case pre-existing only).** This MUST run before the ACTIVE transition for the case-pre-existing path, so Ground Control never gets promoted-without-coverage:
+  1. Read the requirement statement and identify the named subsystems, file roots, modules, or component identifiers it references (e.g., "the Identity Center bootstrap module," "the state-boundary verifier," "the ingest pipeline's retry helper").
+  2. Run `git ls-files` filtered to those roots, plus `grep -r` against the requirement's distinctive identifiers (UID, named module, distinctive function names) bounded to the subject-area paths. Do NOT scan the whole repo.
+  3. **Validate each candidate file against the requirement statement** by reading it and confirming the file actually satisfies the clause(s) you mapped it to. The candidate list from grep/ls-files is a superset; the agent's read of file content against the requirement is what proves satisfaction. Discard candidates that do not actually satisfy the requirement.
+  4. **For each surviving candidate**, classify it by intended link type and call `gc_get_traceability_by_artifact` to learn what it is already linked to (dedupe / preservation, NOT validation):
+     - Production code, configuration files, ADR/design docs, workflow files → IMPLEMENTS link, with `artifact_type: CODE_FILE` / `CONFIG` / `ADR` / `DOCUMENTATION` as appropriate.
+     - Automated tests that verify the requirement → TESTS link, with `artifact_type: TEST`.
+     - Existing links to the same requirement remain valid; do not churn them. Existing links to a different requirement that still satisfy that requirement also remain valid; do not delete them.
+  5. Cache the resulting candidate set as the *backfill targets*, partitioned by intended link type (IMPLEMENTS targets vs TESTS targets) — Step 16 Mode A reuses this partitioned set rather than re-discovering, and never creates an IMPLEMENTS link onto a candidate classified as a TEST.
+  6. If the IMPLEMENTS partition is empty after a bounded, validated search, the case-pre-existing classification fails (see above).
+
+- **Only after classification (and, for case pre-existing, after discovery succeeded)**, transition the materially-implemented requirements:
   - Use `gc_transition_status` to transition the requirement from `DRAFT` to `ACTIVE`.
   - If the requirement was already `ACTIVE`, skip it.
   - If the requirement was in any other state (`DEPRECATED`, `ARCHIVED`), STOP and surface the anomaly to the user — transitioning out of those states is a user decision.
@@ -437,18 +464,23 @@ Now that CI and all reviews are green AND every materially-implemented in-scope 
 
 5. **Ensure every in-scope requirement has coverage appropriate to its nature.**
 
-   **Mode A — the diff implemented the work.** For each UID in `in_scope_requirements[]`:
-   - **IMPLEMENTS coverage is required.** Every materially-implemented in-scope requirement must have at least one IMPLEMENTS link pointing at a file touched by this diff. The shape of "implementation" depends on the requirement: code requirements → production file; documentation requirements → ADR/SCHEMA/docs file; configuration requirements → config file; workflow requirements → workflow file/hook script.
-   - **TESTS coverage is conditional.** Add a TESTS link when the diff introduces or touches an automated test that verifies the requirement. TESTS is NOT required for documentation/configuration/structural-invariant requirements with no executable behavior. IMPLEMENTS alone is the complete coverage record in those cases.
-   - **Do not fabricate test links.** If a requirement has testable behavior and no test was added, go back to Step 4.4.
+   **Mode A — the diff ships the work.** For each UID in `in_scope_requirements[]`:
+   - **IMPLEMENTS coverage is required against the artifact(s) of record.** Every materially-implemented in-scope requirement must have at least one IMPLEMENTS link pointing at the file(s) that actually satisfy its clauses. Those files may be in the diff (Step 15 case in-diff), pre-date the diff (Step 15 case pre-existing — finalization/documentation runs whose structural implementation lives in a sibling requirement's earlier code), or both. The shape of "implementation" depends on the requirement: code requirements → production file; documentation requirements → ADR/SCHEMA/docs file; configuration requirements → config file; workflow requirements → workflow file / hook script. When the diff itself adds documentation that defines the requirement's contract (e.g., an ADR section), link that ADR with IMPLEMENTS too; pure-housekeeping diff entries (e.g., CHANGELOG bullets) need no link.
+   - **Backfill onto pre-existing artifacts when the diff finalizes the requirement.** If Step 15 classified the requirement as case pre-existing, the *backfill targets* are already cached from Step 15's discovery procedure, partitioned by intended link type. Create IMPLEMENTS links pointing at each candidate in the IMPLEMENTS partition; create TESTS links pointing at each candidate in the TESTS partition. Use `gc_create_traceability_link` with the partition's link type. Never create an IMPLEMENTS link onto a candidate classified as a TEST. Apply the *Backfill rules* below. Do not invent a "diff-only" IMPLEMENTS link onto an ADR or CHANGELOG entry as a substitute for linking the actual implementing code.
+   - **TESTS coverage is conditional.** Add a TESTS link when the diff introduces or touches an automated test that verifies the requirement, OR when discovery's TESTS partition (Step 15) contains a pre-existing automated test that verifies it. TESTS is NOT required for documentation / configuration / structural-invariant requirements with no executable behavior. IMPLEMENTS alone is the complete coverage record in those cases.
+   - **Do not fabricate test links.** If a requirement has testable behavior and no test was added or discovered, go back to Step 4.4.
    - **Never link the diff to a requirement it does not satisfy** just to satisfy this step. Surface the mismatch to the user instead.
    - **Forward-looking requirements** (DRAFT requirements this PR does not materially implement) get DOCUMENTS links, not IMPLEMENTS, and stay DRAFT.
 
-   **Mode B — Step 4 concluded the work is already complete.** The diff has no new implementation files; forcing an IMPLEMENTS link onto a file in the diff would be wrong. Instead:
+   **Backfill rules (apply to Mode A case pre-existing and to Mode B below).**
+   - Reuse the discovery procedure documented in Step 15 (subject-area-bounded `git ls-files` / `grep` against named subsystems/file roots, then `gc_get_traceability_by_artifact` per candidate). Do NOT compare every requirement to every file in the repo.
+   - Existing links to files that still satisfy the requirement remain valid. Do not churn links merely because the current PR touched a nearby document.
+   - If backfill discovers no implementing file anywhere in the repo, STOP — either the requirement should be demoted (DEPRECATED) or implementation is missing. Surface to the user. (For Mode A case pre-existing this should be impossible — Step 15 would have refused the transition first.)
+
+   **Mode B — Step 4 concluded the work is already complete.** The diff is empty (Step 4 step 5 path); forcing an IMPLEMENTS link onto a non-existent diff file would be wrong. Instead:
    - **Accept existing IMPLEMENTS coverage.** If the requirement already has IMPLEMENTS links pointing at files that exist and still satisfy it, that coverage is complete. Do NOT fabricate new links.
-   - **Backfill only when nothing is linked.** If the requirement has zero existing IMPLEMENTS links, locate the implementing file(s) anywhere in the repo and create the link(s).
+   - **Backfill only when nothing is linked.** If the requirement has zero existing IMPLEMENTS links, locate the implementing file(s) per the *Backfill rules* above and create the link(s).
    - **TESTS rules from Mode A still apply.**
-   - If Mode B discovers no implementing file anywhere, STOP — either the requirement should be demoted (DEPRECATED) or implementation is missing.
 
 6. **Reconcile the issue → requirement links (both directions).**
    - **Add missing links.** For each UID in `in_scope_requirements[]`, ensure there is a `GITHUB_ISSUE` link with `artifact_identifier: <issue-number>` on the requirement. Use `IMPLEMENTS` for materially-implemented requirements (matches `gc_create_github_issue`'s auto-link convention), `DOCUMENTS` for forward-looking ones. **Never** use `TESTS` — an issue is not an executable test. Material implementation status of the *code* is captured by separate `IMPLEMENTS` links from the requirement to actual code/ADR/config files (Step 5 above).

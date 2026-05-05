@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Canonical `skills/implement/SKILL.md` clarifies two corner cases that
+  were under-specified by the previous gate prose (closes #801):
+  - **Step 4.4 documentation-only carve-out.** TDD remains mandatory by
+    default. A narrow carve-out now permits skipping the red-green loop
+    when the entire diff is documentation (ADR / README / CHANGELOG /
+    skill prose / design notes) AND every clause / acceptance criterion
+    is protected by a named structural gate (policy check, schema
+    validator, lint rule, verifier script, structural invariant test).
+    The skip must be declared in the plan and re-stated as a comment on
+    the issue thread naming the gate. Substring or snapshot tests
+    written only to satisfy TDD wording are explicitly disallowed as
+    gates; if no real gate exists the agent must add one as part of
+    the PR or remove the unprotected clause from scope (no shipping a
+    requirement claim with no durable verification). Any executable
+    line anywhere in the diff invalidates the entire carve-out — the
+    full TDD loop applies, and any documentation in the same diff
+    rides along on the back of the executable behavior's tests. The
+    carve-out is re-validated against the actual diff at Step 4.5
+    clause-mapping and at Step 6 completion gate; an executable line
+    added during implementation invalidates it retroactively.
+  - **Step 15 / Step 16 backfill onto pre-existing artifacts.** Step
+    15's "materially implemented" classification now distinguishes
+    *case in-diff* (the diff contains the artifacts of record) from
+    *case pre-existing* (the diff finalizes a requirement whose
+    structural implementation already exists in pre-existing files
+    shipped under a sibling requirement). The case-pre-existing path
+    runs an explicit *pre-existing artifact discovery procedure*
+    BEFORE the DRAFT→ACTIVE transition: subject-area-bounded
+    `git ls-files`/`grep` against the requirement's named subsystems
+    and identifiers produces candidates, the agent reads each
+    candidate against the requirement statement to confirm
+    satisfaction (the MCP reverse lookup answers
+    "what is this already linked to," not "does this satisfy the
+    requirement" — content review is the validation), then
+    `gc_get_traceability_by_artifact` deduplicates against existing
+    links. The surviving candidates are partitioned by intended link
+    type (production code / config / ADR / docs → IMPLEMENTS;
+    automated tests → TESTS), and Step 16 Mode A creates each link
+    using its partition's link type — so an IMPLEMENTS link is never
+    created onto a candidate classified as a test. If discovery's
+    IMPLEMENTS partition is empty after a bounded, validated search,
+    the transition is refused and the user is surfaced — Ground
+    Control never gets promoted-without-coverage. A shared
+    *Backfill rules* block (used by Mode A case pre-existing and
+    Mode B) preserves valid existing links. Mode B retains its
+    original meaning (the literal zero-diff case from Step 4 step 5)
+    and now references the shared rules instead of duplicating them.
+- `architecture/policies/adr-policy.json` `workflow-guardrail-sync` rule
+  now also fires on changes to the canonical `skills/implement/SKILL.md`
+  (the authoritative location per ADR-027). The legacy
+  `.claude/skills/implement/SKILL.md` glob is retained for back-compat.
+  Without this, edits to the canonical workflow source slipped past
+  `make policy` and the ADR-021 sync gate. Covered by a new
+  `tools/tests/test_policy.py` unit test.
+- `docs/DEVELOPMENT_WORKFLOW.md`, `docs/WORKFLOW.md`, and ADR-021 carry
+  short notes describing the carve-out and backfill clarifications and
+  point at the operative SKILL.md prose. `docs/WORKFLOW.md` Phase 3
+  also drops two stale lines from the pre-ADR-029 era: the "user
+  reviews and approves" plan-approval gate (now an asynchronous issue
+  comment) and the link-creation-before-transition step ordering
+  (which contradicted the API's `IMPLEMENTS-only-on-ACTIVE`
+  invariant). The preflight design context lives in
+  `architecture/notes/implement-docs-only-preexisting-traceability-guardrails.md`.
+
 ### Added
 
 - `gc_codex_review` enforces the GC-O007 hard-cap-2 contract on
