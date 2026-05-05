@@ -222,8 +222,9 @@ Run `gc_codex_review` with `uncommitted=true` against the staged + unstaged chan
    - `repo_path`: absolute path from Step 1
    - `base_branch`: `{cfg.workflow.base_branch|default dev}`
    - `uncommitted`: `true`
+   - `issue_number`: the issue number resolved at Step 1, so the MCP server anchors the cycle counter to the issue thread (per ADR-029). When omitted, the server derives it from the current branch's leading numeric prefix (e.g. `796-cap-pre-push` → 796); pass it explicitly when the branch was named manually.
 3. Apply the **Review loop rules** (defined above Step 12) to the returned findings, fix locally, re-stage, and re-invoke `gc_codex_review` until clean.
-4. **Hard cap: 2 iterations.** No escape clause. After 2 invocations, if findings remain, STOP and post the remaining findings + your fix history as an issue comment, escalate to the user.
+4. **Hard cap: 2 iterations** (enforced by the MCP server, issue #796). The next invocation reads existing markers on the issue thread, counts pre-push cycles for the current (issue, branch) pair, and refuses cycle 3 with `error: "codex_review_prepush_cap_reached"` and `next_action: "post_summary_and_escalate_to_user"`. After cycle 2, if findings remain, STOP, post the remaining findings + your fix history as an issue comment, and escalate to the user. If the user authorizes cycle 3, retry with `override_cap=true` and `override_reason="<one-line quote of the user's authorization>"`.
 5. Once clean, proceed to Phase C with the staged diff. Step 12 then becomes a verification pass against the merge commit (typically a no-op).
 
 Skip this step only if the diff is so trivial (one-liner typo fix) that codex would have nothing to find. When in doubt, run it.

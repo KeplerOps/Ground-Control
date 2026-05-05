@@ -2272,9 +2272,10 @@ function buildPostingInstructions({ prNumber, reviewerLabel }) {
 // No new database, no local state file — the durable record lives on the
 // issue thread per ADR-029. Restart-safe by construction.
 //
-// Scope: enforces on `runCodexReview({ uncommitted: false, prNumber: <N> })`
-// only. Pre-push uncommitted reviews (Step 6.5) have a separate cap (5)
-// and no PR yet; left for a follow-up MVP.
+// Scope: this section enforces on `runCodexReview({ uncommitted: false,
+// prNumber: <N> })`. Pre-push (`uncommitted=true`) reviews have their own
+// cap and marker family — see "gc_codex_review pre-push cycle enforcement
+// (issue #796)" below.
 // ---------------------------------------------------------------------------
 
 export const CODEX_REVIEW_HARD_CAP = 2;
@@ -2341,6 +2342,7 @@ export function evaluateCodexReviewCycleCap({
       cap: hardCap,
       override: true,
       override_reason: overrideReason.trim(),
+      next_action: "fix_findings_then_summarize_and_escalate",
     };
   }
 
@@ -2461,6 +2463,7 @@ export function evaluateCodexVerifyCycleCap({
       cap: hardCap,
       override: true,
       override_reason: overrideReason.trim(),
+      next_action: "fix_finding_then_escalate_if_still_unresolved",
     };
   }
 
@@ -2508,6 +2511,178 @@ export function buildCodexVerifyCycleMarker({ prNumber, commentId, cycleNumber, 
     headline +
       " Posted by the MCP server to enforce the per-finding hard-cap-2 contract (issue #794). " +
       "Do not edit or delete — used by the next `gc_codex_verify_finding` invocation to count cycles." +
+      reasonLine,
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// gc_codex_review pre-push cycle enforcement (issue #796)
+//
+// Pre-push reviews run with `uncommitted=true` against the local working tree
+// before any PR exists. They hit the same diminishing-returns wall as
+// post-push reviews, so they inherit GC-O007 / ADR-029's hard-cap-2 contract.
+// Cycle 3 is forbidden unless the user explicitly authorizes an override —
+// the agent cannot self-authorize.
+//
+// Persistence: marker comment on the resolved GitHub issue thread (Step 1 of
+// the implement skill resolves an issue before reviews start). Anchored to
+// (issue_number, branch_name) so a re-checked-out branch resets cleanly and
+// distinct branches on the same issue do not collide. Same template family
+// as the existing post-push cycle markers and verify markers, but a disjoint
+// regex so the two parsers never accidentally cross-count.
+// ---------------------------------------------------------------------------
+
+export const CODEX_REVIEW_PREPUSH_HARD_CAP = 2;
+export const CODEX_REVIEW_PREPUSH_MARKER_PREFIX = "<!-- gc:codex-prepush-cycle";
+// Matches `<!-- gc:codex-prepush-cycle issue="N" branch="..." cycle="M" ... -->`.
+// `branch` is JSON-encoded so it can carry slashes and escaped quotes; the
+// regex captures the *raw* attribute body up to the first unescaped quote and
+// the caller JSON-parses it before comparing. Optional override/reason attrs
+// after `cycle` are tolerated, mirroring the post-push marker shape.
+const CODEX_REVIEW_PREPUSH_MARKER_RE =
+  /<!--\s*gc:codex-prepush-cycle\s+issue="(\d+)"\s+branch="((?:[^"\\]|\\.)*)"\s+cycle="(\d+)"[^]*?-->/g;
+
+// Pure: extract the leading positive integer from a branch name like
+// `796-cap-pre-push`. Returns null when the branch does not start with one or
+// more digits, or when the leading value would be zero / negative. Used as a
+// safe fallback for callers (the implement skill) that don't pass an explicit
+// `issue_number`.
+export function deriveIssueNumberFromBranch(branchName) {
+  if (typeof branchName !== "string" || branchName === "") return null;
+  const match = branchName.match(/^(\d+)(?:-|$)/);
+  if (!match) return null;
+  const n = Number.parseInt(match[1], 10);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  return n;
+}
+
+// Pure: count pre-push cycle markers for the given issueNumber. The marker
+// records the branch for audit context but the cap is anchored by issue
+// alone — a branch rename on the same issue cannot reset the counter. This
+// closes the bypass codex flagged in #800 review cycle 2: an agent
+// renaming `796-x` → `796-x-2` would previously start fresh under
+// (issue, branch) keying. Defensive: non-array input and non-string entries
+// return 0.
+export function parseCodexReviewPrePushCycleMarkers(commentBodies, issueNumber) {
+  if (!Array.isArray(commentBodies)) return 0;
+  let count = 0;
+  for (const body of commentBodies) {
+    if (typeof body !== "string") continue;
+    for (const m of body.matchAll(CODEX_REVIEW_PREPUSH_MARKER_RE)) {
+      const markerIssue = Number.parseInt(m[1], 10);
+      if (markerIssue !== issueNumber) continue;
+      // Validate branch attr is JSON-decodable so malformed markers don't
+      // pollute counts. We don't compare it against any specific branch; the
+      // attribute is audit-only context.
+      try {
+        JSON.parse(`"${m[2]}"`);
+      } catch {
+        continue;
+      }
+      count += 1;
+    }
+  }
+  return count;
+}
+
+// Pure: decide whether the next pre-push cycle is allowed. Same shape and
+// override semantics as evaluateCodexReviewCycleCap, with (issue, branch)
+// identity instead of (PR).
+export function evaluateCodexReviewPrePushCycleCap({
+  priorCount,
+  issueNumber,
+  branchName,
+  hardCap = CODEX_REVIEW_PREPUSH_HARD_CAP,
+  overrideCap = false,
+  overrideReason = null,
+}) {
+  if (typeof priorCount !== "number" || !Number.isFinite(priorCount) || priorCount < 0) {
+    throw new Error(
+      `evaluateCodexReviewPrePushCycleCap: priorCount must be a non-negative number, got ${priorCount}`,
+    );
+  }
+
+  if (overrideCap === true) {
+    if (typeof overrideReason !== "string" || overrideReason.trim() === "") {
+      return {
+        ok: false,
+        error: "codex_review_prepush_override_missing_reason",
+        message:
+          "override_cap=true requires a non-empty override_reason quoting the user's authorization. " +
+          "Audits cannot distinguish legitimate overrides from accidental ones without a reason.",
+        issue_number: issueNumber,
+        branch: branchName,
+        prior_cycles: priorCount,
+        cap: hardCap,
+      };
+    }
+    return {
+      ok: true,
+      nextCycle: priorCount + 1,
+      cap: hardCap,
+      override: true,
+      override_reason: overrideReason.trim(),
+      next_action: "fix_findings_then_summarize_and_escalate",
+    };
+  }
+
+  if (priorCount >= hardCap) {
+    return {
+      ok: false,
+      error: "codex_review_prepush_cap_reached",
+      message:
+        `gc_codex_review pre-push hard cap reached (${hardCap} cycles) for issue #${issueNumber} ` +
+        `on branch '${branchName}'. Per GC-O007 / ADR-029, after cycle ${hardCap} you must (a) post a ` +
+        `summary of findings + fixes to the issue thread, then (b) escalate to the user and ask whether ` +
+        `to run cycle ${hardCap + 1} or push as-is. Do not address findings by silently re-invoking ` +
+        `codex. If the user authorizes another cycle, retry with override_cap=true and ` +
+        `override_reason="<their authorization>".`,
+      issue_number: issueNumber,
+      branch: branchName,
+      prior_cycles: priorCount,
+      cap: hardCap,
+      next_action: "post_summary_and_escalate_to_user",
+    };
+  }
+
+  const nextCycle = priorCount + 1;
+  return {
+    ok: true,
+    nextCycle,
+    cap: hardCap,
+    next_action:
+      nextCycle === hardCap
+        ? "fix_all_findings_then_summarize_and_escalate"
+        : "fix_all_findings_and_restage",
+  };
+}
+
+export function buildCodexReviewPrePushCycleMarker({
+  issueNumber,
+  branchName,
+  cycleNumber,
+  override = false,
+  overrideReason = null,
+}) {
+  const branchAttr = JSON.stringify(String(branchName)).slice(1, -1); // raw inner JSON-encoded form
+  const overrideAttr = override === true ? ' override="true"' : "";
+  const reasonAttr =
+    override === true && typeof overrideReason === "string" && overrideReason.trim() !== ""
+      ? ` reason=${JSON.stringify(overrideReason.trim())}`
+      : "";
+  const headline = override
+    ? `_gc_codex_review pre-push cycle ${cycleNumber} (USER-AUTHORIZED OVERRIDE past cap ${CODEX_REVIEW_PREPUSH_HARD_CAP}) complete for issue #${issueNumber} on branch '${branchName}'._`
+    : `_gc_codex_review pre-push cycle ${cycleNumber} of ${CODEX_REVIEW_PREPUSH_HARD_CAP} complete for issue #${issueNumber} on branch '${branchName}'._`;
+  const reasonLine =
+    override && typeof overrideReason === "string" && overrideReason.trim() !== ""
+      ? `\nOverride reason: ${overrideReason.trim()}`
+      : "";
+  return [
+    `${CODEX_REVIEW_PREPUSH_MARKER_PREFIX} issue="${issueNumber}" branch="${branchAttr}" cycle="${cycleNumber}"${overrideAttr}${reasonAttr} -->`,
+    "",
+    headline +
+      " Posted by the MCP server to enforce the pre-push hard-cap-2 contract (issue #796). " +
+      "Do not edit or delete — used by the next `gc_codex_review` (uncommitted) invocation to count cycles." +
       reasonLine,
   ].join("\n");
 }
@@ -2789,6 +2964,13 @@ async function getPullRequestClosingIssues(repoRoot, prNumber) {
 // PR is the same endpoint — issues/{N}/comments). Used by both cycle-marker
 // counting and phase-marker counting. Returns an array of comment body
 // strings; entries that don't have a string body are silently skipped.
+//
+// Paginates through every page (100 comments at a time) via `gh api
+// --paginate --slurp`. `--paginate` alone emits one JSON array per page
+// concatenated as adjacent arrays (invalid JSON); `--slurp` wraps them in an
+// outer array of arrays which we flatten. Without pagination, an active
+// issue with more than 100 comments would hide marker comments on later pages
+// and silently bypass the hard-cap enforcement.
 async function readIssueCommentBodies(repoRoot, owner, name, issueNumber) {
   const { stdout } = await execFile(
     "gh",
@@ -2796,14 +2978,20 @@ async function readIssueCommentBodies(repoRoot, owner, name, issueNumber) {
       "api",
       "--method",
       "GET",
+      "--paginate",
+      "--slurp",
       `/repos/${owner}/${name}/issues/${issueNumber}/comments`,
       "-F",
       "per_page=100",
     ],
     { cwd: repoRoot },
   );
-  const comments = JSON.parse(stdout);
-  if (!Array.isArray(comments)) return [];
+  const pages = JSON.parse(stdout);
+  if (!Array.isArray(pages)) return [];
+  // `--slurp` produces array-of-arrays (one inner array per page). Flatten
+  // before extracting body strings. Tolerate the legacy single-array shape
+  // as well, in case future gh versions change this behavior.
+  const comments = pages.length > 0 && Array.isArray(pages[0]) ? pages.flat() : pages;
   return comments
     .map((c) => (c && typeof c.body === "string" ? c.body : null))
     .filter((b) => b != null);
@@ -2904,6 +3092,61 @@ async function postCodexReviewCycleMarker(repoRoot, owner, name, prNumber, cycle
     ],
     { cwd: repoRoot },
   );
+}
+
+// Read the issue's comments and count prior pre-push cycle markers for the
+// given issueNumber. Cap is anchored by issue alone (branch rename does not
+// reset the counter — see parseCodexReviewPrePushCycleMarkers).
+async function readPriorCodexReviewPrePushCycleCount(repoRoot, owner, name, issueNumber) {
+  const bodies = await readIssueCommentBodies(repoRoot, owner, name, issueNumber);
+  return parseCodexReviewPrePushCycleMarkers(bodies, issueNumber);
+}
+
+// Post the pre-push cycle marker on the resolved issue thread.
+async function postCodexReviewPrePushCycleMarker(
+  repoRoot,
+  owner,
+  name,
+  issueNumber,
+  branchName,
+  cycleNumber,
+  extras = {},
+) {
+  const body = buildCodexReviewPrePushCycleMarker({
+    issueNumber,
+    branchName,
+    cycleNumber,
+    override: extras.override === true,
+    overrideReason: extras.overrideReason ?? null,
+  });
+  await execFile(
+    "gh",
+    [
+      "api",
+      "--method",
+      "POST",
+      `/repos/${owner}/${name}/issues/${issueNumber}/comments`,
+      "-f",
+      `body=${body}`,
+    ],
+    { cwd: repoRoot },
+  );
+}
+
+// Resolve the current branch via `git rev-parse --abbrev-ref HEAD`. Returns
+// null when HEAD is detached or when the call fails — the caller decides how
+// to surface that to the agent.
+async function getCurrentBranchName(repoRoot) {
+  try {
+    const { stdout } = await execFile("git", ["-C", repoRoot, "rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: repoRoot,
+    });
+    const branch = String(stdout).trim();
+    if (!branch || branch === "HEAD") return null;
+    return branch;
+  } catch {
+    return null;
+  }
 }
 
 async function autoDetectPrNumber(repoRoot) {
@@ -3145,6 +3388,7 @@ export async function runCodexReview({
   baseBranch = "dev",
   uncommitted = false,
   prNumber = null,
+  issueNumber = null,
   overrideCap = false,
   overrideReason = null,
   overridePhaseGate = false,
@@ -3157,10 +3401,109 @@ export async function runCodexReview({
     effectivePr = await autoDetectPrNumber(repoRoot);
   }
 
-  // Hard-cap-2 enforcement (issue #794 MVP-1) + plan-before-review ordering
-  // gate (issue #794 MVP-2 extension). Both apply only to post-push reviews
-  // tied to a PR; pre-push uncommitted reviews use a separate mechanic.
+  // Hard-cap-2 enforcement: post-push reviews use the (PR) marker family
+  // (issue #794 MVP-1); pre-push uncommitted reviews use the (issue, branch)
+  // marker family (issue #796). Plan-before-review ordering applies to
+  // post-push only.
   let cycleOwnership = null;
+  let prePushOwnership = null;
+
+  if (uncommitted) {
+    // Pre-push enforcement (#796). Resolve (issueNumber, branchName) — the
+    // explicit param wins; otherwise derive from the current branch name. If
+    // neither resolves to a positive integer, refuse with a structured error
+    // so the agent fixes the input rather than silently bypassing the cap.
+    const branchName = await getCurrentBranchName(repoRoot);
+    if (!branchName) {
+      return {
+        repo_path: repoRoot,
+        base_branch: baseBranch,
+        uncommitted,
+        pr_number: null,
+        ok: false,
+        error: "prepush_branch_unresolved",
+        message:
+          "gc_codex_review (uncommitted=true) requires a named branch to anchor the cycle counter, " +
+          "but HEAD is detached or the branch could not be resolved. Switch to a named feature branch " +
+          "(typically the one created by `gh issue develop <issue>`) and retry.",
+        next_action: "checkout_named_feature_branch",
+        finding_count: 0,
+        comments: [],
+        reviewers: [],
+      };
+    }
+
+    let effectiveIssue = Number.isInteger(issueNumber) && issueNumber > 0 ? issueNumber : null;
+    if (effectiveIssue == null) {
+      effectiveIssue = deriveIssueNumberFromBranch(branchName);
+    }
+    if (effectiveIssue == null) {
+      return {
+        repo_path: repoRoot,
+        base_branch: baseBranch,
+        uncommitted,
+        pr_number: null,
+        ok: false,
+        error: "prepush_issue_unresolved",
+        message:
+          `gc_codex_review (uncommitted=true) requires an issue number to anchor the cycle counter ` +
+          `to the issue thread (per ADR-029). Branch '${branchName}' does not start with a numeric ` +
+          `issue prefix (e.g. '796-...'), and no issue_number was passed. Either pass issue_number ` +
+          `explicitly or switch to a branch created via 'gh issue develop <issue>'.`,
+        branch: branchName,
+        next_action: "pass_issue_number_or_use_numeric_branch_prefix",
+        finding_count: 0,
+        comments: [],
+        reviewers: [],
+      };
+    }
+
+    const { owner, name } = await getOwnerRepo(repoRoot);
+    const priorCount = await readPriorCodexReviewPrePushCycleCount(
+      repoRoot,
+      owner,
+      name,
+      effectiveIssue,
+    );
+    const decision = evaluateCodexReviewPrePushCycleCap({
+      priorCount,
+      issueNumber: effectiveIssue,
+      branchName,
+      overrideCap,
+      overrideReason,
+    });
+    if (!decision.ok) {
+      return {
+        repo_path: repoRoot,
+        base_branch: baseBranch,
+        uncommitted,
+        pr_number: null,
+        ok: false,
+        error: decision.error,
+        message: decision.message,
+        issue_number: decision.issue_number,
+        branch: decision.branch,
+        prior_cycles: decision.prior_cycles,
+        cap: decision.cap,
+        next_action: decision.next_action ?? null,
+        finding_count: 0,
+        comments: [],
+        reviewers: [],
+      };
+    }
+    prePushOwnership = {
+      owner,
+      name,
+      issueNumber: effectiveIssue,
+      branchName,
+      cycleNumber: decision.nextCycle,
+      cap: decision.cap,
+      nextAction: decision.next_action ?? null,
+      override: decision.override === true,
+      overrideReason: decision.override_reason ?? null,
+    };
+  }
+
   if (!uncommitted && effectivePr != null) {
     const { owner, name } = await getOwnerRepo(repoRoot);
 
@@ -3324,12 +3667,12 @@ export async function runCodexReview({
 
   const comments = dedupFindings([...coreComments, ...securityComments]);
 
-  // Successfully ran codex — record the cycle marker on the PR so subsequent
-  // invocations honor the hard cap. Posting after the codex run (not before)
-  // means failed/aborted runs don't consume a cycle. Marker-post failures are
-  // not fatal: the review itself succeeded and surfaced findings; the worst
-  // case is the next cycle's count is off-by-one, which the cap-evaluator
-  // handles gracefully (it reads whatever count is on the PR at the time).
+  // Successfully ran codex — record the cycle marker so subsequent invocations
+  // honor the hard cap. Posting after the codex run (not before) means
+  // failed/aborted runs don't consume a cycle. Marker-post failures are not
+  // fatal: the review itself succeeded and surfaced findings; the worst case
+  // is the next cycle's count is off-by-one, which the cap-evaluator handles
+  // gracefully (it reads whatever count is on the issue thread at the time).
   if (cycleOwnership != null) {
     try {
       await postCodexReviewCycleMarker(
@@ -3349,11 +3692,77 @@ export async function runCodexReview({
     }
   }
 
+  if (prePushOwnership != null) {
+    // The cap is durable iff the marker lands on the issue thread. Pre-push
+    // has no PR / CI / other secondary check — the marker IS the enforcement
+    // surface, so a marker-post failure has to fail the run. Findings are
+    // preserved in the returned payload (the agent can still act on them);
+    // failing here pushes the agent to retry once the underlying issue
+    // (network, gh auth, repo perms) is resolved, which is idempotent
+    // because the cap evaluator reads whatever count is on the thread.
+    try {
+      await postCodexReviewPrePushCycleMarker(
+        repoRoot,
+        prePushOwnership.owner,
+        prePushOwnership.name,
+        prePushOwnership.issueNumber,
+        prePushOwnership.branchName,
+        prePushOwnership.cycleNumber,
+        { override: prePushOwnership.override, overrideReason: prePushOwnership.overrideReason },
+      );
+    } catch (markerError) {
+      return {
+        repo_path: repoRoot,
+        base_branch: baseBranch,
+        uncommitted,
+        pr_number: null,
+        issue_number: prePushOwnership.issueNumber,
+        branch: prePushOwnership.branchName,
+        ok: false,
+        error: "prepush_cycle_record_failed",
+        message:
+          `gc_codex_review (uncommitted=true) ran successfully but failed to record the pre-push ` +
+          `cycle marker on issue #${prePushOwnership.issueNumber} (branch ` +
+          `'${prePushOwnership.branchName}'): ${markerError.message}. The cap is not durable for ` +
+          `this run; do not treat as a completed cycle. Findings (if any) are returned below for ` +
+          `review, but the workflow must not proceed past Step 6.5 until a successful run records ` +
+          `the marker. Retry once the underlying issue (network, gh auth, repo permissions) is ` +
+          `resolved.`,
+        next_action: "fix_underlying_marker_post_failure_and_retry",
+        cycle_record_error: markerError.message,
+        attempted_cycle: prePushOwnership.cycleNumber,
+        cap: prePushOwnership.cap,
+        finding_count: comments.length,
+        comments,
+        core_review_text: core.body,
+        security_review_text: security.body,
+        reviewers: [
+          { name: "core", finding_count: core.commentIds.length },
+          { name: "security", finding_count: security.commentIds.length },
+        ],
+      };
+    }
+  }
+
+  const cycleSource = cycleOwnership ?? prePushOwnership ?? null;
+  // When the cycle returned 0 findings, the cap-evaluator's pre-run
+  // next_action ("fix_all_findings_..." / "fix_all_findings_then_summarize_...")
+  // is misleading — there is nothing to fix. Override to a clean signal so the
+  // caller proceeds (and so cycle 2 doesn't carry the cycle-2 escalation cue
+  // when there are no findings to summarize). Refusal envelopes (returned
+  // earlier with their own next_action) and override-cycle metadata are
+  // unaffected.
+  let effectiveNextAction = cycleSource ? cycleSource.nextAction : null;
+  if (cycleSource != null && comments.length === 0) {
+    effectiveNextAction = "proceed_clean";
+  }
   return {
     repo_path: repoRoot,
     base_branch: baseBranch,
     uncommitted,
     pr_number: effectivePr,
+    issue_number: prePushOwnership ? prePushOwnership.issueNumber : null,
+    branch: prePushOwnership ? prePushOwnership.branchName : null,
     finding_count: comments.length,
     comments,
     core_review_text: core.body,
@@ -3362,11 +3771,11 @@ export async function runCodexReview({
       { name: "core", finding_count: core.commentIds.length },
       { name: "security", finding_count: security.commentIds.length },
     ],
-    cycle: cycleOwnership ? cycleOwnership.cycleNumber : null,
-    cap: cycleOwnership ? cycleOwnership.cap : null,
-    next_action: cycleOwnership ? cycleOwnership.nextAction : null,
-    override: cycleOwnership && cycleOwnership.override === true ? true : false,
-    override_reason: cycleOwnership ? cycleOwnership.overrideReason : null,
+    cycle: cycleSource ? cycleSource.cycleNumber : null,
+    cap: cycleSource ? cycleSource.cap : null,
+    next_action: effectiveNextAction,
+    override: cycleSource && cycleSource.override === true ? true : false,
+    override_reason: cycleSource ? cycleSource.overrideReason : null,
   };
 }
 

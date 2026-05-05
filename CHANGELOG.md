@@ -9,6 +9,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `gc_codex_review` enforces the GC-O007 hard-cap-2 contract on
+  pre-push (`uncommitted=true`) reviews as well, closing the
+  follow-up gap that #794 MVP-1 left open (closes #796). The cycle
+  counter is anchored to the resolved GitHub issue thread; the
+  current branch name is recorded in the marker for audit context
+  but is NOT part of the cap key (per #800 cycle-2 review — keying by
+  `(issue, branch)` would let a noncompliant agent rename the branch
+  and start fresh). After each successful pre-push run the tool posts a
+  machine-readable marker (`<!-- gc:codex-prepush-cycle issue="..."
+  branch="..." cycle="..." -->`); the next invocation reads existing
+  markers and refuses cycle 3 with `error:
+  "codex_review_prepush_cap_reached"` and `next_action:
+  "post_summary_and_escalate_to_user"`. The new family is disjoint
+  from the post-push `gc:codex-review-cycle` family so the two
+  parsers never cross-count. `override_cap` + `override_reason`
+  apply identically (user-only authorization; the agent cannot
+  self-authorize). Successful returns surface `cycle`, `cap`,
+  `next_action`, `override`, `override_reason`, plus the resolved
+  `issue_number` and `branch`. New optional `issue_number` parameter
+  on `gc_codex_review`; when omitted, the tool derives the issue
+  number from the current branch's leading numeric prefix (e.g.
+  `796-cap-pre-push` → 796) and refuses with a structured error if
+  neither resolves. Detached-HEAD pre-push runs are also refused.
+  Marker-post failures fail the entire pre-push run with
+  `error: "prepush_cycle_record_failed"` (findings are preserved in
+  the response so they aren't lost) — the cap is only durable if
+  the marker lands, so a silent failure cannot count as a completed
+  cycle. The shared issue-comment reader now uses `gh api
+  --paginate --slurp` so issues with more than 100 comments don't
+  hide markers on later pages and silently bypass enforcement
+  (this also tightens the post-push and verify cap counts on
+  long-lived issues). Clean cycles (no findings) return
+  `next_action: "proceed_clean"` so the cap-evaluator's pre-run
+  `fix_all_findings_...` hint doesn't mislead the caller after a
+  0-finding review. Five new pure-function exports back the
+  enforcement: `parseCodexReviewPrePushCycleMarkers`,
+  `evaluateCodexReviewPrePushCycleCap`,
+  `buildCodexReviewPrePushCycleMarker`,
+  `deriveIssueNumberFromBranch`, and constants
+  `CODEX_REVIEW_PREPUSH_HARD_CAP` /
+  `CODEX_REVIEW_PREPUSH_MARKER_PREFIX`. 35+ new unit + integration
+  tests cover the parser, evaluator, marker round-trip (including
+  override-with-embedded-quote reasons and slashes-in-branch),
+  branch derivation, the disjoint-family invariant, the
+  `runCodexReview` `uncommitted=true` decision tree (detached-HEAD
+  refusal, missing-issue refusal, accepted positive paths), per-issue
+  keying (branch rename does NOT bypass cap), and the post-codex
+  marker-write path (success metadata + `prepush_cycle_record_failed`
+  on POST failure) via hermetic gh + codex shims. Override paths on
+  all three review/verify cap evaluators now return a concrete
+  `next_action` instead of `null`.
 - ADR-030 "On-prem Hetzner Deployment" — documents the new production deployment architecture (red-dragon, Hetzner dedicated, Tailscale-only), the runner→red-dragon tailnet path, the SSH authorization model (`gc-deploy` user with `command="/opt/gc/deploy.sh",restrict <ed25519-pubkey>`), what ADR-018 retains and sheds, and the migration timeline.
 - Canonical `skills/implement/SKILL.md` at the repo root (closes #791,
   GC-O007, GC-O009). One source of truth for the agentic implement

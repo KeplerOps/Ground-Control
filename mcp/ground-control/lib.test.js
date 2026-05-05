@@ -35,6 +35,13 @@ import {
   buildCodexVerifyCycleMarker,
   CODEX_VERIFY_HARD_CAP,
   CODEX_VERIFY_CYCLE_MARKER_PREFIX,
+  parseCodexReviewPrePushCycleMarkers,
+  evaluateCodexReviewPrePushCycleCap,
+  buildCodexReviewPrePushCycleMarker,
+  deriveIssueNumberFromBranch,
+  CODEX_REVIEW_PREPUSH_HARD_CAP,
+  CODEX_REVIEW_PREPUSH_MARKER_PREFIX,
+  runCodexReview,
   dedupFindings,
   buildCodexVerifyPrompt,
   parseCodexVerifyTail,
@@ -2009,6 +2016,7 @@ describe("evaluateCodexReviewCycleCap", () => {
     assert.equal(result.override, true);
     assert.equal(result.nextCycle, 3);
     assert.match(result.override_reason, /yes run cycle 3 to verify/);
+    assert.equal(result.next_action, "fix_findings_then_summarize_and_escalate");
   });
 
   it("rejects overrideCap=true without an overrideReason (audit requirement)", () => {
@@ -2179,6 +2187,10 @@ describe("evaluateCodexVerifyCycleCap", () => {
     assert.equal(goodOverride.ok, true);
     assert.equal(goodOverride.override, true);
     assert.equal(goodOverride.nextCycle, 3);
+    assert.equal(
+      goodOverride.next_action,
+      "fix_finding_then_escalate_if_still_unresolved",
+    );
   });
 
   it("throws on garbage priorCount (defensive)", () => {
@@ -2206,6 +2218,854 @@ describe("buildCodexVerifyCycleMarker", () => {
     assert.match(m, /USER-AUTHORIZED OVERRIDE/);
     assert.match(m, new RegExp(reason));
     assert.equal(parseCodexVerifyCycleMarkers([m], 1, 7), 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gc_codex_review pre-push cycle enforcement (#796)
+//
+// Pre-push reviews (`uncommitted=true`) hit the same diminishing-returns wall
+// as post-push reviews, so they inherit GC-O007's hard-cap-2. The marker is a
+// new, disjoint family from the post-push one — anchored to (issue, branch)
+// instead of (PR) — so the two parsers never accidentally cross-count.
+// ---------------------------------------------------------------------------
+
+describe("deriveIssueNumberFromBranch", () => {
+  it("extracts the leading integer from a gh-issue-develop-style branch", () => {
+    assert.equal(deriveIssueNumberFromBranch("796-cap-pre-push"), 796);
+    assert.equal(deriveIssueNumberFromBranch("1-x"), 1);
+  });
+
+  it("returns the integer when the branch is just digits", () => {
+    assert.equal(deriveIssueNumberFromBranch("796"), 796);
+  });
+
+  it("returns null when the branch does not start with digits", () => {
+    assert.equal(deriveIssueNumberFromBranch("feature/796-x"), null);
+    assert.equal(deriveIssueNumberFromBranch("dev"), null);
+    assert.equal(deriveIssueNumberFromBranch("main"), null);
+    assert.equal(deriveIssueNumberFromBranch("release-2.0"), null);
+  });
+
+  it("returns null on empty / non-string / nullish input", () => {
+    assert.equal(deriveIssueNumberFromBranch(""), null);
+    assert.equal(deriveIssueNumberFromBranch(null), null);
+    assert.equal(deriveIssueNumberFromBranch(undefined), null);
+    assert.equal(deriveIssueNumberFromBranch(42), null);
+  });
+
+  it("rejects zero or negative leading values (issue numbers are positive)", () => {
+    assert.equal(deriveIssueNumberFromBranch("0-foo"), null);
+    assert.equal(deriveIssueNumberFromBranch("-1-foo"), null);
+  });
+});
+
+describe("parseCodexReviewPrePushCycleMarkers", () => {
+  it("returns 0 when no comments contain markers", () => {
+    const bodies = ["random comment", "another", "## summary"];
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 796), 0);
+  });
+
+  it("counts markers for the matching issue regardless of branch", () => {
+    const bodies = [
+      'cycle 1: <!-- gc:codex-prepush-cycle issue="796" branch="796-foo" cycle="1" -->',
+      "unrelated",
+      'cycle 2: <!-- gc:codex-prepush-cycle issue="796" branch="796-foo" cycle="2" -->',
+    ];
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 796), 2);
+  });
+
+  it("ignores markers for other issues", () => {
+    const bodies = [
+      '<!-- gc:codex-prepush-cycle issue="100" branch="796-foo" cycle="1" -->',
+      '<!-- gc:codex-prepush-cycle issue="796" branch="796-foo" cycle="1" -->',
+    ];
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 796), 1);
+  });
+
+  it("counts markers from any branch on the same issue (closes branch-rename bypass)", () => {
+    // Per #800 review cycle 2: a noncompliant agent could rename
+    // `796-x` → `796-x-2` to evade per-(issue, branch) keying. The cap is now
+    // anchored by issue alone — markers on either branch count toward the same
+    // budget. Branch is recorded in the marker for audit context only.
+    const bodies = [
+      '<!-- gc:codex-prepush-cycle issue="796" branch="796-foo" cycle="1" -->',
+      '<!-- gc:codex-prepush-cycle issue="796" branch="796-bar" cycle="2" -->',
+    ];
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 796), 2);
+  });
+
+  it("does not cross-count post-push cycle markers (different family)", () => {
+    const bodies = [
+      '<!-- gc:codex-review-cycle cycle="1" pr="500" -->',
+      '<!-- gc:codex-review-cycle cycle="2" pr="500" -->',
+    ];
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 500), 0);
+  });
+
+  it("ignores malformed markers (missing attrs, unquoted, garbled)", () => {
+    const bodies = [
+      "<!-- gc:codex-prepush-cycle -->",
+      '<!-- gc:codex-prepush-cycle issue="796" branch="796-foo" -->', // no cycle
+      '<!-- gc:codex-prepush-cycle issue="796" cycle="1" -->', // no branch
+      '<!-- gc:codex-prepush-cycle branch="796-foo" cycle="1" -->', // no issue
+      "<!-- gc:codex-prepush-cycle issue=796 branch=796-foo cycle=1 -->", // unquoted
+    ];
+    assert.equal(parseCodexReviewPrePushCycleMarkers(bodies, 796), 0);
+  });
+
+  it("tolerates non-string entries and non-array input", () => {
+    assert.equal(parseCodexReviewPrePushCycleMarkers(["a", 42, null], 1), 0);
+    assert.equal(parseCodexReviewPrePushCycleMarkers(null, 1), 0);
+    assert.equal(parseCodexReviewPrePushCycleMarkers("not an array", 1), 0);
+  });
+});
+
+describe("evaluateCodexReviewPrePushCycleCap", () => {
+  it("allows cycle 1 with a fix-and-push next_action", () => {
+    const r = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 0,
+      issueNumber: 796,
+      branchName: "796-foo",
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.nextCycle, 1);
+    assert.equal(r.cap, CODEX_REVIEW_PREPUSH_HARD_CAP);
+    assert.equal(r.next_action, "fix_all_findings_and_restage");
+    assert.notEqual(r.override, true);
+  });
+
+  it("allows cycle 2 with the summarize-and-escalate discipline", () => {
+    const r = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 1,
+      issueNumber: 796,
+      branchName: "796-foo",
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.nextCycle, 2);
+    assert.equal(r.next_action, "fix_all_findings_then_summarize_and_escalate");
+  });
+
+  it("refuses cycle 3 with codex_review_prepush_cap_reached", () => {
+    const r = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 2,
+      issueNumber: 796,
+      branchName: "796-foo",
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.error, "codex_review_prepush_cap_reached");
+    assert.equal(r.prior_cycles, 2);
+    assert.equal(r.cap, 2);
+    assert.equal(r.issue_number, 796);
+    assert.equal(r.branch, "796-foo");
+    assert.equal(r.next_action, "post_summary_and_escalate_to_user");
+    assert.match(r.message, /hard cap reached/);
+    assert.match(r.message, /escalate to the user/);
+    assert.match(r.message, /override_cap=true/);
+  });
+
+  it("refuses higher counts the same way (cap is a floor)", () => {
+    const r = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 9,
+      issueNumber: 1,
+      branchName: "1-x",
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.prior_cycles, 9);
+  });
+
+  it("respects an override hardCap (used by tests / future per-tool caps)", () => {
+    const allowed = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 2,
+      issueNumber: 1,
+      branchName: "1-x",
+      hardCap: 5,
+    });
+    assert.equal(allowed.ok, true);
+    assert.equal(allowed.nextCycle, 3);
+    const refused = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 5,
+      issueNumber: 1,
+      branchName: "1-x",
+      hardCap: 5,
+    });
+    assert.equal(refused.ok, false);
+    assert.equal(refused.cap, 5);
+  });
+
+  it("allows cycle 3 when overrideCap=true with a non-empty overrideReason", () => {
+    const r = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 2,
+      issueNumber: 796,
+      branchName: "796-foo",
+      overrideCap: true,
+      overrideReason: "user said 'yes run cycle 3 to verify' on 2026-05-04",
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.override, true);
+    assert.equal(r.nextCycle, 3);
+    assert.match(r.override_reason, /yes run cycle 3 to verify/);
+    assert.equal(r.next_action, "fix_findings_then_summarize_and_escalate");
+  });
+
+  it("rejects overrideCap=true without an overrideReason (audit requirement)", () => {
+    const r1 = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 2,
+      issueNumber: 1,
+      branchName: "1-x",
+      overrideCap: true,
+    });
+    assert.equal(r1.ok, false);
+    assert.equal(r1.error, "codex_review_prepush_override_missing_reason");
+
+    const r2 = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 2,
+      issueNumber: 1,
+      branchName: "1-x",
+      overrideCap: true,
+      overrideReason: "   ",
+    });
+    assert.equal(r2.ok, false);
+    assert.equal(r2.error, "codex_review_prepush_override_missing_reason");
+  });
+
+  it("override applies even within the cap (allows arbitrary mid-flight overrides)", () => {
+    const r = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 0,
+      issueNumber: 796,
+      branchName: "796-foo",
+      overrideCap: true,
+      overrideReason: "user wants cycle 1 marked as override for some reason",
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.override, true);
+    assert.equal(r.nextCycle, 1);
+  });
+
+  it("throws on garbage priorCount (defensive)", () => {
+    assert.throws(() =>
+      evaluateCodexReviewPrePushCycleCap({
+        priorCount: -1,
+        issueNumber: 1,
+        branchName: "x",
+      }),
+    );
+    assert.throws(() =>
+      evaluateCodexReviewPrePushCycleCap({
+        priorCount: NaN,
+        issueNumber: 1,
+        branchName: "x",
+      }),
+    );
+    assert.throws(() =>
+      evaluateCodexReviewPrePushCycleCap({
+        priorCount: "1",
+        issueNumber: 1,
+        branchName: "x",
+      }),
+    );
+  });
+});
+
+describe("buildCodexReviewPrePushCycleMarker", () => {
+  it("produces a marker that round-trips through parseCodexReviewPrePushCycleMarkers", () => {
+    const marker = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 796,
+      branchName: "796-foo",
+      cycleNumber: 1,
+    });
+    assert.ok(marker.startsWith(CODEX_REVIEW_PREPUSH_MARKER_PREFIX));
+    assert.equal(parseCodexReviewPrePushCycleMarkers([marker], 796), 1);
+  });
+
+  it("includes the cycle, cap, issue, and branch in the human-readable body", () => {
+    const marker = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 796,
+      branchName: "796-foo",
+      cycleNumber: 2,
+    });
+    assert.match(marker, /cycle 2 of 2/);
+    assert.match(marker, /issue #796/);
+    assert.match(marker, /796-foo/);
+    assert.match(marker, /issue #796\b/); // attribution stays scoped
+  });
+
+  it("two markers for the same issue are both counted regardless of branch", () => {
+    const m1 = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 50,
+      branchName: "50-x",
+      cycleNumber: 1,
+    });
+    const m2 = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 50,
+      branchName: "50-x-renamed",
+      cycleNumber: 2,
+    });
+    // Same issue, different branches → both count under per-issue keying.
+    assert.equal(parseCodexReviewPrePushCycleMarkers([m1, m2], 50), 2);
+    const other = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 999,
+      branchName: "999-x",
+      cycleNumber: 1,
+    });
+    assert.equal(parseCodexReviewPrePushCycleMarkers([m1, m2, other], 50), 2);
+  });
+
+  it("renders an override marker distinguishable from regular cycle markers", () => {
+    const reason = "user authorized cycle 3 to verify cycle-2 fixes";
+    const marker = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 796,
+      branchName: "796-foo",
+      cycleNumber: 3,
+      override: true,
+      overrideReason: reason,
+    });
+    assert.match(marker, /override="true"/);
+    assert.match(marker, /reason="[^"]+"/);
+    assert.match(marker, /USER-AUTHORIZED OVERRIDE/);
+    assert.match(marker, new RegExp(reason));
+    assert.equal(parseCodexReviewPrePushCycleMarkers([marker], 796), 1);
+  });
+
+  it("escapes quotes in override reasons so the comment HTML stays parseable", () => {
+    const tricky = 'user said "yes do it" then ran off';
+    const marker = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 1,
+      branchName: "1-x",
+      cycleNumber: 3,
+      override: true,
+      overrideReason: tricky,
+    });
+    assert.match(marker, /reason="user said \\"yes do it\\" then ran off"/);
+    assert.equal(parseCodexReviewPrePushCycleMarkers([marker], 1), 1);
+  });
+
+  it("supports branches with slashes in the audit-context attribute", () => {
+    const marker = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 200,
+      branchName: "feat/200-cool",
+      cycleNumber: 1,
+    });
+    // JSON-encoding preserves slashes; the marker round-trips.
+    assert.equal(parseCodexReviewPrePushCycleMarkers([marker], 200), 1);
+    // Different issue still doesn't match.
+    assert.equal(parseCodexReviewPrePushCycleMarkers([marker], 999), 0);
+  });
+
+  it("attribution mentions the enforcement issue (#796) so reviewers can audit", () => {
+    const marker = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 1,
+      branchName: "1-x",
+      cycleNumber: 1,
+    });
+    assert.match(marker, /issue #796/);
+  });
+});
+
+describe("runCodexReview uncommitted=true input gating", () => {
+  // These tests exercise the uncommitted=true decision tree before any gh /
+  // codex shells out. The refusal paths (detached HEAD, missing issue) are the
+  // most important pre-flight checks because they are the only thing standing
+  // between an unresolvable input and a half-completed run that no marker can
+  // anchor.
+  function makeTempRepo({ branch = "main", detached = false } = {}) {
+    const dir = mkdtempSync(join(tmpdir(), "gc-prepush-test-"));
+    execFileSync("git", ["-C", dir, "init", "-q", "--initial-branch", branch]);
+    execFileSync("git", ["-C", dir, "config", "user.email", "test@example.com"]);
+    execFileSync("git", ["-C", dir, "config", "user.name", "test"]);
+    // Need at least one commit so HEAD points somewhere we can detach onto.
+    writeFileSync(join(dir, "README"), "x\n");
+    execFileSync("git", ["-C", dir, "add", "README"]);
+    execFileSync("git", ["-C", dir, "commit", "-q", "-m", "init"]);
+    if (detached) {
+      const sha = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"]).toString().trim();
+      execFileSync("git", ["-C", dir, "-c", "advice.detachedHead=false", "checkout", "-q", sha]);
+    }
+    return dir;
+  }
+
+  it("refuses with prepush_branch_unresolved on detached HEAD before invoking gh/codex", async () => {
+    const dir = makeTempRepo({ detached: true });
+    try {
+      const result = await runCodexReview({ repoPath: dir, uncommitted: true });
+      assert.equal(result.ok, false);
+      assert.equal(result.error, "prepush_branch_unresolved");
+      assert.equal(result.next_action, "checkout_named_feature_branch");
+      assert.equal(result.finding_count, 0);
+      assert.deepEqual(result.comments, []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses with prepush_issue_unresolved when the branch has no numeric prefix and no issue_number is passed", async () => {
+    const dir = makeTempRepo({ branch: "feature-x" });
+    try {
+      const result = await runCodexReview({ repoPath: dir, uncommitted: true });
+      assert.equal(result.ok, false);
+      assert.equal(result.error, "prepush_issue_unresolved");
+      assert.equal(result.branch, "feature-x");
+      assert.equal(result.next_action, "pass_issue_number_or_use_numeric_branch_prefix");
+      assert.equal(result.finding_count, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Note: the "numeric-prefix branch derives issueNumber" path is exercised by
+  // every test in the cap-enforcement and marker-post suites below (all of
+  // which use a numeric-prefix branch and rely on derivation). A standalone
+  // weak-assertion test for it is subsumed and intentionally not duplicated.
+  // The "explicit issue_number on a non-numeric branch" path is covered by
+  // the strong assertion test at the bottom of the marker-post suite.
+});
+
+describe("runCodexReview uncommitted=true cap enforcement (hermetic gh shim)", () => {
+  // These tests exercise the actual cap-enforcement wiring: read prior markers
+  // from the issue thread, evaluate the cap, refuse cycle 3+ with the right
+  // structured error. We cannot mock node:child_process execFile directly
+  // (ESM imports), so we shadow `gh` via a fake binary at the front of PATH.
+  // The cap-refusal short-circuit happens BEFORE codex is spawned, so we only
+  // need to fake `gh` (not `codex`) for these paths.
+
+  function makeShimRepo({ branch, ghHandler }) {
+    const repoDir = mkdtempSync(join(tmpdir(), "gc-shim-repo-"));
+    execFileSync("git", ["-C", repoDir, "init", "-q", "--initial-branch", branch]);
+    execFileSync("git", ["-C", repoDir, "config", "user.email", "t@example.com"]);
+    execFileSync("git", ["-C", repoDir, "config", "user.name", "t"]);
+    writeFileSync(join(repoDir, "README"), "x\n");
+    execFileSync("git", ["-C", repoDir, "add", "README"]);
+    execFileSync("git", ["-C", repoDir, "commit", "-q", "-m", "init"]);
+
+    const binDir = mkdtempSync(join(tmpdir(), "gc-shim-bin-"));
+    // Persist routing data in a JSON file so the shim — a separate process —
+    // can read it. Each test owns its own shim dir / config.
+    const configPath = join(binDir, "config.json");
+    writeFileSync(configPath, JSON.stringify(ghHandler));
+    // Fake `gh`: dispatch on argv to canned responses keyed by argv-prefix.
+    const ghShim = `#!/usr/bin/env node
+const fs = require("node:fs");
+const cfg = JSON.parse(fs.readFileSync(${JSON.stringify(configPath)}, "utf8"));
+const argv = process.argv.slice(2);
+function match(prefix) { return prefix.every((p, i) => argv[i] === p); }
+for (const route of cfg.routes) {
+  if (match(route.argv_prefix)) {
+    if (route.exit_code != null && route.exit_code !== 0) {
+      process.stderr.write(route.stderr || "");
+      process.exit(route.exit_code);
+    }
+    process.stdout.write(route.stdout || "");
+    process.exit(0);
+  }
+}
+process.stderr.write("gh shim: unhandled argv: " + JSON.stringify(argv) + "\\n");
+process.exit(2);
+`;
+    const ghPath = join(binDir, "gh");
+    writeFileSync(ghPath, ghShim, { mode: 0o755 });
+    return {
+      repoDir,
+      binDir,
+      cleanup() {
+        rmSync(repoDir, { recursive: true, force: true });
+        rmSync(binDir, { recursive: true, force: true });
+      },
+    };
+  }
+
+  async function withShimPath(binDir, fn) {
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${oldPath}`;
+    try {
+      return await fn();
+    } finally {
+      process.env.PATH = oldPath;
+    }
+  }
+
+  function commentBody(marker) {
+    return JSON.stringify([{ id: 1, body: marker, user: { login: "tester" } }]);
+  }
+
+  it("refuses cycle 3 with codex_review_prepush_cap_reached when 2 prior markers exist", async () => {
+    const m1 = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 796,
+      branchName: "796-x",
+      cycleNumber: 1,
+    });
+    const m2 = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 796,
+      branchName: "796-x",
+      cycleNumber: 2,
+    });
+    // gh api --paginate --slurp wraps pages in an outer array. One page with
+    // both markers as comments suffices; --slurp produces [[c1, c2]].
+    const slurpedComments = JSON.stringify([
+      [
+        { id: 1, body: m1, user: { login: "tester" } },
+        { id: 2, body: m2, user: { login: "tester" } },
+      ],
+    ]);
+
+    const shim = makeShimRepo({
+      branch: "796-x",
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: slurpedComments,
+          },
+        ],
+      },
+    });
+
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: true,
+        });
+        assert.equal(result.ok, false);
+        assert.equal(result.error, "codex_review_prepush_cap_reached");
+        assert.equal(result.prior_cycles, 2);
+        assert.equal(result.cap, CODEX_REVIEW_PREPUSH_HARD_CAP);
+        assert.equal(result.issue_number, 796);
+        assert.equal(result.branch, "796-x");
+        assert.equal(result.next_action, "post_summary_and_escalate_to_user");
+        assert.equal(result.finding_count, 0);
+        assert.deepEqual(result.comments, []);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("does NOT refuse on cycle 1 when no prior markers exist (positive path through cap evaluation)", async () => {
+    // Empty issue thread: 0 prior markers → cap evaluator returns ok with
+    // cycle 1. The function then progresses to computing diff and spawning
+    // codex, which we don't have. We accept either a thrown shell-exec
+    // failure or a returned non-cap-error envelope as proof we got past the
+    // cap-refusal short-circuit.
+    const shim = makeShimRepo({
+      branch: "796-x",
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: JSON.stringify([[]]), // one empty page
+          },
+        ],
+      },
+    });
+
+    try {
+      await withShimPath(shim.binDir, async () => {
+        let result;
+        let threw = false;
+        try {
+          result = await runCodexReview({
+            repoPath: shim.repoDir,
+            uncommitted: true,
+          });
+        } catch {
+          threw = true;
+        }
+        if (!threw) {
+          assert.notEqual(result.error, "codex_review_prepush_cap_reached");
+        }
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("branch rename does NOT bypass cap — markers from any branch on the issue count", async () => {
+    // Per #800 review cycle 2: under per-(issue, branch) keying a noncompliant
+    // agent could rename the branch to evade the cap. Per-issue keying closes
+    // that bypass: 2 markers exist for issue #796 on branch '796-different',
+    // current branch is '796-x' (rename), cycle 3 must still be refused.
+    const otherBranchM1 = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 796,
+      branchName: "796-different-branch",
+      cycleNumber: 1,
+    });
+    const otherBranchM2 = buildCodexReviewPrePushCycleMarker({
+      issueNumber: 796,
+      branchName: "796-different-branch",
+      cycleNumber: 2,
+    });
+    const slurpedComments = JSON.stringify([
+      [
+        { id: 1, body: otherBranchM1, user: { login: "tester" } },
+        { id: 2, body: otherBranchM2, user: { login: "tester" } },
+      ],
+    ]);
+
+    const shim = makeShimRepo({
+      branch: "796-x", // renamed branch
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: slurpedComments,
+          },
+        ],
+      },
+    });
+
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: true,
+        });
+        assert.equal(result.ok, false);
+        assert.equal(result.error, "codex_review_prepush_cap_reached");
+        assert.equal(result.prior_cycles, 2);
+        assert.equal(result.branch, "796-x"); // current branch reflected
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  // Single-token reference so eslint-no-unused-vars is happy when the helper
+  // is otherwise indirectly used.
+  void commentBody;
+});
+
+describe("runCodexReview uncommitted=true marker-post path (hermetic codex+gh shims)", () => {
+  // These tests exercise the post-codex marker-write path. Codex is shimmed to
+  // emit an empty COMMENT_IDS=[] tail (clean review). gh is shimmed for the
+  // entire flow: repo view, paginated slurped comments read, and the issue-
+  // comment POST (the marker write). Test 1 succeeds the POST; Test 2 fails
+  // the POST and asserts the prepush_cycle_record_failed envelope shape.
+
+  function makeFullShimRepo({ branch, ghHandler, codexHandler }) {
+    const repoDir = mkdtempSync(join(tmpdir(), "gc-fullshim-repo-"));
+    execFileSync("git", ["-C", repoDir, "init", "-q", "--initial-branch", branch]);
+    execFileSync("git", ["-C", repoDir, "config", "user.email", "t@example.com"]);
+    execFileSync("git", ["-C", repoDir, "config", "user.name", "t"]);
+    writeFileSync(join(repoDir, "README"), "x\n");
+    execFileSync("git", ["-C", repoDir, "add", "README"]);
+    execFileSync("git", ["-C", repoDir, "commit", "-q", "-m", "init"]);
+
+    const binDir = mkdtempSync(join(tmpdir(), "gc-fullshim-bin-"));
+    const ghCfgPath = join(binDir, "gh-config.json");
+    writeFileSync(ghCfgPath, JSON.stringify(ghHandler));
+    const ghShim = `#!/usr/bin/env node
+const fs = require("node:fs");
+const cfg = JSON.parse(fs.readFileSync(${JSON.stringify(ghCfgPath)}, "utf8"));
+const argv = process.argv.slice(2);
+function match(prefix) { return prefix.every((p, i) => argv[i] === p); }
+for (const route of cfg.routes) {
+  if (match(route.argv_prefix)) {
+    if (route.exit_code != null && route.exit_code !== 0) {
+      process.stderr.write(route.stderr || "");
+      process.exit(route.exit_code);
+    }
+    process.stdout.write(route.stdout || "");
+    process.exit(0);
+  }
+}
+process.stderr.write("gh shim: unhandled argv: " + JSON.stringify(argv) + "\\n");
+process.exit(2);
+`;
+    writeFileSync(join(binDir, "gh"), ghShim, { mode: 0o755 });
+
+    // codex shim: parses --output-last-message <path>, writes the canned tail
+    // to that path AND to stdout, drains stdin so the prompt pipe doesn't
+    // SIGPIPE, then exits 0.
+    const codexCfgPath = join(binDir, "codex-config.json");
+    writeFileSync(codexCfgPath, JSON.stringify(codexHandler));
+    const codexShim = `#!/usr/bin/env node
+const fs = require("node:fs");
+const cfg = JSON.parse(fs.readFileSync(${JSON.stringify(codexCfgPath)}, "utf8"));
+const args = process.argv.slice(2);
+let outputPath = null;
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--output-last-message") outputPath = args[i + 1];
+}
+let stdinBuf = "";
+process.stdin.on("data", (chunk) => { stdinBuf += chunk.toString(); });
+process.stdin.on("end", () => {
+  const tail = cfg.tail || "**Findings**\\n\\nNo issues found.\\n\\nCOMMENT_IDS=[]\\n";
+  if (outputPath) fs.writeFileSync(outputPath, tail);
+  process.stdout.write(tail);
+  process.exit(cfg.exit_code || 0);
+});
+`;
+    writeFileSync(join(binDir, "codex"), codexShim, { mode: 0o755 });
+
+    return {
+      repoDir,
+      binDir,
+      cleanup() {
+        rmSync(repoDir, { recursive: true, force: true });
+        rmSync(binDir, { recursive: true, force: true });
+      },
+    };
+  }
+
+  async function withShimPathFull(binDir, fn) {
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${oldPath}`;
+    try {
+      return await fn();
+    } finally {
+      process.env.PATH = oldPath;
+    }
+  }
+
+  it("returns ok=true with cycle metadata when codex is clean and the marker POST succeeds", async () => {
+    const shim = makeFullShimRepo({
+      branch: "796-x",
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: JSON.stringify([[]]),
+          },
+          {
+            // Marker POST → success
+            argv_prefix: ["api", "--method", "POST"],
+            stdout: JSON.stringify({ id: 999, html_url: "https://example.test/c/999" }),
+          },
+        ],
+      },
+      codexHandler: { tail: "Clean review.\n\nCOMMENT_IDS=[]\n" },
+    });
+
+    try {
+      await withShimPathFull(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: true,
+        });
+        assert.equal(result.uncommitted, true);
+        assert.equal(result.issue_number, 796);
+        assert.equal(result.branch, "796-x");
+        assert.equal(result.cycle, 1);
+        assert.equal(result.cap, CODEX_REVIEW_PREPUSH_HARD_CAP);
+        assert.equal(result.finding_count, 0);
+        // Clean cycle should signal "proceed_clean" — the cap-evaluator's
+        // pre-run "fix..." hint is overridden when there are no findings.
+        assert.equal(result.next_action, "proceed_clean");
+        assert.equal(result.override, false);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("honors an explicit issue_number even when the branch has no numeric prefix", async () => {
+    // Strong-assertion replacement for the deleted weak input-gating test:
+    // proves that an explicit issue_number is honored when the branch has no
+    // numeric prefix that derivation could pick up. End-to-end through to the
+    // marker POST so we observe the resolved issue_number in the response.
+    const shim = makeFullShimRepo({
+      branch: "feature-x", // no leading digits → derivation returns null
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: JSON.stringify([[]]),
+          },
+          {
+            argv_prefix: ["api", "--method", "POST"],
+            stdout: JSON.stringify({ id: 1, html_url: "https://example.test/c/1" }),
+          },
+        ],
+      },
+      codexHandler: { tail: "Clean review.\n\nCOMMENT_IDS=[]\n" },
+    });
+
+    try {
+      await withShimPathFull(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: true,
+          issueNumber: 4242,
+        });
+        // Explicit issue_number is the resolved issue, not derived from
+        // "feature-x" (which derivation returns null for).
+        assert.equal(result.issue_number, 4242);
+        assert.equal(result.branch, "feature-x");
+        assert.equal(result.cycle, 1);
+        assert.equal(result.finding_count, 0);
+        assert.equal(result.next_action, "proceed_clean");
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("returns prepush_cycle_record_failed when the marker POST fails", async () => {
+    const shim = makeFullShimRepo({
+      branch: "796-x",
+      ghHandler: {
+        routes: [
+          {
+            argv_prefix: ["repo", "view", "--json", "nameWithOwner"],
+            stdout: JSON.stringify({ nameWithOwner: "fake/repo" }),
+          },
+          {
+            argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp"],
+            stdout: JSON.stringify([[]]),
+          },
+          {
+            // Marker POST → fail with non-zero exit and stderr
+            argv_prefix: ["api", "--method", "POST"],
+            exit_code: 1,
+            stderr: "HTTP 500: simulated server error\n",
+          },
+        ],
+      },
+      codexHandler: { tail: "Clean review.\n\nCOMMENT_IDS=[]\n" },
+    });
+
+    try {
+      await withShimPathFull(shim.binDir, async () => {
+        const result = await runCodexReview({
+          repoPath: shim.repoDir,
+          uncommitted: true,
+        });
+        assert.equal(result.ok, false);
+        assert.equal(result.error, "prepush_cycle_record_failed");
+        assert.equal(result.next_action, "fix_underlying_marker_post_failure_and_retry");
+        assert.equal(result.issue_number, 796);
+        assert.equal(result.branch, "796-x");
+        assert.equal(result.attempted_cycle, 1);
+        assert.equal(result.cap, CODEX_REVIEW_PREPUSH_HARD_CAP);
+        // Findings preserved (codex output was clean, so 0 here, but the
+        // shape includes the comments array).
+        assert.equal(result.finding_count, 0);
+        assert.deepEqual(result.comments, []);
+        assert.match(result.cycle_record_error, /HTTP 500|simulated/);
+      });
+    } finally {
+      shim.cleanup();
+    }
   });
 });
 

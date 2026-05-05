@@ -80,6 +80,38 @@ effect. Reviews route through `gc_codex_review`, `gc_codex_verify_finding`,
 and `gc_codex_architecture_preflight` regardless of which agent runtime
 drives the workflow.
 
+### Pre-push review cycle state
+
+Pre-push `gc_codex_review` runs with `uncommitted=true` are the same Codex
+review loop as the post-push PR review, just before a PR number exists. They
+therefore inherit GC-O007's hard two-cycle cap and no cycle-3 verification pass.
+Any older workflow text or issue prose that refers to a five-cycle Codex cap is
+stale and must not drive implementation without a new ADR amending GC-O007.
+
+Because the pre-push review has no PR issue number, its durable cycle state is
+anchored to the GitHub issue resolved at workflow Step 1. The marker records
+the current branch name as audit-only context — the cap counter itself is
+keyed by issue alone, so a branch rename on the same issue cannot reset the
+counter. Earlier drafts of this ADR had the cap keyed by `(issue, branch)`,
+but PR #800 review (cycle 2) flagged that as a bypass: a noncompliant agent
+could rename `<issue>-x` to `<issue>-x-2` and start fresh. Per-issue keying
+closes that path. Legitimate "abandon and restart on a new branch" remains
+available via the user-authorized `override_cap=true` + `override_reason`
+path; the override marker stays distinguishable from regular cycle markers in
+the audit trail.
+
+The marker belongs to the same issue-thread marker family as plan, phase,
+review-cycle, and verify-cycle markers. Implementations must reuse the
+existing issue-comment read/post helpers, marker parser/evaluator pattern, and
+structured refusal result style; they must not add a local state file, git
+notes, database row, Temporal state, or driver-local counter for this cap.
+
+The cap mechanism is an audit / discipline gate, not a security boundary. A
+fully noncompliant or compromised agent with shell access has many paths to
+bypass — the cap narrows the most likely accidental-bypass path (branch
+rename) but does not protect against all attacks. The user's PR merge
+remains the only synchronous human gate.
+
 ## Consequences
 
 ### Positive
