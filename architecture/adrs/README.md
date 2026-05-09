@@ -47,5 +47,6 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | [028](028-temporal-workflow-orchestration-boundary.md) | Temporal Workflow Orchestration Boundary | Accepted |
 | [029](029-issue-thread-gate-model.md) | Issue-Thread Gate Model | Accepted |
 | [030](030-on-prem-hetzner-deployment.md) | On-prem Hetzner Deployment | Accepted |
+| [031](031-codex-review-stopping-model.md) | Severity Rubric and Stopping Model for Pre-Push Codex Review | Proposed |
 
 Prior ADRs from the old project frame are archived in `archive/architecture/adrs/`.
