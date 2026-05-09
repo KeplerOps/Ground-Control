@@ -12,6 +12,9 @@ import com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskRegisterR
 import com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskScenarioRepository;
 import com.keplerops.groundcontrol.domain.riskscenarios.repository.TreatmentPlanRepository;
 import com.keplerops.groundcontrol.domain.riskscenarios.state.RiskScenarioLinkTargetType;
+import com.keplerops.groundcontrol.domain.threatmodels.repository.ThreatModelRepository;
+import com.keplerops.groundcontrol.domain.threatmodels.state.ThreatModelLinkTargetType;
+import com.keplerops.groundcontrol.domain.verification.repository.VerificationResultRepository;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
@@ -29,6 +32,8 @@ public class GraphTargetResolverService {
     private final TreatmentPlanRepository treatmentPlanRepository;
     private final MethodologyProfileRepository methodologyProfileRepository;
     private final ControlRepository controlRepository;
+    private final ThreatModelRepository threatModelRepository;
+    private final VerificationResultRepository verificationResultRepository;
 
     public GraphTargetResolverService(
             RequirementRepository requirementRepository,
@@ -39,7 +44,9 @@ public class GraphTargetResolverService {
             RiskAssessmentResultRepository riskAssessmentResultRepository,
             TreatmentPlanRepository treatmentPlanRepository,
             MethodologyProfileRepository methodologyProfileRepository,
-            ControlRepository controlRepository) {
+            ControlRepository controlRepository,
+            ThreatModelRepository threatModelRepository,
+            VerificationResultRepository verificationResultRepository) {
         this.requirementRepository = requirementRepository;
         this.assetRepository = assetRepository;
         this.observationRepository = observationRepository;
@@ -49,6 +56,8 @@ public class GraphTargetResolverService {
         this.treatmentPlanRepository = treatmentPlanRepository;
         this.methodologyProfileRepository = methodologyProfileRepository;
         this.controlRepository = controlRepository;
+        this.threatModelRepository = threatModelRepository;
+        this.verificationResultRepository = verificationResultRepository;
     }
 
     public ValidatedTarget validateAssetTarget(
@@ -88,8 +97,11 @@ public class GraphTargetResolverService {
                     "Methodology profile");
             case CONTROL -> internalTarget(
                     targetEntityId, controlRepository.existsByIdAndProjectId(targetEntityId, projectId), "Control");
-            case THREAT_MODEL_ENTRY, FINDING, EVIDENCE, AUDIT, ISSUE, CODE, CONFIGURATION, EXTERNAL -> externalTarget(
-                    targetIdentifier);
+            case THREAT_MODEL_ENTRY -> internalTarget(
+                    targetEntityId,
+                    threatModelRepository.existsByIdAndProjectId(targetEntityId, projectId),
+                    "Threat model");
+            case FINDING, EVIDENCE, AUDIT, ISSUE, CODE, CONFIGURATION, EXTERNAL -> externalTarget(targetIdentifier);
         };
     }
 
@@ -134,8 +146,46 @@ public class GraphTargetResolverService {
                     "Methodology profile");
             case CONTROL -> internalTarget(
                     targetEntityId, controlRepository.existsByIdAndProjectId(targetEntityId, projectId), "Control");
-            case THREAT_MODEL, VULNERABILITY, FINDING, EVIDENCE, AUDIT_RECORD, EXTERNAL -> externalTarget(
-                    targetIdentifier);
+            case THREAT_MODEL -> internalTarget(
+                    targetEntityId,
+                    threatModelRepository.existsByIdAndProjectId(targetEntityId, projectId),
+                    "Threat model");
+            case VULNERABILITY, FINDING, EVIDENCE, AUDIT_RECORD, EXTERNAL -> externalTarget(targetIdentifier);
+        };
+    }
+
+    public ValidatedTarget validateThreatModelTarget(
+            UUID projectId, ThreatModelLinkTargetType targetType, UUID targetEntityId, String targetIdentifier) {
+        return switch (targetType) {
+            case ASSET -> internalTarget(
+                    targetEntityId, assetRepository.existsByIdAndProjectId(targetEntityId, projectId), "Asset");
+            case REQUIREMENT -> internalTarget(
+                    targetEntityId,
+                    requirementRepository.existsByIdAndProjectId(targetEntityId, projectId),
+                    "Requirement");
+            case CONTROL -> internalTarget(
+                    targetEntityId, controlRepository.existsByIdAndProjectId(targetEntityId, projectId), "Control");
+            case RISK_SCENARIO -> internalTarget(
+                    targetEntityId,
+                    riskScenarioRepository.existsByIdAndProjectId(targetEntityId, projectId),
+                    "Risk scenario");
+            case OBSERVATION -> internalTarget(
+                    targetEntityId,
+                    observationRepository
+                            .findByIdWithAssetAndProjectId(targetEntityId, projectId)
+                            .isPresent(),
+                    "Observation");
+            case RISK_ASSESSMENT_RESULT -> internalTarget(
+                    targetEntityId,
+                    riskAssessmentResultRepository
+                            .findByIdAndProjectIdWithObservations(targetEntityId, projectId)
+                            .isPresent(),
+                    "Risk assessment result");
+            case VERIFICATION_RESULT -> internalTarget(
+                    targetEntityId,
+                    verificationResultRepository.existsByIdAndProjectId(targetEntityId, projectId),
+                    "Verification result");
+            case ARCHITECTURE_MODEL, CODE, ISSUE, EVIDENCE, EXTERNAL -> externalTarget(targetIdentifier);
         };
     }
 

@@ -41,6 +41,11 @@ management:
         include: health,info,metrics
 
 groundcontrol:
+  security:
+    enabled: ${GC_SECURITY_ENABLED:true}
+    openapi-public: ${GC_SECURITY_OPENAPI_PUBLIC:false}
+    credentials: []
+    ip-allowlist: []
   github:
     gh-path: ${GC_GH_PATH:}
   age:

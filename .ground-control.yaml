@@ -1,0 +1,38 @@
+schema_version: 1
+project: ground-control
+github_repo: KeplerOps/Ground-Control
+workflow:
+  test_command: cd backend && ./gradlew test -Pquick
+  completion_command: make check
+  lint_command: cd backend && ./gradlew spotlessCheck
+  format_command: cd backend && ./gradlew spotlessApply
+sonarcloud:
+  project_key: KeplerOps_Ground-Control
+  organization: KeplerOps
+rules:
+  plan_rules: .gc/plan-rules.md
+knowledge:
+  dir: docs/knowledge
+docs:
+  adr_dir: architecture/adrs/
+  architecture_overview: docs/architecture/ARCHITECTURE.md
+  coding_standards: docs/CODING_STANDARDS.md
+  workflow_reference: docs/DEVELOPMENT_WORKFLOW.md
+  knowledge_base: docs/knowledge/
+example_paths:
+  source: backend/src/main/java/com/keplerops/groundcontrol/
+  test: backend/src/test/java/com/keplerops/groundcontrol/
+requirements:
+  uid_examples:
+    - GC-X001
+    - OBS-042
+cross_cutting_concerns:
+  description: |
+    Logger: SLF4J via @Slf4j; structured JSON logging via logstash-logback-encoder
+    Validation: Bean Validation (jakarta.validation) + Spring @Validated; Zod on the React frontend
+    Errors: ErrorResponse envelope (shared/web/ErrorResponse.java) routed through GlobalExceptionHandler
+    Auth: Spring Security (shared/security/) — bearer token against groundcontrol.security.credentials, ROLE_USER/ROLE_ADMIN path matrix
+    Audit: ActorHolder + MDC populated by ActorFilter from SecurityContext; @Audited entities use Hibernate Envers
+    Tests: @WebMvcTest controllers (with @AutoConfigureMockMvc(addFilters=false) for slice tests), @SpringBootTest integration tests under @Tag("integration"), ArchUnit architecture tests, jqwik property tests
+    HTTP: Spring's RestClient/WebClient as needed; standard Jackson ObjectMapper
+    Config: @ConfigurationProperties POJOs registered via @ConfigurationPropertiesScan on GroundControlApplication

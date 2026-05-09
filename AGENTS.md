@@ -4,12 +4,11 @@ This repository uses Ground Control for requirements management and workflow aut
 
 ## Ground Control Context
 
-```yaml
-ground_control:
-  project: ground-control
-```
-
-Use this repo-local project identifier for Ground Control MCP calls when working in this repository.
+This repo's Ground Control project id, workflow commands, SonarCloud
+settings, and plan rules live in `.ground-control.yaml` at repo root
+(with larger rule files under `.gc/`). Agents read it via the
+`gc_get_repo_ground_control_context` MCP tool, which returns the full
+workflow config in a single call.
 
 ## Workflow Notes
 

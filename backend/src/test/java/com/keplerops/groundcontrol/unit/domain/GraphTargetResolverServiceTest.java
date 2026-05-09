@@ -16,6 +16,9 @@ import com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskRegisterR
 import com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskScenarioRepository;
 import com.keplerops.groundcontrol.domain.riskscenarios.repository.TreatmentPlanRepository;
 import com.keplerops.groundcontrol.domain.riskscenarios.state.RiskScenarioLinkTargetType;
+import com.keplerops.groundcontrol.domain.threatmodels.repository.ThreatModelRepository;
+import com.keplerops.groundcontrol.domain.threatmodels.state.ThreatModelLinkTargetType;
+import com.keplerops.groundcontrol.domain.verification.repository.VerificationResultRepository;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -55,6 +58,12 @@ class GraphTargetResolverServiceTest {
     @Mock
     private com.keplerops.groundcontrol.domain.controls.repository.ControlRepository controlRepository;
 
+    @Mock
+    private ThreatModelRepository threatModelRepository;
+
+    @Mock
+    private VerificationResultRepository verificationResultRepository;
+
     @InjectMocks
     private GraphTargetResolverService graphTargetResolverService;
 
@@ -71,7 +80,8 @@ class GraphTargetResolverServiceTest {
                 "RISK_ASSESSMENT_RESULT",
                 "TREATMENT_PLAN",
                 "METHODOLOGY_PROFILE",
-                "CONTROL"
+                "CONTROL",
+                "THREAT_MODEL_ENTRY"
             })
     void validateAssetTargetAcceptsInternalTargets(AssetLinkTargetType targetType) {
         stubAssetInternalTarget(targetType, true);
@@ -86,8 +96,7 @@ class GraphTargetResolverServiceTest {
     @ParameterizedTest
     @EnumSource(
             value = AssetLinkTargetType.class,
-            names = {"THREAT_MODEL_ENTRY", "FINDING", "EVIDENCE", "AUDIT", "ISSUE", "CODE", "CONFIGURATION", "EXTERNAL"
-            })
+            names = {"FINDING", "EVIDENCE", "AUDIT", "ISSUE", "CODE", "CONFIGURATION", "EXTERNAL"})
     void validateAssetTargetAcceptsExternalTargets(AssetLinkTargetType targetType) {
         var validated = graphTargetResolverService.validateAssetTarget(projectId, targetType, null, "EXT-1");
 
@@ -107,7 +116,8 @@ class GraphTargetResolverServiceTest {
                 "RISK_ASSESSMENT_RESULT",
                 "TREATMENT_PLAN",
                 "METHODOLOGY_PROFILE",
-                "CONTROL"
+                "CONTROL",
+                "THREAT_MODEL"
             })
     void validateRiskScenarioTargetAcceptsInternalTargets(RiskScenarioLinkTargetType targetType) {
         stubScenarioInternalTarget(targetType, true);
@@ -121,12 +131,46 @@ class GraphTargetResolverServiceTest {
     @ParameterizedTest
     @EnumSource(
             value = RiskScenarioLinkTargetType.class,
-            names = {"THREAT_MODEL", "VULNERABILITY", "FINDING", "EVIDENCE", "AUDIT_RECORD", "EXTERNAL"})
+            names = {"VULNERABILITY", "FINDING", "EVIDENCE", "AUDIT_RECORD", "EXTERNAL"})
     void validateRiskScenarioTargetAcceptsExternalTargets(RiskScenarioLinkTargetType targetType) {
         var validated = graphTargetResolverService.validateRiskScenarioTarget(projectId, targetType, null, "EXT-2");
 
         assertThat(validated.internal()).isFalse();
         assertThat(validated.targetIdentifier()).isEqualTo("EXT-2");
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = ThreatModelLinkTargetType.class,
+            names = {
+                "ASSET",
+                "REQUIREMENT",
+                "CONTROL",
+                "RISK_SCENARIO",
+                "OBSERVATION",
+                "RISK_ASSESSMENT_RESULT",
+                "VERIFICATION_RESULT"
+            })
+    void validateThreatModelTargetAcceptsInternalTargets(ThreatModelLinkTargetType targetType) {
+        stubThreatModelInternalTarget(targetType, true);
+
+        var validated = graphTargetResolverService.validateThreatModelTarget(projectId, targetType, targetId, null);
+
+        assertThat(validated.internal()).isTrue();
+        assertThat(validated.targetEntityId()).isEqualTo(targetId);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = ThreatModelLinkTargetType.class,
+            names = {"ARCHITECTURE_MODEL", "CODE", "ISSUE", "EVIDENCE", "EXTERNAL"})
+    void validateThreatModelTargetAcceptsExternalTargets(ThreatModelLinkTargetType targetType) {
+        var validated =
+                graphTargetResolverService.validateThreatModelTarget(projectId, targetType, null, "backend/Auth.java");
+
+        assertThat(validated.internal()).isFalse();
+        assertThat(validated.targetEntityId()).isNull();
+        assertThat(validated.targetIdentifier()).isEqualTo("backend/Auth.java");
     }
 
     @Test
@@ -163,6 +207,52 @@ class GraphTargetResolverServiceTest {
                         projectId, RiskScenarioLinkTargetType.ASSET, targetId, null))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("not found");
+    }
+
+    @Test
+    void validateAssetTargetRejectsMissingThreatModelEntry() {
+        when(threatModelRepository.existsByIdAndProjectId(targetId, projectId)).thenReturn(false);
+
+        assertThatThrownBy(() -> graphTargetResolverService.validateAssetTarget(
+                        projectId, AssetLinkTargetType.THREAT_MODEL_ENTRY, targetId, null))
+                .isInstanceOf(DomainValidationException.class)
+                .hasMessageContaining("Threat model");
+    }
+
+    @Test
+    void validateRiskScenarioTargetRejectsMissingThreatModel() {
+        when(threatModelRepository.existsByIdAndProjectId(targetId, projectId)).thenReturn(false);
+
+        assertThatThrownBy(() -> graphTargetResolverService.validateRiskScenarioTarget(
+                        projectId, RiskScenarioLinkTargetType.THREAT_MODEL, targetId, null))
+                .isInstanceOf(DomainValidationException.class)
+                .hasMessageContaining("Threat model");
+    }
+
+    @Test
+    void validateThreatModelTargetRejectsMissingInternalTargetEntityId() {
+        assertThatThrownBy(() -> graphTargetResolverService.validateThreatModelTarget(
+                        projectId, ThreatModelLinkTargetType.ASSET, null, null))
+                .isInstanceOf(DomainValidationException.class)
+                .hasMessageContaining("targetEntityId");
+    }
+
+    @Test
+    void validateThreatModelTargetRejectsMissingProjectScopedTarget() {
+        when(assetRepository.existsByIdAndProjectId(targetId, projectId)).thenReturn(false);
+
+        assertThatThrownBy(() -> graphTargetResolverService.validateThreatModelTarget(
+                        projectId, ThreatModelLinkTargetType.ASSET, targetId, null))
+                .isInstanceOf(DomainValidationException.class)
+                .hasMessageContaining("not found");
+    }
+
+    @Test
+    void validateThreatModelTargetRejectsMissingExternalIdentifier() {
+        assertThatThrownBy(() -> graphTargetResolverService.validateThreatModelTarget(
+                        projectId, ThreatModelLinkTargetType.EXTERNAL, null, " "))
+                .isInstanceOf(DomainValidationException.class)
+                .hasMessageContaining("targetIdentifier");
     }
 
     private void stubAssetInternalTarget(AssetLinkTargetType targetType, boolean exists) {
@@ -202,14 +292,10 @@ class GraphTargetResolverServiceTest {
                                     : java.util.Optional.empty());
             case CONTROL -> when(controlRepository.existsByIdAndProjectId(targetId, projectId))
                     .thenReturn(exists);
-            case THREAT_MODEL_ENTRY,
-                    FINDING,
-                    EVIDENCE,
-                    AUDIT,
-                    ISSUE,
-                    CODE,
-                    CONFIGURATION,
-                    EXTERNAL -> throw new IllegalArgumentException("Not an internal target type");
+            case THREAT_MODEL_ENTRY -> when(threatModelRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case FINDING, EVIDENCE, AUDIT, ISSUE, CODE, CONFIGURATION, EXTERNAL -> throw new IllegalArgumentException(
+                    "Not an internal target type");
         }
     }
 
@@ -256,12 +342,41 @@ class GraphTargetResolverServiceTest {
                                     : java.util.Optional.empty());
             case CONTROL -> when(controlRepository.existsByIdAndProjectId(targetId, projectId))
                     .thenReturn(exists);
-            case THREAT_MODEL,
-                    VULNERABILITY,
-                    FINDING,
-                    EVIDENCE,
-                    AUDIT_RECORD,
-                    EXTERNAL -> throw new IllegalArgumentException("Not an internal target type");
+            case THREAT_MODEL -> when(threatModelRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case VULNERABILITY, FINDING, EVIDENCE, AUDIT_RECORD, EXTERNAL -> throw new IllegalArgumentException(
+                    "Not an internal target type");
+        }
+    }
+
+    private void stubThreatModelInternalTarget(ThreatModelLinkTargetType targetType, boolean exists) {
+        switch (targetType) {
+            case ASSET -> when(assetRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case REQUIREMENT -> when(requirementRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case CONTROL -> when(controlRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case RISK_SCENARIO -> when(riskScenarioRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case OBSERVATION -> when(observationRepository.findByIdWithAssetAndProjectId(targetId, projectId))
+                    .thenReturn(
+                            exists
+                                    ? java.util.Optional.of(org.mockito.Mockito.mock(
+                                            com.keplerops.groundcontrol.domain.assets.model.Observation.class))
+                                    : java.util.Optional.empty());
+            case RISK_ASSESSMENT_RESULT -> when(riskAssessmentResultRepository.findByIdAndProjectIdWithObservations(
+                            targetId, projectId))
+                    .thenReturn(
+                            exists
+                                    ? java.util.Optional.of(org.mockito.Mockito.mock(
+                                            com.keplerops.groundcontrol.domain.riskscenarios.model.RiskAssessmentResult
+                                                    .class))
+                                    : java.util.Optional.empty());
+            case VERIFICATION_RESULT -> when(verificationResultRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case ARCHITECTURE_MODEL, CODE, ISSUE, EVIDENCE, EXTERNAL -> throw new IllegalArgumentException(
+                    "Not an internal target type");
         }
     }
 }

@@ -41,7 +41,7 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         "014", "015", "016", "017", "018", "019", "020", "021", "022", "023", "024", "025", "026",
                         "027", "028", "029", "030", "031", "032", "033", "034", "035", "036", "037", "038", "039",
                         "040", "041", "042", "043", "044", "045", "046", "047", "048", "049", "050", "051", "052",
-                        "053", "054");
+                        "053", "054", "055", "056", "057", "058");
     }
 
     @Test
@@ -192,5 +192,26 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                 .createNativeQuery("SELECT 1 FROM trust_policy_audit LIMIT 1")
                 .getResultList();
         // V053/V054 pack registry tables verified
+        // V055-V058 threat model tables
+        entityManager.createNativeQuery("SELECT 1 FROM threat_model LIMIT 1").getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM threat_model_audit LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM threat_model_link LIMIT 1")
+                .getResultList();
+        // V057 set target_url / target_title to NOT NULL DEFAULT '' so the entity-side
+        // empty-string contract holds end-to-end. Verify the column metadata directly.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'threat_model_link'"
+                        + " AND column_name = 'target_url' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'threat_model_link'"
+                        + " AND column_name = 'target_title' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM threat_model_link_audit LIMIT 1")
+                .getResultList();
     }
 }

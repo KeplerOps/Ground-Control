@@ -168,20 +168,20 @@ For this repository, the human-maintained policy entrypoints are:
 
 Pick the next unblocked requirement from the work order and implement it. Ground Control's `/implement` skill automates the entire cycle:
 
-- The current repository's `AGENTS.md` should define repo-local Ground Control context using a `Ground Control Context` section with a fenced YAML block.
-- The `/implement` skill validates this up front via `gc_get_repo_ground_control_context` and stops rather than guessing if the repo context is missing or invalid.
+- The current repository's Ground Control context (project id, workflow commands, SonarCloud settings, plan rules) lives in `.ground-control.yaml` at the repo root, with larger rule files under `.gc/`. `AGENTS.md` carries a brief pointer to this config so agents know where to look.
+- The `/implement` skill validates this up front via `gc_get_repo_ground_control_context` — a single call that returns the full workflow config — and stops rather than guessing if the repo context is missing or invalid.
 - The `/implement` argument should be the full requirement UID as it already exists in Ground Control.
 
 1. **Fetch requirement** from Ground Control
 2. **Create GitHub issue** and link it via traceability
 3. **Checkout feature branch** via `gh issue develop`
-4. **Plan implementation** — user reviews and approves
-5. **Write code, tests, docs** — clause-by-clause verification against the requirement statement
-6. **Create traceability links:**
-   - `IMPLEMENTS` → code files that satisfy the requirement
+4. **Plan implementation** — posted as a comment on the GitHub issue thread per ADR-029. The workflow proceeds directly to TDD without a synchronous user-approval gate; the user owns review at PR merge.
+5. **Write code, tests, docs** — clause-by-clause verification against the requirement statement. TDD is mandatory except for the narrow documentation-only carve-out documented in `skills/implement/SKILL.md` Step 4.4 (no executable behavior in the diff + every clause/criterion protected by a named structural gate; declared in the plan and re-stated on the issue thread). The completion gate re-validates the carve-out with a two-check sweep over the union of committed and uncommitted paths — both the path set and the diff hunk content must be doc-only — because a path-only check can miss executable behavior buried in a doc file, and an HEAD-only check would miss uncommitted changes still in the working tree.
+6. **Transition to ACTIVE** once implemented and verified — the API enforces `IMPLEMENTS-only-on-ACTIVE`, so transition MUST happen before the link-creation step.
+7. **Create traceability links** (after the transition above):
+   - `IMPLEMENTS` → code files that satisfy the requirement. When the diff finalizes/documents a requirement whose structural implementation lives in pre-existing files (shipped under a sibling requirement), `IMPLEMENTS` links are backfilled onto those pre-existing artifacts of record, bounded by the requirement's concrete subject matter.
    - `TESTS` → test files that verify the requirement
-   - `DOCUMENTS` → ADRs or design docs that explain the approach
-7. **Transition to ACTIVE** once implemented and verified
+   - `DOCUMENTS` → ADRs or design docs that explain the approach (also used for forward-looking requirements that the diff references but does not yet ship)
 
 Before you stop, run `make policy` alongside the feature-specific verification commands. This catches ADR drift, missing controller/MCP/doc parity, migration companion updates, and PR body omissions before review.
 
@@ -233,13 +233,14 @@ Returns overall pass/fail + per-gate details (actual value vs. threshold). Fix f
 
 ### Architecture + Review Pipeline
 
-The `/implement` skill now runs one mandatory Codex architecture preflight before coding and then four independent verification/review stages before the PR is presented for human review:
+Per issue #804, the `/implement` skill runs one mandatory Codex architecture preflight before coding and then a small set of independent verification/review stages before the PR is presented for human review:
 
-1. **Codex architecture preflight** — cross-cutting concerns, reuse opportunities, abstraction/concept confusion, ADR/design guidance when needed
-2. **SonarCloud** — static analysis, coverage, duplication, security hotspots
-3. **Codex (ChatGPT)** — exhaustive no-triage review for design, abstractions, maintainability, reliability, security, and consistency
-4. **Claude /review** — code quality, conventions, correctness, performance
-5. **Claude /security-review** — OWASP Top 10, injection, auth, data exposure
+1. **Codex architecture preflight** (Step 2.5) — cross-cutting concerns, reuse opportunities, abstraction/concept confusion, ADR/design guidance when needed.
+2. **Pre-push Codex review** (Step 6.5, hard-capped at 3 cycles) — THE codex review pass. Production-readiness review (`gc_codex_review`, core + security reviewers) runs against the staged + unstaged diff *before* the first push, so each fix iteration is local (~5 min) instead of a CI/SonarCloud roundtrip (10–15 min). Every successful cycle posts a verbatim findings record to the resolved issue thread (durable per ADR-029) plus inline PR review comments when a PR exists.
+3. **SonarCloud** (Step 11) — static analysis, coverage, duplication, security hotspots.
+4. **Test quality review** (Step 13) — `/review-tests` catches assertion-free tests, mock-only assertions, integration-as-unit tests, and tests that can't detect regressions.
+
+The post-push codex review (former Step 12) was removed by issue #804: the pre-push pass catches everything codex would normally flag, and merge-commit drift is the responsibility of CI (compile/tests/integration) and SonarCloud (quality), not a duplicate codex run. The post-push tool entrypoint (`gc_codex_review` with a `pr_number`) remains as defense-in-depth for direct callers but the SKILL no longer drives it.
 
 All findings are fixed before the PR is presented for human review.
 

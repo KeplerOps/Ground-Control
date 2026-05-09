@@ -182,6 +182,7 @@ Other `state/` packages contain simple value enums (L0) that are **not** ESC-ver
 - `domain/plugins/state/` — `PluginType`, `PluginLifecycleState` enums
 - `domain/controlpacks/state/` — `ControlPackLifecycleState`, `ControlPackEntryStatus` enums
 - `domain/packregistry/state/` — `PackType`, `CatalogStatus`, `TrustOutcome`, `InstallOutcome`, `TrustPolicyField`, `TrustPolicyRuleOperator` enums
+- `domain/threatmodels/state/` — `ThreatModelStatus` (simple DRAFT→ACTIVE→ARCHIVED lifecycle, same pattern as `RiskScenarioStatus`), `StrideCategory`, `ThreatModelLinkTargetType`, `ThreatModelLinkType` (pure value enums, no invariants; ADR-024 treats threat modeling as an analysis surface at L0)
 
 These pack-registry enums remain L0 typed value surfaces. Use them to remove stringly typed branching and policy fields in the generic registry, but do not expand ESC scope unless they gain real transition logic or invariants.
 `TrustPolicyField` includes both informational fields (for example `signatureVerified`) and trust-safe fields (for example `signerTrusted`); validation that rejects unsupported trust-policy rules belongs in domain services, not in the value enum.

@@ -102,6 +102,7 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                     return List.of();
                 }
 
+                @Override
                 public GitHubIssueData createIssue(String repo, String title, String body, List<String> labels) {
                     throw new UnsupportedOperationException("Not used in E2E tests");
                 }
@@ -397,6 +398,10 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "040", "041", "042", "043", "044", "045", "046", "047", "048", "049", "050", "051",
                         "052", // V052: control pack tables
                         "053", // V053: pack registry tables
-                        "054"); // V054: typed control-pack registry payloads
+                        "054", // V054: typed control-pack registry payloads
+                        "055", // V055: threat_model
+                        "056", // V056: threat_model_audit
+                        "057", // V057: threat_model_link (target_url / target_title NOT NULL DEFAULT '')
+                        "058"); // V058: threat_model_link_audit
     }
 }

@@ -79,7 +79,7 @@ be related, linked, or analyzed.
 | `gc_import_reqif` | `file_path` (required), `project` (optional) | Import requirements from a .reqif file. Idempotent |
 | `gc_sync_github` | `owner` (required), `repo` (required) | Sync GitHub issues as traceability links |
 | `gc_create_github_issue` | `uid` (required), `repo`, `labels`, `extra_body` | Create GitHub issue from requirement and auto-link |
-| `gc_get_repo_ground_control_context` | `repo_path` (required) | Read and validate the repo's standardized Ground Control context from `AGENTS.md` |
+| `gc_get_repo_ground_control_context` | `repo_path` (required) | Read and validate the repo's `.ground-control.yaml` context (project, workflow, sonarcloud, rules, knowledge). Returns inlined plan_rules content and resolved knowledge paths when those sections are configured |
 | `gc_codex_architecture_preflight` | `requirement_uid` (required), `repo_path` (required), `project`, `issue_number`, `repo` | Run Codex architecture preflight, update ADR/design guidance when needed, and return guardrails plus changed files |
 | `gc_codex_review` | `repo_path` (required), `base_branch`, `uncommitted` | Run Codex review with an exhaustive no-triage production-quality prompt |
 | `gc_embed_requirement` | `requirement_id` (required) | Generate embedding for a requirement's text |
@@ -159,11 +159,26 @@ Common codes: `NOT_FOUND` (404), `CONFLICT` (409), `VALIDATION_ERROR` (422).
 e.g. `REQ-001`). All other tools use `id` (UUID, returned in create/list
 responses).
 
-For cross-repo workflow automation, define repo-local Ground Control context in `AGENTS.md` using this convention:
+For cross-repo workflow automation, define repo-local Ground Control context in a `.ground-control.yaml` file at the repo root. At minimum it must declare `schema_version: 1` and a `project` identifier; optional sections include `workflow`, `sonarcloud`, `rules`, `knowledge`, plus the workflow-packaging fields added in ADR-027: `docs.{adr_dir, architecture_overview, coding_standards, workflow_reference, knowledge_base}`, `example_paths.{source, test}`, `requirements.uid_examples`, and `cross_cutting_concerns.description`. The canonical `skills/implement/SKILL.md` renders prose against these fields via `{cfg.X|default Y}` placeholders so one source of truth serves every Ground-Control-aware repo. The `gc_get_repo_ground_control_context` MCP tool reads and validates this file and returns inlined `plan_rules` content plus resolved `knowledge` paths and the workflow-packaging blocks when those sections are present. See `docs/DEVELOPMENT_WORKFLOW.md` for the full convention and `buildSuggestedGroundControlYaml()` in `lib.js` for the canonical starter template.
 
-## Ground Control Context
+## Codex review architecture (privileged side-effect boundary)
 
-```yaml
-ground_control:
-  project: your-project-id
-```
+Per ADR-027 and issue #793, the codex-backed review tools follow a strict separation of concerns:
+
+- **Codex is the planner / reviewer.** It runs in a `read-only` sandbox with no GitHub credentials and returns structured payloads only. It must never invoke `gh`, `git`, or `curl` to post comments.
+- **The MCP server is the GitHub poster.** It validates codex's payloads against the schema below, then performs all GitHub writes (inline review comments, threaded replies, thread-resolution mutations, phase markers, cycle markers) from the host's authenticated `gh`.
+
+`gc_codex_review` consumes a `===FINDINGS===…===END===` JSON tail from each reviewer's stdout. The MCP server validates each finding lexically (path lives inside the repo, line is positive or null, body is non-empty and within GitHub's 65535-char limit) and then POSTs each finding to `/repos/{owner}/{repo}/pulls/{pr}/comments` with the PR's current head SHA. The `[core]` / `[security]` reviewer label is prepended to the comment body by the poster — codex does not include it in the JSON.
+
+Per-finding schema:
+
+| Field | Type | Required | Constraints |
+|-------|------|----------|-------------|
+| `path` | string | yes | repo-relative, no leading `/`, no `..` segments |
+| `line` | integer | yes | positive integer (file-level comments are not yet supported; every finding must anchor to a line in the diff) |
+| `title` | string | yes | non-empty, ≤200 characters |
+| `body` | string | yes | non-empty, ≤65322 characters (leaves headroom for the poster's `[reviewerLabel] title\n\n` prefix to keep the rendered comment under GitHub's 65535-char limit) |
+
+The tool response carries both findings and write results, including any per-finding POST failures under `post_failures` (so callers can see partial-write conditions without parsing logs) and any per-reviewer parse errors under `parse_errors`.
+
+`gc_codex_verify_finding` and `gc_codex_architecture_preflight` follow the same boundary: codex emits a structured decision (verify) or modifies design docs in-place (preflight); the MCP server posts the threaded reply, resolves the review thread, and writes phase markers from the host.

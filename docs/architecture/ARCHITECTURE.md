@@ -78,7 +78,11 @@ backend/src/main/java/com/keplerops/groundcontrol/
 │   ├── sweep/                    # ScheduledSweepRunner, notifiers
 │   └── web/                      # CORS config, SPA routing
 ├── shared/
-│   └── logging/                  # RequestLoggingFilter (MDC request_id)
+│   ├── logging/                  # RequestLoggingFilter (MDC request_id)
+│   ├── security/                 # ApiSecurityConfig, BearerTokenAuthFilter,
+│   │                             # IpAllowlistFilter, ApiAuthenticationEntryPoint,
+│   │                             # ApiAccessDeniedHandler, SecurityProperties (ADR-026)
+│   └── web/                      # ActorFilter (audit identity from SecurityContext)
 └── GroundControlApplication.java
 ```
 
@@ -98,10 +102,28 @@ Enforced at compile time by ArchUnit tests in `ArchitectureTest.java`.
 
 Spring profiles drive environment-specific behavior:
 
-- `application.yml` — base config (datasource, JPA, Flyway, server port)
-- `application-test.yml` — test overrides (Testcontainers)
+- `application.yml` — base config (datasource, JPA, Flyway, server port, security defaults)
+- `application-dev.yml` — local dev (`groundcontrol.security.enabled=false`)
+- `application-test.yml` — test overrides (Testcontainers, security disabled)
 
 Environment variables use the `GC_` prefix (e.g., `GC_DATABASE_URL`, `GC_SERVER_PORT`). See `.env.example`.
+
+## Request filter chain
+
+Once Spring Security is enabled (production default; `dev`/`test` profiles
+opt out), every request passes through:
+
+```
+IpAllowlistFilter           # CIDR check (skipped if allowlist empty)
+  → BearerTokenAuthFilter   # Authorization: Bearer <token> → SecurityContext
+    → AuthorizationFilter   # path-matrix / ROLE_USER / ROLE_ADMIN
+      → ActorFilter         # populates ActorHolder + MDC actor=<principal>
+        → controllers
+```
+
+Authorization is centralized in `ApiSecurityConfig` (ADR-026); controllers
+do not perform per-method auth checks. `ActorFilter` runs after the
+security chain so audit identity tracks the authenticated principal.
 
 ## What Exists vs. What Doesn't
 

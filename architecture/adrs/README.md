@@ -34,10 +34,18 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | [015](015-cloud-database-deployment.md) | Cloud Database Deployment | Withdrawn |
 | [016](016-project-scoping.md) | Project Scoping | Accepted |
 | [017](017-interactive-web-application.md) | Interactive Web Application | Accepted |
-| [018](018-aws-ec2-deployment.md) | AWS EC2 Deployment | Accepted |
+| [018](018-aws-ec2-deployment.md) | AWS EC2 Deployment | Superseded by ADR-030 |
 | [019](019-asset-topology-model.md) | Asset Topology and Boundary Relationships | Accepted |
 | [020](020-asset-cross-entity-linking.md) | Asset Cross-Entity Linking | Accepted |
-| [021](021-gated-agentic-development-loop.md) | Gated Agentic Development Loop | Accepted |
+| [021](021-gated-agentic-development-loop.md) | Gated Agentic Development Loop | Accepted (amended by ADR-029) |
 | [022](022-content-pack-distribution-architecture.md) | Content Pack Distribution Architecture | Accepted |
+| [023](023-plugin-architecture.md) | Plugin Architecture | Accepted |
+| [024](024-threat-model-entry-boundary.md) | Threat Model Entry Boundary | Accepted |
+| [025](025-backup-policy.md) | Backup Policy (GC-P021) | Accepted |
+| [026](026-rest-api-access-control.md) | REST API Access Control (GC-P011) | Accepted |
+| [027](027-agent-neutral-implement-workflow-packaging.md) | Agent-Neutral Implement Workflow Packaging | Accepted |
+| [028](028-temporal-workflow-orchestration-boundary.md) | Temporal Workflow Orchestration Boundary | Accepted |
+| [029](029-issue-thread-gate-model.md) | Issue-Thread Gate Model | Accepted |
+| [030](030-on-prem-hetzner-deployment.md) | On-prem Hetzner Deployment | Accepted |
 
 Prior ADRs from the old project frame are archived in `archive/architecture/adrs/`.

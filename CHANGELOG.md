@@ -5,6 +5,758 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Codex review collapsed to a single pre-push pass; cap bumped 2 → 3; findings
+  now durably recorded on the issue thread** (issue #804). The post-push codex
+  review (former SKILL Step 12) is removed from `/implement` — `Step 6.5` is
+  renamed `Pre-push Codex Review (final)` and is now THE codex review pass.
+  Merge-commit drift relative to base is the responsibility of CI and
+  SonarCloud, not a separate codex pass. The post-push tool entrypoint
+  (`gc_codex_review` with a `pr_number`) remains as defense-in-depth for
+  direct callers but the SKILL no longer drives it. `CODEX_REVIEW_HARD_CAP`
+  and `CODEX_REVIEW_PREPUSH_HARD_CAP` go from 2 → 3 (one combined pass keeps
+  the net iteration bound tighter than the old 2+2 = 4 across two steps,
+  while restoring "review feels like a real review, not a hot-cap" headroom).
+  `CODEX_VERIFY_HARD_CAP` stays at 2 — verification loops are per-finding,
+  not whole-review. After every successful `gc_codex_review` cycle (pre-push
+  or post-push), the MCP server posts a verbatim findings record to the
+  resolved issue thread containing the cycle/cap/mode header, both reviewers'
+  full text, and (post-push) every successfully posted inline comment URL.
+  If that post fails, the run returns `ok: false, error:
+  "review_comment_post_failed"` — same fail-fast posture as the pre-push
+  cycle marker, since the issue thread is the durable record per ADR-029.
+  ADR-021, ADR-027, ADR-029, GC-O007, and `docs/DEVELOPMENT_WORKFLOW.md`
+  are amended for cap-3 + single-pass wording.
+
+### Fixed
+
+- `gc_codex_review` no longer relies on Codex calling `gh` from inside its
+  sandbox to post inline PR review comments. Codex's sandbox does not carry
+  GitHub credentials, so the prior architecture silently lost findings — they
+  never landed on the durable PR thread that ADR-029 designates as the source
+  of truth. Codex now returns findings as a structured JSON payload inside a
+  `===FINDINGS===…===END===` block (validated server-side against schema:
+  `path`/`line`/`title`/`body`, with lexical path containment); the MCP server
+  performs every GitHub write from the host's authenticated `gh`. Tool
+  responses surface both the findings and the per-finding write results,
+  including any partial-write failures (`post_failures`) and per-reviewer
+  parse errors (`parse_errors`). The Codex review sandbox tightens from
+  `workspace-write` to `read-only` since Codex no longer needs to mutate the
+  workspace. Schema documented in `mcp/ground-control/README.md`. Closes #793.
+
+### Changed
+
+- ADR-027 now explicitly records the Codex/MCP privilege boundary for
+  review workflow side effects: Codex is the planner / reviewer, while the
+  Ground Control MCP layer validates structured payloads and performs
+  durable GitHub writes from the host. `docs/DEVELOPMENT_WORKFLOW.md`
+  now describes `gc_codex_review` the same way, avoiding stale wording
+  that implied sandboxed Codex should post comments itself.
+- **CI default runner switched from self-hosted to github-hosted.**
+  `.github/workflows/ci.yml` jobs `policy`, `build`, `test`,
+  `integration`, `sonar`, `verify`, `docker`, and `smoke` now run on
+  `ubuntu-latest`. Two jobs stay on the fabricator-managed self-hosted
+  runner pool as deliberate exceptions: `deploy` (SSHes to red-dragon
+  over the tailnet per ADR-030) and `policy-live` (when
+  `vars.GC_BASE_URL` is set it talks to the tailnet-only Ground
+  Control instance; currently the var is unset so the job is skipped,
+  but the runner choice has to match the intended target rather than
+  the empty default). ADR-030 carries a new "CI runner asymmetry"
+  section documenting both exceptions. Motivation: the fabricator
+  template's runner-registration path has been failing intermittently
+  (`runner_offline_wait_timeout` after the runner reports `online`,
+  followed by a 422 on runner removal), leaving CI runs queued
+  indefinitely; github-hosted runners eliminate the failure surface
+  for jobs that don't need tailnet access. Moving the two exception
+  jobs to ubuntu-latest as well would require adding
+  `tailscale/github-action` and a Tailscale OAuth secret, which isn't
+  done here. `pack-registry-sync.yml` is left alone — it's a
+  manual-trigger workflow that targets the decommissioned AWS
+  infrastructure (per ADR-018→ADR-030 supersession) and is dead code
+  awaiting separate cleanup.
+- Canonical `skills/implement/SKILL.md` clarifies two corner cases that
+  were under-specified by the previous gate prose (closes #801):
+  - **Step 4.4 documentation-only carve-out.** TDD remains mandatory by
+    default. A narrow carve-out now permits skipping the red-green loop
+    when the entire diff is documentation (ADR / README / CHANGELOG /
+    skill prose / design notes) AND every clause / acceptance criterion
+    is protected by a named structural gate (policy check, schema
+    validator, lint rule, verifier script, structural invariant test).
+    The skip must be declared in the plan and re-stated as a comment on
+    the issue thread naming the gate. Substring or snapshot tests
+    written only to satisfy TDD wording are explicitly disallowed as
+    gates; if no real gate exists the agent must add one as part of
+    the PR or remove the unprotected clause from scope (no shipping a
+    requirement claim with no durable verification). Any executable
+    line anywhere in the diff invalidates the entire carve-out — the
+    full TDD loop applies, and any documentation in the same diff
+    rides along on the back of the executable behavior's tests. The
+    carve-out is re-validated against the actual diff at Step 4.5
+    clause-mapping and at Step 6 completion gate. The Step 6
+    re-validation is a two-check sweep: (a) every changed path must
+    be in the documentation set (`*.md`, ADRs, notes, docs,
+    CHANGELOG, README, skills prose) AND (b) every diff hunk's
+    *content* must be free of executable behavior (no embedded code,
+    no schema/grammar/policy data consumed by a runtime parser, no
+    runnable fixtures). The path check alone isn't sufficient
+    because a doc file can carry executable behavior; an earlier
+    `git diff --name-status` check only saw paths and could miss
+    content-level executable changes, so it's been replaced with
+    this stricter two-step. The path set also takes the union of
+    committed (`<base-ref>...HEAD`), staged, unstaged, and untracked
+    paths, since Step 6 runs *before* the stage-and-commit step
+    and uncommitted executable changes would otherwise slip past.
+    The pre-existing artifact discovery procedure now uses
+    `git grep` and `git ls-files` instead of `grep -r`, so the
+    candidate set only contains tracked files and the workflow
+    can't backfill traceability links onto untracked / generated /
+    `.gitignore`'d files that were never shipped.
+  - **Step 15 / Step 16 backfill onto pre-existing artifacts.** Step
+    15's "materially implemented" classification now distinguishes
+    *case in-diff* (the diff contains the artifacts of record) from
+    *case pre-existing* (the diff finalizes a requirement whose
+    structural implementation already exists in pre-existing files
+    shipped under a sibling requirement). The case-pre-existing path
+    runs an explicit *pre-existing artifact discovery procedure*
+    BEFORE the DRAFT→ACTIVE transition: subject-area-bounded
+    `git ls-files`/`grep` against the requirement's named subsystems
+    and identifiers produces candidates, the agent reads each
+    candidate against the requirement statement to confirm
+    satisfaction (the MCP reverse lookup answers
+    "what is this already linked to," not "does this satisfy the
+    requirement" — content review is the validation), then
+    `gc_get_traceability_by_artifact` deduplicates against existing
+    links. The surviving candidates are partitioned by intended link
+    type (production code / config / ADR / docs → IMPLEMENTS;
+    automated tests → TESTS), and Step 16 Mode A creates each link
+    using its partition's link type — so an IMPLEMENTS link is never
+    created onto a candidate classified as a test. If discovery's
+    IMPLEMENTS partition is empty after a bounded, validated search,
+    the transition is refused and the user is surfaced — Ground
+    Control never gets promoted-without-coverage. A shared
+    *Backfill rules* block (used by Mode A case pre-existing and
+    Mode B) preserves valid existing links. Mode B retains its
+    original meaning (the literal zero-diff case from Step 4 step 5)
+    and now references the shared rules instead of duplicating them.
+- `architecture/policies/adr-policy.json` `workflow-guardrail-sync` rule
+  now also fires on changes to the canonical `skills/implement/SKILL.md`
+  (the authoritative location per ADR-027). The legacy
+  `.claude/skills/implement/SKILL.md` glob is retained for back-compat.
+  Without this, edits to the canonical workflow source slipped past
+  `make policy` and the ADR-021 sync gate. Covered by a new
+  `tools/tests/test_policy.py` unit test.
+- `docs/DEVELOPMENT_WORKFLOW.md`, `docs/WORKFLOW.md`, and ADR-021 carry
+  short notes describing the carve-out and backfill clarifications and
+  point at the operative SKILL.md prose. `docs/WORKFLOW.md` Phase 3
+  also drops two stale lines from the pre-ADR-029 era: the "user
+  reviews and approves" plan-approval gate (now an asynchronous issue
+  comment) and the link-creation-before-transition step ordering
+  (which contradicted the API's `IMPLEMENTS-only-on-ACTIVE`
+  invariant). The preflight design context lives in
+  `architecture/notes/implement-docs-only-preexisting-traceability-guardrails.md`.
+
+### Added
+
+- `gc_codex_review` enforces the GC-O007 hard-cap-2 contract on
+  pre-push (`uncommitted=true`) reviews as well, closing the
+  follow-up gap that #794 MVP-1 left open (closes #796). The cycle
+  counter is anchored to the resolved GitHub issue thread; the
+  current branch name is recorded in the marker for audit context
+  but is NOT part of the cap key (per #800 cycle-2 review — keying by
+  `(issue, branch)` would let a noncompliant agent rename the branch
+  and start fresh). After each successful pre-push run the tool posts a
+  machine-readable marker (`<!-- gc:codex-prepush-cycle issue="..."
+  branch="..." cycle="..." -->`); the next invocation reads existing
+  markers and refuses cycle 3 with `error:
+  "codex_review_prepush_cap_reached"` and `next_action:
+  "post_summary_and_escalate_to_user"`. The new family is disjoint
+  from the post-push `gc:codex-review-cycle` family so the two
+  parsers never cross-count. `override_cap` + `override_reason`
+  apply identically (user-only authorization; the agent cannot
+  self-authorize). Successful returns surface `cycle`, `cap`,
+  `next_action`, `override`, `override_reason`, plus the resolved
+  `issue_number` and `branch`. New optional `issue_number` parameter
+  on `gc_codex_review`; when omitted, the tool derives the issue
+  number from the current branch's leading numeric prefix (e.g.
+  `796-cap-pre-push` → 796) and refuses with a structured error if
+  neither resolves. Detached-HEAD pre-push runs are also refused.
+  Marker-post failures fail the entire pre-push run with
+  `error: "prepush_cycle_record_failed"` (findings are preserved in
+  the response so they aren't lost) — the cap is only durable if
+  the marker lands, so a silent failure cannot count as a completed
+  cycle. The shared issue-comment reader now uses `gh api
+  --paginate --slurp` so issues with more than 100 comments don't
+  hide markers on later pages and silently bypass enforcement
+  (this also tightens the post-push and verify cap counts on
+  long-lived issues). Clean cycles (no findings) return
+  `next_action: "proceed_clean"` so the cap-evaluator's pre-run
+  `fix_all_findings_...` hint doesn't mislead the caller after a
+  0-finding review. Five new pure-function exports back the
+  enforcement: `parseCodexReviewPrePushCycleMarkers`,
+  `evaluateCodexReviewPrePushCycleCap`,
+  `buildCodexReviewPrePushCycleMarker`,
+  `deriveIssueNumberFromBranch`, and constants
+  `CODEX_REVIEW_PREPUSH_HARD_CAP` /
+  `CODEX_REVIEW_PREPUSH_MARKER_PREFIX`. 35+ new unit + integration
+  tests cover the parser, evaluator, marker round-trip (including
+  override-with-embedded-quote reasons and slashes-in-branch),
+  branch derivation, the disjoint-family invariant, the
+  `runCodexReview` `uncommitted=true` decision tree (detached-HEAD
+  refusal, missing-issue refusal, accepted positive paths), per-issue
+  keying (branch rename does NOT bypass cap), and the post-codex
+  marker-write path (success metadata + `prepush_cycle_record_failed`
+  on POST failure) via hermetic gh + codex shims. Override paths on
+  all three review/verify cap evaluators now return a concrete
+  `next_action` instead of `null`.
+- ADR-030 "On-prem Hetzner Deployment" — documents the new production deployment architecture (red-dragon, Hetzner dedicated, Tailscale-only), the runner→red-dragon tailnet path, the SSH authorization model (`gc-deploy` user with `command="/opt/gc/deploy.sh",restrict <ed25519-pubkey>`), what ADR-018 retains and sheds, and the migration timeline.
+- Canonical `skills/implement/SKILL.md` at the repo root (closes #791,
+  GC-O007, GC-O009). One source of truth for the agentic implement
+  workflow, parameterized at runtime by the per-repo
+  `.ground-control.yaml`. Replaces the per-repo `.claude/skills/implement/`
+  copies that previously diverged across Ground-Control, shifter, pulsar,
+  and aptl. The skill is agent-neutral: it runs from Claude Code or
+  Codex against the same content. Codex remains the reviewer of record
+  via `gc_codex_*` MCP tools regardless of driver.
+- Canonical `skills/review-tests/SKILL.md`, migrated from
+  `.claude/skills/review-tests/SKILL.md`. Same agent-neutral packaging
+  story: `bin/install-skills.sh` ships the same content to Claude Code
+  and Codex. The base-branch reference inside the skill now reads from
+  `workflow.base_branch` like the implement skill does.
+- `bin/install-skills.sh` distributes `skills/*` to `~/.claude/skills/`
+  (Claude Code) and `~/.codex/prompts/*.md` (Codex). Symlinks by default
+  so the agent always reads the latest source-of-truth from the repo;
+  `--copy` for environments without symlink support; `--no-codex` to
+  skip the Codex install target if the host doesn't have it.
+- `.ground-control.yaml` gains four optional blocks consumed by the
+  canonical skill via `gc_get_repo_ground_control_context`:
+  `docs.{adr_dir, architecture_overview, coding_standards,
+  workflow_reference, knowledge_base}`, `example_paths.{source, test}`,
+  `requirements.uid_examples`, and `cross_cutting_concerns.description`.
+  All four are optional; missing blocks fall back to defaults baked
+  into the skill prose via `{cfg.X|default Y}` placeholders.
+- `mcp/ground-control/lib.js` extends `parseGroundControlYaml` with the
+  four new normalize functions and updates `buildSuggestedGroundControlYaml`
+  with commented examples of the new sections.
+- ADR-027 (Agent-Neutral Implement Workflow Packaging),
+  ADR-028 (Temporal Workflow Orchestration Boundary; forward-looking for
+  GC-O009), and ADR-029 (Issue-Thread Gate Model) document the design.
+
+### Changed
+
+- **Production deployment moved off AWS to on-prem Hetzner (red-dragon).** ADR-030 supersedes ADR-018. The `t3a.small` EC2 instance, EBS data volume, ECR repo, S3 backup bucket, DLM snapshot policy, IAM roles/policies, SSM parameters, S3 terraform-state bucket, DynamoDB lock table, and GitHub Actions OIDC provider are all destroyed. The catalyst-dev AWS account no longer hosts Ground-Control resources. ~$17/mo to $0 marginal.
+- **`ci.yml` `deploy` job rewritten end-to-end.** Old: AWS OIDC → SSM `SendCommand` against an EC2 tagged `Project=ground-control` → run `/opt/gc/deploy.sh`. New: install the `RED_DRAGON_DEPLOY_KEY` and `RED_DRAGON_KNOWN_HOSTS` secrets, wait briefly for the runner VM's tailnet to come up, then `ssh gc-deploy@red-dragon` (forced command on the remote runs `/opt/gc/deploy.sh`). The runner reaches red-dragon over the user's tailnet via fabricator's tailscale-on-runner-VMs change ([KeplerOps/fabricator PR #14](https://github.com/KeplerOps/fabricator/pull/14)).
+- **`docker` job drops ECR push.** GHCR-only. The `aws-actions/configure-aws-credentials` step and the `Login to ECR` step are removed; `metadata-action` produces only `ghcr.io/keplerops/ground-control` tags.
+- `docs/deployment/DEPLOYMENT.md` "AWS Deployment (EC2 + Tailscale)" section replaced with "Hetzner Deployment (red-dragon + Tailscale)" — covers the `/opt/gc/` layout, deploy contract (forced-command SSH, the two new GitHub secrets, fabricator runner tailnet path), the cutover dump that migrated production data, the planned on-prem backup mechanism (rsync-over-tailnet to aurora — wiring lands in a follow-up), monitoring, and the host-setup runbook for disaster recovery.
+- ADR-018 "AWS EC2 Deployment" status changed to `Superseded by ADR-030`. Body preserved as historical context.
+- `architecture/adrs/README.md` index entry for ADR-018 updated; ADR-030 added.
+- **GC-O007 amended (ADR-029)**: the workflow's human-touchpoint count
+  drops from two to one. PR merge is the only synchronous human gate.
+  Plan approval is no longer a synchronous gate — the plan is posted to
+  the GitHub issue as a comment and the workflow proceeds directly to
+  TDD. Review findings and decisions on findings (fix / wontfix /
+  not-applicable, each with a one-line rationale) are recorded as
+  comments on the issue thread so the durable record survives PR
+  merge/close. `defer` is not a valid decision: the workflow's contract
+  is "fix every finding before PR is ready". ADR-021 is amended (not
+  superseded). Codex review loops are hard-capped at two cycles.
+- ADR-021 carries an inline amendment note pointing at ADR-029.
+- `docs/DEVELOPMENT_WORKFLOW.md` updates the human-touchpoint guidance
+  to reflect the single PR-merge gate.
+
+### Added
+
+- `gc_codex_review` enforces the GC-O007 hard-cap-2 contract on the
+  MCP-server side instead of relying on skill prose (closes #794
+  MVP-1). After each successful post-push review the tool posts a
+  machine-readable cycle marker (`<!-- gc:codex-review-cycle ... -->`)
+  as a PR issue-comment. The next invocation reads the markers and
+  refuses a 3rd cycle on the same PR with a structured error:
+  `{ok: false, error: "codex_review_cap_reached", message,
+  prior_cycles, cap, next_action}`. Successful returns surface
+  `cycle`, `cap`, and `next_action` so the agent sees its position
+  and the discipline expected at each cycle (e.g.,
+  `fix_all_findings_then_summarize_and_escalate` on cycle 2). The
+  cap-reached refusal returns
+  `next_action: "post_summary_and_escalate_to_user"`. Pre-push
+  uncommitted reviews (Step 6.5) are not capped here — they have a
+  separate cycle limit and no PR yet; left for a follow-up MVP.
+- `gc_codex_review` accepts `override_cap=true` + `override_reason`
+  for user-authorized cycle 3+ (the agent cannot self-authorize: the
+  override_reason must quote the user's authorization, captured in
+  the conversation, and is logged on the marker for audit). Override
+  cycles are recorded as override markers
+  (`<!-- gc:codex-review-cycle ... override="true" reason="..." -->`)
+  distinguishable from regular ones. Without the override, the cap
+  refuses cycle 3+ unconditionally.
+- `next_action` field on `gc_codex_review` results: closes the
+  specific behavior bug where agents stop at cycle 2 to ask "should
+  I fix these?" instead of fixing and escalating. The mechanical
+  signal now points at the discipline; skill prose is reinforced
+  rather than alone.
+- Pure-function exports backing the enforcement:
+  `parseCodexReviewCycleMarkers`, `evaluateCodexReviewCycleCap` (now
+  with `overrideCap` / `overrideReason` params), and
+  `buildCodexReviewCycleMarker` (now with `override` / `overrideReason`
+  knobs). 19 unit tests cover happy path, override path, refusal
+  path, missing-reason rejection, override-marker round-trip, and
+  reasons containing embedded quotes.
+- Plan-before-review ordering gate on `gc_codex_review` (#794
+  extension). Post-push reviews look up the PR's closing-issue refs
+  via `gh pr view --json closingIssuesReferences` and refuse unless
+  at least one of those issues carries a `plan` phase marker.
+  Closes the same ordering hole MVP-2 closes for preflight→plan,
+  but for plan→review. PRs that close no issues skip the gate
+  (legitimate refactor/chore PRs without an issue). Override is
+  available via `override_phase_gate=true` +
+  `override_phase_reason` for trivial cases the user explicitly
+  authorizes.
+- Per-finding hard-cap-2 enforcement on `gc_codex_verify_finding`
+  (#794 extension). Same template as the MVP-1 cycle cap but
+  keyed per `(PR, comment_id)`. After 2 verify cycles per finding,
+  the tool refuses cycle 3+ unless `override_cap=true` with
+  `override_reason`. Override cycles are recorded with
+  `override="true"` in the marker for audit. Three new
+  pure-function exports back the enforcement:
+  `parseCodexVerifyCycleMarkers`, `evaluateCodexVerifyCycleCap`,
+  `buildCodexVerifyCycleMarker`. Successful returns surface
+  `cycle`, `cap`, `next_action`, `override`, `override_reason`.
+- `gc_post_implementation_plan` MCP tool (closes #794 MVP-2). Posts
+  the implementation plan as an issue-thread comment per ADR-029,
+  but refuses unless a `preflight` phase marker exists for the
+  issue. `gc_codex_architecture_preflight` now writes that marker
+  on success. This closes the specific ordering bug where agents
+  repeatedly tried to defer preflight until after planning — the
+  MCP server now refuses to accept the plan until preflight has
+  run. Override is available with `override=true` +
+  `override_reason` for cases where the user explicitly authorizes
+  skipping preflight (e.g., trivial bug fixes); reason is logged
+  on the marker for audit. Three new pure-function exports back
+  the enforcement: `parsePhaseMarkers`, `evaluatePhasePrerequisite`,
+  `buildPhaseMarker`. 14 new unit tests cover the parser, the cap
+  evaluator, and the marker builder; covering missing-prerequisite
+  refusal, multiple-prerequisite reporting, duplicate-marker
+  collapsing, and other-issue isolation.
+
+### Fixed
+
+- `workflow.base_branch` is now validated against an allowlist of safe
+  Git ref names in `normalizeWorkflowConfig`. Previously the value was
+  rendered into shell-evaluated `gh` and `git` commands by the implement
+  skill (Steps 1, 9, 16) without sanitization, so a hostile or malformed
+  `.ground-control.yaml` could inject shell commands. Allowed characters
+  are `[A-Za-z0-9._/-]` and the value must satisfy `git check-ref-format`.
+- `/implement` Step 16 (traceability reconciliation) now resolves the
+  base ref via `workflow.base_branch` instead of hardcoding
+  `origin/dev` / `dev`. Repos configured with a non-`dev` base were
+  reconciling against the wrong branch.
+- `/implement` Step 15 reordered: classify each in-scope requirement as
+  materially-implemented vs forward-looking BEFORE transitioning, so
+  forward-looking requirements stay DRAFT and don't get prematurely
+  promoted to ACTIVE. The previous wording transitioned every UID first
+  and then noted the forward-looking exception.
+- `/implement` Step 12.5 removed. The step was a documented no-op gap
+  pending tooling that may never ship; an unimplemented "required gate"
+  is worse than no gate. Cross-cutting-concerns review remains covered
+  by Step 3 (assess existing helpers before writing new code) and
+  Step 12 (codex review with the cross-cutting reviewer set).
+- `/implement` Step 13 is now agent-neutral. `review-tests` migrated
+  to `skills/review-tests/SKILL.md` so the same canonical content
+  drives Claude Code (`Skill` tool) and Codex
+  (`~/.codex/prompts/review-tests.md`, populated by
+  `bin/install-skills.sh`).
+- `defer` removed from the review-finding decision vocabulary in the
+  implement skill, the review-tests skill, and the CHANGELOG narrative.
+  The workflow's stated contract is "fix every finding before PR is
+  ready"; allowing `defer` was an explicit bypass.
+- `docs/DEVELOPMENT_WORKFLOW.md` Mermaid diagram and User Touchpoints
+  section updated to reflect ADR-029's single-touchpoint model. The
+  S5 node is now `Post plan as issue comment` (white, not yellow), the
+  approval edge is unconditional, and the prior hedge ("interpret stale
+  plan-approval node") is gone.
+
+### Removed
+
+- `deploy/terraform/` — the entire Terraform module tree for the AWS
+  deployment (bootstrap + dev environment + modules/compute / networking
+  / backup / secrets). Resources are destroyed; the module is no longer
+  needed. Git history preserves the prior layout for anyone needing to
+  reconstruct it.
+- `.claude/skills/implement/SKILL.md` — replaced by the canonical
+  `skills/implement/SKILL.md`. Run `bin/install-skills.sh` to install
+  the canonical skill into `~/.claude/skills/` (and `~/.codex/prompts/`
+  for Codex driver use).
+- `.claude/skills/review-tests/SKILL.md` — replaced by the canonical
+  `skills/review-tests/SKILL.md`. Same install path as above.
+
+- `bin/policy --pr-body-file <path>` and `--pr-number <n>` modes so the
+  PR-body template check can run from a local draft or a fetched
+  GitHub PR body. Backed by a new `scripts/check-pr-body.sh` pre-push
+  hook (registered via `pre-commit install --hook-type pre-push`)
+  that catches missing template sections before the push triggers a
+  CI run that would fail at the policy job.
+- New `Step 6.5: Pre-push Codex Review (uncommitted)` in the
+  `/implement` skill. Runs `gc_codex_review` with `uncommitted=true`
+  against the staged diff before the first push so each fix iterates
+  through codex locally (~5 min) instead of through CI (~10–15 min).
+  Step 12 becomes a verification pass against the merge commit
+  rather than the loop driver.
+- REST API access control via Spring Security (closes #243, GC-P011). All
+  `/api/v1/**` endpoints now require `Authorization: Bearer <token>` against
+  the configured `groundcontrol.security.credentials` list; admin paths
+  (`/api/v1/admin/**`, `/api/v1/embeddings/**`, `/api/v1/analysis/sweep/**`,
+  `/api/v1/pack-registry/**`) require `ROLE_ADMIN`. Optional CIDR allowlist
+  via `groundcontrol.security.ip-allowlist`. Only `/actuator/health` and
+  `/actuator/info` are anonymous; OpenAPI schema is gated by
+  `groundcontrol.security.openapi-public` (default `false`). Filter chain,
+  configuration model, and rationale documented in
+  `architecture/adrs/026-rest-api-access-control.md`. The `dev` and `test`
+  profiles ship with `groundcontrol.security.enabled=false` so local dev
+  and the existing test suite are unaffected.
+
+### Changed
+
+- Pack registry admin authentication is now part of the unified
+  `groundcontrol.security` model. `ground-control.pack-registry.security.admin-credentials`,
+  `authentication-header`, and `token-scheme` are removed; deployments
+  must move admin entries into `groundcontrol.security.credentials` with
+  `role: ADMIN`. Pack-signing settings (`trusted-signers`) are unchanged.
+  `PackRegistryAccessGuard` no longer parses tokens — it reads the
+  authenticated principal from `SecurityContextHolder` for audit fields.
+- `ActorFilter` prefers the authenticated `SecurityContext` principal name
+  over the `X-Actor` request header. The header remains a fallback when
+  `groundcontrol.security.enabled=false` (dev/test) but can no longer
+  spoof identity in production.
+- `.github/workflows/ci.yml` — `docker` now `needs: [integration, verify, sonar]` instead of `[integration, verify]`. The `sonar` job is part of the gate, not informational: a quality-gate failure must block the deploy chain (`docker → smoke → deploy`). Without this, the post-merge dev push for #536 produced `sonar:failure` while `docker:success` proceeded toward `smoke`/`deploy`.
+
+### Removed
+
+- `ground-control.pack-registry.security.admin-credentials`,
+  `ground-control.pack-registry.security.authentication-header`, and
+  `ground-control.pack-registry.security.token-scheme` — superseded by
+  the unified `groundcontrol.security` model (see ADR-026). Operators
+  using the old keys MUST migrate their admin token entries into
+  `groundcontrol.security.credentials` with `role: ADMIN` before
+  upgrading. The pack-signing block
+  (`ground-control.pack-registry.security.trusted-signers`) is unchanged.
+
+### Fixed
+
+- `gc_codex_review` no longer hangs indefinitely. Three independent
+  bugs in the implement workflow were causing the final code-review
+  step to stall:
+  - `execFileWithInput` (used by every codex invocation in
+    `mcp/ground-control/lib.js`) ran without any timeout. A stuck
+    codex child blocked the MCP tool, the agent, and the workflow
+    forever. It now accepts `timeoutMs` and escalates SIGTERM →
+    SIGKILL after a grace period; the codex callers default to
+    `GC_CODEX_TIMEOUT_MS` (20 min by default).
+  - `runCodexReview` invoked `codex review` with a stdin prompt,
+    which was observed to occasionally not exit after emitting the
+    structured tail. It now uses `codex exec --sandbox workspace-write
+    -C <repo> --output-last-message <file>` — the same shape that the
+    architecture preflight and verify-finding callers already use
+    successfully — and reads the result from the output file.
+  - The two reviewers (core + security) were always run in parallel
+    via `Promise.all`, doubling local resource pressure. They now run
+    sequentially by default; set `GC_CODEX_REVIEW_PARALLEL=2` to
+    re-enable the old parallel behavior.
+
+### Changed
+
+- `gc_codex_review` caps the inlined diff at 256 KiB by default
+  (override via `GC_CODEX_REVIEW_MAX_DIFF_BYTES`; set 0 to disable).
+  Beyond the cap, the prompt switches to a manifest of changed files
+  with line counts and instructs codex to fetch per-file diffs via
+  shell. Keeps prompt size predictable on long-lived branches.
+- `enrichCommentsWithThreadIds` (`mcp/ground-control/lib.js`) now
+  hard-caps GraphQL pagination at 100 pages so a malformed response
+  cannot loop forever.
+- `.claude/skills/implement/SKILL.md` Step 10 (CI Monitor) replaces
+  `gh run watch` with a bounded poll. Surfaces a stuck-queued
+  condition after 5 min (likely no self-hosted runner picked the
+  job up) and caps total wait at 45 min, instead of waiting silently
+  for a runner that may never appear.
+
+## [0.114.1] - 2026-04-19
+
+### Changed
+
+- All CI workflows (`.github/workflows/ci.yml` and
+  `.github/workflows/pack-registry-sync.yml`) now target
+  `[self-hosted, linux, x64]` instead of `ubuntu-latest`. Jobs route
+  to the aurora-provisioned ephemeral Proxmox runners via Fabricator's
+  org webhook, per GC-GitHub issue #535.
+
+## [0.114.0] - 2026-04-19
+
+### Added
+
+- `deploy/scripts/install-ops-scripts.sh` — canonical, idempotent
+  installer for `/opt/gc/{backup,restore,test-restore,watchdog}.sh` and
+  `/etc/cron.d/gc-{backup,restore-test,watchdog}`. Enforces the GC-P021
+  cadence (≥ 3×/day) and retention (≥ 4) floors on input; exits non-zero
+  on any out-of-spec value. Runs on the instance in two paths: first
+  boot (written by user-data) and every main-branch deploy (pushed via
+  `aws ssm send-command` by the CI `deploy` job).
+- CI `deploy` job now refreshes `/opt/gc` scripts via SSM before
+  invoking `/opt/gc/deploy.sh` so the live instance picks up script
+  changes even though `ignore_changes = [user_data]` prevents Terraform
+  from replacing user-data. Closes the rollout gap flagged in Codex
+  review of #534.
+- `scripts/assert-backup-policy.sh` now additionally validates:
+  - the dev env root `variables.tf` defaults (not just the module
+    defaults, so the forwarded `module.backup` inputs stay compliant),
+  - `install-ops-scripts.sh` contains every GC-P021 sentinel and the
+    `GC-P021` anchor,
+  - the CI workflow wires `install-ops-scripts.sh` into the deploy
+    job,
+  - executing the installer against an ephemeral prefix — rejecting
+    non-compliant inputs and writing the expected artifacts with the
+    expected substitutions.
+- GC-P021 backup policy enforcement (ADR-025): backup cadence raised to
+  3× / day (`0 3,11,19 * * *` UTC) and local dump retention raised to 4
+  files, guaranteeing ≥ 24 h of local retention with a one-run margin
+  on top of the 30-day S3 lifecycle. Defaults live in
+  `deploy/terraform/modules/backup/variables.tf`; overrides below these
+  thresholds are blocked by the new structural guardrail.
+- Daily restore verification (`0 5 * * *` UTC) replaces the prior
+  weekly run. `deploy/scripts/test-restore.sh` and the user-data
+  inlined copy now additionally assert the AGE extension is present,
+  core Ground Control tables (`project`, `requirement`,
+  `requirement_relation`, `traceability_link`, `document`, `section`,
+  `threat_model`) exist in the restored database, `flyway_schema_history`
+  contains V010, and `create_graph('requirements_verify')` succeeds
+  against the restored catalog — proving AGE is operationally usable
+  after restore, not just installed.
+- `docs/operations/backup-restore.md` — standalone operator runbook
+  covering the three recovery scenarios (in-place, volume survives,
+  full rebuild), AGE graph rematerialization after S3 dump restore,
+  credential rotation, and post-restore verification. Written for an
+  operator with AWS + Tailscale credentials but no prior exposure to
+  the stack.
+- `scripts/assert-backup-policy.sh` — structural guardrail that fails
+  pre-commit / `make policy` if the GC-P021 cadence, retention, cron, or
+  verification sentinels are altered away from the accepted defaults.
+- `scripts/test-backup-restore-locally.sh` + `make test-backup-restore-local`
+  — self-contained end-to-end local exerciser. Stands up a fresh
+  `apache/age` container, replays every Flyway migration, takes a
+  pg_dump, and invokes `test-restore.sh` against the dump; asserts
+  every sentinel check appears in the output.
+- `.pre-commit-config.yaml` now runs `bash -n` across
+  `deploy/scripts/*.sh` plus the two new ops scripts, and invokes
+  `scripts/assert-backup-policy.sh` on any change to the backup module,
+  user-data template, backup/restore scripts, or the example tfvars.
+- ADR-025 (Backup Policy) documents the decision to retain
+  pg_dump + EBS rather than switching to pgBackRest, the GC-P021
+  clause-to-change mapping, and the AGE-derivative-from-relational
+  invariant that makes the decision safe.
+
+### Changed
+
+- `deploy/scripts/backup.sh` and `deploy/scripts/test-restore.sh`
+  headers now reference GC-P021 so the policy anchor is visible at the
+  script level. `test-restore.sh` accepts env overrides
+  (`BACKUP_DIR`, `TEST_CONTAINER`, `TEST_PORT`, `DB_IMAGE`,
+  `POSTGRES_*`, `SKIP_ENV_FILE=1`) so it runs locally without the
+  production `/opt/gc/.env`. The readiness loop now requires three
+  consecutive successful `SELECT 1` calls to outlast the apache/age
+  image's post-init restart window.
+- `docs/deployment/DEPLOYMENT.md` Backup and Recovery section now
+  delegates to `docs/operations/backup-restore.md`, records the new
+  cadence / retention / verification defaults, and enumerates the AGE
+  verification checks.
+
+## [0.113.0] - 2026-04-12
+
+### Added
+
+- Knowledge base config wiring (GC-X002, GC-X003, GC-X004, GC-X005, GC-X013):
+  `.ground-control.yaml` now accepts an optional `knowledge` section with
+  required `dir` and optional `schema` / `inbox` overrides. Paths are
+  validated against the repository root via a shared resolver that rejects
+  absolute paths and `..` traversal.
+- `gc_get_repo_ground_control_context` MCP tool returns a resolved
+  `knowledge` block when the section is configured, with existence checks
+  for the knowledge directory and schema file. The inbox path is surfaced
+  but not existence-checked; later slices create it on first capture.
+- Repo knowledge base skeleton at `docs/knowledge/` containing `SCHEMA.md`
+  (conventions, source-citation rule, one-repo invariant, navigation rule),
+  `index.md` (empty content catalog), and `log.md` (append-only history).
+- This repo's own `.ground-control.yaml` now points at `docs/knowledge/`
+  via the new `knowledge.dir` field.
+
+### Fixed
+
+- `mcp/ground-control/README.md` no longer describes
+  `gc_get_repo_ground_control_context` as reading from `AGENTS.md`; the
+  tool reads `.ground-control.yaml` at the repo root.
+
+## [0.112.0] - 2026-04-12
+
+### Added
+
+- Threat model entry aggregate (GC-H001, ADR-024): new `ThreatModel` and
+  `ThreatModelLink` entities with Envers auditing. Captures threat source,
+  threat event, effect, and optional STRIDE taxonomy — separate aggregate from
+  risk scenarios, risk assessments, and treatment plans.
+- Threat model link targets: internal first-class targets (ASSET, REQUIREMENT,
+  CONTROL, RISK_SCENARIO, OBSERVATION, RISK_ASSESSMENT_RESULT, VERIFICATION_RESULT)
+  validated project-scoped via `GraphTargetResolverService`; external targets
+  (ARCHITECTURE_MODEL, CODE, ISSUE, EVIDENCE, EXTERNAL) stored as
+  `targetIdentifier` strings.
+- Threat model REST endpoints under `/api/v1/threat-models` and
+  `/api/v1/threat-models/{id}/links` with matching `@WebMvcTest` coverage.
+- MCP tools `gc_create_threat_model`, `gc_list_threat_models`,
+  `gc_get_threat_model`, `gc_update_threat_model`, `gc_delete_threat_model`,
+  `gc_transition_threat_model_status`, `gc_create_threat_model_link`,
+  `gc_list_threat_model_links`, `gc_delete_threat_model_link`.
+- New graph entity type `THREAT_MODEL` with `ThreatModelGraphProjectionContributor`
+  emitting nodes and edges for internal-target links.
+- Flyway migrations V055–V058 creating `threat_model`, `threat_model_audit`,
+  `threat_model_link`, and `threat_model_link_audit` tables.
+
+### Changed
+
+- `GraphTargetResolverService` now treats
+  `AssetLinkTargetType.THREAT_MODEL_ENTRY` and
+  `RiskScenarioLinkTargetType.THREAT_MODEL` as first-class internal targets
+  validated against `ThreatModelRepository` instead of free-form external
+  identifiers. Existing rows are unaffected; the new routing applies to
+  newly-created links.
+- `AssetGraphProjectionContributor` and `RiskGraphProjectionContributor` now
+  project edges to `GraphEntityType.THREAT_MODEL` when their threat-model
+  target type carries a `targetEntityId`.
+- `ThreatModelService.update` now rejects blank required fields
+  (`title`, `threatSource`, `threatEvent`, `effect`) with `validation_error`.
+- `UpdateThreatModelRequest` and `UpdateThreatModelCommand` gain `clearStride`
+  and `clearNarrative` boolean flags so callers can explicitly null those
+  optional fields (passing `null` alone now means "no change").
+- `VerificationResultGraphProjectionContributor` no longer emits `VERIFIES`
+  edges to archived requirements.
+- `ThreatModelService.delete` rejects deletion with 409 `threat_model_referenced`
+  while reverse `AssetLink` / `RiskScenarioLink` rows still target the threat
+  model. The conflict envelope's `detail` block lists offending UIDs.
+- MCP `gc_delete_threat_model` and other tools now surface the structured error
+  envelope (`code` + `detail`) returned by the API via the new `RequestError`
+  class in `mcp/ground-control/lib.js`.
+- `ThreatModelGraphProjectionContributor.contributeEdges` now skips edges to
+  archived `ASSET`, `REQUIREMENT`, and `RISK_SCENARIO` targets so the projection
+  never produces dangling edges relative to the peer contributors that omit
+  archived nodes from the graph.
+- MCP `gc_update_threat_model` exposes `clear_stride` and `clear_narrative`
+  boolean flags so callers can explicitly null those optional fields (the
+  backend tri-state convention is now reachable from the MCP surface).
+- `ThreatModelGraphProjectionContributor.contributeNodes` now omits `narrative`
+  and `createdBy` from the node property map when their values are `null`,
+  matching the existing `stride` guard. Apache AGE / Cypher reject null
+  property values, so present-but-null entries would have failed graph
+  materialization for any threat model lacking a narrative or createdBy.
+- `OperationalAssetRepository`, `RequirementRepository`, and
+  `RiskScenarioRepository` gain `findIdsByProjectId*` projection queries.
+  `ThreatModelGraphProjectionContributor` uses them to build live-target ID
+  sets without hydrating full entities.
+- `AssetLinkRepository` and `RiskScenarioLinkRepository` gain
+  `find*UidsByTargetTypeAndTargetEntityIdAndProjectId` projection queries.
+  `ThreatModelService.delete` uses them to build the 409 conflict envelope
+  without hydrating full link rows.
+- `V057__create_threat_model_link.sql` sets `target_url` and `target_title`
+  to `NOT NULL DEFAULT ''` so the JPA entity's empty-string contract holds
+  end-to-end. `MigrationSmokeTest` verifies the column metadata directly.
+- `VerificationResultGraphProjectionContributor.contributeNodes` now omits
+  `property` and `expiresAt` from the node property map when their values are
+  `null` (same class of fix as `ThreatModelGraphProjectionContributor`); the
+  `VERIFIES` edge id is now the bare `VerificationResult` UUID, matching every
+  other contributor.
+- `GlobalExceptionHandler.handleConflict` calls the 2-arg `ErrorResponse.of`
+  overload when the exception's detail map is empty so legacy 409 responses no
+  longer regress to serializing `detail: {}`. The cycle-2 envelope upgrade is
+  preserved for the threat-model `threat_model_referenced` path which always
+  carries detail.
+- `GlobalExceptionHandler.handleValidation` applies the same empty-detail
+  guard so legacy single-arg `DomainValidationException` throws across the
+  ~30 422 sites no longer serialize `detail: {}` either.
+- MCP `gc_codex_review` now fans out two focused codex reviewers in parallel
+  against a single pre-computed diff: a core production-readiness reviewer
+  (fitness for purpose, architectural soundness, maintainability,
+  extensibility, established patterns, codebase consistency) and a dedicated
+  application-security reviewer (input validation, AuthN/AuthZ, secrets and
+  crypto, data exposure, request handling, supply chain). Each reviewer
+  posts its own findings as inline PR review comments tagged `[core]` or
+  `[security]` in the title. The tool returns a single deduplicated
+  `comments` list with a `reviewer` field per entry, enriched with GraphQL
+  review-thread ids via one `reviewThreads` query, plus a `reviewers`
+  summary and per-reviewer `review_text`. PR number auto-detects via
+  `gh pr view --json number` when not supplied. `parseCodexReviewTail`
+  parses each reviewer's `COMMENT_IDS=[...]` tail; missing or malformed
+  tails throw rather than silently returning zero findings. New
+  `dedupFindings` helper collapses same-location findings by
+  `(path, line, title-prefix)` so cross-reviewer overlaps produce a
+  single entry in the returned list.
+- New MCP tool `gc_codex_verify_finding` takes `repo_path`, `pr_number`, and
+  the REST `comment_id` returned from `gc_codex_review`, fetches the
+  original comment from GitHub (only allowlisted authors are accepted),
+  reads the anchored file, and runs `codex exec --sandbox read-only` to
+  decide whether the finding is resolved. On RESOLVED the review thread
+  is marked resolved via the GraphQL `resolveReviewThread` mutation. On
+  UNRESOLVED a threaded reply with codex's new directions is posted via
+  `/repos/:o/:r/pulls/:pr/comments/:id/replies` and returned to the caller
+  so the coding agent can drive the next fix cycle without re-fetching.
+- Skills `implement` (Step 13) and `ship` (Phase 4) updated to drive the new
+  fix/verify loop: call `gc_codex_review` with `pr_number`, iterate over the
+  returned `comments` list, fix each one locally, then call
+  `gc_codex_verify_finding` to confirm. Per-finding cap of 2 verify calls
+  before escalation; overall step/phase cap of 2 `gc_codex_review`
+  invocations unchanged.
+- `ErrorResponse.of(code, message, detail)` now treats `null`/empty detail
+  identically to the 2-arg overload, preventing both an `NPE` from
+  `Map.copyOf(null)` and accidental `detail: {}` serialization at the type
+  boundary. Direct unit tests for `handleConflict` and `handleValidation`
+  cover both the empty- and populated-detail branches.
+
+## [0.111.1] - 2026-04-11
+
+### Added
+
+- `.ground-control.yaml` at repo root declaring the workflow config
+  consumed by the Ground Control MCP tool and centralized skills.
+- `.gc/plan-rules.md` containing the Java/JPA plan constraints that
+  were previously hardcoded in `implement/SKILL.md` Step 4.
+
+### Changed
+
+- `AGENTS.md` Ground Control Context section now points to
+  `.ground-control.yaml` instead of carrying an inline yaml block.
+
+## [0.111.0] - 2026-04-11
+
+### Changed
+
+- Ground Control MCP server now reads `.ground-control.yaml` from each
+  repository root instead of parsing the "Ground Control Context" YAML
+  block in `AGENTS.md`. The `gc_get_repo_ground_control_context` tool
+  returns the full workflow config: project identifier, github_repo,
+  workflow commands (test/completion/lint/format), optional sonarcloud
+  settings, and optional inlined plan_rules file content. Repos must
+  provide `.ground-control.yaml` at their root; agents can self-service
+  migration using the `suggested_ground_control_yaml` field returned
+  on `missing_ground_control_yaml` status.
+
+### Removed
+
+- `parseRepoGroundControlContext` export and its AGENTS.md-based parser
+  (replaced by `parseGroundControlYaml`).
+
+### Added
+
+- `parseGroundControlYaml` and `buildSuggestedGroundControlYaml` exports
+  in `mcp/ground-control/lib.js`.
+- 16 new tests in `mcp/ground-control/lib.test.js` covering yaml
+  parsing, schema validation, plan_rules file resolution, and the
+  full `getRepoGroundControlContext` flow on a temporary git repo.
+
 ## [0.110.1] - 2026-04-10
 
 ### Added

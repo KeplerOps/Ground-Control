@@ -9,6 +9,7 @@
         {
           "id": "workflow-guardrail-sync",
           "whenAny": [
+            "skills/implement/SKILL.md",
             ".claude/skills/implement/SKILL.md",
             ".claude/agents/completion-verifier.md",
             ".claude/rules/*.md",

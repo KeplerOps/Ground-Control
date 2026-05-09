@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface OperationalAssetRepository extends JpaRepository<OperationalAsset, UUID> {
 
@@ -20,4 +22,7 @@ public interface OperationalAssetRepository extends JpaRepository<OperationalAss
     Optional<OperationalAsset> findByIdAndProjectId(UUID id, UUID projectId);
 
     boolean existsByIdAndProjectId(UUID id, UUID projectId);
+
+    @Query("SELECT a.id FROM OperationalAsset a WHERE a.project.id = :projectId AND a.archivedAt IS NULL")
+    List<UUID> findIdsByProjectIdAndArchivedAtIsNull(@Param("projectId") UUID projectId);
 }

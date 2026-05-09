@@ -45,4 +45,11 @@ public interface AssetLinkRepository extends JpaRepository<AssetLink, UUID> {
             @Param("targetType") AssetLinkTargetType targetType,
             @Param("targetEntityId") UUID targetEntityId,
             @Param("projectId") UUID projectId);
+
+    @Query("SELECT l.asset.uid FROM AssetLink l WHERE l.targetType = :targetType"
+            + " AND l.targetEntityId = :targetEntityId AND l.asset.project.id = :projectId")
+    List<String> findAssetUidsByTargetTypeAndTargetEntityIdAndProjectId(
+            @Param("targetType") AssetLinkTargetType targetType,
+            @Param("targetEntityId") UUID targetEntityId,
+            @Param("projectId") UUID projectId);
 }

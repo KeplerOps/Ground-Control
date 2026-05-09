@@ -1,5 +1,17 @@
 #!/usr/bin/env node
 // Ground Control MCP Server
+//
+// Environment variables consumed by this server (see mcp/ground-control/lib.js):
+//   GC_BASE_URL                              Base URL of the Ground Control backend
+//                                             (default: http://localhost:8000).
+//   GROUND_CONTROL_API_TOKEN                 Bearer token forwarded on every
+//                                             /api/v1/** request when the backend
+//                                             has groundcontrol.security.enabled=true
+//                                             (ADR-026 / GC-P011).
+//   GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN Legacy admin-only token; forwarded only
+//                                             on paths requiring ROLE_ADMIN. Used as
+//                                             a fallback when GROUND_CONTROL_API_TOKEN
+//                                             is unset.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -59,6 +71,8 @@ import {
   getRepoGroundControlContext,
   runCodexArchitecturePreflight,
   runCodexReview,
+  runCodexVerifyFinding,
+  runPostImplementationPlan,
   embedRequirement,
   getEmbeddingStatus,
   embedProject,
@@ -142,6 +156,20 @@ import {
   createRiskScenarioLink,
   listRiskScenarioLinks,
   deleteRiskScenarioLink,
+  createThreatModel,
+  listThreatModels,
+  getThreatModel,
+  getThreatModelByUid,
+  updateThreatModel,
+  deleteThreatModel,
+  transitionThreatModelStatus,
+  createThreatModelLink,
+  listThreatModelLinks,
+  deleteThreatModelLink,
+  THREAT_MODEL_STATUSES,
+  STRIDE_CATEGORIES,
+  THREAT_MODEL_LINK_TARGET_TYPES,
+  THREAT_MODEL_LINK_TYPES,
   createControl,
   listControls,
   getControl,
@@ -259,7 +287,18 @@ function ok(text) {
 }
 
 function err(e) {
-  return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+  // RequestError carries the structured backend error envelope (status, code,
+  // detail). Render code and detail when present so callers see the full
+  // actionable info — for example the asset/scenario UID lists from a 409
+  // threat_model_referenced rejection.
+  let text = `Error: ${e.message}`;
+  if (e && e.name === "RequestError") {
+    if (e.code) text += ` (${e.code})`;
+    if (e.detail && typeof e.detail === "object" && Object.keys(e.detail).length > 0) {
+      text += `\nDetail: ${JSON.stringify(e.detail, null, 2)}`;
+    }
+  }
+  return { content: [{ type: "text", text }], isError: true };
 }
 
 const server = new McpServer({ name: "ground-control", version: "1.0.0" });
@@ -666,7 +705,7 @@ server.tool(
 
 server.tool(
   "gc_get_repo_ground_control_context",
-  "Read the current repository's AGENTS.md and return the standardized Ground Control context used by workflow automation, including the project identifier and validation errors when the convention is missing or invalid.",
+  "Read the current repository's .ground-control.yaml and return the full Ground Control workflow config used by automation: project identifier, github_repo, workflow commands (test/completion/lint/format), optional sonarcloud settings, and optional inlined plan_rules file content. Returns validation errors when the file is missing or invalid.",
   {
     repo_path: z.string().describe("Absolute path to the target Git repository"),
   },
@@ -681,12 +720,12 @@ server.tool(
 
 server.tool(
   "gc_codex_architecture_preflight",
-  "Run Codex architecture preflight before implementation. Codex inspects the requirement and repository, updates ADRs/design guidance when needed, and returns guardrails and changed files.",
+  "Run Codex architecture preflight before implementation. Codex inspects the requirement and/or issue plus the repository, updates ADRs/design guidance when needed, and returns guardrails and changed files. At least one of `requirement_uid` or `issue_number` must be supplied; requirement-free issues (bugs, refactors, maintenance) should pass `issue_number` alone.",
   {
-    requirement_uid: z.string().describe("Requirement UID (for example 'GC-J001')"),
+    requirement_uid: z.string().optional().describe("Requirement UID (for example 'GC-J001'). Optional when issue_number is supplied."),
     repo_path: z.string().describe("Absolute path to the target Git repository"),
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
-    issue_number: z.number().int().positive().optional().describe("Optional GitHub issue number for extra implementation context"),
+    issue_number: z.number().int().positive().optional().describe("GitHub issue number. Optional when requirement_uid is supplied; required for requirement-free issues."),
     repo: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/).optional().describe("GitHub repo as 'owner/repo' (defaults to GH_REPO env var)"),
   },
   async ({ requirement_uid, repo_path, project, issue_number, repo }) => {
@@ -710,19 +749,89 @@ server.tool(
 
 server.tool(
   "gc_codex_review",
-  "Run Codex review against the current repository with an exhaustive, no-triage review prompt focused on production-grade maintainability, reliability, security, and avoidance of concept confusion.",
+  "Run Codex against the current branch with a production-readiness review prompt. Codex enumerates all material findings (no triage) and, when a pull request is available, posts each finding as an inline PR review comment. Returns the list of posted comment ids, enriched with GraphQL review-thread ids and a short file/line/title preview so the coding agent can drive a fix/verify loop via gc_codex_verify_finding. Auto-detects the PR number for the current branch via `gh pr view` when pr_number is omitted. Hard-cap-2 enforcement: post-push reviews are capped at two cycles per PR (issue #794); pre-push reviews (uncommitted=true) are capped at two cycles per (issue, branch) pair anchored to the resolved GitHub issue thread (issue #796). The tool refuses cycle 3+ unless override_cap=true with a non-empty override_reason quoting the user's authorization.",
   {
     repo_path: z.string().describe("Absolute path to the target Git repository"),
     base_branch: z.string().optional().describe("Base branch to review against (defaults to 'dev')"),
     uncommitted: z.boolean().optional().describe("Review staged/unstaged/untracked changes instead of committed branch history"),
+    pr_number: z.number().int().positive().optional().describe("Pull request number to post findings to. When omitted and uncommitted is false, the tool auto-detects via `gh pr view --json number`. When no PR can be found, codex emits findings inline without posting."),
+    issue_number: z.number().int().positive().optional().describe("GitHub issue number used to anchor the pre-push cycle counter (uncommitted=true). When omitted, the tool derives it from the current branch's leading numeric prefix (e.g. '796-cap-pre-push' → 796). If neither resolves, the tool refuses with a structured error. Ignored for post-push reviews."),
+    override_cap: z.boolean().optional().describe("Override the hard-cap-2 cycle limit (post-push and pre-push). Only legitimate when the user has explicitly authorized cycle 3+ in the conversation. Requires override_reason."),
+    override_reason: z.string().optional().describe("Required when override_cap=true. Quote the user's authorization (e.g. 'user said: yes run cycle 3 to verify'). Stored in the marker for audit."),
+    override_phase_gate: z.boolean().optional().describe("Override the plan-before-review ordering gate. Only legitimate when the user explicitly authorized skipping planning (e.g., trivial bug fix). Requires override_phase_reason."),
+    override_phase_reason: z.string().optional().describe("Required when override_phase_gate=true. Quote the user's authorization. Logged for audit."),
   },
-  async ({ repo_path, base_branch, uncommitted }) => {
+  async ({ repo_path, base_branch, uncommitted, pr_number, issue_number, override_cap, override_reason, override_phase_gate, override_phase_reason }) => {
     try {
       return ok(JSON.stringify(
         await runCodexReview({
           repoPath: repo_path,
           baseBranch: base_branch || "dev",
           uncommitted: Boolean(uncommitted),
+          prNumber: pr_number != null ? pr_number : null,
+          issueNumber: issue_number != null ? issue_number : null,
+          overrideCap: Boolean(override_cap),
+          overrideReason: override_reason ?? null,
+          overridePhaseGate: Boolean(override_phase_gate),
+          overridePhaseReason: override_phase_reason ?? null,
+        }),
+        null,
+        2,
+      ));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_codex_verify_finding",
+  "Ask Codex to verify whether a specific PR review finding has been resolved in the local working tree. Takes repo_path, pr_number, and the REST comment_id returned from gc_codex_review. Codex reads the original comment directly from GitHub (only comments from allowlisted authors are accepted), reads the anchored file, and decides RESOLVED or UNRESOLVED. If RESOLVED, the review thread is marked resolved via GraphQL. If UNRESOLVED, a threaded reply with concrete new directions is posted to the original comment and returned to the caller. Per-finding hard cap of 2 verify calls per (PR, comment_id); refuses cycle 3+ unless override_cap=true with override_reason quoting the user's authorization.",
+  {
+    repo_path: z.string().describe("Absolute path to the target Git repository"),
+    pr_number: z.number().int().positive().describe("Pull request number the comment belongs to"),
+    comment_id: z.number().int().positive().describe("REST comment id (as returned in the gc_codex_review comments list) of the finding to verify"),
+    override_cap: z.boolean().optional().describe("Override the per-finding hard-cap-2. Only legitimate when the user explicitly authorized cycle 3+ for this finding. Requires override_reason."),
+    override_reason: z.string().optional().describe("Required when override_cap=true. Quote the user's authorization. Logged on the marker for audit."),
+  },
+  async ({ repo_path, pr_number, comment_id, override_cap, override_reason }) => {
+    try {
+      return ok(JSON.stringify(
+        await runCodexVerifyFinding({
+          repoPath: repo_path,
+          prNumber: pr_number,
+          commentId: comment_id,
+          overrideCap: Boolean(override_cap),
+          overrideReason: override_reason ?? null,
+        }),
+        null,
+        2,
+      ));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_post_implementation_plan",
+  "Post the implementation plan as a comment on the GitHub issue thread (per ADR-029, the issue is the durable record). Enforces the preflight-before-planning ordering from #794 MVP-2: refuses unless a 'preflight' phase marker exists for the issue (gc_codex_architecture_preflight writes that marker on success). On a successful post, also writes a 'plan' phase marker so downstream tools can confirm planning happened. Override is available for cases where the user explicitly authorizes skipping preflight, but the override_reason must quote the authorization for audit.",
+  {
+    repo_path: z.string().describe("Absolute path to the target Git repository"),
+    issue_number: z.number().int().positive().describe("GitHub issue number the plan is for"),
+    plan_body: z.string().min(1).describe("Plan body in Markdown. Posted verbatim as a comment on the issue, alongside the phase marker."),
+    override: z.boolean().optional().describe("Skip the preflight prerequisite check. Only legitimate when the user has explicitly authorized skipping preflight (e.g., trivial bug fixes). Requires override_reason."),
+    override_reason: z.string().optional().describe("Required when override=true. Quote the user's authorization. Stored alongside the marker for audit."),
+  },
+  async ({ repo_path, issue_number, plan_body, override, override_reason }) => {
+    try {
+      return ok(JSON.stringify(
+        await runPostImplementationPlan({
+          repoPath: repo_path,
+          issueNumber: issue_number,
+          planBody: plan_body,
+          override: Boolean(override),
+          overrideReason: override_reason ?? null,
         }),
         null,
         2,
@@ -2967,6 +3076,216 @@ server.tool(
     try {
       await deleteRiskScenarioLink(risk_scenario_id, link_id, project);
       return ok("Risk scenario link deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+// ==========================================================================
+// Threat Model tools (GC-H001)
+// ==========================================================================
+
+server.tool(
+  "gc_create_threat_model",
+  "Create a threat model entry — a first-class threat analysis artifact distinct from risk scenarios. Captures threat source or actor, threat event or method, effect/consequence, and optional STRIDE taxonomy. Link to assets, requirements, controls, risk scenarios, architecture models, code, and issues via gc_create_threat_model_link.",
+  {
+    uid: z.string().max(30).describe("Threat model UID (e.g. 'TM-001')"),
+    title: z.string().max(200).describe("Threat model title"),
+    threat_source: z.string().describe("Threat source or actor (NIST SP 800-30 language)"),
+    threat_event: z.string().describe("Threat event or method"),
+    effect: z.string().describe("Effect or consequence"),
+    stride: z.enum(STRIDE_CATEGORIES).optional().describe("Optional STRIDE category"),
+    narrative: z.string().optional().describe("Free-text analyst narrative (non-authoritative context)"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ uid, title, threat_source, threat_event, effect, stride, narrative, project }) => {
+    try {
+      const data = { uid, title, threat_source, threat_event, effect };
+      if (stride !== undefined) data.stride = stride;
+      if (narrative !== undefined) data.narrative = narrative;
+      return ok(JSON.stringify(await createThreatModel(data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_threat_models",
+  "List all threat model entries for a project, ordered by creation date (newest first).",
+  {
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ project }) => {
+    try {
+      const result = await listThreatModels(project);
+      if (Array.isArray(result) && result.length === 0) return ok("No threat models found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_get_threat_model",
+  "Get a threat model by UUID or UID.",
+  {
+    id: z.string().uuid().optional().describe("Threat model UUID"),
+    uid: z.string().optional().describe("Threat model UID (e.g. 'TM-001')"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, uid, project }) => {
+    try {
+      if (id) {
+        return ok(JSON.stringify(await getThreatModel(id, project), null, 2));
+      }
+      if (uid) {
+        return ok(JSON.stringify(await getThreatModelByUid(uid, project), null, 2));
+      }
+      return err(new Error("Provide either 'id' (UUID) or 'uid'"));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_update_threat_model",
+  "Update mutable fields of a threat model entry. Only provided fields are updated. Required fields (title, threat_source, threat_event, effect) reject blank strings server-side. To explicitly clear an optional field, set clear_stride=true or clear_narrative=true (passing the value field as null/undefined alone means 'no change'). When a clear flag is true any value supplied in the corresponding field is ignored.",
+  {
+    id: z.string().uuid().describe("Threat model UUID"),
+    title: z.string().max(200).optional().describe("Updated title"),
+    threat_source: z.string().optional().describe("Updated threat source"),
+    threat_event: z.string().optional().describe("Updated threat event"),
+    effect: z.string().optional().describe("Updated effect"),
+    stride: z.enum(STRIDE_CATEGORIES).optional().describe("Updated STRIDE category"),
+    narrative: z.string().optional().describe("Updated narrative"),
+    clear_stride: z.boolean().optional().describe("If true, sets stride to null on the entity"),
+    clear_narrative: z.boolean().optional().describe("If true, sets narrative to null on the entity"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({
+    id,
+    title,
+    threat_source,
+    threat_event,
+    effect,
+    stride,
+    narrative,
+    clear_stride,
+    clear_narrative,
+    project,
+  }) => {
+    try {
+      const data = {};
+      if (title !== undefined) data.title = title;
+      if (threat_source !== undefined) data.threat_source = threat_source;
+      if (threat_event !== undefined) data.threat_event = threat_event;
+      if (effect !== undefined) data.effect = effect;
+      if (stride !== undefined) data.stride = stride;
+      if (narrative !== undefined) data.narrative = narrative;
+      if (clear_stride !== undefined) data.clear_stride = clear_stride;
+      if (clear_narrative !== undefined) data.clear_narrative = clear_narrative;
+      return ok(JSON.stringify(await updateThreatModel(id, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_threat_model",
+  "Delete a threat model entry. Cascades to all owned ThreatModelLink rows. Returns 409 threat_model_referenced (with `assetUids` and `scenarioUids` in the error detail) if any AssetLink THREAT_MODEL_ENTRY or RiskScenarioLink THREAT_MODEL row still references this threat model — clean those up before retrying.",
+  {
+    id: z.string().uuid().describe("Threat model UUID"),
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+  },
+  async ({ id, project }) => {
+    try {
+      await deleteThreatModel(id, project);
+      return ok("Threat model deleted.");
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_transition_threat_model_status",
+  "Transition a threat model lifecycle status. Valid transitions: DRAFT→ACTIVE|ARCHIVED, ACTIVE→ARCHIVED.",
+  {
+    id: z.string().uuid().describe("Threat model UUID"),
+    status: z.enum(THREAT_MODEL_STATUSES).describe("Target status"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ id, status, project }) => {
+    try {
+      return ok(JSON.stringify(await transitionThreatModelStatus(id, status, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_create_threat_model_link",
+  "Link a threat model to an operational asset or system boundary, requirement, control, risk scenario, observation, risk assessment result, verification result, or external architecture model / code / issue / evidence.",
+  {
+    threat_model_id: z.string().uuid().describe("Threat model UUID"),
+    target_type: z.enum(THREAT_MODEL_LINK_TARGET_TYPES).describe("Type of the linked target"),
+    target_entity_id: z.string().uuid().optional().describe("UUID of the internal target entity (for first-class targets)"),
+    target_identifier: z.string().max(500).optional().describe("Identifier of an external or not-yet-modeled target (e.g. repo-relative path, issue number)"),
+    link_type: z.enum(THREAT_MODEL_LINK_TYPES).describe("Nature of the relationship"),
+    target_url: z.string().max(2000).optional().describe("URL of the linked target"),
+    target_title: z.string().max(255).optional().describe("Human-readable title for the linked target"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ threat_model_id, target_type, target_entity_id, target_identifier, link_type, target_url, target_title, project }) => {
+    try {
+      const data = { target_type, link_type };
+      if (target_entity_id !== undefined) data.target_entity_id = target_entity_id;
+      if (target_identifier !== undefined) data.target_identifier = target_identifier;
+      if (target_url !== undefined) data.target_url = target_url;
+      if (target_title !== undefined) data.target_title = target_title;
+      return ok(JSON.stringify(await createThreatModelLink(threat_model_id, data, project), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_list_threat_model_links",
+  "List all links from a threat model entry.",
+  {
+    threat_model_id: z.string().uuid().describe("Threat model UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ threat_model_id, project }) => {
+    try {
+      const result = await listThreatModelLinks(threat_model_id, project);
+      if (Array.isArray(result) && result.length === 0) return ok("No threat model links found.");
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+server.tool(
+  "gc_delete_threat_model_link",
+  "Delete a link from a threat model entry.",
+  {
+    threat_model_id: z.string().uuid().describe("Threat model UUID"),
+    link_id: z.string().uuid().describe("Link UUID"),
+    project: z.string().optional().describe("Project identifier"),
+  },
+  async ({ threat_model_id, link_id, project }) => {
+    try {
+      await deleteThreatModelLink(threat_model_id, link_id, project);
+      return ok("Threat model link deleted.");
     } catch (e) {
       return err(e);
     }
