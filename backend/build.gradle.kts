@@ -55,8 +55,9 @@ dependencies {
     // Audit trail
     implementation("org.springframework.data:spring-data-envers")
 
-    // Database
-    runtimeOnly("org.postgresql:postgresql")
+    // Database — implementation (not runtimeOnly) because AgeGraphService binds AGE's
+    // agtype pseudotype via org.postgresql.util.PGobject at compile time.
+    implementation("org.postgresql:postgresql")
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-database-postgresql")
 

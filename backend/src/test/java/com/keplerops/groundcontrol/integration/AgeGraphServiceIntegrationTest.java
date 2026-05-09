@@ -1,7 +1,10 @@
 package com.keplerops.groundcontrol.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import com.keplerops.groundcontrol.domain.graph.service.MixedGraphClient;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
@@ -13,6 +16,7 @@ import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 @Transactional
@@ -22,6 +26,9 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
     private GraphClient graphClient;
 
     @Autowired
+    private MixedGraphClient mixedGraphClient;
+
+    @Autowired
     private RequirementRepository requirementRepository;
 
     @Autowired
@@ -29,6 +36,9 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
 
     @Autowired
     private ProjectRepository projectRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private Project testProject;
 
@@ -82,5 +92,126 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
         var firstPath = paths.get(0);
         assertThat(firstPath.nodeUids()).containsExactly("AGE-A", "AGE-B", "AGE-C2");
         assertThat(firstPath.edgeLabels()).containsExactly("DEPENDS_ON", "DEPENDS_ON");
+    }
+
+    @Test
+    void materializeGraph_handlesAdversarialTitleAndStatement() {
+        // Free-form fields cannot be allowlisted at the AGE adapter — they accept arbitrary user
+        // text. The adapter must bind them as Cypher parameters so they cannot influence query
+        // structure even with $gc$, $$, single quotes, backslashes, or SQL keywords embedded.
+        String adversarialTitle = "Evil $gc$); DROP TABLE requirement; --";
+        String adversarialStatement = "Stmt with 'quotes' and \\backslashes\\ and $$delimiters$$";
+        String requirementCountSql = "SELECT COUNT(*) FROM requirement";
+        Long beforeCount = jdbcTemplate.queryForObject(requirementCountSql, Long.class);
+
+        var req = requirementRepository.save(
+                new Requirement(testProject, "AGE-EVIL", adversarialTitle, adversarialStatement));
+
+        graphClient.materializeGraph();
+
+        // The requirement table is intact (the DROP TABLE in the title was stored, not executed).
+        Long afterCount = jdbcTemplate.queryForObject(requirementCountSql, Long.class);
+        assertThat(afterCount).isEqualTo(beforeCount + 1);
+
+        // The materialized graph round-trips the malicious values verbatim as property data.
+        var projection = mixedGraphClient.getVisualization(testProject.getId());
+        var matched = projection.nodes().stream()
+                .filter(n -> "AGE-EVIL".equals(n.uid()))
+                .findFirst();
+        assertThat(matched).isPresent();
+        assertThat(matched.get().properties())
+                .containsEntry("title", adversarialTitle)
+                .containsEntry("statement", adversarialStatement);
+
+        // Quick sanity-check: the requirement is still readable through normal JPA after materialization.
+        var reloaded = requirementRepository.findById(req.getId()).orElseThrow();
+        assertThat(reloaded.getTitle()).isEqualTo(adversarialTitle);
+        assertThat(reloaded.getStatement()).isEqualTo(adversarialStatement);
+    }
+
+    @Test
+    void getAncestors_acceptsAdversarialUidWithoutInjection() {
+        // The adapter-level UID validator no longer rejects shapes like $gc$, single quotes, or
+        // backslashes — those are bound through the agtype params payload and cannot affect
+        // query structure. Verify the call returns cleanly (empty result, no SQL error).
+        var ancestors = graphClient.getAncestors(testProject.getId(), "REQ-$gc$);DROP--", 5);
+        assertThat(ancestors).isEmpty();
+    }
+
+    @Test
+    void getDescendants_acceptsAdversarialUidWithoutInjection() {
+        var descendants = graphClient.getDescendants(testProject.getId(), "REQ-'OR'1'='1", 5);
+        assertThat(descendants).isEmpty();
+    }
+
+    @Test
+    void findPaths_acceptsAdversarialUidWithoutInjection() {
+        var paths = graphClient.findPaths(testProject.getId(), "REQ-001", "REQ-\\evil");
+        assertThat(paths).isEmpty();
+    }
+
+    @Test
+    void getAncestors_stillRejectsControlCharactersInUid() {
+        // Control characters are not an injection vector under parameter binding, but they
+        // would corrupt logs and confuse operators; the adapter still rejects them as an
+        // operational sanity check.
+        assertThatThrownBy(() -> graphClient.getAncestors(testProject.getId(), "REQ\n001", 5))
+                .isInstanceOf(DomainValidationException.class);
+    }
+
+    @Test
+    void getAncestors_rejectsOutOfRangeDepth() {
+        assertThatThrownBy(() -> graphClient.getAncestors(testProject.getId(), "AGE-C", 0))
+                .isInstanceOf(DomainValidationException.class);
+        assertThatThrownBy(() -> graphClient.getAncestors(testProject.getId(), "AGE-C", 999))
+                .isInstanceOf(DomainValidationException.class);
+    }
+
+    @Test
+    void materializeGraph_preservesInstantPropertiesAsIsoStrings() {
+        // RequirementRelation projection contributes a `createdAt` Instant property. Without an
+        // explicit Jackson configuration, the JSON-bound params would serialize Instants as
+        // numeric timestamps, silently changing the API shape of getVisualization() responses
+        // when AGE is enabled. Verify the round-trip preserves an ISO-8601 string.
+        var src = requirementRepository.save(new Requirement(testProject, "AGE-INST-S", "Src", "S statement"));
+        var tgt = requirementRepository.save(new Requirement(testProject, "AGE-INST-T", "Tgt", "T statement"));
+        relationRepository.save(new RequirementRelation(src, tgt, RelationType.DEPENDS_ON));
+
+        graphClient.materializeGraph();
+
+        var projection = mixedGraphClient.getVisualization(testProject.getId());
+        var matchedEdge = projection.edges().stream()
+                .filter(e -> "DEPENDS_ON".equals(e.edgeType()))
+                .findFirst();
+        assertThat(matchedEdge).isPresent();
+        Object createdAt = matchedEdge.get().properties().get("createdAt");
+        // ISO-8601 starts with a 4-digit year; numeric epoch seconds would not.
+        assertThat(createdAt)
+                .as("createdAt must round-trip as an ISO-8601 string, not a numeric timestamp")
+                .isInstanceOf(String.class);
+        assertThat((String) createdAt).matches("^\\d{4}-\\d{2}-\\d{2}T.*");
+    }
+
+    @Test
+    void materializeGraph_preservesAgtypeTypeTagSequencesInsideTitleVerbatim() {
+        // Defense against the regression where stripAgtypeTypeTags() naively rewrote
+        // }::vertex inside user-controlled string properties. Persist a requirement whose
+        // title literally contains the AGE type-tag suffixes, materialize, round-trip
+        // through getVisualization, and confirm the title comes back verbatim.
+        String trickyTitle = "edge case }::vertex and }::edge inside title }::path";
+        var req = requirementRepository.save(new Requirement(testProject, "AGE-TAG", trickyTitle, "stmt"));
+
+        graphClient.materializeGraph();
+
+        var projection = mixedGraphClient.getVisualization(testProject.getId());
+        var matched = projection.nodes().stream()
+                .filter(n -> "AGE-TAG".equals(n.uid()))
+                .findFirst();
+        assertThat(matched).isPresent();
+        assertThat(matched.get().properties()).containsEntry("title", trickyTitle);
+
+        // Sanity: the JPA row also has the original title (no DB-side corruption).
+        var reloaded = requirementRepository.findById(req.getId()).orElseThrow();
+        assertThat(reloaded.getTitle()).isEqualTo(trickyTitle);
     }
 }
