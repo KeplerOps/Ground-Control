@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **AGE adapter migrated to native Cypher parameter binding** (issue #244,
+  ADR-032). `AgeGraphService` now routes every user-controlled string value
+  (UIDs, project identifiers, free-form requirement properties like titles
+  and statements) through the `params` argument of
+  `ag_catalog.cypher(graph, query, params)`, bound via JDBC as a typed
+  `PGobject(agtype)`. The Cypher query text contains only allowlisted
+  identifiers (graph name, entity-type labels, edge-type labels, property
+  keys) and `$paramName` references — no user value reaches the SQL string
+  even after extended escaping. Allowlists for UIDs, graph names, and
+  property keys remain as defense in depth and now throw
+  `DomainValidationException` (mapped to HTTP 422 by
+  `GlobalExceptionHandler`). Removed the legacy `escapeCypher` /
+  `toCypherValue` helpers; their interpolation paths are gone. Closes #244.
+- **Bounded AGE traversal depth at the adapter layer.** Added
+  `MAX_GRAPH_TRAVERSAL_DEPTH = 20` cap enforced by `validateDepth()` in
+  `AgeGraphService.getAncestors`/`getDescendants`, and a `[*1..20]` bound
+  plus an inside-Cypher `LIMIT 50` in `findPaths` (which has no
+  caller-supplied depth). Rejects out-of-range or non-positive depths with
+  `DomainValidationException` before any Cypher is constructed, eliminating
+  the unbounded-traversal DoS surface flagged in the codex review of #244.
+- **Closed remaining AGE adapter findings from cycle 3 review:**
+  - Class-level `@Transactional` on `AgeGraphService` so AGE's connection-
+    local `LOAD 'age'` and `SET search_path` share a single connection with
+    the subsequent `cypher(...)` call.
+  - Quote-aware tokenizer in `stripAgtypeTypeTags` so AGE's `::vertex` /
+    `::edge` / `::path` type-tag stripping cannot corrupt user-controlled
+    string property values containing those literal sequences.
+  - `APPROVED_PROPERTY_KEYS` registry — fixed allowlist of every AGE
+    property key that any current `GraphProjectionContributor` may emit.
+    Per ADR-032 §"Decision," dynamic Cypher tokens must come from a fixed
+    allowlist, not just satisfy a syntactic pattern. New contributors must
+    register new keys and ship a regression test; this catches schema drift
+    at compile-time-of-test rather than at production runtime.
+  - Fixed cypher-direction inversion on `getAncestors`/`getDescendants`
+    (now follow outgoing/incoming PARENT edges respectively, matching the
+    repo's source→target child→parent edge convention).
+  - Relaxed `validateUid` from a `[a-zA-Z0-9_-]+` allowlist (which would
+    have rejected domain-valid imported UIDs) to a length + control-char
+    operational sanity check; injection safety comes from parameter
+    binding, not from input grammar narrowness.
+  - Switched `findPaths` to return `nodes(path)` and `relationships(path)`
+    directly and parse on the Java side, working around AGE 1.6's "could
+    not find properties for n" planner error on list comprehensions over
+    path nodes.
+
 ### Added
 
 - **ADR-031 Severity Rubric and Stopping Model for Pre-Push Codex Review** (Proposed). Refines GC-O007 with a five-piece stopping model: per-finding severity classification (IEEE 1044 + CVSS v4.0) (GC-X101); pre-declared numeric exit gates per `/implement` run (GC-X102); severity-weighted early-stop within the existing three-cycle cap (GC-X103); independent-reviewer confirmation for `Critical`/`Blocking` findings (GC-X104); structured cycle-3 escalation decision aid replacing free-text vibes (GC-X105). The cap mechanics, override-cap path, reviewer-of-record invariant, and tool-layer enforcement boundary from ADR-029 are preserved. Addresses the empirical failure mode where the cycle-3 escalation prompt provides no signal to discriminate "fixes were trivial — stop" from "still finding real bugs — keep going."
