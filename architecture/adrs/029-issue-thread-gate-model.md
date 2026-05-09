@@ -82,11 +82,21 @@ drives the workflow.
 
 ### Pre-push review cycle state
 
-Pre-push `gc_codex_review` runs with `uncommitted=true` are the same Codex
-review loop as the post-push PR review, just before a PR number exists. They
-therefore inherit GC-O007's hard two-cycle cap and no cycle-3 verification pass.
-Any older workflow text or issue prose that refers to a five-cycle Codex cap is
-stale and must not drive implementation without a new ADR amending GC-O007.
+Pre-push `gc_codex_review` runs with `uncommitted=true` are the canonical
+Codex review step. The later post-push invocation is retained only as a
+tool-layer defense-in-depth path for direct callers; the `/implement` skill
+must not drive a second Codex review after the first push. Merge-commit drift
+relative to the target branch is covered by CI, integration tests, and
+SonarCloud, not by a duplicate Codex pass.
+
+Because the workflow now has one Codex review step instead of two, the
+`gc_codex_review` hard cap is three cycles for both pre-push and post-push
+tool entrypoints. `gc_codex_verify_finding` remains capped at two calls per
+finding because verification loops are per-finding, not whole-review cycles.
+Any older workflow text, issue prose, or ADR amendment that refers to a
+five-cycle Codex cap, a hard two-cycle `gc_codex_review` cap, or two Codex
+review steps is stale and must not drive implementation without a new ADR
+amending GC-O007.
 
 Because the pre-push review has no PR issue number, its durable cycle state is
 anchored to the GitHub issue resolved at workflow Step 1. The marker records
@@ -105,6 +115,38 @@ review-cycle, and verify-cycle markers. Implementations must reuse the
 existing issue-comment read/post helpers, marker parser/evaluator pattern, and
 structured refusal result style; they must not add a local state file, git
 notes, database row, Temporal state, or driver-local counter for this cap.
+
+### Codex findings issue-thread record
+
+After every successful `gc_codex_review` cycle, the MCP server must post a
+human-readable findings record to the resolved GitHub issue thread. That
+comment is the durable record for "what Codex said in cycle N"; agent-written
+decision summaries remain a separate record of what the agent did with each
+finding.
+
+The findings record must preserve the existing machine-readable cycle marker
+contract and include:
+
+- cycle number, cap, reviewer names, and review mode (`pre-push` or
+  `post-push`);
+- the verbatim `core_review_text` and `security_review_text` returned by the
+  reviewers;
+- for post-push reviews, every inline PR review comment URL that was created.
+
+Post-push inline PR review comments still exist for anchored human review.
+The issue-thread findings comment is additive, not a replacement for inline
+comments. If posting the issue-thread findings record fails, the review run is
+not durable and must fail fast with a structured
+`review_comment_post_failed` result while preserving the review text and
+finding metadata in the returned payload.
+
+Implementations must route this through the existing host-side GitHub posting
+boundary in `gc_codex_review`: use the same `gh api` issue-comment helpers,
+secret-content guardrails, parser/evaluator result envelopes, and
+issue-resolution logic already used for phase markers, cycle markers, and
+inline PR comment posting. Do not let Codex call `gh` directly, do not create a
+second GitHub client abstraction, and do not make agent prose the only source
+of truth for review findings.
 
 The cap mechanism is an audit / discipline gate, not a security boundary. A
 fully noncompliant or compromised agent with shell access has many paths to

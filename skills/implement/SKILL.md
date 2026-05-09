@@ -120,7 +120,7 @@ Explore the codebase to determine whether the work described in the issue is alr
   }
   ```
 
-  For each concern the new code will touch, find and read the project's existing implementation. Use the existing helper. If you genuinely need a new one, justify the new helper in the plan (Step 4) and note why the existing one didn't fit. Re-implementing what's already there is the failure mode Step 12 (codex review, cross-cutting reviewer) is designed to catch — catch it here first so you don't spend a review cycle on it.
+  For each concern the new code will touch, find and read the project's existing implementation. Use the existing helper. If you genuinely need a new one, justify the new helper in the plan (Step 4) and note why the existing one didn't fit. Re-implementing what's already there is the failure mode the Step 6.5 codex review is designed to catch — catch it here first so you don't spend a review cycle on it.
 - For each requirement in `in_scope_requirements[]`, review its existing traceability links (IMPLEMENTS, TESTS) via `gc_get_traceability` on the requirement UUID. Some or all clauses may already be satisfied.
 - Reuse the architecture-preflight guidance from Step 2.5 while assessing existing coverage and planning changes.
 
@@ -231,9 +231,11 @@ Implementation is NOT ready for commit until ALL of the following are verified:
 
 If any check fails, fix it before proceeding. Do NOT move to Phase C until every check passes.
 
-### Step 6.5: Pre-push Codex Review (uncommitted)
+### Step 6.5: Pre-push Codex Review (final)
 
-Run `gc_codex_review` with `uncommitted=true` against the staged + unstaged changes BEFORE the first push. Each codex review cycle takes ~5 min locally; each CI cycle to discover the same findings takes 10–15 min. Iterating locally collapses N CI runs into N local runs and one push.
+Run `gc_codex_review` with `uncommitted=true` against the staged + unstaged changes BEFORE the first push. **This is THE codex review pass for the PR** — there is no second post-push codex review (see issue #804). Merge-commit drift relative to the target branch is the responsibility of CI (compile/tests/integration) and SonarCloud (quality), not a separate codex pass.
+
+Each codex review cycle takes ~5 min locally; each CI cycle to discover the same findings takes 10–15 min. Iterating locally collapses N CI runs into N local runs and one push.
 
 1. Stage everything you intend to push (`git add -A` for the full diff).
 2. Call the `gc_codex_review` MCP tool with:
@@ -241,9 +243,10 @@ Run `gc_codex_review` with `uncommitted=true` against the staged + unstaged chan
    - `base_branch`: `{cfg.workflow.base_branch|default dev}`
    - `uncommitted`: `true`
    - `issue_number`: the issue number resolved at Step 1, so the MCP server anchors the cycle counter to the issue thread (per ADR-029). When omitted, the server derives it from the current branch's leading numeric prefix (e.g. `796-cap-pre-push` → 796); pass it explicitly when the branch was named manually.
-3. Apply the **Review loop rules** (defined above Step 12) to the returned findings, fix locally, re-stage, and re-invoke `gc_codex_review` until clean.
-4. **Hard cap: 2 iterations** (enforced by the MCP server, issue #796). The next invocation reads existing markers on the issue thread, counts pre-push cycles for the current (issue, branch) pair, and refuses cycle 3 with `error: "codex_review_prepush_cap_reached"` and `next_action: "post_summary_and_escalate_to_user"`. After cycle 2, if findings remain, STOP, post the remaining findings + your fix history as an issue comment, and escalate to the user. If the user authorizes cycle 3, retry with `override_cap=true` and `override_reason="<one-line quote of the user's authorization>"`.
-5. Once clean, proceed to Phase C with the staged diff. Step 12 then becomes a verification pass against the merge commit (typically a no-op).
+3. Apply the **Review loop rules** (defined below) to the returned findings, fix locally, re-stage, and re-invoke `gc_codex_review` until clean.
+4. **Hard cap: 3 iterations** (enforced by the MCP server, issues #796 and #804). The next invocation reads existing markers on the issue thread, counts pre-push cycles **per issue** (the current branch is recorded in the marker for audit context but is NOT part of the cap key — a branch rename on the same issue cannot reset the counter), and refuses cycle 4 with `error: "codex_review_prepush_cap_reached"` and `next_action: "post_summary_and_escalate_to_user"`. After cycle 3, if findings remain, STOP, post the remaining findings + your fix history as an issue comment, and escalate to the user. If the user authorizes cycle 4, retry with `override_cap=true` and `override_reason="<one-line quote of the user's authorization>"`.
+5. **Findings record**: every successful cycle posts a verbatim findings comment to the resolved issue thread (per ADR-029). The comment carries the cycle/cap/mode header and both reviewers' verbatim text. If that post fails, the run returns `ok: false, error: "review_comment_post_failed"` — fix the underlying GitHub issue (network, gh auth, repo perms) and retry.
+6. Once clean, proceed to Phase C with the staged diff.
 
 Skip this step only if the diff is so trivial (one-liner typo fix) that codex would have nothing to find. When in doubt, run it.
 
@@ -298,7 +301,7 @@ Skip this step only if the diff is so trivial (one-liner typo fix) that codex wo
 
 ### Step 11: SonarCloud
 
-**Skip this step entirely if `cfg.sonarcloud` is null.** Log "SonarCloud skipped — no sonarcloud block in .ground-control.yaml" and proceed to Step 12.
+**Skip this step entirely if `cfg.sonarcloud` is null.** Log "SonarCloud skipped — no sonarcloud block in .ground-control.yaml" and proceed to Step 13.
 
 This step runs AFTER Step 10 (CI Monitor) reports green. A green CI run does not imply a clean SonarCloud — the quality gate and the issue list are separate from CI conclusions and must be checked independently.
 
@@ -327,11 +330,11 @@ Otherwise:
 
 6. **Cycle cap: 5 iterations for SonarCloud.** If the issue list is still non-empty after 5 fix→re-analyze cycles, STOP, post the remaining findings as an issue comment, and escalate to the user.
 
-7. Proceed to Step 12 only when: the quality gate is `OK` AND `api/issues/search?resolved=false` returns zero rows for this PR AND `api/hotspots/search?status=TO_REVIEW` returns zero rows for this PR.
+7. Proceed to Step 13 only when: the quality gate is `OK` AND `api/issues/search?resolved=false` returns zero rows for this PR AND `api/hotspots/search?status=TO_REVIEW` returns zero rows for this PR.
 
-## Review loop rules (apply to every review step in this phase)
+## Review loop rules (apply to every review step in this skill)
 
-Every review step below (Codex cross-model, refactor & cross-cutting concerns, test quality review) follows the **same loop**:
+Codex review now runs as a single pre-push pass at Step 6.5; the remaining review step in Phase D is **test quality review (Step 13)**. Both follow the **same loop**:
 
 1. **Invoke the review.**
 2. **Read the FULL output.** Do not stop after the first few findings.
@@ -340,54 +343,21 @@ Every review step below (Codex cross-model, refactor & cross-cutting concerns, t
 5. **Re-run the SAME review after fixing.** Do not assume your fixes are complete — the re-run is the verification.
 6. **Repeat until the reviewer reports zero findings, OR the cycle cap is hit.**
 
-For every cycle, after applying fixes, commit and push BEFORE re-running the review so the reviewer sees the updated tree. Format every fix commit as `Fix review findings (<reviewer>, cycle <N>)` so the loop history is visible in git log.
+For every cycle, after applying fixes the agent must update the tree the reviewer sees BEFORE re-running:
 
-### Step 12: Cross-Model Review (Codex)
+- **Step 6.5 (pre-push codex review)** is local-only. Re-stage with `git add -A` and re-invoke; do NOT commit or push between cycles. The pre-push review reads the staged + unstaged diff against the base branch.
+- **Step 13 (test quality review)** runs after the PR is open. Commit and push fixes BEFORE re-invoking so the reviewer sees the updated tree.
 
-This step normally lands as a **verification pass** rather than a fix/verify loop, because Step 6.5 should already have driven the diff through codex locally before the first push. Treat Step 12 as the post-merge-commit re-check: codex sometimes catches issues that only surface on the merged tree (interactions with target-branch changes since the local review ran). Most of the time it returns 0 findings.
+Format every fix commit (Step 13 only) as `Fix review findings (<reviewer>, cycle <N>)` so the loop history is visible in git log.
 
-`gc_codex_review` runs two focused codex reviewers — a core production-readiness reviewer and a dedicated application-security reviewer — against a single pre-computed diff. By default the reviewers run sequentially. Both post their findings as inline PR review comments with a reviewer-tagged title (`[core]` or `[security]`). The tool returns a single deduplicated list; you then drive a per-finding fix/verify loop via `gc_codex_verify_finding`.
-
-1. Run `pwd` to capture the absolute repository root.
-2. Determine the pull request number for the current branch: `gh pr view --json number`. Cache it.
-3. Call the `gc_codex_review` MCP tool with:
-   - `repo_path`: absolute path from `pwd`
-   - `base_branch`: `{cfg.workflow.base_branch|default dev}`
-   - `pr_number`: the PR number from step 2
-4. The tool returns `{pr_number, finding_count, comments: [{comment_id, thread_id, reviewer, path, line, title, html_url}, ...], reviewers, core_review_text, security_review_text}`. Codex has already posted each finding as an inline PR review comment.
-5. If `finding_count` is 0, skip to Step 13.
-6. Otherwise, for EACH entry in `comments`, run the following fix/verify loop:
-   1. Read the comment body if needed: `gh api /repos/<owner>/<repo>/pulls/comments/<comment_id>`.
-   2. Fix the finding locally. Apply the **Review loop rules** above.
-   3. Run the local completion gate to make sure nothing regressed locally.
-   4. Call `gc_codex_verify_finding` with `repo_path`, `pr_number`, and the `comment_id`. Codex will read your local changes and decide:
-      - **`status: "resolved"`** — the review thread has already been marked resolved on GitHub. Move on.
-      - **`status: "unresolved"`** — codex posted a threaded reply with `reply_body`. Fix per those directions and re-invoke `gc_codex_verify_finding`. **Per-finding cap: 2 verify calls** (enforced by the MCP server, see #794 — the tool refuses cycle 3 with a structured error and `next_action: "escalate_finding_to_user"`). If the user authorizes a 3rd verify, retry with `override_cap=true` and `override_reason="<their authorization>"`.
-   5. After the finding is resolved (or marked `wontfix`/`not-applicable` by user direction), post a one-line decision comment on the GitHub issue thread linking back to the PR review comment. `defer` is not a valid decision — the workflow's contract is "fix every finding before PR is ready"; deferring a finding violates that contract.
-7. After all findings are resolved, commit and push the fixes (one commit per fix cycle, message `Fix review findings (codex, cycle <N>)`), then re-invoke `gc_codex_review` to confirm no new issues surfaced.
-
-8. **Hard cap: 2 iterations of `gc_codex_review`** (with a user-authorized override; see below).
-
-   **The cap is *NOT* permission to skip fixing findings, and stopping at a cycle-2 finding to ask "should I fix this?" is itself a process violation.** You ran the review *because* findings should be fixed; pausing to ask before fixing is asking the user to do work they delegated. The contract is:
-
-   - **Cycle 1**: review → **fix every finding without asking** → push.
-   - **Cycle 2**: review → **fix every finding without asking** → push → **then** post a summary comment to the issue thread listing every finding from both cycles and how it was addressed → **then** escalate to the user with the summary and ask: *"Cycle 2 fixes complete. Should I run cycle 3 to verify the fixes, or ship as-is? See <summary-comment-url>."* The user makes the judgment call on cycle 3.
-   - **Cycle 3** is the user's decision, not yours. If the user authorizes it, invoke `gc_codex_review` with `override_cap=true` and `override_reason="<one-line quote of the user's authorization>"`. Without that override, `gc_codex_review` refuses cycle 3 with a structured error.
-
-   The cap exists because cycle 3+ codex passes hit diminishing returns and start repeating out-of-scope findings — not because cycle 2 fixes themselves are optional.
-
-   **The cap is enforced by the MCP server, not by this prose.** `gc_codex_review` posts a machine-readable marker comment to the PR after each successful invocation. The next invocation:
-
-   - Reads existing markers and counts cycles for this PR.
-   - If `priorCount < 2` and `override_cap` is not set: allows the run, returns `cycle` and `cap` in the result, and posts a new marker.
-   - If `priorCount >= 2` and `override_cap` is not set: refuses with `{ok: false, error: "codex_review_cap_reached", message, prior_cycles, cap, next_action}`. `next_action` instructs the agent to escalate to the user with a summary; the agent literally cannot run cycle 3 without authorization.
-   - If `override_cap === true`: requires `override_reason` (a non-empty string). The run proceeds and the result includes `override: true` plus the reason. The marker for that cycle is recorded as an override marker so audits can distinguish authorized cycle-3+ runs from regular ones.
-
-   Successful returns also surface `next_action` — `"fix_findings_and_push"` for cycle 1, `"fix_findings_then_summarize_and_escalate"` for cycle 2, etc. Follow the next_action verbatim. (See issue #794 for the enforcement design.)
-
-**Tool shape**: `gc_codex_verify_finding` accepts `repo_path`, `pr_number`, `comment_id`, and (for user-authorized cycle 3) `override_cap` + `override_reason`. It reads the comment directly from GitHub; do not paraphrase the finding through the tool.
-
-**Plan-before-review gate**: `gc_codex_review` itself refuses to run if the PR's closing-issue refs don't carry a `plan` phase marker (per #794). The agent must run `gc_post_implementation_plan` (Step 4) first. PR bodies must therefore include `Closes #<issue>` so the linked issue is discoverable. If the user has explicitly authorized skipping planning (e.g., a one-line bug fix), retry with `override_phase_gate=true` and `override_phase_reason="<their authorization>"`.
+<!-- Step 12 (post-push codex review) intentionally removed by issue #804.
+     The single codex review pass now lives at Step 6.5 (pre-push). The
+     tool-layer post-push entrypoint (`gc_codex_review` with a `pr_number`)
+     remains as defense-in-depth for direct callers, but the SKILL no
+     longer drives it as a workflow step. See ADR-029 (Pre-push review
+     cycle state) for the rationale and the `gc_codex_verify_finding`
+     per-finding cap that still applies when an agent does invoke the
+     tool-layer post-push entrypoint by hand. -->
 
 ### Step 13: Test Quality Review
 
@@ -397,7 +367,7 @@ This step normally lands as a **verification pass** rather than a fix/verify loo
 
 ### Step 14: Final CI re-verification
 
-After both review steps (12-13) have reported zero findings (or you have user-approved exceptions documented as decision comments on the issue):
+After Step 13 (test quality review) has reported zero findings (or you have user-approved exceptions documented as decision comments on the issue):
 
 1. Verify the branch is pushed with the latest fix commits.
 2. Re-run Step 10 (CI Monitor) to confirm CI is still green.
