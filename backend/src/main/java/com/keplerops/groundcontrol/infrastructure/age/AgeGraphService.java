@@ -524,7 +524,7 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
         List<String> labels = new ArrayList<>(values.size());
         for (Object element : values) {
             if (element instanceof Map<?, ?> edge) {
-                Object label = edge.get("label");
+                Object label = edge.get(KEY_LABEL);
                 if (label != null) {
                     labels.add(label.toString());
                 }
