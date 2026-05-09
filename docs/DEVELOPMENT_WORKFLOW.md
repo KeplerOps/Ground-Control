@@ -139,7 +139,7 @@ One mandatory pre-implementation architecture pass, then two reviewers before th
 |-------|-----------------|-------------|
 | Codex architecture preflight | Cross-cutting concerns, reuse opportunities, abstraction/concept confusion, need for ADR/design guidance before coding | `gc_codex_architecture_preflight` |
 | SonarCloud | Coverage, code smells, duplication, security hotspots, open issues on the PR | CI job + `$SONAR_TOKEN` sweep of `api/issues/search` and `api/hotspots/search` for this PR |
-| Codex review | Fitness for purpose, architectural soundness, maintainability, extensibility, security, established patterns, consistency with the larger codebase. Codex posts each finding as an inline PR review comment; the coding agent fixes locally and calls `gc_codex_verify_finding` to verify. | `gc_codex_review` (posts) + `gc_codex_verify_finding` (per-finding verify loop) |
+| Codex review | Fitness for purpose, architectural soundness, maintainability, extensibility, security, established patterns, consistency with the larger codebase. Codex returns structured findings; the MCP server posts durable GitHub comments from the host side, and the coding agent fixes locally and calls `gc_codex_verify_finding` to verify. | `gc_codex_review` (MCP posts) + `gc_codex_verify_finding` (per-finding verify loop) |
 | `/review-tests` | Assertion-free tests, mock-only assertions, integration-as-unit, tests that can't detect regressions | `Skill("review-tests")` |
 
 All preflight/review stages operate under the same rule: **fix everything, defer nothing.** Review-loop cap: 2 cycles per reviewer, per-finding cap: 2 codex verify calls. If a third cycle would be needed, the skill escalates to the user with the full finding history.
