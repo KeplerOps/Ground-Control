@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **ADR-031 Severity Rubric and Stopping Model for Pre-Push Codex Review** (Proposed). Refines GC-O007 with a five-piece stopping model: per-finding severity classification (IEEE 1044 + CVSS v4.0) (GC-X101); pre-declared numeric exit gates per `/implement` run (GC-X102); severity-weighted early-stop within the existing three-cycle cap (GC-X103); independent-reviewer confirmation for `Critical`/`Blocking` findings (GC-X104); structured cycle-3 escalation decision aid replacing free-text vibes (GC-X105). The cap mechanics, override-cap path, reviewer-of-record invariant, and tool-layer enforcement boundary from ADR-029 are preserved. Addresses the empirical failure mode where the cycle-3 escalation prompt provides no signal to discriminate "fixes were trivial — stop" from "still finding real bugs — keep going."
 - **Trivy and OSV-scanner advisory CI jobs** (issue #807). Two new
   non-blocking jobs in `.github/workflows/ci.yml`, both running on
   `ubuntu-latest` and never gating `docker`/`smoke`/`deploy`:
