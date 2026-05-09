@@ -63,7 +63,7 @@ http://localhost:8000/api/v1/
 | POST | `/requirements/{id}/traceability` | TraceabilityLinkRequest | 201 | Create traceability link |
 | GET | `/requirements/{id}/traceability` | — | 200 | List traceability links |
 | GET | `/requirements/traceability/by-artifact` | — | 200 | Reverse lookup: find links by artifact |
-| DELETE | `/requirements/{id}/traceability/{linkId}` | — | 204 | Delete traceability link |
+| DELETE | `/requirements/{id}/traceability/{linkId}` | — | 204 / 404 | Delete traceability link. Returns 404 if `linkId` does not belong to `id`. |
 
 `GET /requirements/traceability/by-artifact` accepts query parameters:
 
@@ -77,8 +77,8 @@ http://localhost:8000/api/v1/
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
 | GET | `/requirements/{id}/history` | — | 200 | Requirement revision history |
-| GET | `/requirements/{id}/relations/{relationId}/history` | — | 200 | Relation revision history |
-| GET | `/requirements/{id}/traceability/{linkId}/history` | — | 200 | Traceability link revision history |
+| GET | `/requirements/{id}/relations/{relationId}/history` | — | 200 / 404 | Relation revision history. Returns 404 if `relationId` does not belong to `id` (the requirement is neither the source nor the target of the relation). |
+| GET | `/requirements/{id}/traceability/{linkId}/history` | — | 200 / 404 | Traceability link revision history. Returns 404 if `linkId` does not belong to `id`. |
 | GET | `/requirements/{id}/timeline` | — | 200 | Unified audit timeline |
 
 `GET /requirements/{id}/timeline` accepts query parameters:

@@ -645,9 +645,9 @@ server.tool(
 
 server.tool(
   "gc_delete_traceability_link",
-  "Delete a traceability link from a requirement.",
+  "Delete a traceability link from a requirement. The link must belong to the named requirement; a mismatch returns 404 (not the deletion of another requirement's link).",
   {
-    requirement_id: z.string().uuid().describe("Requirement UUID"),
+    requirement_id: z.string().uuid().describe("Requirement UUID — must own the link; otherwise the call returns 404 and nothing is deleted"),
     link_id: z.string().uuid().describe("Traceability link UUID to delete"),
   },
   async ({ requirement_id, link_id }) => {
@@ -883,9 +883,9 @@ server.tool(
 
 server.tool(
   "gc_get_relation_history",
-  "Get the full audit history for a relation between requirements.",
+  "Get the full audit history for a relation between requirements. The relation must belong to the named requirement (the requirement is either source or target); a mismatch returns 404, not another requirement's history.",
   {
-    requirement_id: z.string().uuid().describe("Requirement UUID"),
+    requirement_id: z.string().uuid().describe("Requirement UUID — must be either the source or the target of the relation; otherwise the call returns 404"),
     relation_id: z.string().uuid().describe("Relation UUID"),
   },
   async ({ requirement_id, relation_id }) => {
@@ -901,9 +901,9 @@ server.tool(
 
 server.tool(
   "gc_get_traceability_link_history",
-  "Get the full audit history for a traceability link.",
+  "Get the full audit history for a traceability link. The link must belong to the named requirement; a mismatch returns 404.",
   {
-    requirement_id: z.string().uuid().describe("Requirement UUID"),
+    requirement_id: z.string().uuid().describe("Requirement UUID — must own the link; otherwise the call returns 404"),
     link_id: z.string().uuid().describe("Traceability link UUID"),
   },
   async ({ requirement_id, link_id }) => {
