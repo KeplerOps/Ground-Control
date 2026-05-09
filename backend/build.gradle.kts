@@ -35,6 +35,14 @@ repositories {
     mavenCentral()
 }
 
+// Gradle dependency locking. Produces backend/gradle.lockfile covering every
+// resolvable configuration, which OSV-scanner consumes in CI. Subsequent
+// `gradle build` (without --write-locks) fails if the resolved graph drifts
+// from the lockfile, which keeps the scanned input honest.
+dependencyLocking {
+    lockAllConfigurations()
+}
+
 dependencies {
     // Spring Boot
     implementation("org.springframework.boot:spring-boot-starter-web")

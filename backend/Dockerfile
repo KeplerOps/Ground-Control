@@ -8,7 +8,7 @@ RUN npm run build
 FROM eclipse-temurin:21-jdk-alpine AS build
 WORKDIR /app
 COPY backend/gradle gradle
-COPY backend/gradlew backend/build.gradle.kts backend/settings.gradle.kts backend/gradle.properties ./
+COPY backend/gradlew backend/build.gradle.kts backend/settings.gradle.kts backend/gradle.properties backend/gradle.lockfile ./
 RUN ./gradlew dependencies --no-daemon
 COPY backend/src src
 COPY --from=frontend /app/dist src/main/resources/static/
