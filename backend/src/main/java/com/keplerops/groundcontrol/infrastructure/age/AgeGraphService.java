@@ -61,8 +61,26 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
 
     private static final Logger log = LoggerFactory.getLogger(AgeGraphService.class);
     private static final java.util.regex.Pattern SAFE_IDENTIFIER = java.util.regex.Pattern.compile("^[a-zA-Z0-9_-]+$");
-    private static final java.util.regex.Pattern SAFE_PARAM_NAME =
-            java.util.regex.Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_]*$");
+    private static final java.util.regex.Pattern SAFE_PARAM_NAME = java.util.regex.Pattern.compile("^[a-zA-Z_]\\w*$");
+
+    // Implicit AGE property keys this adapter writes / reads. Centralized so
+    // executeCreateNode/Edge, toGraphNode/Edge, getVisualization, and APPROVED_PROPERTY_KEYS
+    // all reference the same string literal.
+    private static final String KEY_ID = "id";
+    private static final String KEY_DOMAIN_ID = "domain_id";
+    private static final String KEY_ENTITY_TYPE = "entity_type";
+    private static final String KEY_PROJECT_IDENTIFIER = "project_identifier";
+    private static final String KEY_UID = "uid";
+    private static final String KEY_LABEL = "label";
+    private static final String KEY_EDGE_TYPE = "edge_type";
+    private static final String KEY_SOURCE_ID = "source_id";
+    private static final String KEY_TARGET_ID = "target_id";
+    private static final String KEY_SOURCE_ENTITY_TYPE = "source_entity_type";
+    private static final String KEY_TARGET_ENTITY_TYPE = "target_entity_type";
+
+    private static final String AGTYPE_TAG_VERTEX = "::vertex";
+    private static final String AGTYPE_TAG_EDGE = "::edge";
+    private static final String AGTYPE_TAG_PATH = "::path";
     // Jackson mapper used for both the agtype params payload and for parsing AGE rows back. We
     // explicitly disable WRITE_DATES_AS_TIMESTAMPS so that Instant / LocalDate properties are
     // bound as ISO-8601 strings (matching the previous String.format-based path that called
@@ -103,17 +121,17 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
      */
     public static final Set<String> APPROVED_PROPERTY_KEYS = Set.of(
             // Adapter-emitted (set in executeCreateNode / executeCreateEdge).
-            "id",
-            "domain_id",
-            "entity_type",
-            "project_identifier",
-            "uid",
-            "label",
-            "edge_type",
-            "source_id",
-            "target_id",
-            "source_entity_type",
-            "target_entity_type",
+            KEY_ID,
+            KEY_DOMAIN_ID,
+            KEY_ENTITY_TYPE,
+            KEY_PROJECT_IDENTIFIER,
+            KEY_UID,
+            KEY_LABEL,
+            KEY_EDGE_TYPE,
+            KEY_SOURCE_ID,
+            KEY_TARGET_ID,
+            KEY_SOURCE_ENTITY_TYPE,
+            KEY_TARGET_ENTITY_TYPE,
             // Requirement projection.
             "title",
             "statement",
@@ -240,7 +258,7 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
         String cypher = "MATCH (n:REQUIREMENT {uid: $uid, project_identifier: $project_identifier})"
                 + "-[:PARENT*1.." + depth + "]->(a:REQUIREMENT {project_identifier: $project_identifier}) "
                 + "RETURN a.uid";
-        String params = encodeParams(Map.of("uid", uid, "project_identifier", projectIdentifier));
+        String params = encodeParams(Map.of(KEY_UID, uid, KEY_PROJECT_IDENTIFIER, projectIdentifier));
 
         return queryUids(graph, cypher, params);
     }
@@ -261,7 +279,7 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
         String cypher = "MATCH (n:REQUIREMENT {uid: $uid, project_identifier: $project_identifier})"
                 + "<-[:PARENT*1.." + depth + "]-(d:REQUIREMENT {project_identifier: $project_identifier}) "
                 + "RETURN d.uid";
-        String params = encodeParams(Map.of("uid", uid, "project_identifier", projectIdentifier));
+        String params = encodeParams(Map.of(KEY_UID, uid, KEY_PROJECT_IDENTIFIER, projectIdentifier));
 
         return queryUids(graph, cypher, params);
     }
@@ -291,10 +309,8 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
                 + "-[*1.." + MAX_GRAPH_TRAVERSAL_DEPTH
                 + "]->(t:REQUIREMENT {uid: $target_uid, project_identifier: $project_identifier}) "
                 + "RETURN nodes(path), relationships(path) LIMIT " + MAX_FIND_PATHS_RESULTS;
-        String params = encodeParams(Map.of(
-                "source_uid", sourceUid,
-                "target_uid", targetUid,
-                "project_identifier", projectIdentifier));
+        String params = encodeParams(
+                Map.of("source_uid", sourceUid, "target_uid", targetUid, KEY_PROJECT_IDENTIFIER, projectIdentifier));
 
         List<PathResult> paths = new ArrayList<>();
         jdbcTemplate.query(buildCypherPathSql(graph, cypher), bindAgtypeParams(params), (RowCallbackHandler) rs -> {
@@ -316,14 +332,14 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
 
         List<GraphNode> nodes = new ArrayList<>();
         String nodeCypher = "MATCH (n {project_identifier: $project_identifier}) RETURN properties(n)";
-        String nodeParams = encodeParams(Map.of("project_identifier", projectIdentifier));
+        String nodeParams = encodeParams(Map.of(KEY_PROJECT_IDENTIFIER, projectIdentifier));
         jdbcTemplate.query(buildCypherSql(graph, nodeCypher), bindAgtypeParams(nodeParams), (RowCallbackHandler)
                 rs -> nodes.add(toGraphNode(parseAgtypeMap(rs.getString(1)))));
 
         List<GraphEdge> edges = new ArrayList<>();
         String edgeCypher = "MATCH (s {project_identifier: $project_identifier})"
                 + "-[r]->(t {project_identifier: $project_identifier}) RETURN properties(r)";
-        String edgeParams = encodeParams(Map.of("project_identifier", projectIdentifier));
+        String edgeParams = encodeParams(Map.of(KEY_PROJECT_IDENTIFIER, projectIdentifier));
         jdbcTemplate.query(buildCypherSql(graph, edgeCypher), bindAgtypeParams(edgeParams), (RowCallbackHandler)
                 rs -> edges.add(toGraphEdge(parseAgtypeMap(rs.getString(1)))));
 
@@ -333,12 +349,12 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
     private void executeCreateNode(String graph, GraphNode node) {
         String label = validateGraphName(node.entityType().name());
         Map<String, Object> nodeProps = new LinkedHashMap<>();
-        nodeProps.put("id", node.id());
-        nodeProps.put("domain_id", node.domainId());
-        nodeProps.put("entity_type", node.entityType().name());
-        nodeProps.put("project_identifier", node.projectIdentifier());
-        nodeProps.put("uid", node.uid());
-        nodeProps.put("label", node.label());
+        nodeProps.put(KEY_ID, node.id());
+        nodeProps.put(KEY_DOMAIN_ID, node.domainId());
+        nodeProps.put(KEY_ENTITY_TYPE, node.entityType().name());
+        nodeProps.put(KEY_PROJECT_IDENTIFIER, node.projectIdentifier());
+        nodeProps.put(KEY_UID, node.uid());
+        nodeProps.put(KEY_LABEL, node.label());
         nodeProps.putAll(node.properties());
 
         ParamBuilder builder = new ParamBuilder("p_");
@@ -350,17 +366,17 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
     private void executeCreateEdge(String graph, GraphEdge edge) {
         String edgeType = validateGraphName(edge.edgeType());
         Map<String, Object> edgeProps = new LinkedHashMap<>();
-        edgeProps.put("id", edge.id());
-        edgeProps.put("edge_type", edge.edgeType());
-        edgeProps.put("source_id", edge.sourceId());
-        edgeProps.put("target_id", edge.targetId());
-        edgeProps.put("source_entity_type", edge.sourceEntityType().name());
-        edgeProps.put("target_entity_type", edge.targetEntityType().name());
+        edgeProps.put(KEY_ID, edge.id());
+        edgeProps.put(KEY_EDGE_TYPE, edge.edgeType());
+        edgeProps.put(KEY_SOURCE_ID, edge.sourceId());
+        edgeProps.put(KEY_TARGET_ID, edge.targetId());
+        edgeProps.put(KEY_SOURCE_ENTITY_TYPE, edge.sourceEntityType().name());
+        edgeProps.put(KEY_TARGET_ENTITY_TYPE, edge.targetEntityType().name());
         edgeProps.putAll(edge.properties());
 
         ParamBuilder builder = new ParamBuilder("p_");
-        builder.put("source_id", edge.sourceId());
-        builder.put("target_id", edge.targetId());
+        builder.put(KEY_SOURCE_ID, edge.sourceId());
+        builder.put(KEY_TARGET_ID, edge.targetId());
         // Re-use the same builder so all values share the single agtype params payload.
         ParamBuilder propBuilder = new ParamBuilder(builder, "pp_");
         String propClause = renderPropertyClause(edgeProps, propBuilder);
@@ -445,22 +461,22 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
     }
 
     private GraphNode toGraphNode(Map<String, Object> props) {
-        String id = stringValue(props.remove("id"));
-        String domainId = stringValue(props.remove("domain_id"));
-        GraphEntityType entityType = GraphEntityType.valueOf(stringValue(props.remove("entity_type")));
-        String projectIdentifier = stringValue(props.remove("project_identifier"));
-        String uid = stringValue(props.remove("uid"));
-        String label = stringValue(props.remove("label"));
+        String id = stringValue(props.remove(KEY_ID));
+        String domainId = stringValue(props.remove(KEY_DOMAIN_ID));
+        GraphEntityType entityType = GraphEntityType.valueOf(stringValue(props.remove(KEY_ENTITY_TYPE)));
+        String projectIdentifier = stringValue(props.remove(KEY_PROJECT_IDENTIFIER));
+        String uid = stringValue(props.remove(KEY_UID));
+        String label = stringValue(props.remove(KEY_LABEL));
         return new GraphNode(id, domainId, entityType, projectIdentifier, uid, label, props);
     }
 
     private GraphEdge toGraphEdge(Map<String, Object> props) {
-        String id = stringValue(props.remove("id"));
-        String edgeType = stringValue(props.remove("edge_type"));
-        String sourceId = stringValue(props.remove("source_id"));
-        String targetId = stringValue(props.remove("target_id"));
-        GraphEntityType sourceEntityType = GraphEntityType.valueOf(stringValue(props.remove("source_entity_type")));
-        GraphEntityType targetEntityType = GraphEntityType.valueOf(stringValue(props.remove("target_entity_type")));
+        String id = stringValue(props.remove(KEY_ID));
+        String edgeType = stringValue(props.remove(KEY_EDGE_TYPE));
+        String sourceId = stringValue(props.remove(KEY_SOURCE_ID));
+        String targetId = stringValue(props.remove(KEY_TARGET_ID));
+        GraphEntityType sourceEntityType = GraphEntityType.valueOf(stringValue(props.remove(KEY_SOURCE_ENTITY_TYPE)));
+        GraphEntityType targetEntityType = GraphEntityType.valueOf(stringValue(props.remove(KEY_TARGET_ENTITY_TYPE)));
         return new GraphEdge(id, edgeType, sourceId, targetId, sourceEntityType, targetEntityType, props);
     }
 
@@ -475,7 +491,7 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
      * sequence from a path's {@code nodes(path)} return.
      */
     @SuppressWarnings("unchecked")
-    private static List<String> extractPathNodeUids(String agtypeValue) {
+    public static List<String> extractPathNodeUids(String agtypeValue) {
         Object parsed = parseAgtypeValue(agtypeValue);
         if (!(parsed instanceof List<?> values)) {
             return List.of();
@@ -500,7 +516,7 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
      * {@code relationships(path)}.
      */
     @SuppressWarnings("unchecked")
-    private static List<String> extractPathEdgeLabels(String agtypeValue) {
+    public static List<String> extractPathEdgeLabels(String agtypeValue) {
         Object parsed = parseAgtypeValue(agtypeValue);
         if (!(parsed instanceof List<?> values)) {
             return List.of();
@@ -515,14 +531,6 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
             }
         }
         return labels;
-    }
-
-    private static List<String> parseAgtypeArray(String agtypeValue) {
-        Object parsed = parseAgtypeValue(agtypeValue);
-        if (!(parsed instanceof List<?> values)) {
-            return List.of();
-        }
-        return values.stream().map(AgeGraphService::stringValue).toList();
     }
 
     private static Map<String, Object> parseAgtypeMap(String agtypeValue) {
@@ -574,37 +582,35 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
                     inString = false;
                 }
                 i++;
-                continue;
-            }
-            if (c == '"') {
+            } else if (c == '"') {
                 inString = true;
                 out.append(c);
                 i++;
-                continue;
-            }
-            if (c == '}' && matchesTypeTagAt(agtypeValue, i + 1)) {
+            } else if (c == '}' && matchesTypeTagAt(agtypeValue, i + 1)) {
                 out.append('}');
                 i = i + 1 + lengthOfTypeTagAt(agtypeValue, i + 1);
-                continue;
+            } else {
+                out.append(c);
+                i++;
             }
-            out.append(c);
-            i++;
         }
         return out.toString();
     }
 
     private static boolean matchesTypeTagAt(String s, int pos) {
-        return s.startsWith("::vertex", pos) || s.startsWith("::edge", pos) || s.startsWith("::path", pos);
+        return s.startsWith(AGTYPE_TAG_VERTEX, pos)
+                || s.startsWith(AGTYPE_TAG_EDGE, pos)
+                || s.startsWith(AGTYPE_TAG_PATH, pos);
     }
 
     private static int lengthOfTypeTagAt(String s, int pos) {
-        if (s.startsWith("::vertex", pos)) {
-            return "::vertex".length();
+        if (s.startsWith(AGTYPE_TAG_VERTEX, pos)) {
+            return AGTYPE_TAG_VERTEX.length();
         }
-        if (s.startsWith("::edge", pos)) {
-            return "::edge".length();
+        if (s.startsWith(AGTYPE_TAG_EDGE, pos)) {
+            return AGTYPE_TAG_EDGE.length();
         }
-        return "::path".length();
+        return AGTYPE_TAG_PATH.length();
     }
 
     private static String encodeParams(Map<String, Object> params) {

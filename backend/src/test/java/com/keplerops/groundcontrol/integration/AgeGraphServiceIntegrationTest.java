@@ -155,15 +155,17 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
         // Control characters are not an injection vector under parameter binding, but they
         // would corrupt logs and confuse operators; the adapter still rejects them as an
         // operational sanity check.
-        assertThatThrownBy(() -> graphClient.getAncestors(testProject.getId(), "REQ\n001", 5))
+        var projectId = testProject.getId();
+        assertThatThrownBy(() -> graphClient.getAncestors(projectId, "REQ\n001", 5))
                 .isInstanceOf(DomainValidationException.class);
     }
 
     @Test
     void getAncestors_rejectsOutOfRangeDepth() {
-        assertThatThrownBy(() -> graphClient.getAncestors(testProject.getId(), "AGE-C", 0))
+        var projectId = testProject.getId();
+        assertThatThrownBy(() -> graphClient.getAncestors(projectId, "AGE-C", 0))
                 .isInstanceOf(DomainValidationException.class);
-        assertThatThrownBy(() -> graphClient.getAncestors(testProject.getId(), "AGE-C", 999))
+        assertThatThrownBy(() -> graphClient.getAncestors(projectId, "AGE-C", 999))
                 .isInstanceOf(DomainValidationException.class);
     }
 

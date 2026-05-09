@@ -262,11 +262,9 @@ class AgeGraphServiceTest {
             // User-controlled values must NOT appear in the SQL string (which AGE parses at SQL
             // parse time and which embeds the cypher template). They must appear in the bound
             // agtype params payload, set via the PreparedStatementSetter.
-            assertThat(sql).doesNotContain("REQ-001");
-            assertThat(sql).doesNotContain("test-project");
+            assertThat(sql).doesNotContain("REQ-001").doesNotContain("test-project");
             String paramsJson = capturedAgtypeParam(pssCaptor.getValue());
-            assertThat(paramsJson).contains("REQ-001");
-            assertThat(paramsJson).contains("test-project");
+            assertThat(paramsJson).contains("REQ-001").contains("test-project");
         }
 
         @Test
@@ -280,11 +278,9 @@ class AgeGraphServiceTest {
             verify(jdbcTemplate).query(sqlCaptor.capture(), pssCaptor.capture(), any(RowCallbackHandler.class));
 
             String sql = sqlCaptor.getValue();
-            assertThat(sql).doesNotContain("REQ-001");
-            assertThat(sql).doesNotContain("test-project");
+            assertThat(sql).doesNotContain("REQ-001").doesNotContain("test-project");
             String paramsJson = capturedAgtypeParam(pssCaptor.getValue());
-            assertThat(paramsJson).contains("REQ-001");
-            assertThat(paramsJson).contains("test-project");
+            assertThat(paramsJson).contains("REQ-001").contains("test-project");
         }
 
         @Test
@@ -298,13 +294,9 @@ class AgeGraphServiceTest {
             verify(jdbcTemplate).query(sqlCaptor.capture(), pssCaptor.capture(), any(RowCallbackHandler.class));
 
             String sql = sqlCaptor.getValue();
-            assertThat(sql).doesNotContain("REQ-001");
-            assertThat(sql).doesNotContain("REQ-002");
-            assertThat(sql).doesNotContain("test-project");
+            assertThat(sql).doesNotContain("REQ-001").doesNotContain("REQ-002").doesNotContain("test-project");
             String paramsJson = capturedAgtypeParam(pssCaptor.getValue());
-            assertThat(paramsJson).contains("REQ-001");
-            assertThat(paramsJson).contains("REQ-002");
-            assertThat(paramsJson).contains("test-project");
+            assertThat(paramsJson).contains("REQ-001").contains("REQ-002").contains("test-project");
         }
 
         @Test
@@ -367,7 +359,7 @@ class AgeGraphServiceTest {
                     String paramsJson =
                             capturedAgtypeParam(pssCaptor.getAllValues().get(i));
                     Map<String, Object> params = parseParams(paramsJson);
-                    assertThat(params.values()).contains(adversarialTitle, adversarialStatement);
+                    assertThat(params).containsValue(adversarialTitle).containsValue(adversarialStatement);
                 }
             }
             assertThat(foundCreate)
@@ -405,7 +397,7 @@ class AgeGraphServiceTest {
                     String paramsJson =
                             capturedAgtypeParam(pssCaptor.getAllValues().get(i));
                     Map<String, Object> params = parseParams(paramsJson);
-                    assertThat(params.values()).contains(adversarialSourceUid);
+                    assertThat(params).containsValue(adversarialSourceUid);
                 }
             }
             assertThat(foundEdgeCreate)
@@ -603,6 +595,44 @@ class AgeGraphServiceTest {
         void stripAgtypeTypeTags_handlesEdgeAndPathTags() {
             String input = "[{\"label\": \"R\"}::edge, {\"length\": 2}::path]";
             assertThat(AgeGraphService.stripAgtypeTypeTags(input)).isEqualTo("[{\"label\": \"R\"}, {\"length\": 2}]");
+        }
+
+        @Test
+        void extractPathNodeUids_pullsUidFromVertexProperties() {
+            String agtype = "[{\"id\": 1, \"label\": \"REQUIREMENT\", \"properties\": {\"uid\": \"REQ-1\"}}::vertex,"
+                    + " {\"id\": 2, \"label\": \"REQUIREMENT\", \"properties\": {\"uid\": \"REQ-2\"}}::vertex]";
+            assertThat(AgeGraphService.extractPathNodeUids(agtype)).containsExactly("REQ-1", "REQ-2");
+        }
+
+        @Test
+        void extractPathNodeUids_returnsEmptyForNonListInput() {
+            assertThat(AgeGraphService.extractPathNodeUids("\"not a list\"")).isEmpty();
+        }
+
+        @Test
+        void extractPathNodeUids_skipsVerticesWithoutPropertiesOrUid() {
+            String agtype = "[{\"id\": 1}::vertex,"
+                    + " {\"id\": 2, \"properties\": {}}::vertex,"
+                    + " {\"id\": 3, \"properties\": {\"uid\": \"REQ-3\"}}::vertex]";
+            assertThat(AgeGraphService.extractPathNodeUids(agtype)).containsExactly("REQ-3");
+        }
+
+        @Test
+        void extractPathEdgeLabels_pullsLabelFromEdges() {
+            String agtype =
+                    "[{\"id\": 10, \"label\": \"PARENT\"}::edge, {\"id\": 11, \"label\": \"DEPENDS_ON\"}::edge]";
+            assertThat(AgeGraphService.extractPathEdgeLabels(agtype)).containsExactly("PARENT", "DEPENDS_ON");
+        }
+
+        @Test
+        void extractPathEdgeLabels_returnsEmptyForNonListInput() {
+            assertThat(AgeGraphService.extractPathEdgeLabels("{}")).isEmpty();
+        }
+
+        @Test
+        void extractPathEdgeLabels_skipsEntriesWithoutLabel() {
+            String agtype = "[{\"id\": 10}::edge, {\"id\": 11, \"label\": \"PARENT\"}::edge]";
+            assertThat(AgeGraphService.extractPathEdgeLabels(agtype)).containsExactly("PARENT");
         }
     }
 }
