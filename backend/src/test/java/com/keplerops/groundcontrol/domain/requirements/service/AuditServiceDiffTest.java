@@ -10,12 +10,18 @@ import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
+import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
+import com.keplerops.groundcontrol.domain.requirements.model.TraceabilityLink;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRelationRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
+import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
+import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
+import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import jakarta.persistence.EntityManager;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.hibernate.envers.AuditReader;
 import org.hibernate.envers.AuditReaderFactory;
@@ -60,6 +66,14 @@ class AuditServiceDiffTest {
         setField(project, "id", UUID.randomUUID());
         var req = new Requirement(project, uid, title, "Statement");
         setField(req, "id", REQ_ID);
+        return req;
+    }
+
+    private static Requirement makeRequirementWithId(String uid, UUID id) {
+        var project = new Project("test", "Test");
+        setField(project, "id", UUID.randomUUID());
+        var req = new Requirement(project, uid, uid, "Statement");
+        setField(req, "id", id);
         return req;
     }
 
@@ -196,6 +210,66 @@ class AuditServiceDiffTest {
                 assertThat(diff.traceabilityLinkChanges().get(0).changeType()).isEqualTo(ChangeType.REMOVED);
                 assertThat(diff.traceabilityLinkChanges().get(0).linkId()).isEqualTo(linkId);
             }
+        }
+    }
+
+    @Nested
+    class GetRelationHistory {
+
+        @Test
+        void throwsNotFoundWhenRelationDoesNotExist() {
+            var relationId = UUID.randomUUID();
+            when(relationRepository.findById(relationId)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.getRelationHistory(REQ_ID, relationId))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining(relationId.toString());
+        }
+
+        @Test
+        void throwsNotFoundWhenRequirementIsNeitherSourceNorTarget() {
+            var sourceId = UUID.randomUUID();
+            var targetId = UUID.randomUUID();
+            var source = makeRequirementWithId("REQ-SRC", sourceId);
+            var target = makeRequirementWithId("REQ-TGT", targetId);
+            var relation = new RequirementRelation(source, target, RelationType.DEPENDS_ON);
+            var relationId = UUID.randomUUID();
+            setField(relation, "id", relationId);
+            when(relationRepository.findById(relationId)).thenReturn(Optional.of(relation));
+
+            var unrelatedRequirementId = UUID.randomUUID();
+            assertThatThrownBy(() -> service.getRelationHistory(unrelatedRequirementId, relationId))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining(relationId.toString());
+        }
+    }
+
+    @Nested
+    class GetTraceabilityLinkHistory {
+
+        @Test
+        void throwsNotFoundWhenLinkDoesNotExist() {
+            var linkId = UUID.randomUUID();
+            when(traceabilityLinkRepository.findById(linkId)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.getTraceabilityLinkHistory(REQ_ID, linkId))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining(linkId.toString());
+        }
+
+        @Test
+        void throwsNotFoundWhenRequirementDoesNotOwnLink() {
+            var ownerId = UUID.randomUUID();
+            var owner = makeRequirementWithId("REQ-OWNER", ownerId);
+            var link = new TraceabilityLink(owner, ArtifactType.GITHUB_ISSUE, "GH-123", LinkType.IMPLEMENTS);
+            var linkId = UUID.randomUUID();
+            setField(link, "id", linkId);
+            when(traceabilityLinkRepository.findById(linkId)).thenReturn(Optional.of(link));
+
+            var unrelatedRequirementId = UUID.randomUUID();
+            assertThatThrownBy(() -> service.getTraceabilityLinkHistory(unrelatedRequirementId, linkId))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining(linkId.toString());
         }
     }
 
