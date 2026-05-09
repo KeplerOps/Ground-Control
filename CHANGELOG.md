@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Trivy and OSV-scanner advisory CI jobs** (issue #807). Two new
+  non-blocking jobs in `.github/workflows/ci.yml`, both running on
+  `ubuntu-latest` and never gating `docker`/`smoke`/`deploy`:
+  - `trivy` builds `backend/Dockerfile` locally (not pushed) and runs Trivy
+    in `image` mode (`vuln,secret,misconfig`) against the built image, plus
+    Trivy in `config` mode against `deploy/docker/` for IaC misconfig. Both
+    invocations write SARIF and use `exit-code: '0'` so findings produce
+    artifacts without failing the job. SARIF files are uploaded as the
+    `trivy-sarif` artifact.
+  - `osv-scanner` first verifies the committed `backend/gradle.lockfile`
+    by running `./gradlew dependencies --no-daemon` (strict locking fails
+    on drift) and asserting `git diff --exit-code` is clean — the
+    committed lockfile is what gets scanned, never a CI-rewritten copy.
+    It then runs `google/osv-scanner-action` against
+    `backend/gradle.lockfile`, with `continue-on-error: true` for
+    advisory mode. SARIF uploaded as the `osv-scanner-sarif` artifact.
+  - Gradle dependency locking is now enabled on every resolvable
+    configuration via `dependencyLocking { lockAllConfigurations() }` in
+    `backend/build.gradle.kts`, with the resulting `backend/gradle.lockfile`
+    committed. Without `--write-locks`, subsequent `gradle build` fails on
+    dependency drift, which keeps OSV-scanner's input from going stale.
+    `backend/Dockerfile` also `COPY`s the lockfile into the build stage so
+    the published image resolves dependencies under the same lock state OSV
+    scans — the runtime artifact and the scanned input can't drift apart.
+  - Architecture boundaries documented in
+    `architecture/notes/security-scanner-ci-preflight.md`. Gitleaks
+    (pre-commit) and SonarCloud remain the authoritative controls for
+    secrets and code quality; the new scanners are additive evidence only.
+
 ### Changed
 
 - **Codex review collapsed to a single pre-push pass; cap bumped 2 → 3; findings
