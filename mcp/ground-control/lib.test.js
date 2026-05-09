@@ -28,6 +28,9 @@ import {
   parseCodexReviewCycleMarkers,
   evaluateCodexReviewCycleCap,
   buildCodexReviewCycleMarker,
+  buildCodexReviewToolDescription,
+  buildCodexReviewOverrideCapDescription,
+  buildCodexReviewOverrideReasonDescription,
   CODEX_REVIEW_HARD_CAP,
   CODEX_REVIEW_CYCLE_MARKER_PREFIX,
   parsePhaseMarkers,
@@ -5012,5 +5015,226 @@ describe("constants", () => {
 
   it("LINK_TYPES matches Java LinkType enum", () => {
     assert.deepEqual(LINK_TYPES, ["IMPLEMENTS", "TESTS", "DOCUMENTS", "CONSTRAINS", "VERIFIES"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gc_codex_review tool description / override description builders (#794)
+//
+// The MCP tool descriptions for `gc_codex_review` are part of the public
+// protocol surface — every LLM client that lists the tool sees them. Inline
+// strings in index.js drifted past the cap bumps in #804 (post-push and
+// pre-push caps moved 2 → 3) and the pre-push key change in #800 review
+// (was (issue, branch), now issue alone per ADR-029). These builders are
+// pure functions that interpolate the live constants so the description
+// cannot drift again.
+// ---------------------------------------------------------------------------
+
+describe("buildCodexReviewToolDescription", () => {
+  it("surfaces both live cap values (collapsed when equal)", () => {
+    const desc = buildCodexReviewToolDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.ok(
+      desc.includes(`${CODEX_REVIEW_HARD_CAP} cycles per PR`),
+      `description must mention "${CODEX_REVIEW_HARD_CAP} cycles per PR"; got: ${desc}`,
+    );
+    assert.ok(
+      desc.includes(`${CODEX_REVIEW_PREPUSH_HARD_CAP} cycles per issue`),
+      `description must mention "${CODEX_REVIEW_PREPUSH_HARD_CAP} cycles per issue"; got: ${desc}`,
+    );
+  });
+
+  it("uses a mode-neutral cap heading (not 'Hard-cap-N enforcement') so divergent caps don't mislead", () => {
+    const desc = buildCodexReviewToolDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.match(desc, /Cycle-cap enforcement/i);
+    assert.ok(
+      !/\bHard-cap-\d+\s+enforcement\b/i.test(desc),
+      `must not contain a hard-cap-N enforcement phrase anywhere (start of line or inline); got: ${desc}`,
+    );
+  });
+
+  it("does not contain the stale hard-cap-2 wording", () => {
+    const desc = buildCodexReviewToolDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.ok(
+      !/hard-cap-2\b/i.test(desc),
+      `description must not contain "hard-cap-2"; got: ${desc}`,
+    );
+    assert.ok(
+      !/two cycles per PR/.test(desc),
+      `description must not say "two cycles per PR"; got: ${desc}`,
+    );
+  });
+
+  it("does not advertise the (issue, branch) pair shape (ADR-029: keyed by issue alone)", () => {
+    const desc = buildCodexReviewToolDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.ok(
+      !/\(issue,\s*branch\)\s+pair/i.test(desc),
+      `description must not advertise (issue, branch) pair keying; got: ${desc}`,
+    );
+  });
+
+  it("references both #794 and #796 so audit history points at the right MVPs", () => {
+    const desc = buildCodexReviewToolDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.ok(desc.includes("#794"), `description must reference issue #794; got: ${desc}`);
+    assert.ok(desc.includes("#796"), `description must reference issue #796; got: ${desc}`);
+  });
+
+  it("documents the override_cap=true / override_reason escape hatch", () => {
+    const desc = buildCodexReviewToolDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.ok(desc.includes("override_cap=true"), `must mention override_cap=true; got: ${desc}`);
+    assert.ok(
+      desc.includes("override_reason"),
+      `must mention override_reason; got: ${desc}`,
+    );
+  });
+
+  it("makes PR auto-detect mode-specific (post-push only, pre-push needs explicit pr_number)", () => {
+    const desc = buildCodexReviewToolDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.match(
+      desc,
+      /post-push.*auto-detects/is,
+      `must scope auto-detect to post-push reviews; got: ${desc}`,
+    );
+    assert.match(
+      desc,
+      /pre-push.*pr_number.*explicit/is,
+      `must clarify pre-push needs an explicit pr_number; got: ${desc}`,
+    );
+  });
+
+  it("interpolates whatever caps the caller passes (equal case)", () => {
+    const desc = buildCodexReviewToolDescription({ postPushCap: 7, prepushCap: 7 });
+    assert.match(desc, /hard-cap-7\b/i);
+    assert.ok(desc.includes("7 cycles per PR"), `expected "7 cycles per PR"; got: ${desc}`);
+    assert.ok(desc.includes("7 cycles per issue"), `expected "7 cycles per issue"; got: ${desc}`);
+    assert.ok(!/\b3\s+cycles\s+per\s+PR\b/.test(desc), `must not leak default 3; got: ${desc}`);
+  });
+
+  it("surfaces both cap values when post-push and pre-push diverge", () => {
+    const desc = buildCodexReviewToolDescription({ postPushCap: 5, prepushCap: 11 });
+    assert.ok(desc.includes("5 cycles per PR"), `expected "5 cycles per PR"; got: ${desc}`);
+    assert.ok(desc.includes("11 cycles per issue"), `expected "11 cycles per issue"; got: ${desc}`);
+    assert.match(desc, /post-push 5.*pre-push 11|pre-push 11.*post-push 5/is);
+  });
+});
+
+describe("buildCodexReviewOverrideCapDescription", () => {
+  it("surfaces the live cap value as a structured cap phrase (not a bare digit)", () => {
+    const desc = buildCodexReviewOverrideCapDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    if (CODEX_REVIEW_HARD_CAP === CODEX_REVIEW_PREPUSH_HARD_CAP) {
+      assert.match(
+        desc,
+        new RegExp(`hard-cap-${CODEX_REVIEW_HARD_CAP}\\b`, "i"),
+        `equal-cap form must surface "hard-cap-N"; got: ${desc}`,
+      );
+    } else {
+      assert.match(
+        desc,
+        new RegExp(
+          `post-push ${CODEX_REVIEW_HARD_CAP}\\b.*pre-push ${CODEX_REVIEW_PREPUSH_HARD_CAP}\\b|` +
+            `pre-push ${CODEX_REVIEW_PREPUSH_HARD_CAP}\\b.*post-push ${CODEX_REVIEW_HARD_CAP}\\b`,
+          "is",
+        ),
+        `divergent-cap form must surface both caps; got: ${desc}`,
+      );
+    }
+  });
+
+  it("does not contain stale hard-cap-2 wording", () => {
+    const desc = buildCodexReviewOverrideCapDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.ok(!/hard-cap-2\b/i.test(desc), `must not contain hard-cap-2; got: ${desc}`);
+  });
+
+  it("nudges the agent toward fix-and-escalate, not silent retries", () => {
+    const desc = buildCodexReviewOverrideCapDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.ok(
+      desc.includes("override_reason"),
+      `must require override_reason; got: ${desc}`,
+    );
+    assert.ok(
+      /user\b/i.test(desc),
+      `must remind that only the user can authorize overrides; got: ${desc}`,
+    );
+  });
+
+  it("collapses to hard-cap-N when caps are equal", () => {
+    const desc = buildCodexReviewOverrideCapDescription({ postPushCap: 9, prepushCap: 9 });
+    assert.match(desc, /hard-cap-9\b/i);
+    assert.ok(!/hard-cap-3\b/i.test(desc), `must not leak default 3; got: ${desc}`);
+  });
+
+  it("surfaces both caps when post-push and pre-push diverge", () => {
+    const desc = buildCodexReviewOverrideCapDescription({ postPushCap: 4, prepushCap: 6 });
+    assert.match(desc, /post-push 4.*pre-push 6|pre-push 6.*post-push 4/is);
+    assert.ok(!/hard-cap-4\b/i.test(desc), `divergent caps must not collapse; got: ${desc}`);
+    assert.ok(!/hard-cap-6\b/i.test(desc), `divergent caps must not collapse; got: ${desc}`);
+  });
+});
+
+describe("buildCodexReviewOverrideReasonDescription", () => {
+  it("requires override_reason when override_cap=true", () => {
+    const desc = buildCodexReviewOverrideReasonDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.match(desc, /Required when override_cap=true/);
+    assert.match(desc, /Stored in the marker for audit/);
+  });
+
+  it("uses a concrete next-cycle example when caps are equal", () => {
+    const desc = buildCodexReviewOverrideReasonDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.match(
+      desc,
+      new RegExp(`run cycle ${CODEX_REVIEW_HARD_CAP + 1}`),
+      `equal-cap example should name the first cycle past the cap; got: ${desc}`,
+    );
+  });
+
+  it("uses cap-relative wording when caps diverge so it does not lock in a single number", () => {
+    const desc = buildCodexReviewOverrideReasonDescription({ postPushCap: 4, prepushCap: 6 });
+    assert.ok(
+      /next over-cap cycle/i.test(desc),
+      `divergent-cap example must avoid a hardcoded next-cycle integer; got: ${desc}`,
+    );
+    assert.ok(!/cycle 5\b/.test(desc), `must not pin to post-push next cycle; got: ${desc}`);
+    assert.ok(!/cycle 7\b/.test(desc), `must not pin to pre-push next cycle; got: ${desc}`);
+  });
+
+  it("does not hardcode the cap value (proves it follows the constants)", () => {
+    const desc = buildCodexReviewOverrideReasonDescription({ postPushCap: 9, prepushCap: 9 });
+    assert.match(desc, /run cycle 10\b/);
+    assert.ok(!/run cycle 4\b/.test(desc), `must not leak default cap+1; got: ${desc}`);
   });
 });

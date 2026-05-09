@@ -110,11 +110,54 @@ available via the user-authorized `override_cap=true` + `override_reason`
 path; the override marker stays distinguishable from regular cycle markers in
 the audit trail.
 
+The three-cycle cap is hard against agent self-authorization: the agent
+cannot run cycle 4 to "verify the fix" of cycle 3 findings. Cycle 3 findings
+must be fixed in place; if concern remains after fixing them, the agent posts
+an issue-thread comment summarizing the remaining concern and fix history and
+escalates to the user. The user may then authorize cycle 4 explicitly via
+`override_cap=true` + an `override_reason` quoting that authorization, or
+decide a different workflow move (stop, re-scope, open a fresh issue). The
+marker preserves the distinction so the audit trail records whether each
+cycle ran in-cap or under user-authorized override.
+
 The marker belongs to the same issue-thread marker family as plan, phase,
 review-cycle, and verify-cycle markers. Implementations must reuse the
 existing issue-comment read/post helpers, marker parser/evaluator pattern, and
 structured refusal result style; they must not add a local state file, git
 notes, database row, Temporal state, or driver-local counter for this cap.
+
+### Tool-layer enforcement boundary
+
+The MCP server is the enforcement boundary for workflow ordering, cycle caps,
+GitHub posting, and durable markers. Implementation work for issue #794 must
+extend the existing MCP review/phase machinery rather than introducing a
+parallel workflow state model.
+
+Reuse these existing cross-cutting patterns:
+
+- the `ensureGitRepo` and `getOwnerRepo` repository resolution path before any
+  GitHub or git side effect;
+- the issue-comment marker family and paginated issue-comment reader for
+  durable state, including marker-shaped-text escaping so reviewer output
+  cannot poison counters;
+- pure parser/evaluator helpers for marker counting and prerequisite decisions,
+  with tests covering malformed markers, wrong issue/PR ids, and cap
+  boundaries;
+- structured refusal envelopes with stable `error`, `message`, `prior_cycles`
+  or `missing`, `cap`, and `next_action` fields instead of thrown control-flow
+  exceptions for expected gate failures;
+- the host-side GitHub posting boundary, sensitive-content guardrail, and
+  partial-failure envelopes already used by `gc_codex_review`;
+- `.ground-control.yaml` resolution through `gc_get_repo_ground_control_context`
+  when workflow behavior needs repo configuration.
+
+Do not duplicate the workflow contract in skill-only prose, local files, git
+notes, in-memory counters, ad hoc JSON blobs, Temporal state, or a new database
+table for this bridge implementation. Do not create separate schemas for
+pre-push and post-push review cycles unless their persisted marker identity
+actually differs. Do not make branch name, PR number, or commit lineage part of
+the pre-push cap key; those are audit context or post-push direct-caller
+defense-in-depth context, not reset levers for the canonical Step 6.5 cap.
 
 ### Codex findings issue-thread record
 

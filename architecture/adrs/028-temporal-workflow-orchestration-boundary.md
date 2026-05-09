@@ -144,6 +144,20 @@ Temporal workflow may read them for observability but does not block on
 synchronous human input for plan approval — that gate was removed by ADR-029
 before Temporal lands.
 
+If GC-O009's draft requirement text, issue prose, or older workflow notes refer
+to "plan approval" as a Temporal signal, that wording is stale with respect to
+ADR-029 and must not drive implementation. GC-O009 may introduce signal
+endpoints only for gates that still exist in the accepted workflow contract
+or for explicit operator controls whose authorization, audit record, and
+failure semantics are defined in Ground Control. Do not reintroduce a
+synchronous plan-approval gate as a side effect of adopting Temporal.
+
+The transition bridge from the existing `/implement` skill must keep using the
+MCP-side issue-thread marker family for preflight, plan, review-cycle, and
+verify-cycle enforcement until Temporal owns those phases end to end. Bridge
+code may start workflows and send supported signals, but it must not become a
+second workflow engine with independent counters, phase state, or gate rules.
+
 ### Observability And Security
 
 Temporal Web and gRPC endpoints are infrastructure surfaces. They must not be
