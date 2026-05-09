@@ -854,10 +854,15 @@ export async function getRequirementHistory(id) {
   return request("GET", `/api/v1/requirements/${encodeURIComponent(id)}/history`);
 }
 
+// Returns 404 if `relId` does not belong to `reqId` (i.e. the requirement is
+// neither source nor target of the relation), so cross-resource lookups are
+// rejected at the gateway rather than silently returning another requirement's
+// history.
 export async function getRelationHistory(reqId, relId) {
   return request("GET", `/api/v1/requirements/${encodeURIComponent(reqId)}/relations/${encodeURIComponent(relId)}/history`);
 }
 
+// Returns 404 if `linkId` does not belong to `reqId`.
 export async function getTraceabilityLinkHistory(reqId, linkId) {
   return request("GET", `/api/v1/requirements/${encodeURIComponent(reqId)}/traceability/${encodeURIComponent(linkId)}/history`);
 }
@@ -941,6 +946,8 @@ export async function deleteRelation(reqId, relId) {
   await request("DELETE", `/api/v1/requirements/${encodeURIComponent(reqId)}/relations/${encodeURIComponent(relId)}`);
 }
 
+// Returns 404 if `linkId` does not belong to `reqId`, preventing one
+// requirement's caller from deleting another requirement's link via a known UUID.
 export async function deleteTraceabilityLink(reqId, linkId) {
   await request("DELETE", `/api/v1/requirements/${encodeURIComponent(reqId)}/traceability/${encodeURIComponent(linkId)}`);
 }
