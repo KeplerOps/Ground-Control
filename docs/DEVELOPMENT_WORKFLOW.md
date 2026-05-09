@@ -68,18 +68,17 @@ flowchart TB
   S6[6 · TDD implementation]
   S7[7 · pre-commit run]
   S8[8 · Completion gate · make policy + make check + CHANGELOG]
+  S8b[8.5 · Pre-push gc_codex_review · core + security · cap 3 · posts findings record to issue thread]
   S9[9 · Stage + commit + push]
   S10[10 · Create PR to dev]
   S11[11 · CI monitor]
   S12[12 · SonarCloud sweep]
-  S13[13 · gc_codex_review · core + security in parallel]
-  S14[14 · Per-finding fix + gc_codex_verify_finding]
-  S15[15 · /review-tests]
-  S16[16 · Final CI re-verify]
-  S17[17 · Transition in-scope requirements DRAFT → ACTIVE]
-  S18[18 · Reconcile traceability against diff]
-  S19[19 · Verify GC state landed]
-  S20[20 · Report — DO NOT MERGE]
+  S13[13 · /review-tests]
+  S14[14 · Final CI re-verify]
+  S15[15 · Transition in-scope requirements DRAFT → ACTIVE]
+  S16[16 · Reconcile traceability against diff]
+  S17[17 · Verify GC state landed]
+  S18[18 · Report — DO NOT MERGE]
   End([User reviews PR and merges])
 
   Start --> S1
@@ -90,7 +89,8 @@ flowchart TB
   S5 --> S6
   S6 --> S7
   S7 --> S8
-  S8 --> S9
+  S8 --> S8b
+  S8b --> S9
   S9 --> S10
   S10 --> S11
   S11 --> S12
@@ -100,17 +100,15 @@ flowchart TB
   S15 --> S16
   S16 --> S17
   S17 --> S18
-  S18 --> S19
-  S19 --> S20
-  S20 --> End
+  S18 --> End
 
   S8 -->|fail| S7
+  S8b -->|findings, re-run cap 3| S6
   S11 -->|red| S9
   S12 -->|findings| S9
-  S14 -->|re-run, cap 2| S13
-  S15 -->|findings| S9
-  S16 -->|red| S9
-  S19 -->|drift| S18
+  S13 -->|findings| S9
+  S14 -->|red| S9
+  S17 -->|drift| S16
 
   classDef user fill:#fff7cc,stroke:#c9a900,color:#000
   class Start,End user
@@ -122,27 +120,28 @@ flowchart TB
 - **Entry is always by issue.** Step 1 resolves the input to a GitHub issue (either directly or via a UID → issue shim) and parses the `## Requirements` section from the issue body into `in_scope_requirements[]`. The list may be empty (bug fix / refactor) or contain one or many UIDs (grouped implementation). Everything downstream treats the issue as the authoritative context and the list as the set of requirements to be transitioned to `ACTIVE` on completion.
 - **Steps 1–4** gather context and run the codex architecture preflight before any code is written. Step 4 also consults the repo knowledge base via the index if one is present.
 - **Step 6** is TDD (red → green → refactor per clause). Steps 7–8 are the local quality gate. A narrow documentation-only carve-out is documented in `skills/implement/SKILL.md` Step 4.4 for diffs that contain no executable behavior and whose claims are protected by an existing structural gate (policy check, schema validator, lint rule, verifier script). The carve-out must be declared in the plan and re-stated as an issue comment naming the gate; substring/snapshot tests written only to satisfy TDD wording are explicitly disallowed. The completion gate re-validates the carve-out with a two-check sweep over the union of committed, staged, unstaged, and untracked paths (Step 6 runs before stage-and-commit, so working-tree state is part of the diff): every path must be in the documentation set AND every diff hunk's content must be free of executable behavior — a path check alone isn't enough, because a doc file can still carry executable behavior.
+- **Step 8.5 (= SKILL Step 6.5)** is the single Codex review pass per issue #804 — `gc_codex_review` with `uncommitted=true` runs locally against the staged + unstaged diff and posts a verbatim findings record to the resolved issue thread for each cycle (durable per ADR-029). Hard-cap is 3 cycles **per issue** (the cycle counter is anchored to the GitHub issue thread; the current branch is recorded in the marker for audit context but is NOT part of the cap key, so a branch rename on the same issue cannot reset the counter — see ADR-029). After a cycle's findings are surfaced, the agent fixes locally, re-stages, and re-invokes — no commit/push between cycles. The post-push codex review (former Step 12 in earlier numbering) was removed by issue #804 — merge-commit drift is the responsibility of CI (compile/tests/integration) and SonarCloud (quality).
 - **Steps 9–12** commit, push, open the PR, and block on CI + SonarCloud before any reviewer looks at the code.
-- **Steps 13–16** are the review phase: `gc_codex_review` posts inline comments, `gc_codex_verify_finding` drives the per-finding fix loop (loop 14 → 13 re-runs the whole review after fixes, cap 2), then `/review-tests` catches false-assurance tests, then one final CI pass.
-- **Step 17 transitions each in-scope requirement to `ACTIVE`.** This MUST happen BEFORE Step 18's traceability reconciliation: the Ground Control API enforces `IMPLEMENTS-only-on-ACTIVE`, so reconciling first against a still-DRAFT requirement silently fails. Forward-looking requirements (the diff documents/references but does not deliver) stay DRAFT and use `DOCUMENTS` links instead in Step 18.
-- **Step 18 is traceability reconciliation, not link creation.** It walks every added/modified/renamed/deleted file in the diff, finds existing IMPLEMENTS/TESTS links pointing at each, and updates/deletes/creates links so the Ground Control graph matches reality after the change. Runs with zero in-scope requirements still reconcile, because a bug fix may have touched files linked to other requirements whose links are now stale. Deleting the sole implementation of a requirement is escalated to the user rather than silently removing the link. When the diff *finalizes* a requirement (e.g., an ADR clarification or CHANGELOG entry that ships the requirement) but the structural implementation lives in pre-existing files shipped under a sibling requirement, Step 18 backfills IMPLEMENTS links onto those pre-existing artifacts of record. The backfill is bounded by the requirement's concrete subject matter — not a whole-repo scan.
-- **Step 19** re-verifies Ground Control state matches reality after Steps 17–18. These three steps run LAST, after every reviewer has signed off, so Ground Control never runs ahead of code that hasn't passed review. Zero in-scope requirements → Step 17 is a no-op; Step 18 still reconciles; Step 19 still audits.
-- **Every downstream failure loops back to step 9** (stage + commit + push), which is the single re-entry point for fix commits. The completion gate (step 8) and the GC verify (step 19) are the only two loops that target earlier steps, because they correspond to local-only and GC-only state respectively.
+- **Steps 13–14** are the post-push review phase: `/review-tests` catches false-assurance tests, then one final CI pass closes out.
+- **Step 15 transitions each in-scope requirement to `ACTIVE`.** This MUST happen BEFORE Step 16's traceability reconciliation: the Ground Control API enforces `IMPLEMENTS-only-on-ACTIVE`, so reconciling first against a still-DRAFT requirement silently fails. Forward-looking requirements (the diff documents/references but does not deliver) stay DRAFT and use `DOCUMENTS` links instead in Step 16.
+- **Step 16 is traceability reconciliation, not link creation.** It walks every added/modified/renamed/deleted file in the diff, finds existing IMPLEMENTS/TESTS links pointing at each, and updates/deletes/creates links so the Ground Control graph matches reality after the change. Runs with zero in-scope requirements still reconcile, because a bug fix may have touched files linked to other requirements whose links are now stale. Deleting the sole implementation of a requirement is escalated to the user rather than silently removing the link. When the diff *finalizes* a requirement (e.g., an ADR clarification or CHANGELOG entry that ships the requirement) but the structural implementation lives in pre-existing files shipped under a sibling requirement, Step 16 backfills IMPLEMENTS links onto those pre-existing artifacts of record. The backfill is bounded by the requirement's concrete subject matter — not a whole-repo scan.
+- **Step 17** re-verifies Ground Control state matches reality after Steps 15–16. These three steps run LAST, after every reviewer has signed off, so Ground Control never runs ahead of code that hasn't passed review. Zero in-scope requirements → Step 15 is a no-op; Step 16 still reconciles; Step 17 still audits.
+- **Every downstream failure loops back to step 9** (stage + commit + push), which is the single re-entry point for fix commits. The completion gate (step 8), the pre-push codex review (step 8.5), and the GC verify (step 17) are the loops that target earlier steps, because they correspond to local-only / pre-PR / GC-only state respectively.
 
 Claude does NOT merge. The user reviews the PR and merges.
 
 ## Review Pipeline
 
-One mandatory pre-implementation architecture pass, then two reviewers before the user sees the PR. The built-in `/review` and `/security-review` skills were removed from the `/implement` loop because `gc_codex_review` (a cross-model production-readiness review posting inline PR comments) plus `/review-tests` (test-quality review) cover the same ground with less duplication and a cleaner fix-verify loop.
+One mandatory pre-implementation architecture pass, then a single pre-push codex review pass (Step 6.5), then test-quality review before the user sees the PR. The post-push codex review (former Step 12) was removed by issue #804 — the canonical codex pass is the pre-push one, which catches everything codex would normally flag while collapsing the asymmetric "post-push finding → guaranteed CI/SonarCloud roundtrip" cost. Merge-commit drift relative to base is the responsibility of CI (compile/tests/integration) and SonarCloud (quality), not a separate codex pass.
 
 | Stage | What it catches | How it runs |
 |-------|-----------------|-------------|
 | Codex architecture preflight | Cross-cutting concerns, reuse opportunities, abstraction/concept confusion, need for ADR/design guidance before coding | `gc_codex_architecture_preflight` |
 | SonarCloud | Coverage, code smells, duplication, security hotspots, open issues on the PR | CI job + `$SONAR_TOKEN` sweep of `api/issues/search` and `api/hotspots/search` for this PR |
-| Codex review | Fitness for purpose, architectural soundness, maintainability, extensibility, security, established patterns, consistency with the larger codebase. Codex returns structured findings; the MCP server posts durable GitHub comments from the host side, and the coding agent fixes locally and calls `gc_codex_verify_finding` to verify. | `gc_codex_review` (MCP posts) + `gc_codex_verify_finding` (per-finding verify loop) |
+| Codex review (pre-push, Step 6.5) | Fitness for purpose, architectural soundness, maintainability, extensibility, security, established patterns, consistency with the larger codebase. Codex returns structured findings; the MCP server posts a verbatim findings record to the resolved issue thread from the host side; the coding agent fixes locally and re-runs the review. There is no PR yet at Step 6.5, so no inline PR comments are written by the SKILL — inline anchored comments only happen if a direct caller invokes `gc_codex_review` post-push (with a `pr_number`), which the SKILL no longer drives (issue #804). | `gc_codex_review` (`uncommitted=true`); MCP posts the issue-thread findings record |
 | `/review-tests` | Assertion-free tests, mock-only assertions, integration-as-unit, tests that can't detect regressions | `Skill("review-tests")` |
 
-All preflight/review stages operate under the same rule: **fix everything, defer nothing.** Review-loop cap: 2 cycles per reviewer, per-finding cap: 2 codex verify calls. If a third cycle would be needed, the skill escalates to the user with the full finding history.
+All preflight/review stages operate under the same rule: **fix everything, defer nothing.** Review-loop cap (per #804): 3 cycles per reviewer; per-finding `gc_codex_verify_finding` cap stays at 2. If a fourth cycle would be needed, the skill escalates to the user with the full finding history.
 
 ## Guardrails
 

@@ -2295,7 +2295,7 @@ function buildFindingsEmissionInstructions({ reviewerLabel }) {
 // (issue #796)" below.
 // ---------------------------------------------------------------------------
 
-export const CODEX_REVIEW_HARD_CAP = 2;
+export const CODEX_REVIEW_HARD_CAP = 3;
 export const CODEX_REVIEW_CYCLE_MARKER_PREFIX = "<!-- gc:codex-review-cycle";
 // Tolerate optional attrs (override="true", reason="...") between pr and the
 // close marker so override-cycle markers parse the same way as regular ones.
@@ -2412,7 +2412,7 @@ export function buildCodexReviewCycleMarker({ prNumber, cycleNumber, override = 
     `${CODEX_REVIEW_CYCLE_MARKER_PREFIX} cycle="${cycleNumber}" pr="${prNumber}"${overrideAttr}${reasonAttr} -->`,
     "",
     headline +
-      " Posted by the MCP server to enforce the hard-cap-2 contract (issue #794). " +
+      ` Posted by the MCP server to enforce the hard-cap-${CODEX_REVIEW_HARD_CAP} contract (issues #794, #804). ` +
       "Do not edit or delete — used by the next `gc_codex_review` invocation to count cycles." +
       reasonLine,
   ].join("\n");
@@ -2537,7 +2537,8 @@ export function buildCodexVerifyCycleMarker({ prNumber, commentId, cycleNumber, 
 //
 // Pre-push reviews run with `uncommitted=true` against the local working tree
 // before any PR exists. They hit the same diminishing-returns wall as
-// post-push reviews, so they inherit GC-O007 / ADR-029's hard-cap-2 contract.
+// post-push reviews, so they inherit GC-O007 / ADR-029's hard-cap-3 contract
+// (bumped from 2 to 3 by issue #804 when the SKILL collapsed to one review pass).
 // Cycle 3 is forbidden unless the user explicitly authorizes an override —
 // the agent cannot self-authorize.
 //
@@ -2549,7 +2550,7 @@ export function buildCodexVerifyCycleMarker({ prNumber, commentId, cycleNumber, 
 // regex so the two parsers never accidentally cross-count.
 // ---------------------------------------------------------------------------
 
-export const CODEX_REVIEW_PREPUSH_HARD_CAP = 2;
+export const CODEX_REVIEW_PREPUSH_HARD_CAP = 3;
 export const CODEX_REVIEW_PREPUSH_MARKER_PREFIX = "<!-- gc:codex-prepush-cycle";
 // Matches `<!-- gc:codex-prepush-cycle issue="N" branch="..." cycle="M" ... -->`.
 // `branch` is JSON-encoded so it can carry slashes and escaped quotes; the
@@ -2698,7 +2699,7 @@ export function buildCodexReviewPrePushCycleMarker({
     `${CODEX_REVIEW_PREPUSH_MARKER_PREFIX} issue="${issueNumber}" branch="${branchAttr}" cycle="${cycleNumber}"${overrideAttr}${reasonAttr} -->`,
     "",
     headline +
-      " Posted by the MCP server to enforce the pre-push hard-cap-2 contract (issue #796). " +
+      ` Posted by the MCP server to enforce the pre-push hard-cap-${CODEX_REVIEW_PREPUSH_HARD_CAP} contract (issues #796, #804). ` +
       "Do not edit or delete — used by the next `gc_codex_review` (uncommitted) invocation to count cycles." +
       reasonLine,
   ].join("\n");
@@ -4019,12 +4020,117 @@ export async function runCodexReview({
     securityPostResults.filter((r) => r.ok).length;
   const cycleConsumed = successfulPostCount > 0 || !partialFailure;
 
-  // Successfully ran codex — record the cycle marker so subsequent invocations
-  // honor the hard cap. Posting after the codex run (not before) means
-  // failed/aborted runs don't consume a cycle. Marker-post failures are not
-  // fatal: the review itself succeeded and surfaced findings; the worst case
-  // is the next cycle's count is off-by-one, which the cap-evaluator handles
-  // gracefully (it reads whatever count is on the issue thread at the time).
+  const cycleSource = cycleOwnership ?? prePushOwnership ?? null;
+
+  // Issue #804 (and #804 review-cycle-1 finding 1): the durable findings
+  // record is posted BEFORE the cycle marker. If the record fails, no
+  // cycle is consumed — a retry is free. If the record succeeds, the
+  // cycle marker write follows; a marker-write failure for post-push is
+  // non-fatal (warning), but for pre-push the marker IS the cap surface
+  // and a failure must surface so the cap is honored.
+  //
+  // Skip the record when the cycle wasn't consumed (no comments landed)
+  // or when no issue thread is resolvable (post-push PR closes no issues
+  // — same convention as the plan-gate's "PRs closing no issues skip the
+  // gate"). In the skip case, proceed straight to the cycle-marker write
+  // because there is no record to wait for.
+  let findingsCommentUrl = null;
+  let recordIssueNumber = null;
+  if (cycleConsumed && cycleSource != null) {
+    recordIssueNumber = await resolveFindingsRecordIssueNumber({
+      repoRoot,
+      uncommitted,
+      effectivePr,
+      prePushOwnership,
+    });
+    if (recordIssueNumber != null) {
+      const findingsBodies = buildCodexReviewFindingsComments({
+        cycleNumber: cycleSource.cycleNumber,
+        cap: cycleSource.cap,
+        mode: uncommitted ? "pre-push" : "post-push",
+        issueNumber: recordIssueNumber,
+        prNumber: uncommitted ? null : effectivePr,
+        branch: prePushOwnership ? prePushOwnership.branchName : null,
+        coreReviewText: core.body,
+        securityReviewText: security.body,
+        postedComments: comments,
+      });
+      // #804 review-cycle-1 finding 2: route the rendered body through the
+      // same sensitive-content filter the inline poster uses, so reviewer-
+      // controlled prose can't exfiltrate workspace contents under the host
+      // identity. Reject before we POST. Filter every body — secret content
+      // could land in any continuation chunk, not just the primary.
+      for (const body of findingsBodies) {
+        const sensitiveError = detectSensitiveBodyContent(body);
+        if (sensitiveError) {
+          return buildReviewCommentPostFailedEnvelope({
+            repoRoot,
+            baseBranch,
+            uncommitted,
+            effectivePr,
+            prePushOwnership,
+            recordIssueNumber,
+            message:
+              `gc_codex_review refused to post the findings record to issue #${recordIssueNumber}: ` +
+              `${sensitiveError}. The reviewer text would have published model-controlled content ` +
+              `that matched the host-side guardrail; no cycle marker has been written, so a retry ` +
+              `is safe once codex emits a clean review.`,
+            postError: sensitiveError,
+            cycleSource,
+            comments,
+            postFailures,
+            parseErrors,
+            core,
+            security,
+          });
+        }
+      }
+      // Post all bodies in order: the primary first, then continuations.
+      // findings_comment_url surfaces the primary URL — continuations
+      // are reachable via the issue thread.
+      try {
+        for (let i = 0; i < findingsBodies.length; i++) {
+          const apiResponse = await postCodexReviewFindingsComment({
+            repoRoot,
+            owner: cycleSource.owner,
+            name: cycleSource.name,
+            issueNumber: recordIssueNumber,
+            body: findingsBodies[i],
+          });
+          if (i === 0) {
+            findingsCommentUrl = apiResponse?.html_url ?? null;
+          }
+        }
+      } catch (postError) {
+        return buildReviewCommentPostFailedEnvelope({
+          repoRoot,
+          baseBranch,
+          uncommitted,
+          effectivePr,
+          prePushOwnership,
+          recordIssueNumber,
+          message:
+            `gc_codex_review ran successfully but failed to post the findings record to issue ` +
+            `#${recordIssueNumber}: ${postError.message}. The issue thread is the durable record ` +
+            `per ADR-029; no cycle marker has been written so a retry is safe. Fix the underlying ` +
+            `GitHub issue (network, gh auth, repo permissions) and retry.`,
+          postError: postError.message,
+          cycleSource,
+          comments,
+          postFailures,
+          parseErrors,
+          core,
+          security,
+        });
+      }
+    }
+  }
+
+  // Findings record landed (or was skipped). Now write the cycle marker so
+  // the next invocation honors the hard cap. Marker-post failures are
+  // non-fatal for post-push (the durable record is on the issue thread; an
+  // off-by-one cap is recoverable). For pre-push the marker IS the cap
+  // surface and a failure surfaces as prepush_cycle_record_failed.
   if (cycleOwnership != null && cycleConsumed) {
     try {
       await postCodexReviewCycleMarker(
@@ -4045,13 +4151,6 @@ export async function runCodexReview({
   }
 
   if (prePushOwnership != null && cycleConsumed) {
-    // The cap is durable iff the marker lands on the issue thread. Pre-push
-    // has no PR / CI / other secondary check — the marker IS the enforcement
-    // surface, so a marker-post failure has to fail the run. Findings are
-    // preserved in the returned payload (the agent can still act on them);
-    // failing here pushes the agent to retry once the underlying issue
-    // (network, gh auth, repo perms) is resolved, which is idempotent
-    // because the cap evaluator reads whatever count is on the thread.
     try {
       await postCodexReviewPrePushCycleMarker(
         repoRoot,
@@ -4098,7 +4197,6 @@ export async function runCodexReview({
     }
   }
 
-  const cycleSource = cycleOwnership ?? prePushOwnership ?? null;
   // When the cycle returned 0 findings AND no reviewer's tail failed to
   // parse AND every POST landed, the cap-evaluator's pre-run next_action
   // ("fix_all_findings_..." / "fix_all_findings_then_summarize_...") is
@@ -4148,7 +4246,263 @@ export async function runCodexReview({
     next_action: effectiveNextAction,
     override: cycleSource && cycleSource.override === true ? true : false,
     override_reason: cycleSource ? cycleSource.overrideReason : null,
+    findings_comment_url: findingsCommentUrl,
   };
+}
+
+// Build the structured review_comment_post_failed envelope. The cycle
+// marker has NOT been written when this fires, so a retry is safe — the
+// cap counter is untouched. Closes #804 review-cycle-1 finding 1.
+function buildReviewCommentPostFailedEnvelope({
+  repoRoot,
+  baseBranch,
+  uncommitted,
+  effectivePr,
+  prePushOwnership,
+  recordIssueNumber,
+  message,
+  postError,
+  cycleSource,
+  comments,
+  postFailures,
+  parseErrors,
+  core,
+  security,
+}) {
+  return {
+    repo_path: repoRoot,
+    base_branch: baseBranch,
+    uncommitted,
+    pr_number: effectivePr,
+    issue_number: prePushOwnership ? prePushOwnership.issueNumber : recordIssueNumber,
+    branch: prePushOwnership ? prePushOwnership.branchName : null,
+    ok: false,
+    error: "review_comment_post_failed",
+    message,
+    next_action: "fix_underlying_issue_thread_post_failure_and_retry",
+    review_comment_post_error: postError,
+    attempted_cycle: cycleSource ? cycleSource.cycleNumber : null,
+    attempted_cap: cycleSource ? cycleSource.cap : null,
+    // cycle/cap fields stay null on the response — the cycle was NOT
+    // consumed because no marker was written. Retry is free.
+    cycle: null,
+    cap: null,
+    finding_count: comments.length,
+    comments,
+    post_failures: postFailures,
+    parse_errors: parseErrors,
+    core_review_text: core.body,
+    security_review_text: security.body,
+    reviewers: [
+      { name: "core", finding_count: core.findings.length },
+      { name: "security", finding_count: security.findings.length },
+    ],
+  };
+}
+
+// Resolve the issue thread the findings record should be posted to. For
+// pre-push runs, the issue is already pinned by prePushOwnership. For
+// post-push runs, look up the PR's first closing-issue ref (mirrors the
+// plan-gate's existing convention). Returns null when no issue is
+// resolvable, which causes the findings post to be skipped (same posture
+// as the plan-gate skipping for PRs that close no issues).
+async function resolveFindingsRecordIssueNumber({
+  repoRoot,
+  uncommitted,
+  effectivePr,
+  prePushOwnership,
+}) {
+  if (uncommitted) {
+    return prePushOwnership ? prePushOwnership.issueNumber : null;
+  }
+  if (effectivePr == null) return null;
+  const closingIssues = await getPullRequestClosingIssues(repoRoot, effectivePr);
+  if (closingIssues.length === 0) return null;
+  return closingIssues[0];
+}
+
+// Post the human-readable findings record as an issue-comment. Wraps
+// `gh api POST /repos/{owner}/{name}/issues/{issueNumber}/comments`. Returns
+// the parsed API response so the caller can surface the comment URL in
+// `findings_comment_url`. Throws on non-zero exit so the caller can shape
+// the structured `review_comment_post_failed` envelope.
+async function postCodexReviewFindingsComment({ repoRoot, owner, name, issueNumber, body }) {
+  const { stdout } = await execFile(
+    "gh",
+    [
+      "api",
+      "--method",
+      "POST",
+      `/repos/${owner}/${name}/issues/${issueNumber}/comments`,
+      "-f",
+      `body=${body}`,
+    ],
+    { cwd: repoRoot },
+  );
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+}
+
+// GitHub's REST limit for issue-comment bodies. The findings record stays
+// under this cap so the POST never deterministically fails on body size
+// (closes #804 review-cycle-2 finding 2). The per-reviewer truncation cap
+// leaves headroom for the markdown scaffold (header, section titles,
+// inline-comment list, truncation notice).
+const FINDINGS_COMMENT_BODY_MAX = 65535;
+const FINDINGS_COMMENT_PER_REVIEWER_MAX = 28000;
+
+// Marker-shaped strings inside reviewer text would be counted by the cycle
+// marker parsers as real markers (`<!-- gc:codex-... -->`), letting a
+// reviewer text falsely advance the cap. Disarm by escaping the leading
+// `<!--` so the regex `<!--\s*gc:codex-` no longer matches; GitHub still
+// renders the human-readable text, but the parser cannot match (closes
+// #804 review-cycle-2 finding 1).
+function disarmMarkerSequences(text) {
+  if (typeof text !== "string" || text === "") return text;
+  return text.replace(/<!--(\s*gc:codex-)/g, "&lt;!--$1");
+}
+
+function truncateReviewText(text, cap) {
+  if (typeof text !== "string") return "";
+  if (text.length <= cap) return text;
+  return text.slice(0, cap) + `\n\n_(truncated — full reviewer output exceeded ${cap} chars; see run logs.)_`;
+}
+
+function buildHeaderLine({ modeLabel, cycleNumber, cap, issueNumber, prNumber, branch }) {
+  return modeLabel === "pre-push"
+    ? `**gc_codex_review** — cycle ${cycleNumber} of ${cap} (${modeLabel}) on issue #${issueNumber}` +
+        (branch ? ` (branch \`${branch}\`)` : "")
+    : `**gc_codex_review** — cycle ${cycleNumber} of ${cap} (${modeLabel}) on PR #${prNumber} (issue #${issueNumber})`;
+}
+
+// Split a long string into chunks each ≤ chunkSize chars. Preserves the
+// full text verbatim — the join of all chunks equals the original string.
+function chunkText(text, chunkSize) {
+  if (typeof text !== "string" || text === "") return [""];
+  const chunks = [];
+  for (let i = 0; i < text.length; i += chunkSize) {
+    chunks.push(text.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+// Compose the human-readable findings record(s) posted to the resolved
+// issue thread on every successful gc_codex_review cycle (issue #804).
+// Returns AN ARRAY of bodies — when a single rendered comment would
+// exceed GitHub's 65535-char issue-comment body cap, the helper splits
+// into a primary body + continuation bodies so the verbatim contract
+// holds (closes #804 review-cycle-3 finding 1). The first body in the
+// array is the primary record; later bodies are continuations and carry
+// a continuation header.
+//
+// Pure function: testable without IO.
+export function buildCodexReviewFindingsComments({
+  cycleNumber,
+  cap,
+  mode,
+  issueNumber,
+  prNumber = null,
+  branch = null,
+  coreReviewText,
+  securityReviewText,
+  postedComments = [],
+}) {
+  const modeLabel = mode === "pre-push" ? "pre-push" : "post-push";
+  const headerLine = buildHeaderLine({ modeLabel, cycleNumber, cap, issueNumber, prNumber, branch });
+
+  const safeCore = disarmMarkerSequences(coreReviewText && coreReviewText.trim() !== "" ? coreReviewText : "_(empty)_");
+  const safeSecurity = disarmMarkerSequences(securityReviewText && securityReviewText.trim() !== "" ? securityReviewText : "_(empty)_");
+
+  // Try to fit everything in one body first.
+  const singleBodyLines = [
+    headerLine,
+    "",
+    "## Core review",
+    "",
+    safeCore,
+    "",
+    "## Security review",
+    "",
+    safeSecurity,
+  ];
+  if (modeLabel === "post-push" && Array.isArray(postedComments) && postedComments.length > 0) {
+    singleBodyLines.push("", "## Inline comments");
+    singleBodyLines.push("");
+    for (const c of postedComments) {
+      const title = (c?.title ?? "").trim() || "(no title)";
+      const url = c?.html_url ?? "";
+      singleBodyLines.push(url ? `- [${title}](${url})` : `- ${title}`);
+    }
+  }
+  const singleBody = singleBodyLines.join("\n");
+  if (singleBody.length <= FINDINGS_COMMENT_BODY_MAX) {
+    return [singleBody];
+  }
+
+  // Doesn't fit. Build the primary body with truncated reviewer text
+  // (each reviewer caps at FINDINGS_COMMENT_PER_REVIEWER_MAX) and a
+  // pointer to the continuation comments. Then chunk the FULL reviewer
+  // text into continuation bodies.
+  const primaryCore = truncateReviewText(safeCore, FINDINGS_COMMENT_PER_REVIEWER_MAX);
+  const primarySecurity = truncateReviewText(safeSecurity, FINDINGS_COMMENT_PER_REVIEWER_MAX);
+  const primaryLines = [
+    headerLine,
+    "",
+    "## Core review",
+    "",
+    primaryCore,
+    "",
+    "## Security review",
+    "",
+    primarySecurity,
+  ];
+  if (modeLabel === "post-push" && Array.isArray(postedComments) && postedComments.length > 0) {
+    primaryLines.push("", "## Inline comments");
+    primaryLines.push("");
+    for (const c of postedComments) {
+      const title = (c?.title ?? "").trim() || "(no title)";
+      const url = c?.html_url ?? "";
+      primaryLines.push(url ? `- [${title}](${url})` : `- ${title}`);
+    }
+  }
+  primaryLines.push("", "_(Reviewer text truncated to fit GitHub's comment cap; full verbatim text in continuation comments below.)_");
+  let primaryBody = primaryLines.join("\n");
+  if (primaryBody.length > FINDINGS_COMMENT_BODY_MAX) {
+    primaryBody = primaryBody.slice(0, FINDINGS_COMMENT_BODY_MAX - 80) +
+      `\n\n_(truncated — composed primary body exceeded ${FINDINGS_COMMENT_BODY_MAX} chars.)_`;
+  }
+  const bodies = [primaryBody];
+
+  // Continuation bodies preserve the full verbatim reviewer text. Each
+  // continuation has a header naming the section and chunk index. Chunk
+  // size leaves headroom for the header.
+  const continuationChunkSize = FINDINGS_COMMENT_BODY_MAX - 256;
+
+  function addContinuationsForSection(label, fullText) {
+    if (fullText.length <= FINDINGS_COMMENT_PER_REVIEWER_MAX) return;
+    const overflow = fullText; // continuation comments carry the full text
+    const chunks = chunkText(overflow, continuationChunkSize);
+    chunks.forEach((chunk, idx) => {
+      const continuationHeader = `**gc_codex_review** — cycle ${cycleNumber} of ${cap} (${modeLabel}) — ${label} continuation ${idx + 1}/${chunks.length} (issue #${issueNumber})`;
+      bodies.push(`${continuationHeader}\n\n${chunk}`);
+    });
+  }
+
+  addContinuationsForSection("Core review", safeCore);
+  addContinuationsForSection("Security review", safeSecurity);
+
+  return bodies;
+}
+
+// Backward-compatible single-body wrapper. Returns the PRIMARY body —
+// callers that haven't been migrated to the multi-body shape see the
+// same body they used to get. The poster (runCodexReview) uses
+// buildCodexReviewFindingsComments directly so continuations land too.
+export function buildCodexReviewFindingsComment(args) {
+  return buildCodexReviewFindingsComments(args)[0];
 }
 
 // Per-reviewer parse: when codex's tail is malformed, we don't want to throw

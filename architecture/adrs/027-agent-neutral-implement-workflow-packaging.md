@@ -77,7 +77,7 @@ After ADR-029, the gate contract is:
 - no reviewer findings are deferred to follow-up work
 - preflight is performed before implementation
 - completion gates and traceability gates remain hard gates
-- Codex review loops are **hard-capped at two cycles** (no escape clause)
+- Codex review runs as a single pre-push pass and is **hard-capped at three cycles** (no escape clause); the post-push codex review (former SKILL Step 12) was removed by issue #804 and remains only as tool-layer defense-in-depth for direct callers
 - plan, review findings, and decisions on findings are recorded as comments on
   the GitHub issue thread so the durable record survives PR merge/close
 

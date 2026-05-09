@@ -233,13 +233,14 @@ Returns overall pass/fail + per-gate details (actual value vs. threshold). Fix f
 
 ### Architecture + Review Pipeline
 
-The `/implement` skill now runs one mandatory Codex architecture preflight before coding and then four independent verification/review stages before the PR is presented for human review:
+Per issue #804, the `/implement` skill runs one mandatory Codex architecture preflight before coding and then a small set of independent verification/review stages before the PR is presented for human review:
 
-1. **Codex architecture preflight** — cross-cutting concerns, reuse opportunities, abstraction/concept confusion, ADR/design guidance when needed
-2. **SonarCloud** — static analysis, coverage, duplication, security hotspots
-3. **Codex (ChatGPT)** — exhaustive no-triage review for design, abstractions, maintainability, reliability, security, and consistency
-4. **Claude /review** — code quality, conventions, correctness, performance
-5. **Claude /security-review** — OWASP Top 10, injection, auth, data exposure
+1. **Codex architecture preflight** (Step 2.5) — cross-cutting concerns, reuse opportunities, abstraction/concept confusion, ADR/design guidance when needed.
+2. **Pre-push Codex review** (Step 6.5, hard-capped at 3 cycles) — THE codex review pass. Production-readiness review (`gc_codex_review`, core + security reviewers) runs against the staged + unstaged diff *before* the first push, so each fix iteration is local (~5 min) instead of a CI/SonarCloud roundtrip (10–15 min). Every successful cycle posts a verbatim findings record to the resolved issue thread (durable per ADR-029) plus inline PR review comments when a PR exists.
+3. **SonarCloud** (Step 11) — static analysis, coverage, duplication, security hotspots.
+4. **Test quality review** (Step 13) — `/review-tests` catches assertion-free tests, mock-only assertions, integration-as-unit tests, and tests that can't detect regressions.
+
+The post-push codex review (former Step 12) was removed by issue #804: the pre-push pass catches everything codex would normally flag, and merge-commit drift is the responsibility of CI (compile/tests/integration) and SonarCloud (quality), not a duplicate codex run. The post-push tool entrypoint (`gc_codex_review` with a `pr_number`) remains as defense-in-depth for direct callers but the SKILL no longer drives it.
 
 All findings are fixed before the PR is presented for human review.
 

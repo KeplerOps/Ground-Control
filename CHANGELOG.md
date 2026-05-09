@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Codex review collapsed to a single pre-push pass; cap bumped 2 → 3; findings
+  now durably recorded on the issue thread** (issue #804). The post-push codex
+  review (former SKILL Step 12) is removed from `/implement` — `Step 6.5` is
+  renamed `Pre-push Codex Review (final)` and is now THE codex review pass.
+  Merge-commit drift relative to base is the responsibility of CI and
+  SonarCloud, not a separate codex pass. The post-push tool entrypoint
+  (`gc_codex_review` with a `pr_number`) remains as defense-in-depth for
+  direct callers but the SKILL no longer drives it. `CODEX_REVIEW_HARD_CAP`
+  and `CODEX_REVIEW_PREPUSH_HARD_CAP` go from 2 → 3 (one combined pass keeps
+  the net iteration bound tighter than the old 2+2 = 4 across two steps,
+  while restoring "review feels like a real review, not a hot-cap" headroom).
+  `CODEX_VERIFY_HARD_CAP` stays at 2 — verification loops are per-finding,
+  not whole-review. After every successful `gc_codex_review` cycle (pre-push
+  or post-push), the MCP server posts a verbatim findings record to the
+  resolved issue thread containing the cycle/cap/mode header, both reviewers'
+  full text, and (post-push) every successfully posted inline comment URL.
+  If that post fails, the run returns `ok: false, error:
+  "review_comment_post_failed"` — same fail-fast posture as the pre-push
+  cycle marker, since the issue thread is the durable record per ADR-029.
+  ADR-021, ADR-027, ADR-029, GC-O007, and `docs/DEVELOPMENT_WORKFLOW.md`
+  are amended for cap-3 + single-pass wording.
+
 ### Fixed
 
 - `gc_codex_review` no longer relies on Codex calling `gh` from inside its
