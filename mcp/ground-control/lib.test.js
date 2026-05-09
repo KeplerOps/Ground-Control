@@ -5139,16 +5139,28 @@ describe("buildCodexReviewToolDescription", () => {
 });
 
 describe("buildCodexReviewOverrideCapDescription", () => {
-  it("surfaces the live cap value", () => {
+  it("surfaces the live cap value as a structured cap phrase (not a bare digit)", () => {
     const desc = buildCodexReviewOverrideCapDescription({
       postPushCap: CODEX_REVIEW_HARD_CAP,
       prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
     });
-    assert.ok(
-      desc.includes(String(CODEX_REVIEW_HARD_CAP)) ||
-        desc.includes(String(CODEX_REVIEW_PREPUSH_HARD_CAP)),
-      `must surface the live cap value(s); got: ${desc}`,
-    );
+    if (CODEX_REVIEW_HARD_CAP === CODEX_REVIEW_PREPUSH_HARD_CAP) {
+      assert.match(
+        desc,
+        new RegExp(`hard-cap-${CODEX_REVIEW_HARD_CAP}\\b`, "i"),
+        `equal-cap form must surface "hard-cap-N"; got: ${desc}`,
+      );
+    } else {
+      assert.match(
+        desc,
+        new RegExp(
+          `post-push ${CODEX_REVIEW_HARD_CAP}\\b.*pre-push ${CODEX_REVIEW_PREPUSH_HARD_CAP}\\b|` +
+            `pre-push ${CODEX_REVIEW_PREPUSH_HARD_CAP}\\b.*post-push ${CODEX_REVIEW_HARD_CAP}\\b`,
+          "is",
+        ),
+        `divergent-cap form must surface both caps; got: ${desc}`,
+      );
+    }
   });
 
   it("does not contain stale hard-cap-2 wording", () => {
