@@ -2274,15 +2274,17 @@ function buildFindingsEmissionInstructions({ reviewerLabel }) {
 }
 
 // ---------------------------------------------------------------------------
-// gc_codex_review hard-cap-2 cycle enforcement (issue #794 MVP-1)
+// gc_codex_review post-push cycle cap enforcement (issue #794 MVP-1)
 //
-// GC-O007 / ADR-029 specify a hard cap of two `gc_codex_review` cycles per PR
-// (cycle 3+ hits diminishing returns and starts repeating out-of-scope
+// GC-O007 / ADR-029 specify a hard cap on `gc_codex_review` cycles per PR
+// (cycle N+1 hits diminishing returns and starts repeating out-of-scope
 // findings). The cap was previously prose-only in skills/implement/SKILL.md,
 // and agents routinely rationalized past it. This MVP moves enforcement onto
 // the MCP server's trusted side: each successful post-push review posts a
 // machine-readable marker comment to the PR, and the next invocation refuses
-// if two markers already exist for the same PR.
+// once `CODEX_REVIEW_HARD_CAP` markers already exist for the same PR. Issue
+// #804 bumped the cap from 2 to 3 when SKILL Step 12 (post-push) was removed
+// and the loop collapsed to a single pre-push pass.
 //
 // Persistence model: PR issue-comments authored by whoever the MCP server's
 // `gh` CLI authenticates as (typically the repo owner / a service account).
@@ -3677,6 +3679,75 @@ export function dedupFindings(comments) {
   return Array.from(seen.values());
 }
 
+// ---------------------------------------------------------------------------
+// gc_codex_review tool & override description builders (issue #794)
+//
+// MCP tool descriptions are part of the public protocol surface — every LLM
+// client that lists the tool sees them. Inline strings in index.js drifted
+// past the cap bumps in #804 (post-push and pre-push caps moved 2 → 3) and
+// the pre-push key change (was (issue, branch), now issue alone per ADR-029).
+// These builders are pure functions that interpolate the live cap constants
+// so the description cannot drift again, and they're tested in lib.test.js
+// against `CODEX_REVIEW_HARD_CAP` / `CODEX_REVIEW_PREPUSH_HARD_CAP`.
+// ---------------------------------------------------------------------------
+
+function capPhrase(postPushCap, prepushCap) {
+  // Equal-cap phrasing collapses to "hard-cap-N"; divergent caps surface
+  // both values so the protocol description stays accurate if they ever
+  // diverge. The same shape is reused by the override / override-reason
+  // builders so a divergence shows up consistently across tool metadata.
+  return postPushCap === prepushCap
+    ? `hard-cap-${postPushCap}`
+    : `hard-cap (post-push ${postPushCap}, pre-push ${prepushCap})`;
+}
+
+export function buildCodexReviewToolDescription({ postPushCap, prepushCap }) {
+  return (
+    "Run Codex against the current branch with a production-readiness review prompt. " +
+    "Codex enumerates all material findings (no triage) and, when a pull request is " +
+    "available, posts each finding as an inline PR review comment. Returns the list of " +
+    "posted comment ids, enriched with GraphQL review-thread ids and a short file/line/" +
+    "title preview so the coding agent can drive a fix/verify loop via " +
+    "gc_codex_verify_finding. For post-push reviews (uncommitted=false) the tool " +
+    "auto-detects the PR number for the current branch via `gh pr view` when " +
+    "pr_number is omitted; pre-push reviews (uncommitted=true) target the issue " +
+    "thread and only post inline PR review comments when pr_number is supplied " +
+    `explicitly. Cycle-cap enforcement (${capPhrase(postPushCap, prepushCap)}): ` +
+    `post-push reviews are capped at ${postPushCap} cycles per PR (issue #794); ` +
+    `pre-push reviews are capped at ${prepushCap} cycles per issue, anchored to ` +
+    "the resolved GitHub issue thread (issue #796 — the branch is recorded in the " +
+    "marker for audit context but is not part of the cap key, so a branch rename " +
+    "on the same issue cannot reset the counter). The tool refuses any over-cap " +
+    "cycle (cycle cap+1 or later) unless override_cap=true with a non-empty " +
+    "override_reason quoting the user's authorization; an already-authorized " +
+    "override cycle does NOT carry forward — every subsequent over-cap cycle " +
+    "requires its own user authorization."
+  );
+}
+
+export function buildCodexReviewOverrideCapDescription({ postPushCap, prepushCap }) {
+  return (
+    `Override the ${capPhrase(postPushCap, prepushCap)} cycle limit (post-push and ` +
+    "pre-push). Only legitimate when the user has explicitly authorized the requested " +
+    "over-cap cycle in the conversation. Authorization is per-cycle: a previous " +
+    "override does not extend to the next cycle. Requires override_reason."
+  );
+}
+
+export function buildCodexReviewOverrideReasonDescription({ postPushCap, prepushCap }) {
+  // Cap-neutral example so the description does not re-drift when either cap
+  // changes. The example references the next over-cap cycle relative to the
+  // current state — not "the first cycle past cap N", since the override is
+  // required for *every* over-cap cycle, not just cycle cap+1.
+  const example =
+    postPushCap === prepushCap
+      ? `'user said: yes run cycle ${postPushCap + 1} to verify'`
+      : "'user said: yes run the next over-cap cycle to verify'";
+  return (
+    `Required when override_cap=true. Quote the user's authorization (e.g. ${example}). ` +
+    "Stored in the marker for audit."
+  );
+}
 
 export async function runCodexReview({
   repoPath,
@@ -3696,10 +3767,12 @@ export async function runCodexReview({
     effectivePr = await autoDetectPrNumber(repoRoot);
   }
 
-  // Hard-cap-2 enforcement: post-push reviews use the (PR) marker family
-  // (issue #794 MVP-1); pre-push uncommitted reviews use the (issue, branch)
-  // marker family (issue #796). Plan-before-review ordering applies to
-  // post-push only.
+  // Hard-cap enforcement: post-push reviews use the (PR) marker family
+  // (issue #794 MVP-1, cap = CODEX_REVIEW_HARD_CAP); pre-push uncommitted
+  // reviews use the per-issue marker family (issue #796 / ADR-029, cap =
+  // CODEX_REVIEW_PREPUSH_HARD_CAP). The pre-push key is the issue alone — the
+  // branch is recorded in the marker for audit context only, never as part of
+  // the cap key. Plan-before-review ordering applies to post-push only.
   let cycleOwnership = null;
   let prePushOwnership = null;
 
@@ -3860,8 +3933,9 @@ export async function runCodexReview({
       }
     }
 
-    // (2) Hard-cap-2 cycle enforcement (MVP-1). overrideCap=true requires a
-    //     non-empty overrideReason — the agent cannot self-authorize.
+    // (2) Hard-cap cycle enforcement (MVP-1, cap = CODEX_REVIEW_HARD_CAP).
+    //     overrideCap=true requires a non-empty overrideReason — the agent
+    //     cannot self-authorize.
     const priorCount = await readPriorCodexReviewCycleCount(repoRoot, owner, name, effectivePr);
     const decision = evaluateCodexReviewCycleCap({
       priorCount,
@@ -4010,7 +4084,7 @@ export async function runCodexReview({
   // response carries ok=false so the agent doesn't treat it as durable.
   const partialFailure = parseErrors.length > 0 || postFailures.length > 0;
   // The cycle marker is a different question: it gates retries against the
-  // hard-cap-2 budget. Suppress it ONLY when no comments landed on the PR
+  // hard-cap budget. Suppress it ONLY when no comments landed on the PR
   // (so a retry doesn't double-spend a cycle that produced nothing). When
   // any post succeeded, the comments are durable and a retry would
   // duplicate them on the PR thread — treat the cycle as consumed (closes

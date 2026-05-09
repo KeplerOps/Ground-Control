@@ -64,6 +64,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `gc_codex_review` MCP tool, `override_cap`, and `override_reason` field
+  descriptions no longer drift from the live cap constants (issue #794).
+  The previous strings said "Hard-cap-2 enforcement... two cycles per PR...
+  two cycles per (issue, branch) pair" — stale relative to issue #804
+  (which bumped both caps from 2 to 3) and ADR-029 (which keys the pre-push
+  cap by issue alone, with the branch recorded only as audit context). The
+  descriptions are now built by three pure functions in
+  `mcp/ground-control/lib.js`
+  (`buildCodexReviewToolDescription`, `buildCodexReviewOverrideCapDescription`,
+  `buildCodexReviewOverrideReasonDescription`) that interpolate
+  `CODEX_REVIEW_HARD_CAP` and `CODEX_REVIEW_PREPUSH_HARD_CAP` through a
+  shared `capPhrase()` helper. The tool description is mode-specific
+  ("post-push reviews auto-detect the PR via `gh pr view` when pr_number
+  is omitted; pre-push reviews target the issue thread and only post inline
+  PR review comments when pr_number is supplied explicitly") and uses a
+  mode-neutral "Cycle-cap enforcement" heading so caller catalogs that ever
+  see post-push and pre-push caps diverge surface both values rather than
+  collapsing to a single misleading "Hard-cap-N" leader. The override
+  description and example are per-cycle (every over-cap cycle requires its
+  own `override_reason`; a previous user authorization does not extend
+  forward). 17 new tests in `mcp/ground-control/lib.test.js` lock the
+  contract: live caps are interpolated, the stale "hard-cap-2" wording is
+  forbidden, the (issue, branch) pair shape is forbidden, both #794 and
+  #796 are referenced, the override-cap escape hatch is documented and
+  per-cycle, divergent post-push/pre-push caps surface both values
+  separately, and the override_reason example is cap-relative for
+  divergent caps and concrete for equal caps. Stale internal section-header
+  comments in `lib.js` are realigned to the live cap; the per-finding
+  verify cap remains 2 and is left unchanged. ADR-029 is amended to
+  preserve the user-authorized `override_cap=true` escape hatch and to
+  clarify that authorization is per-cycle and that the cap is hard against
+  agent self-authorization. ADR-028 carries a small clarification that
+  the Temporal bridge must continue using the MCP issue-thread marker
+  family rather than reintroducing a synchronous plan-approval gate.
 - `gc_codex_review` no longer relies on Codex calling `gh` from inside its
   sandbox to post inline PR review comments. Codex's sandbox does not carry
   GitHub credentials, so the prior architecture silently lost findings — they
