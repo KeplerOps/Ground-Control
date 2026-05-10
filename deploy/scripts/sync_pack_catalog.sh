@@ -92,7 +92,15 @@ while IFS= read -r entry; do
   fi
 
   installed_body="${tmp_dir}/${pack_id}-installed.json"
+  # ADR-026 protects every /api/v1/** path with at least authenticated access.
+  # Without the bearer header this read 401s after the security-enabled image
+  # rolls out, breaking the install-state probe (#828 cycle 2). Pass the
+  # bearer header through curl's --config FD instead of -H "...${TOKEN}..."
+  # so the token never lands in this process's argv (which `ps`, `/proc/<pid>/
+  # cmdline`, or audit logs would expose to other local users on the host —
+  # #828 cycle 3 security finding).
   installed_status="$(curl -s -o "${installed_body}" -w '%{http_code}' \
+    --config <(printf 'header = "Authorization: Bearer %s"\n' "${auth_token}") \
     "${BASE_URL}/api/v1/control-packs/${pack_id}?project=${PROJECT}")"
 
   if [ "${installed_status}" = "404" ]; then

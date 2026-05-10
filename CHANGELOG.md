@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`NoResourceFoundException` now returns `404 not_found` instead of
+  `500 internal_error`** (issue #828). Spring throws this exception for
+  unmapped paths in 3.2+; without an explicit `@ExceptionHandler` it fell
+  through to `handleGeneric` and surfaced as a generic server error, which
+  muddied the #821 diagnosis of the threat-model 500 (an image without the
+  threat-model controllers looked like a real server bug). The new handler
+  emits the standard `ErrorResponse` envelope with code `not_found`. The
+  exception's resource path is intentionally NOT echoed in the response body.
+
+### Changed
+
+- **Production compose file enumerates ADR-026 credential env vars
+  explicitly** (issue #828). `deploy/docker/docker-compose.prod.yml` now
+  passes `GC_SECURITY_ENABLED`, `GC_SECURITY_OPENAPI_PUBLIC`, five indexed
+  `GROUNDCONTROL_SECURITY_CREDENTIALS_<N>_*` slots, and five
+  `GROUNDCONTROL_SECURITY_IP_ALLOWLIST_<N>` slots through to the backend
+  container. Prior to this change, an operator who set the values in
+  `/opt/gc/.env` still got a 401-storm on cutover because compose never
+  forwarded the variables — the regression that triggered the 2026-05-09
+  rollback. Defaults are empty (`:-`) so back-compat is preserved.
+  `deploy/docker/.env.template` mirrors the new shape with commented
+  placeholders. `tools/policy/checks.py` adds
+  `run_deploy_compose_credential_passthrough` (wired into `make policy`)
+  as the structural gate that prevents future diffs from silently stripping
+  the keys.
+
+### Documentation
+
+- **Pre-existing-deployment ADR-026 auth migration runbook**
+  (`docs/deployment/DEPLOYMENT.md`, issue #828). Adds a 10-step playbook
+  ordered to prevent the 2026-05-09 rollback pattern: inventory consumers
+  first, provision and distribute tokens, verify each consumer hits `200`
+  *before* the new image rolls, then the cutover and post-deploy
+  verification. Cross-links the canonical compose file and the
+  `make policy` gate so the source-of-truth invariant is enforced.
+
 ### Security
 
 - **AGE adapter migrated to native Cypher parameter binding** (issue #244,
