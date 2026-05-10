@@ -31,6 +31,8 @@ Codify the gated agentic development loop as a first-class requirement (GC-O007)
 
 **Zero-deferral policy**: All reviewer findings are fixed before the PR is presented. No findings are deferred to follow-up work.
 
+> **Amended by ADR-029 (2026-05-10 per issue #830):** the zero-deferral policy is now mechanically enforced — a `PreToolUse` hook (`.claude/hooks/block-defer-language.py`) blocks `gh issue/pr {create,edit,comment,close}` calls carrying deferral-disposition language, and `bin/policy` flags the same language in the PR body at completion gate. Filing a tracking issue does not convert a deferral into a valid disposition; the only valid dispositions are `fix`, `wontfix` (with explicit user authorization), or `not-applicable` (with rationale). Codex review additionally classifies each finding `one-off` or `class`; a `class` finding must be fixed at the category level (one structural point of repair applied to every instance), not whack-a-mole'd to the reviewer-named site. See ADR-029 § "`defer` is not a valid disposition" for the full contract.
+
 The workflow is implemented by:
 - `/implement` skill (`.claude/skills/implement/SKILL.md`)
 - Completion verifier agent (`.claude/agents/completion-verifier.md`)

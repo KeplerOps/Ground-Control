@@ -139,6 +139,7 @@ Per ADR-029, the plan is **published to the GitHub issue as a comment** and the 
    - Avoid reinventing the wheel — use existing libraries and frameworks where appropriate.
    - Simple is better than complex.
    - If `cfg.rules.plan_rules_content` is non-null, treat every bullet in that content as a mandatory plan constraint (repo-specific "plans MUST..." rules).
+   - **Design with the repository in view, not just the file you're editing.** The plan must demonstrate the design was considered against all four of: **security** (every cross-cutting layer the change passes through that has a `validate()` / shape-check / parser / policy gate — auth surface, secret-handling, env/config binding shapes, OS-level exposure like a token in process argv, error-envelope leakage — name each layer and how the design satisfies it); **maintainability** (the canonical incumbents — config, script, helper — the change must build on, reuse over new abstraction); **extensibility** (the next obvious change in the same direction; whether the design forecloses it; the seam/parameter that keeps one future variation from re-editing the canonical artifact); **whole-repo view** (the canonical configs, canonical scripts, cross-cutting rules, and host/OS/runtime layers that will see the artifact — enumerate the ones in scope). A design that "sits correctly within the edited file's existing style" but fails a validator outside that file, or that re-implements a canonical incumbent, is the failure this requirement exists to catch *at plan time* rather than at codex-review time. The codex architecture preflight (Step 2.5) is asked the same four questions; reconcile its answers into the plan.
 
 2. **Post the plan to the issue thread** via the `gc_post_implementation_plan` MCP tool with:
    - `repo_path`: absolute path from Step 1
@@ -338,10 +339,20 @@ Codex review now runs as a single pre-push pass at Step 6.5; the remaining revie
 
 1. **Invoke the review.**
 2. **Read the FULL output.** Do not stop after the first few findings.
-3. **Fix every finding, pre-existing or not.** The zero-deferral rule applies: there is no `defer` decision. If you think a finding is dangerous to fix, unwise in context, or a false positive, STOP, post your reasoning as an issue comment with `decision: <fix|wontfix|not-applicable>` and rationale, and ask the user. Wait for their answer; do not push commits while the question is open. `wontfix` requires explicit user approval; `not-applicable` is for findings that don't actually apply (false positive on this codebase, finding outside the diff's scope, etc.).
-4. **Record decisions on the issue thread.** Per ADR-029, every finding decision (`fix` / `wontfix` / `not-applicable`) gets a one-line rationale comment on the GitHub issue. Agent silence on a finding is a process violation.
-5. **Re-run the SAME review after fixing.** Do not assume your fixes are complete — the re-run is the verification.
-6. **Repeat until the reviewer reports zero findings, OR the cycle cap is hit.**
+3. **Classify each finding before touching anything: `one-off` or `class`.** Codex review supplies `classification` (and, for `class` findings, `category = {shape, instances}`) on each finding object — read it. If a finding arrived without a classification (e.g. test-quality review, which does not yet emit it), classify it yourself first.
+   - **`one-off`** — this exact site, no analogues. Apply the named fix to the named site. This is the existing path.
+   - **`class`** — this site is one instance of a recurring pattern (the same brittle construction, the same missing pre-condition, the same bypassed helper). **STOP. Do not apply the named fix to the named site yet.** Instead:
+     1. Re-read the category's `shape` — what makes a site an instance? What pre-condition fails? What invariant is violated?
+     2. Sweep the diff **and adjacent repo code where the category plausibly extends** for every instance — the ones codex listed in `category.instances` *and* any it missed.
+     3. Design the fix to address the **category**, not the symptom: a structural gate, a shared helper, a parameterization, a single point of repair, an API change. The fix should be one place, not N.
+     4. Apply that single design to every instance at once.
+     5. Only then re-run the review.
+
+     A `class` finding that you fixed only on the codex-named site is a process violation in the same shape as silent deferral — it leaves the category un-addressed, and the next review cycle surfaces another instance, burning a cycle the cap is not meant to absorb. If a category genuinely spans 5+ files outside the current feature's scope, that is the architectural-change escalation point — STOP, post the category + the affected files as an issue comment, and ask the user.
+4. **Fix every finding, pre-existing or not.** The zero-deferral rule applies: there is no `defer` decision — not "out of scope for this PR", not "follow-up issue to track it", not "addressed in a subsequent PR", not "deferred to a later iteration", not "TBD later" in a closing comment. Filing a tracking issue does **not** convert a deferral into a valid disposition. The PreToolUse hook (`.claude/hooks/block-defer-language.py`) and `bin/policy` enforce this mechanically; the contract is fix-or-escalate. If you think a finding is dangerous to fix, unwise in context, or a false positive, STOP, post your reasoning as an issue comment with `decision: <fix|wontfix|not-applicable>` and rationale, and ask the user. Wait for their answer; do not push commits while the question is open. `wontfix` requires explicit user approval; `not-applicable` is for findings that don't actually apply (false positive on this codebase, finding outside the diff's scope, etc.).
+5. **Record decisions on the issue thread.** Per ADR-029, every finding decision (`fix` / `wontfix` / `not-applicable`) gets a one-line rationale comment on the GitHub issue — a `class` finding's decision says how the category was closed, not just that the named site was patched. Agent silence on a finding is a process violation; text scanning catches *written* deferral language, but the issue-thread findings-vs-decisions reconciliation is what catches *silent* omission.
+6. **Re-run the SAME review after fixing.** Do not assume your fixes are complete — the re-run is the verification.
+7. **Repeat until the reviewer reports zero findings, OR the cycle cap is hit.**
 
 For every cycle, after applying fixes the agent must update the tree the reviewer sees BEFORE re-running:
 
@@ -407,6 +418,8 @@ If `in_scope_requirements[]` is empty, this step is a no-op. Proceed to Step 16 
 ### Step 16: Reconcile Traceability Links Against the Diff
 
 Now that CI and all reviews are green AND every materially-implemented in-scope requirement is ACTIVE, reconcile the Ground Control traceability graph against the actual diff. This MUST happen AFTER Step 15 and BEFORE Step 19.
+
+**No deferral, here or anywhere downstream (ADR-029).** Reconciliation, the final report (Step 19), and any issue comment you post from here on must not contain deferral-disposition language — "out of scope for this PR", "follow-up issue to track X", "addressed in a subsequent PR", "deferred to a later iteration", "TBD later". A finding or a piece of work is either fixed in this PR, recorded `wontfix` with explicit user authorization, or recorded `not-applicable` with rationale. If reconciliation surfaces missing implementation for a requirement, that is a STOP-and-escalate, not a "noted as a follow-up". The `.claude/hooks/block-defer-language.py` PreToolUse hook will block a `gh issue comment` / `gh pr edit` carrying that language; do not work around it — re-route to fix-or-escalate.
 
 **Reconciliation is not the same as "create links for the in-scope requirements"**. Even runs with zero in-scope requirements (pure bug fixes, refactors, maintenance) must reconcile, because the diff may have touched files that were already linked to OTHER requirements.
 

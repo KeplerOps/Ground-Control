@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.115.1] - 2026-05-10
+
+### Added
+
+- **Mechanical enforcement of ADR-029's no-deferral contract** (issue #830).
+  A new `PreToolUse` hook, `.claude/hooks/block-defer-language.py` (registered
+  in `scripts/bootstrap-claude-workflow.sh`'s `WORKFLOW_HOOKS` allowlist),
+  blocks `gh issue/pr {create,edit,comment,close}` calls — including heredoc
+  bodies — that carry deferral-disposition language ("deferred to a follow-up
+  PR", "addressed in a subsequent PR", "TBD later" in a closing comment, …),
+  routing the agent back to fix-or-escalate. `bin/policy` gains
+  `run_no_deferral_disposition_check`, which flags the same Tier-1 language in
+  the PR body at completion gate. Both layers share one classifier; the
+  shared golden-case file is `tools/policy/deferral_cases.json`, loaded by
+  both `tools/tests/test_policy.py` and `tools/tests/test_block_defer_language.py`
+  so the hook's standalone copy and the policy copy cannot drift without a
+  test failing. ADR-029 gains a "`defer` is not a valid disposition"
+  subsection making the contract explicit, and ADR-021 / `docs/WORKFLOW.md` /
+  `docs/DEVELOPMENT_WORKFLOW.md` cross-reference it.
+
+### Changed
+
+- **Codex review classifies each finding `one-off` or `class`** (issue #830).
+  `gc_codex_review`'s core and security prompts (`buildFindingsEmissionInstructions`,
+  `buildCodexReviewCorePrompt`, `buildCodexSecurityReviewPrompt` in
+  `mcp/ground-control/lib.js`) now require, per finding, a `classification`
+  field (`"one-off"` / `"class"`) and — for `class` findings — a
+  `category = {shape, instances}` object enumerating the recurring pattern and
+  every known instance. `validateFinding` enforces the schema; the returned
+  `comments[]` carry `classification`/`category` so the agent's review-response
+  loop can take the class-finding path; a one-line classification note is
+  prepended to each posted PR comment. `skills/implement/SKILL.md` Step 6.5 /
+  Step 13 review-response loop is reframed: a `class` finding must be fixed at
+  the category level (a structural gate / shared helper / parameterization —
+  one point of repair applied to every instance), not whack-a-mole'd to the
+  reviewer-named site, and fixing only the named site of a `class` finding is
+  a process violation in the same shape as silent deferral.
+
+- **Architecture preflight and the plan step design repo-wide, not
+  file-locally** (issue #830). `gc_codex_architecture_preflight`'s prompt
+  (`buildCodexArchitecturePreflightPrompt`) now asks Codex to evaluate the
+  intended design against security (every cross-cutting layer with a
+  `validate()` / shape-check / parser / policy gate the design passes
+  through — auth surface, secret handling, env/config binding, OS-level
+  exposure, error-envelope leakage), maintainability (the canonical
+  incumbents it must build on), extensibility (the seam/parameter the next
+  variation needs), and the whole-repo view (canonical configs, scripts,
+  cross-cutting rules, host/OS/runtime layers — not just the file being
+  edited). `skills/implement/SKILL.md` Step 4 (Plan) requires the plan to
+  demonstrate the design has been considered against those four properties.
+
+- **PR-template wording** — the Ground Control Checks line "`gc_run_sweep`
+  reviewed or intentionally deferred with reason" is reworded to
+  "`gc_run_sweep` reviewed; findings fixed or recorded with rationale" in
+  `.github/PULL_REQUEST_TEMPLATE.md`, `tools/policy/checks.py`, and the
+  matching test fixture, so the new deferral scanner has no false positive on
+  the template's own text.
+
 ## [0.115.0] - 2026-05-10
 
 ### Changed

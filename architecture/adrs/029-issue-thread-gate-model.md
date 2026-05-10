@@ -197,6 +197,77 @@ bypass — the cap narrows the most likely accidental-bypass path (branch
 rename) but does not protect against all attacks. The user's PR merge
 remains the only synchronous human gate.
 
+### `defer` is not a valid disposition
+
+The "Decisions on findings" bullet above states the contract in one sentence:
+`defer` is not a valid decision. Issue #830 documented that agents kept
+inventing a third path anyway — "out of scope for this PR; follow-up issue to
+track it", "will be addressed in a subsequent PR", "deferred to a later
+iteration", or simply writing "deferred"/"TBD" in a closing comment without
+filing anything. Once the issue closes, the deferred item has no anchor: not
+in the requirement graph, not in any tracker, not on any backlog. It is
+silent debt. This subsection makes the prohibition explicit and names its
+mechanical enforcement.
+
+**The only valid dispositions for a reviewer finding are:**
+
+1. **`fix`** — the finding is fixed now, in the same diff. For a *class*
+   finding (one instance of a pattern that recurs), the fix is designed at
+   the category level — a structural gate, a shared helper, a parameterization,
+   a single point of repair — and applied to every instance at once, not
+   whack-a-mole to the reviewer-named site only. Fixing a `class` finding on
+   the named site alone is a process violation in the same shape as silent
+   deferral: it leaves the category un-addressed and burns a review cycle the
+   cap is not meant to absorb.
+2. **`wontfix`** — the finding is genuinely wrong, dangerous to fix in
+   context, or a false positive. Requires **explicit user authorization** on
+   the issue thread, quoted in the disposition comment.
+3. **`not-applicable`** — the finding does not actually apply (false positive
+   on this codebase, out of the diff's real scope, etc.), recorded with a
+   rationale.
+
+**Deferral language — forbidden.** "Defer this to a follow-up PR / issue /
+later iteration / subsequent commit", "will be addressed in a follow-up",
+"fixed in a subsequent PR", "handled as a follow-up issue", and — in a
+comment that closes or reports completion on the issue under implementation —
+a bare "deferred", "TBD later", or "to be done later/separately" are all
+deferral dispositions. Filing a tracking issue does **not** convert a deferral
+into a valid disposition; the contract is fix-or-escalate, not fix-or-file.
+A new issue's own body legitimately scope-bounds future work (an
+`## Out of scope` section, a "this builds on #N" note) — that is scope
+*definition*, not finding *deferral*; the distinction is by phrase, not by
+section heading.
+
+**Mechanical enforcement — two defense-in-depth layers over the same
+contract, neither replacing the other:**
+
+- **Tool-call time** — the PreToolUse hook `.claude/hooks/block-defer-language.py`
+  (installed via `scripts/bootstrap-claude-workflow.sh`'s `WORKFLOW_HOOKS`
+  allowlist, registered in `~/.claude/settings.json`'s `PreToolUse[Bash]`
+  chain) inspects `gh issue {create,edit,comment,close}` and
+  `gh pr {create,edit,comment}` body/title text — including heredoc bodies —
+  and blocks the call (exit 2) on deferral-disposition language, routing the
+  agent back to fix-or-escalate.
+- **Completion gate** — `bin/policy` (`tools/policy/checks.py`'s
+  `run_no_deferral_disposition_check`) scans the resolved PR body for the same
+  Tier-1 deferral phrases at completion-gate / CI time.
+
+Both layers share one classifier; `tools/policy/deferral_cases.json` is the
+golden-case file both test suites load, so the hook's standalone copy and the
+policy copy cannot drift without a test failing. The classifier's allowed
+contexts are encoded in those cases, not in agent prose — future tuning is
+reviewable.
+
+**Text scanning is necessary, not sufficient.** A scanner cannot prove an
+agent *silently dropped* a finding it never wrote about. That failure mode —
+"agent silence on a finding is a process violation" from the bullet above —
+is caught only by reconciling the issue-thread Codex findings record (every
+cycle's verbatim finding list) against the agent's disposition comments
+(one `fix`/`wontfix`/`not-applicable` rationale per finding). The hook and
+policy layers catch *written* deferral language; the findings-vs-decisions
+reconciliation is the existing control for *unwritten* omission and is
+unchanged by this amendment.
+
 ## Consequences
 
 ### Positive

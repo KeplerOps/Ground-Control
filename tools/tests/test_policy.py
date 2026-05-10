@@ -4,13 +4,16 @@ import unittest
 from pathlib import Path
 
 from tools.policy.checks import (
+    DEFERRAL_CASES_PATH,
     REPO_ROOT,
     check_pr_body,
+    classify_deferral_language,
     parse_args,
     run_adr_guard,
     run_controller_contracts,
     run_deploy_compose_credential_passthrough,
     run_migration_policy,
+    run_no_deferral_disposition_check,
     run_pr_body_check,
 )
 
@@ -68,7 +71,7 @@ class PolicyChecksTest(unittest.TestCase):
             "## Ground Control Checks\n\n"
             "- [x] `make policy` passes\n"
             "- [x] `gc_evaluate_quality_gates` passes or is unchanged by this repo-only change\n"
-            "- [x] `gc_run_sweep` reviewed or intentionally deferred with reason\n"
+            "- [x] `gc_run_sweep` reviewed; findings fixed or recorded with rationale\n"
             "## Traceability\n\n- IMPLEMENTS: foo\n- TESTS: bar\n"
         )
         self.assertEqual(check_pr_body(body), [])
@@ -202,6 +205,52 @@ class PolicyChecksTest(unittest.TestCase):
             violations = run_deploy_compose_credential_passthrough(root=root)
             codes = {item.code for item in violations}
             self.assertIn("deploy-compose-missing", codes)
+
+    def test_deferral_classifier_matches_golden_cases(self):
+        # The shared golden-case file is the single source of truth for what
+        # text, on what surface, gets flagged. The hook test
+        # (tools/tests/test_block_defer_language.py) loads the same file, so
+        # the hook's standalone classifier and this one cannot drift without
+        # one of the two suites failing.
+        cases = json.loads(DEFERRAL_CASES_PATH.read_text(encoding="utf-8"))["cases"]
+        self.assertGreater(len(cases), 10, "deferral_cases.json should have a substantive case set")
+        failures = []
+        for case in cases:
+            decision, pattern = classify_deferral_language(case["text"], case["surface"])
+            if decision != case["expect"]:
+                failures.append(
+                    f"{case['id']}: surface={case['surface']} expected {case['expect']} "
+                    f"got {decision} (pattern={pattern}) — {case['why']}"
+                )
+        self.assertEqual(failures, [], "\n".join(failures))
+
+    def test_no_deferral_disposition_check_flags_tier1_in_pr_body(self):
+        violations = run_no_deferral_disposition_check(
+            pr_body="## Summary\n\nFixed the gate. SonarCloud findings deferred to a follow-up PR.\n"
+        )
+        codes = {v.code for v in violations}
+        self.assertIn("pr-body-deferral-disposition", codes)
+        details = " ".join(d for v in violations for d in v.details)
+        self.assertIn("tier1:", details)
+
+    def test_no_deferral_disposition_check_allows_out_of_scope_section(self):
+        # A PR body legitimately scope-bounds its own work; bare "out of scope"
+        # with no deferral verb is not flagged on the pr-body surface.
+        body = (
+            "## Summary\n\nImplements the gate.\n\n"
+            "## Out of scope\n\n- Retroactive cleanup of past issues.\n"
+            "- Changing the existing hard cap behavior.\n"
+        )
+        self.assertEqual(run_no_deferral_disposition_check(pr_body=body), [])
+
+    def test_no_deferral_disposition_check_allows_amended_gc_run_sweep_line(self):
+        # After the A4 wording fix, the Ground Control Checks line no longer
+        # carries "deferred"; the scanner must not flag the template line.
+        body = "## Summary\n\nx\n- [x] `gc_run_sweep` reviewed; findings fixed or recorded with rationale\n"
+        self.assertEqual(run_no_deferral_disposition_check(pr_body=body), [])
+
+    def test_no_deferral_disposition_check_noop_when_no_body(self):
+        self.assertEqual(run_no_deferral_disposition_check(pr_body=None), [])
 
     def test_parse_args_accepts_pre_commit_positional_files(self):
         args = parse_args(["--skip-pr-body", "docs/WORKFLOW.md", "mcp/ground-control/lib.js"])

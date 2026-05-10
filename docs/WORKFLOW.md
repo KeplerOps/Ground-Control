@@ -242,7 +242,7 @@ Per issue #804, the `/implement` skill runs one mandatory Codex architecture pre
 
 The post-push codex review (former Step 12) was removed by issue #804: the pre-push pass catches everything codex would normally flag, and merge-commit drift is the responsibility of CI (compile/tests/integration) and SonarCloud (quality), not a duplicate codex run. The post-push tool entrypoint (`gc_codex_review` with a `pr_number`) remains as defense-in-depth for direct callers but the SKILL no longer drives it.
 
-All findings are fixed before the PR is presented for human review.
+All findings are fixed before the PR is presented for human review. "Defer" is not a valid disposition (ADR-029) and is mechanically enforced (issue #830): the `.claude/hooks/block-defer-language.py` PreToolUse hook blocks GitHub issue/PR text carrying deferral-disposition language, and `bin/policy` flags it in the PR body at completion gate. The only valid dispositions are `fix`, `wontfix` (with explicit user authorization), or `not-applicable` (with rationale); filing a tracking issue does not make a deferral valid. Codex review classifies each finding `one-off` or `class`; a `class` finding is fixed at the category level (one structural point of repair applied to every instance), not site-by-site.
 
 ### Impact Analysis
 
