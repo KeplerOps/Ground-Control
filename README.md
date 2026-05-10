@@ -88,8 +88,14 @@ full configuration reference.
 
 Configured in `.mcp.json`, works automatically with Claude Code. Start the
 backend, then use tools like `gc_create_requirement`, `gc_analyze_cycles`, and
-`gc_create_github_issue` from your conversation. See the
-[MCP server docs](mcp/ground-control/README.md) for the full tool reference.
+`gc_create_github_issue` from your conversation. The default catalog selection
+loads about 92 of the 216 available tools — enough for an `/implement` run
+without surfacing risk-modelling, asset, or admin tools your session does not
+need. Set `GC_MCP_CATALOGS=all` for everything, or pick a narrower selection
+(`workflow,requirements`, etc.). The read-only `gc_query` tool is always
+available for ad-hoc GETs against `/api/v1/**`. See the
+[MCP server docs](mcp/ground-control/README.md) for the full tool reference,
+catalog list, and `gc_query` semantics.
 
 ## Development
 

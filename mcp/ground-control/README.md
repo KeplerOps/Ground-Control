@@ -59,6 +59,112 @@ requiring `ROLE_ADMIN` (`/api/v1/admin/**`, `/api/v1/embeddings/**`,
 Codex-backed workflow tools additionally require the Codex CLI to be installed
 and available on `PATH`.
 
+## Tuning the loaded catalog (ADR-035)
+
+The MCP server registers ~216 tools across seven catalogs. Loading every tool
+into every LLM session is unnecessary and noisy: tool names, descriptions, and
+Zod schemas all sit in the agent's context window even when the session only
+needs requirements work or an `/implement` run. Use `GC_MCP_CATALOGS` to
+narrow the surface.
+
+Catalogs:
+
+| Catalog | What's in it |
+|---|---|
+| `workflow` | `/implement` lifecycle: `gc_get_repo_ground_control_context`, `gc_codex_architecture_preflight`, `gc_post_implementation_plan`, `gc_codex_review`, `gc_codex_verify_finding`, `gc_create_github_issue`, `gc_dashboard_stats`, `gc_query` (always registered, regardless of `GC_MCP_CATALOGS`) |
+| `requirements` | requirements, projects, relations, traceability, history, work-order, exports |
+| `documents` | ADRs, documents, sections, section content, reading order, grammars |
+| `analysis` | coverage gaps, orphans, completeness, similarity, cross-wave, sweep, baselines, semantic analysis, quality gates, graph traversal |
+| `assets` | operational assets, asset links, asset external IDs |
+| `risk` | observations, risk scenarios, threat models, controls, methodology profiles, risk register, risk assessments, treatment plans, verification results |
+| `admin` | imports, embeddings, plugins, pack registry, trust policies, pack install records, materialize-graph |
+
+Selection — `GC_MCP_CATALOGS` is comma-separated:
+
+```jsonc
+{
+  "mcpServers": {
+    "ground-control": {
+      "command": "node",
+      "args": ["/path/to/Ground-Control/mcp/ground-control/index.js"],
+      "env": {
+        "GC_BASE_URL": "http://red-dragon:8000",
+        "GC_MCP_CATALOGS": "workflow,requirements,documents,analysis"  // default; sized for /implement
+      }
+    }
+  }
+}
+```
+
+- Unset / empty → `workflow,requirements,documents,analysis` (the default).
+- `all` → every catalog.
+- `workflow` is added automatically whatever you pick — its tools are
+  non-negotiable per ADR-035 and the `/implement` skill.
+- An unknown catalog name throws at startup so a typo can't silently strip
+  the agent's surface.
+
+The active selection is advertised on `gc_get_repo_ground_control_context`'s
+response under the `mcp` field:
+
+```json
+{
+  ...,
+  "mcp": {
+    "catalogs_active": ["analysis", "documents", "requirements", "workflow"],
+    "catalogs_available": ["admin", "analysis", "assets", "documents", "requirements", "risk", "workflow"],
+    "tool_count": 92,
+    "gc_query_available": true
+  }
+}
+```
+
+If your agent reports a missing tool, ask the user (or check this field
+yourself) to confirm the relevant catalog is in the active set and widen
+`GC_MCP_CATALOGS` if needed.
+
+## Read-only ad-hoc queries via `gc_query`
+
+`gc_query` is a tightly bounded GET-only escape hatch into `/api/v1/**` for
+hypothesis-checking that the curated tools don't pre-bake. It is registered
+under the `workflow` catalog, so it is always available.
+
+- **Method:** GET only (no `method` parameter exists).
+- **Path:** must be a relative `/api/v1/...` path under one of the
+  allowlisted prefixes. Absolute URLs, protocol-relative URLs, `..` segments,
+  embedded `?` / `#`, and any path outside `/api/v1/` are rejected before any
+  network call.
+- **Allowlist (canonical source: `GC_QUERY_PATH_ALLOWLIST` in
+  `mcp/ground-control/catalogs.js`):**
+  `/api/v1/adrs`, `/api/v1/analysis`, `/api/v1/assets`, `/api/v1/audit`,
+  `/api/v1/baselines`, `/api/v1/controls`, `/api/v1/dashboard`,
+  `/api/v1/documents`, `/api/v1/graph`, `/api/v1/methodology-profiles`,
+  `/api/v1/observations`, `/api/v1/projects`, `/api/v1/quality-gates`,
+  `/api/v1/relations`, `/api/v1/requirements`,
+  `/api/v1/risk-assessment-results`, `/api/v1/risk-register-records`,
+  `/api/v1/risk-scenarios`, `/api/v1/sections`, `/api/v1/threat-models`,
+  `/api/v1/timeline`, `/api/v1/traceability`, `/api/v1/treatment-plans`,
+  `/api/v1/verification-results`. A drift-catch test
+  (`gc-query.test.js`) compares this list against the implementation
+  constant on every test run, so the README is the documentation surface
+  but the constant in `catalogs.js` is the truth.
+- **Denylist:** `/api/v1/admin/**`, `/api/v1/embeddings/**`,
+  `/api/v1/analysis/sweep/**`, `/api/v1/pack-registry/**` are rejected even
+  though they live under `/api/v1/`. The denylist takes precedence over the
+  allowlist when prefixes overlap (e.g., `/api/v1/analysis` is allowed but
+  `/api/v1/analysis/sweep` is denied).
+- **Headers:** none accepted. `X-Actor: mcp-server` and the bearer token
+  resolved from `GROUND_CONTROL_API_TOKEN` (or the legacy admin token, when
+  appropriate per ADR-026's path matrix) are added automatically.
+- **Params:** flat object, values must be `string | number | boolean | null`.
+  `undefined` and `null` are dropped before URL construction.
+- **Cost cap:** 30s timeout via `AbortController`; 1 MiB response-body cap
+  with a clear truncation marker. Larger results need the catalog tool that
+  paginates the resource (in `analysis` or `requirements`).
+
+Adding a new read endpoint to the agent's reach requires updating the
+`GC_QUERY_PATH_ALLOWLIST` constant in `mcp/ground-control/catalogs.js`. The
+default-deny posture is intentional.
+
 ## Workflow
 
 Operations have a natural ordering. Requirements must exist before they can

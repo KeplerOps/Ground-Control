@@ -11,6 +11,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (Phase B, amended by issue #848) for the workflow contract.
 
 <!-- towncrier release notes start -->
+## [0.117.0] - 2026-05-11
+
+### Added
+
+- **MCP tool catalog curation and `gc_query` read-only escape hatch (issue #628, ADR-035).**
+  The Ground Control MCP server now tags every tool with one of seven catalogs
+  (`workflow`, `requirements`, `documents`, `analysis`, `assets`, `risk`,
+  `admin`) and registers only the catalogs named in the new `GC_MCP_CATALOGS`
+  env var. Default selection is `workflow,requirements,documents,analysis`,
+  which loads ~92 of the 216 tools — sized to cover an `/implement` run end-
+  to-end without loading risk, asset, or admin surfaces. `GC_MCP_CATALOGS=all`
+  registers every tool. `workflow` is always registered regardless of the env
+  value. Unknown catalog names throw at startup; an inventory drift check
+  enforces that every registered tool has a catalog tag and vice versa.
+
+  `gc_query` is a new tool registered under `workflow` (always available). It
+  is a GET-only, allowlist-bounded escape hatch for ad-hoc agent queries
+  against `/api/v1/**`: 24 read-oriented prefixes are allowed (the canonical
+  list lives in `GC_QUERY_PATH_ALLOWLIST` in `mcp/ground-control/catalogs.js`
+  and is enforced against the README and ADR-035 by a drift-catch test),
+  the four `ROLE_ADMIN`-restricted prefixes (`/admin`, `/embeddings`,
+  `/analysis/sweep`, `/pack-registry`) are denied even though they live
+  under `/api/v1/`,
+  callers cannot supply headers or override the method, params must be a
+  flat object of primitive values, response bodies are capped at 1 MiB with
+  a clear truncation marker, and a 30s `AbortController` timeout covers the
+  request. All paths and types of validation throw `RequestError` with a
+  structured `code` so the existing MCP error-rendering surface applies.
+
+  `gc_get_repo_ground_control_context`'s response now carries an `mcp` field
+  reporting `catalogs_active`, `catalogs_available`, `tool_count`, and
+  `gc_query_available`, so agents can discover which surface they have
+  loaded and ask the operator to widen `GC_MCP_CATALOGS` when needed.
+
+  No backend changes; ADR-026's path-matrix authorization is unchanged.
+  Hiding a tool from a catalog is a usability decision, not an authorization
+  decision — backend access control remains the enforcement layer.
 
 ## [0.116.3] - 2026-05-10
 

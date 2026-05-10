@@ -299,6 +299,18 @@ import {
   TRUST_POLICY_FIELDS,
   TRUST_POLICY_RULE_OPERATORS,
 } from "./lib.js";
+import {
+  selectCatalogs,
+  registerCatalogTool,
+  validateInventory,
+  augmentGroundControlContext,
+  CATALOG_NAMES,
+  GC_QUERY_BODY_BYTE_CAP,
+  GC_QUERY_TIMEOUT_MS,
+  GC_QUERY_PATH_ALLOWLIST,
+  GC_QUERY_PATH_DENYLIST,
+} from "./catalogs.js";
+import { gcQueryToolHandler, gcQuerySchema } from "./gc-query.js";
 
 // Load .env from the consumer repo's root (the cwd this process was launched
 // from) before anything reads env. lib.js's auth helpers read process.env at
@@ -355,11 +367,42 @@ function err(e) {
 
 const server = new McpServer({ name: "ground-control", version: "1.0.0" });
 
+// Catalog selection (ADR-035). The GC_MCP_CATALOGS env var is comma-separated;
+// special value `all` registers every tool. Default: workflow, requirements,
+// documents, analysis. The `workflow` catalog is non-negotiable.
+const ACTIVE_CATALOGS = selectCatalogs(process.env.GC_MCP_CATALOGS);
+
+// Inventory drift check (every tool name passed to `tool(...)`).
+// `ALL_TOOL_NAMES` is the universe of names the registration code declares;
+// `ACTIVE_TOOL_NAMES` is the subset actually registered under the active
+// catalog selection. ADR-035's tool_count advertises the active subset.
+const ALL_TOOL_NAMES = new Set();
+const ACTIVE_TOOL_NAMES = new Set();
+
+/**
+ * Catalog-aware wrapper around `server.tool(...)`. Skips registration when the
+ * named catalog is not in the active selection; throws on inventory drift.
+ */
+function tool(catalog, name, description, schema, handler) {
+  ALL_TOOL_NAMES.add(name);
+  const registered = registerCatalogTool(
+    server,
+    catalog,
+    name,
+    description,
+    schema,
+    handler,
+    ACTIVE_CATALOGS,
+  );
+  if (registered) ACTIVE_TOOL_NAMES.add(name);
+}
+
 // ==========================================================================
 // Project tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "requirements",
   "gc_list_projects",
   "List all projects in Ground Control.",
   {},
@@ -372,7 +415,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_create_project",
   "Create a new project. Identifier must be lowercase alphanumeric with hyphens (e.g. 'my-project').",
   {
@@ -395,7 +439,8 @@ server.tool(
 // Requirement tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "requirements",
   "gc_get_requirement",
   "Get a requirement by its human-readable UID (e.g. 'REQ-001').",
   {
@@ -411,7 +456,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_list_requirements",
   "List requirements with optional filtering by status, type, priority, wave, or free-text search. Returns paginated results.",
   {
@@ -434,7 +480,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_create_requirement",
   "Create a new requirement. Status defaults to DRAFT.",
   {
@@ -461,7 +508,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_update_requirement",
   "Update an existing requirement's fields. Pass only the fields to change.",
   {
@@ -489,7 +537,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_transition_status",
   "Transition a requirement's status. Valid transitions: DRAFT->ACTIVE, ACTIVE->DEPRECATED, ACTIVE->ARCHIVED, DEPRECATED->ARCHIVED.",
   {
@@ -506,7 +555,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_archive_requirement",
   "Archive a requirement (shortcut for transitioning to ARCHIVED).",
   {
@@ -521,7 +571,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_bulk_transition_status",
   "Transition multiple requirements to the same status in a single operation. Best-effort: valid transitions succeed, invalid ones are collected as failures. Accepts UIDs (human-readable IDs like 'GC-A008'), not UUIDs.",
   {
@@ -558,7 +609,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_clone_requirement",
   "Clone an existing requirement with a new UID. Copies all content fields (title, statement, rationale, type, priority, wave). The clone starts in DRAFT status. Optionally copies outgoing relations.",
   {
@@ -577,7 +629,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_create_relation",
   "Create a directed relation between two requirements.",
   {
@@ -594,7 +647,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_get_relations",
   "Get all relations (incoming and outgoing) for a requirement.",
   {
@@ -611,7 +665,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_delete_relation",
   "Delete a relation between two requirements.",
   {
@@ -632,7 +687,8 @@ server.tool(
 // Traceability tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "requirements",
   "gc_get_traceability",
   "Get all traceability links for a requirement (code files, tests, ADRs, issues, etc.).",
   {
@@ -649,7 +705,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_get_traceability_by_artifact",
   "Find all traceability links for a given artifact (reverse lookup: from code/test/ADR to requirements).",
   {
@@ -667,7 +724,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_create_traceability_link",
   "Link an artifact (code file, test, ADR, GitHub issue, etc.) to a requirement.",
   {
@@ -690,7 +748,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_delete_traceability_link",
   "Delete a traceability link from a requirement. The link must belong to the named requirement; a mismatch returns 404 (not the deletion of another requirement's link).",
   {
@@ -711,7 +770,8 @@ server.tool(
 // GitHub integration tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "workflow",
   "gc_create_github_issue",
   "Create a GitHub issue from a requirement and auto-link it via traceability.",
   {
@@ -755,7 +815,8 @@ server.tool(
 // Codex workflow tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "workflow",
   "gc_get_repo_ground_control_context",
   "Read the current repository's .ground-control.yaml and return the full Ground Control workflow config used by automation: project identifier, github_repo, workflow commands (test/completion/lint/format), optional sonarcloud settings, and optional inlined plan_rules file content. Returns validation errors when the file is missing or invalid.",
   {
@@ -763,14 +824,21 @@ server.tool(
   },
   async ({ repo_path }) => {
     try {
-      return ok(JSON.stringify(await getRepoGroundControlContext(repo_path), null, 2));
+      const backendPayload = await getRepoGroundControlContext(repo_path);
+      const augmented = augmentGroundControlContext(
+        backendPayload,
+        ACTIVE_CATALOGS,
+        ACTIVE_TOOL_NAMES.size,
+      );
+      return ok(JSON.stringify(augmented, null, 2));
     } catch (e) {
       return err(e);
     }
   },
 );
 
-server.tool(
+tool(
+  "workflow",
   "gc_codex_architecture_preflight",
   "Run Codex architecture preflight before implementation. Codex inspects the requirement and/or issue plus the repository, updates ADRs/design guidance when needed, and returns guardrails and changed files. At least one of `requirement_uid` or `issue_number` must be supplied; requirement-free issues (bugs, refactors, maintenance) should pass `issue_number` alone.",
   {
@@ -799,7 +867,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "workflow",
   "gc_codex_review",
   buildCodexReviewToolDescription({
     postPushCap: CODEX_REVIEW_HARD_CAP,
@@ -849,7 +918,31 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "workflow",
+  "gc_query",
+  // Note: keep this description tight — it is loaded into every connected LLM
+  // client even on the curated default surface.
+  `Read-only ad-hoc GET against the Ground Control REST API (ADR-035). Use this when the curated tools don't pre-bake the join/filter you need. ` +
+    `Path must be a relative '/api/v1/...' string under one of the allowlisted prefixes: ${GC_QUERY_PATH_ALLOWLIST.join(", ")}. ` +
+    `Admin prefixes (${GC_QUERY_PATH_DENYLIST.join(", ")}) are rejected even though they live under /api/v1/. ` +
+    `GET only — no method override exists. Pass query parameters via the structured 'params' object (flat, primitive values only). ` +
+    `Body cap: ${GC_QUERY_BODY_BYTE_CAP} bytes; timeout: ${GC_QUERY_TIMEOUT_MS}ms.`,
+  // Strict ZodObject (NOT a raw shape) so the MCP SDK's input validation
+  // rejects unknown keys (`headers`, `method`, etc.) at the protocol layer
+  // before the handler runs.
+  gcQuerySchema,
+  async (args) => {
+    try {
+      return ok(JSON.stringify(await gcQueryToolHandler(args), null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
+tool(
+  "workflow",
   "gc_codex_verify_finding",
   "Ask Codex to verify whether a specific PR review finding has been resolved in the local working tree. Takes repo_path, pr_number, and the REST comment_id returned from gc_codex_review. Codex reads the original comment directly from GitHub (only comments from allowlisted authors are accepted), reads the anchored file, and decides RESOLVED or UNRESOLVED. If RESOLVED, the review thread is marked resolved via GraphQL. If UNRESOLVED, a threaded reply with concrete new directions is posted to the original comment and returned to the caller. Per-finding hard cap of 2 verify calls per (PR, comment_id); refuses cycle 3+ unless override_cap=true with override_reason quoting the user's authorization.",
   {
@@ -878,7 +971,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "workflow",
   "gc_post_implementation_plan",
   "Post the implementation plan as a comment on the GitHub issue thread (per ADR-029, the issue is the durable record). Enforces the preflight-before-planning ordering from #794 MVP-2: refuses unless a 'preflight' phase marker exists for the issue (gc_codex_architecture_preflight writes that marker on success). On a successful post, also writes a 'plan' phase marker so downstream tools can confirm planning happened. Override is available for cases where the user explicitly authorizes skipping preflight, but the override_reason must quote the authorization for audit.",
   {
@@ -911,7 +1005,8 @@ server.tool(
 // History tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "requirements",
   "gc_get_requirement_history",
   "Get the full audit history for a requirement, showing all revisions with timestamps and actors.",
   {
@@ -928,7 +1023,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_get_relation_history",
   "Get the full audit history for a relation between requirements. The relation must belong to the named requirement (the requirement is either source or target); a mismatch returns 404, not another requirement's history.",
   {
@@ -946,7 +1042,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_get_traceability_link_history",
   "Get the full audit history for a traceability link. The link must belong to the named requirement; a mismatch returns 404.",
   {
@@ -964,7 +1061,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_get_timeline",
   "Get a unified audit timeline for a requirement, merging requirement, relation, and traceability link changes with field-level diffs. Paginated (default 100 entries).",
   {
@@ -987,7 +1085,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_get_requirement_diff",
   "Get a structured diff between two revisions of a requirement, showing per-field changes, added/removed relations, and added/removed traceability links.",
   {
@@ -1005,7 +1104,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_get_project_timeline",
   "Get a unified audit timeline across all requirements in a project. Merges requirement, relation, and traceability link changes with field-level diffs. Paginated (default 100 entries).",
   {
@@ -1028,7 +1128,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_export_audit_timeline",
   "Export the project audit timeline as CSV for compliance reporting. Returns CSV text with columns: timestamp, actor, reason, change_category, revision_type, entity_id, changes.",
   {
@@ -1049,7 +1150,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_export_requirements",
   "Export all requirements for a project as CSV, Excel (.xlsx), or PDF. CSV is returned as text; binary formats (xlsx, pdf) are returned as base64-encoded data.",
   {
@@ -1066,7 +1168,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_export_sweep_report",
   "Run a comprehensive sweep analysis and export results as CSV, Excel (.xlsx), or PDF. Includes cycles, orphans, coverage gaps, violations, and quality gate results. CSV is returned as text; binary formats are returned as base64-encoded data.",
   {
@@ -1083,7 +1186,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "requirements",
   "gc_export_document",
   "Export a document to StrictDoc (.sdoc), HTML, PDF, or ReqIF 1.2 format. Text formats return content directly; PDF returns base64-encoded data.",
   {
@@ -1104,7 +1208,8 @@ server.tool(
 // Analysis tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "analysis",
   "gc_analyze_cycles",
   "Detect dependency cycles in the requirements graph. Returns list of cycles (each cycle is a list of requirement UIDs).",
   {
@@ -1121,7 +1226,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_analyze_orphans",
   "Find requirements with no relations to other requirements (no parent, no dependencies, not depended upon).",
   {
@@ -1138,7 +1244,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_analyze_coverage_gaps",
   "Find requirements missing a specific traceability link type (e.g. requirements with no IMPLEMENTS link).",
   {
@@ -1156,7 +1263,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_analyze_impact",
   "Transitive impact analysis: find all requirements that would be affected by a change to the given requirement.",
   {
@@ -1173,7 +1281,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_analyze_cross_wave",
   "Find cross-wave validation issues (e.g. a requirement in wave 2 depending on one in wave 3).",
   {
@@ -1190,7 +1299,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_analyze_consistency",
   "Detect consistency violations: ACTIVE requirements linked by CONFLICTS_WITH, or SUPERSEDES relations where both sides are ACTIVE.",
   {
@@ -1211,7 +1321,8 @@ server.tool(
 // Completeness analysis tool
 // ==========================================================================
 
-server.tool(
+tool(
+  "analysis",
   "gc_analyze_completeness",
   "Analyze overall completeness of requirements: checks for missing fields and status distribution.",
   {
@@ -1228,7 +1339,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_analyze_status_drift",
   "Detect DRAFT requirements that carry independent evidence of implementation or design completion (lifecycle status drift): an IMPLEMENTS traceability link on a DRAFT requirement, a DOCUMENTS link to an ACCEPTED ADR, links to GitHub issues / pull requests, or links to code/test/spec/proof artifacts. Project-scoped — evidence comes only from the requirement's own project's traceability links and accepted ADR records; never the project-unscoped GitHub sync caches or the filesystem. Read-only: it does not transition requirements or create links. Each finding carries confidence (HIGH/MEDIUM/LOW), the strongest signal, and the evidence artifacts.",
   {
@@ -1255,7 +1367,8 @@ server.tool(
 // Dashboard stats tool
 // ==========================================================================
 
-server.tool(
+tool(
+  "workflow",
   "gc_dashboard_stats",
   "Get aggregate project health dashboard: requirement counts by status and wave, traceability coverage percentages, and recent changes.",
   {
@@ -1275,7 +1388,8 @@ server.tool(
 // Work order tool
 // ==========================================================================
 
-server.tool(
+tool(
+  "requirements",
   "gc_get_work_order",
   "Get a topologically-sorted work order derived from the requirements DAG. Shows what is unblocked and ready to work on, grouped by wave, sorted by dependency order and MoSCoW priority.",
   {
@@ -1295,7 +1409,8 @@ server.tool(
 // Graph tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "admin",
   "gc_materialize_graph",
   "Materialize the mixed-entity graph in Apache AGE. Run this after bulk changes to graph-participating entities and relations.",
   {},
@@ -1309,7 +1424,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_get_ancestors",
   "Get all ancestor requirement UIDs for a given requirement in the dependency graph.",
   {
@@ -1328,7 +1444,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_get_descendants",
   "Get all descendant requirement UIDs for a given requirement in the dependency graph.",
   {
@@ -1347,7 +1464,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_find_paths",
   "Find all paths between two requirements in the dependency graph. Returns nodes (requirement UIDs) and edges (with source, target, and relation type) for each path.",
   {
@@ -1366,7 +1484,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_get_graph_visualization",
   "Get the full mixed-entity graph visualization data (nodes and edges with metadata) for a project. Supports filtering by entity type.",
   {
@@ -1383,7 +1502,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_extract_subgraph",
   "Extract a mixed-entity subgraph starting from one or more root graph node IDs. Returns all reachable nodes and edges. Supports filtering by entity type.",
   {
@@ -1402,7 +1522,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_traverse_graph",
   "Traverse the mixed-entity graph outward from one or more root graph node IDs. Returns the visited neighborhood as nodes and edges.",
   {
@@ -1421,7 +1542,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_find_graph_paths",
   "Find paths in the mixed-entity graph between two graph node IDs. Returns mixed-node path results, not requirement-DAG-only paths.",
   {
@@ -1452,7 +1574,8 @@ server.tool(
 // Baseline tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "analysis",
   "gc_create_baseline",
   "Create a named baseline — a point-in-time snapshot of the current requirement set. Captures the current Envers revision number.",
   {
@@ -1471,7 +1594,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_list_baselines",
   "List all baselines for a project, ordered by creation date (newest first).",
   {
@@ -1488,7 +1612,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_get_baseline",
   "Get a baseline by its UUID.",
   {
@@ -1503,7 +1628,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_get_baseline_snapshot",
   "Get the requirement snapshot for a baseline — reconstructs the full requirement set as it existed at that point in time.",
   {
@@ -1518,7 +1644,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_compare_baselines",
   "Compare two baselines to see what requirements were added, removed, or modified between them.",
   {
@@ -1534,7 +1661,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_delete_baseline",
   "Delete a baseline. This does not affect the underlying requirement history.",
   {
@@ -1554,7 +1682,8 @@ server.tool(
 // Admin tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "admin",
   "gc_import_strictdoc",
   "Import a StrictDoc (.sdoc) file, creating documents, sections, text blocks, requirements, and relations preserving the source hierarchy. Idempotent: re-importing updates existing requirements by UID and skips existing documents/sections.",
   {
@@ -1570,7 +1699,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_import_reqif",
   "Import requirements from a ReqIF 1.2 (.reqif) file. Idempotent: re-importing updates existing requirements by IDENTIFIER.",
   {
@@ -1586,7 +1716,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_sync_github",
   "Sync GitHub issues for a repository. Creates traceability links between issues and requirements.",
   {
@@ -1602,7 +1733,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_sync_github_prs",
   "Sync GitHub pull requests for a repository. Updates traceability links with PR state (open, closed, merged).",
   {
@@ -1622,7 +1754,8 @@ server.tool(
 // Analysis sweep tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "admin",
   "gc_run_sweep",
   "Run a full analysis sweep (orphans, coverage gaps, cross-wave, cycles, consistency, status drift) on a project. Returns a report of all detected problems. Optionally triggers configured notifications (GitHub issues, webhooks).",
   {
@@ -1639,7 +1772,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_run_sweep_all",
   "Run a full analysis sweep across ALL projects. Returns a list of reports, one per project.",
   {},
@@ -1658,7 +1792,8 @@ server.tool(
 // Embedding tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "admin",
   "gc_embed_requirement",
   "Generate a vector embedding for a requirement's text content (title, statement, rationale). Skips if embedding is already up-to-date. Returns status: 'embedded', 'up_to_date', or 'provider_unavailable'.",
   {
@@ -1674,7 +1809,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_get_embedding_status",
   "Check the embedding status of a requirement: whether it has an embedding, if it's stale (text changed), or if the model has changed since embedding.",
   {
@@ -1690,7 +1826,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_embed_project",
   "Batch-embed all requirements in a project. Only embeds requirements missing embeddings or with stale content. Use force=true to re-embed everything (e.g., after model migration).",
   {
@@ -1711,7 +1848,8 @@ server.tool(
 // Semantic analysis tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "analysis",
   "gc_analyze_similarity",
   "Find semantically similar requirement pairs by computing cosine similarity across requirement embeddings. Returns pairs exceeding the threshold, sorted by similarity score descending. Requires embeddings to exist (run gc_embed_project first).",
   {
@@ -1743,7 +1881,8 @@ server.tool(
 // Quality Gate tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "analysis",
   "gc_create_quality_gate",
   "Create a quality gate rule for a project. Quality gates define pass/fail thresholds for CI/CD integration (e.g. 'minimum 80% of ACTIVE requirements must have a TESTS link').",
   {
@@ -1769,7 +1908,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_list_quality_gates",
   "List all quality gates for a project.",
   {
@@ -1786,7 +1926,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_get_quality_gate",
   "Get a quality gate by its UUID.",
   {
@@ -1801,7 +1942,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_update_quality_gate",
   "Update a quality gate. Only specified fields are changed.",
   {
@@ -1828,7 +1970,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_delete_quality_gate",
   "Delete a quality gate.",
   {
@@ -1844,7 +1987,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "analysis",
   "gc_evaluate_quality_gates",
   "Evaluate all enabled quality gates for a project. Returns overall pass/fail plus per-gate results. Designed for CI/CD integration.",
   {
@@ -1864,7 +2008,8 @@ server.tool(
 // Document tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "documents",
   "gc_create_document",
   "Create a document — a top-level container for organizing requirements into coherent specifications.",
   {
@@ -1884,7 +2029,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_list_documents",
   "List all documents for a project, ordered by creation date (newest first).",
   {
@@ -1901,7 +2047,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_get_document",
   "Get a document by its UUID.",
   {
@@ -1916,7 +2063,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_update_document",
   "Update a document. Only specified fields are changed.",
   {
@@ -1938,7 +2086,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_delete_document",
   "Delete a document.",
   {
@@ -1958,7 +2107,8 @@ server.tool(
 // Section tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "documents",
   "gc_create_section",
   "Create a section within a document. Sections support arbitrary nesting via optional parentId.",
   {
@@ -1981,7 +2131,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_list_sections",
   "List all sections in a document (flat, ordered by sort order).",
   {
@@ -1998,7 +2149,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_get_section_tree",
   "Get sections as a nested tree structure for a document.",
   {
@@ -2015,7 +2167,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_get_section",
   "Get a section by its UUID.",
   {
@@ -2030,7 +2183,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_update_section",
   "Update a section. Only specified fields are changed.",
   {
@@ -2052,7 +2206,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_delete_section",
   "Delete a section and all its children (cascading).",
   {
@@ -2072,7 +2227,8 @@ server.tool(
 // Section Content tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "documents",
   "gc_add_section_content",
   "Add a content item to a section — either a requirement reference or a text block. Items are ordered by sort_order for rendering.",
   {
@@ -2095,7 +2251,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_list_section_content",
   "List content items in a section, ordered by sort_order for rendering in reading order.",
   {
@@ -2112,7 +2269,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_update_section_content",
   "Update a section content item. Only text_content (for TEXT_BLOCK) and sort_order can be changed.",
   {
@@ -2133,7 +2291,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_delete_section_content",
   "Delete a content item from a section.",
   {
@@ -2153,7 +2312,8 @@ server.tool(
 // Document Reading Order tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "documents",
   "gc_get_document_reading_order",
   "Get a document rendered in reading order: sections with their content (text blocks and requirement references) nested in authored sequence.",
   {
@@ -2173,7 +2333,8 @@ server.tool(
 // Document Grammar tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "documents",
   "gc_set_document_grammar",
   "Set or replace the grammar for a document. Defines custom fields, allowed requirement types, and allowed relation types.",
   {
@@ -2200,7 +2361,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_get_document_grammar",
   "Get the grammar for a document.",
   {
@@ -2217,7 +2379,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_delete_document_grammar",
   "Remove the grammar from a document.",
   {
@@ -2237,7 +2400,8 @@ server.tool(
 // Architecture Decision Records
 // ==========================================================================
 
-server.tool(
+tool(
+  "documents",
   "gc_create_adr",
   "Create an architecture decision record (ADR) — a first-class entity for tracking architectural decisions linked to requirements.",
   {
@@ -2262,7 +2426,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_list_adrs",
   "List all ADRs for a project, ordered by decision date (newest first).",
   {
@@ -2279,7 +2444,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_get_adr",
   "Get an ADR by its UUID or by its UID (e.g. 'ADR-018'). Provide either id or uid.",
   {
@@ -2302,7 +2468,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_update_adr",
   "Update an ADR. Only specified fields are changed.",
   {
@@ -2330,7 +2497,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_delete_adr",
   "Delete an ADR by its UUID.",
   {
@@ -2346,7 +2514,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_transition_adr_status",
   `Transition an ADR's status. Valid transitions: PROPOSED→ACCEPTED, ACCEPTED→DEPRECATED, ACCEPTED→SUPERSEDED.`,
   {
@@ -2362,7 +2531,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "documents",
   "gc_get_adr_requirements",
   "Get all requirements linked to an ADR via traceability links (reverse traceability).",
   {
@@ -2383,7 +2553,8 @@ server.tool(
 // Operational Asset tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "assets",
   "gc_create_asset",
   "Create an operational asset in a project.",
   {
@@ -2405,7 +2576,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_list_assets",
   "List operational assets in a project, optionally filtered by type.",
   {
@@ -2423,7 +2595,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_get_asset",
   "Get an operational asset by its UUID.",
   {
@@ -2439,7 +2612,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_get_asset_by_uid",
   "Get an operational asset by its human-readable UID (e.g. 'ASSET-001').",
   {
@@ -2455,7 +2629,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_update_asset",
   "Update an operational asset.",
   {
@@ -2478,7 +2653,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_delete_asset",
   "Delete an operational asset by its UUID. Cascade-deletes all its relations.",
   {
@@ -2495,7 +2671,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_archive_asset",
   "Archive (soft-delete) an operational asset.",
   {
@@ -2511,7 +2688,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_create_asset_relation",
   `Create a typed relationship between two operational assets. Relation types: ${ASSET_RELATION_TYPES.join(", ")}. Optional provenance: source_system, external_source_id, collected_at (ISO-8601), confidence.`,
   {
@@ -2538,7 +2716,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_get_asset_relations",
   "Get all incoming and outgoing relations for an operational asset.",
   {
@@ -2556,7 +2735,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_delete_asset_relation",
   "Delete a relation from an operational asset.",
   {
@@ -2574,7 +2754,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_detect_asset_cycles",
   "Detect cycles in the asset topology graph for a project.",
   {
@@ -2591,7 +2772,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_asset_impact_analysis",
   "Multi-hop impact analysis: find all assets transitively affected by a given asset.",
   {
@@ -2609,7 +2791,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_extract_asset_subgraph",
   "Extract a connected subgraph of assets starting from one or more root UIDs.",
   {
@@ -2629,7 +2812,8 @@ server.tool(
 // Asset Links (cross-entity linking)
 // ==========================================================================
 
-server.tool(
+tool(
+  "assets",
   "gc_create_asset_link",
   `Link an operational asset to a requirement, control, risk scenario, or other entity. Target types: ${ASSET_LINK_TARGET_TYPES.join(", ")}. Link types: ${ASSET_LINK_TYPES.join(", ")}.`,
   {
@@ -2656,7 +2840,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_get_asset_links",
   "Get all cross-entity links for an operational asset, optionally filtered by target type.",
   {
@@ -2673,7 +2858,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_delete_asset_link",
   "Delete a cross-entity link from an operational asset.",
   {
@@ -2691,7 +2877,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_get_asset_links_by_target",
   "Find all assets linked to a specific target (e.g. all assets linked to a requirement).",
   {
@@ -2722,7 +2909,8 @@ server.tool(
 // External Identifiers (source provenance)
 // ==========================================================================
 
-server.tool(
+tool(
+  "assets",
   "gc_create_asset_external_id",
   "Register an external identifier for an operational asset, mapping it to a source system (e.g. AWS ARN, Terraform resource ID, ServiceNow CI). Supports multiple overlapping sources per asset.",
   {
@@ -2745,7 +2933,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_list_asset_external_ids",
   "List all external identifiers for an operational asset, optionally filtered by source system.",
   {
@@ -2764,7 +2953,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_update_asset_external_id",
   "Update the collection timestamp or confidence metadata of an external identifier. Source system and source ID are immutable.",
   {
@@ -2786,7 +2976,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_delete_asset_external_id",
   "Delete an external identifier from an operational asset.",
   {
@@ -2804,7 +2995,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "assets",
   "gc_find_asset_by_external_id",
   "Find operational assets by their external identifier in a specific source system. Reverse lookup from source system + source ID to Ground Control assets.",
   {
@@ -2827,7 +3019,8 @@ server.tool(
 // Observations (time-bounded state facts)
 // ==========================================================================
 
-server.tool(
+tool(
+  "risk",
   "gc_create_observation",
   "Record a time-bounded state fact (observation) about an operational asset, such as a configuration value, exposure status, identity assignment, deployment attribute, patch state, or discovered relationship.",
   {
@@ -2855,7 +3048,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_list_observations",
   "List observations for an operational asset, optionally filtered by category and/or key.",
   {
@@ -2875,7 +3069,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_get_observation",
   "Get a specific observation by ID.",
   {
@@ -2892,7 +3087,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_update_observation",
   "Update a mutable field of an observation (value, expiry, confidence, or evidence reference). Category, key, source, and observed-at are immutable.",
   {
@@ -2918,7 +3114,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_delete_observation",
   "Delete an observation from an operational asset.",
   {
@@ -2936,7 +3133,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_list_latest_observations",
   "Get the most recent non-expired observation for each unique (category, key) pair on an operational asset. Useful for building a current-state snapshot. Expired observations (past their expiresAt timestamp) are excluded.",
   {
@@ -2958,7 +3156,8 @@ server.tool(
 // Risk Scenario tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "risk",
   "gc_create_risk_scenario",
   "Create a risk scenario — a scoped statement of potential future loss tied to operational assets within a defined time horizon.",
   {
@@ -2983,7 +3182,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_list_risk_scenarios",
   "List all risk scenarios for a project, ordered by creation date (newest first).",
   {
@@ -3000,7 +3200,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_get_risk_scenario",
   "Get a risk scenario by UUID or UID.",
   {
@@ -3023,7 +3224,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_update_risk_scenario",
   "Update mutable fields of a risk scenario. Only provided fields are updated.",
   {
@@ -3054,7 +3256,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_delete_risk_scenario",
   "Delete a risk scenario.",
   {
@@ -3071,7 +3274,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_transition_risk_scenario_status",
   "Transition a risk scenario content lifecycle status. Valid transitions: DRAFT→ACTIVE|ARCHIVED, ACTIVE→ARCHIVED.",
   {
@@ -3088,7 +3292,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_get_risk_scenario_requirements",
   "Get requirements linked to a risk scenario.",
   {
@@ -3106,7 +3311,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_create_risk_scenario_link",
   "Link a risk scenario to a threat model, vulnerability, control, finding, evidence, audit record, risk register entry, observation, asset, requirement, or external artifact.",
   {
@@ -3133,7 +3339,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_list_risk_scenario_links",
   "List all links from a risk scenario, optionally filtered by target type.",
   {
@@ -3152,7 +3359,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_delete_risk_scenario_link",
   "Delete a link from a risk scenario.",
   {
@@ -3174,7 +3382,8 @@ server.tool(
 // Threat Model tools (GC-H001)
 // ==========================================================================
 
-server.tool(
+tool(
+  "risk",
   "gc_create_threat_model",
   "Create a threat model entry — a first-class threat analysis artifact distinct from risk scenarios. Captures threat source or actor, threat event or method, effect/consequence, and optional STRIDE taxonomy. Link to assets, requirements, controls, risk scenarios, architecture models, code, and issues via gc_create_threat_model_link.",
   {
@@ -3199,7 +3408,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_list_threat_models",
   "List all threat model entries for a project, ordered by creation date (newest first).",
   {
@@ -3216,7 +3426,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_get_threat_model",
   "Get a threat model by UUID or UID.",
   {
@@ -3239,7 +3450,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_update_threat_model",
   "Update mutable fields of a threat model entry. Only provided fields are updated. Required fields (title, threat_source, threat_event, effect) reject blank strings server-side. To explicitly clear an optional field, set clear_stride=true or clear_narrative=true (passing the value field as null/undefined alone means 'no change'). When a clear flag is true any value supplied in the corresponding field is ignored.",
   {
@@ -3283,7 +3495,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_delete_threat_model",
   "Delete a threat model entry. Cascades to all owned ThreatModelLink rows. Returns 409 threat_model_referenced (with `assetUids` and `scenarioUids` in the error detail) if any AssetLink THREAT_MODEL_ENTRY or RiskScenarioLink THREAT_MODEL row still references this threat model — clean those up before retrying.",
   {
@@ -3300,7 +3513,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_transition_threat_model_status",
   "Transition a threat model lifecycle status. Valid transitions: DRAFT→ACTIVE|ARCHIVED, ACTIVE→ARCHIVED.",
   {
@@ -3317,7 +3531,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_create_threat_model_link",
   "Link a threat model to an operational asset or system boundary, requirement, control, risk scenario, observation, risk assessment result, verification result, or external architecture model / code / issue / evidence.",
   {
@@ -3344,7 +3559,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_list_threat_model_links",
   "List all links from a threat model entry.",
   {
@@ -3362,7 +3578,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_delete_threat_model_link",
   "Delete a link from a threat model entry.",
   {
@@ -3384,7 +3601,8 @@ server.tool(
 // Control tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "risk",
   "gc_create_control",
   "Create a control — a security or risk control with definitions, objectives, ownership, and methodology factor mappings.",
   {
@@ -3419,7 +3637,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_list_controls",
   "List controls for a project.",
   {
@@ -3436,7 +3655,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_get_control",
   "Get a control by UUID or UID.",
   {
@@ -3454,7 +3674,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_update_control",
   "Update a control.",
   {
@@ -3491,7 +3712,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_transition_control_status",
   "Transition a control's lifecycle status.",
   {
@@ -3508,7 +3730,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_delete_control",
   "Delete a control.",
   {
@@ -3525,7 +3748,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_create_control_link",
   "Link a control to an asset, risk scenario, evidence, code artifact, or other entity.",
   {
@@ -3552,7 +3776,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_list_control_links",
   "List links from a control, optionally filtered by target type.",
   {
@@ -3571,7 +3796,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_delete_control_link",
   "Delete a control link.",
   {
@@ -3593,7 +3819,8 @@ server.tool(
 // Methodology Profile tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "risk",
   "gc_create_methodology_profile",
   "Create a methodology profile that defines a risk assessment method and schema.",
   {
@@ -3621,7 +3848,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_list_methodology_profiles",
   "List methodology profiles for a project.",
   {
@@ -3638,7 +3866,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_get_methodology_profile",
   "Get a methodology profile by UUID.",
   {
@@ -3654,7 +3883,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_update_methodology_profile",
   "Update a methodology profile.",
   {
@@ -3685,7 +3915,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_delete_methodology_profile",
   "Delete a methodology profile.",
   {
@@ -3706,7 +3937,8 @@ server.tool(
 // Risk Register Record tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "risk",
   "gc_create_risk_register_record",
   "Create a risk register record that governs one or more risk scenarios.",
   {
@@ -3738,7 +3970,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_list_risk_register_records",
   "List risk register records for a project.",
   {
@@ -3755,7 +3988,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_get_risk_register_record",
   "Get a risk register record by UUID.",
   {
@@ -3771,7 +4005,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_update_risk_register_record",
   "Update a risk register record.",
   {
@@ -3804,7 +4039,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_transition_risk_register_record_status",
   "Transition a risk register record status through the governance workflow.",
   {
@@ -3821,7 +4057,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_delete_risk_register_record",
   "Delete a risk register record.",
   {
@@ -3842,7 +4079,8 @@ server.tool(
 // Risk Assessment Result tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "risk",
   "gc_create_risk_assessment_result",
   "Create a versioned risk assessment result for a risk scenario.",
   {
@@ -3886,7 +4124,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_list_risk_assessment_results",
   "List risk assessment results, optionally filtered by scenario or risk register record.",
   {
@@ -3909,7 +4148,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_get_risk_assessment_result",
   "Get a risk assessment result by UUID.",
   {
@@ -3925,7 +4165,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_update_risk_assessment_result",
   "Update a risk assessment result.",
   {
@@ -3970,7 +4211,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_transition_risk_assessment_approval_state",
   "Transition a risk assessment result approval state.",
   {
@@ -3987,7 +4229,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_delete_risk_assessment_result",
   "Delete a risk assessment result.",
   {
@@ -4008,7 +4251,8 @@ server.tool(
 // Treatment Plan tools
 // ==========================================================================
 
-server.tool(
+tool(
+  "risk",
   "gc_create_treatment_plan",
   "Create a treatment plan linked to a risk register record.",
   {
@@ -4042,7 +4286,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_list_treatment_plans",
   "List treatment plans, optionally filtered by risk register record.",
   {
@@ -4060,7 +4305,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_get_treatment_plan",
   "Get a treatment plan by UUID.",
   {
@@ -4076,7 +4322,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_update_treatment_plan",
   "Update a treatment plan.",
   {
@@ -4109,7 +4356,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_transition_treatment_plan_status",
   "Transition a treatment plan status.",
   {
@@ -4126,7 +4374,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_delete_treatment_plan",
   "Delete a treatment plan.",
   {
@@ -4147,7 +4396,8 @@ server.tool(
 // Verification Results
 // ==========================================================================
 
-server.tool(
+tool(
+  "risk",
   "gc_create_verification_result",
   "Store a verification result from any prover or verifier.",
   {
@@ -4177,7 +4427,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_list_verification_results",
   "List verification results with optional filters.",
   {
@@ -4195,7 +4446,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_get_verification_result",
   "Get a verification result by UUID.",
   {
@@ -4211,7 +4463,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_update_verification_result",
   "Update a verification result.",
   {
@@ -4246,7 +4499,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "risk",
   "gc_delete_verification_result",
   "Delete a verification result.",
   {
@@ -4267,7 +4521,8 @@ server.tool(
 // Plugins (GC-P005)
 // ==========================================================================
 
-server.tool(
+tool(
+  "admin",
   "gc_list_plugins",
   "List all registered plugins with their metadata, type, state, and capabilities. Returns both built-in (classpath) and dynamic (DB-persisted) plugins.",
   {
@@ -4284,7 +4539,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_get_plugin",
   "Get a registered plugin by its canonical name.",
   {
@@ -4299,7 +4555,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_register_plugin",
   "Register a dynamic plugin. Persisted to the database and survives restarts.",
   {
@@ -4324,7 +4581,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_unregister_plugin",
   "Unregister a dynamic plugin. Removes it from the database.",
   {
@@ -4341,7 +4599,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_list_control_packs",
   "List installed control packs for a project.",
   {
@@ -4358,7 +4617,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_get_control_pack",
   "Get a control pack by its pack identifier.",
   {
@@ -4374,7 +4634,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_deprecate_control_pack",
   "Deprecate an installed control pack.",
   {
@@ -4390,7 +4651,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_remove_control_pack",
   "Remove an installed control pack (terminal state, irreversible). Controls remain but provenance link is severed.",
   {
@@ -4407,7 +4669,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_list_control_pack_entries",
   "List entries (control definitions) within an installed control pack.",
   {
@@ -4425,7 +4688,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_get_control_pack_entry",
   "Get a specific entry from a control pack by its entry UID.",
   {
@@ -4442,7 +4706,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_create_control_pack_override",
   "Create or update a field-level override on a pack entry for local tailoring.",
   {
@@ -4465,7 +4730,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_list_control_pack_overrides",
   "List field-level overrides for a pack entry.",
   {
@@ -4484,7 +4750,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_delete_control_pack_override",
   "Delete a field-level override, restoring the original pack value on the materialized control.",
   {
@@ -4507,7 +4774,8 @@ server.tool(
 // Pack Registry tools (GC-P016)
 // ==========================================================================
 
-server.tool(
+tool(
+  "admin",
   "gc_register_pack_registry_entry",
   "Register a new pack version in the registry catalog. This adds the pack as a discoverable, installable artifact.",
   {
@@ -4558,7 +4826,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_import_pack_registry_entry",
   "Import a pack registry entry from a local JSON file. Supports Ground Control manifests and OSCAL JSON catalogs, then registers the resulting pack version in the catalog.",
   {
@@ -4590,7 +4859,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_list_pack_registry_entries",
   "List pack registry entries for a project, optionally filtered by pack type.",
   {
@@ -4608,7 +4878,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_list_pack_versions",
   "List all registered versions of a specific pack.",
   {
@@ -4626,7 +4897,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_get_pack_registry_entry",
   "Get a specific pack registry entry by pack ID and version.",
   {
@@ -4643,7 +4915,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_update_pack_registry_entry",
   "Update metadata of a pack registry entry.",
   {
@@ -4693,7 +4966,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_withdraw_pack_registry_entry",
   "Withdraw a pack version from the registry (marks as WITHDRAWN, terminal state).",
   {
@@ -4710,7 +4984,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_delete_pack_registry_entry",
   "Delete a pack registry entry permanently.",
   {
@@ -4728,7 +5003,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_resolve_pack",
   "Resolve a pack version from the registry using semantic version constraints. Returns the best matching available version and compatibility status.",
   {
@@ -4745,7 +5021,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_check_pack_compatibility",
   "Check if a pack version is compatible with the current platform. Returns packId, resolvedVersion, and compatible boolean.",
   {
@@ -4766,7 +5043,8 @@ server.tool(
 // Trust Policy tools (GC-P016)
 // ==========================================================================
 
-server.tool(
+tool(
+  "admin",
   "gc_create_trust_policy",
   "Create a trust policy with declarative rules for evaluating pack trust. Rules match against pack fields (publisher, packId, packType, sourceUrl, checksum, verifiedChecksum, checksumVerified, signerTrusted) using bounded operators (EQUALS, NOT_EQUALS, CONTAINS, IN_LIST).",
   {
@@ -4792,7 +5070,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_list_trust_policies",
   "List trust policies for a project, ordered by priority.",
   {
@@ -4809,7 +5088,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_get_trust_policy",
   "Get a trust policy by ID.",
   {
@@ -4824,7 +5104,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_update_trust_policy",
   "Update a trust policy.",
   {
@@ -4850,7 +5131,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_delete_trust_policy",
   "Delete a trust policy.",
   {
@@ -4870,7 +5152,8 @@ server.tool(
 // Pack Install Record tools (GC-P016)
 // ==========================================================================
 
-server.tool(
+tool(
+  "admin",
   "gc_install_pack_from_registry",
   "Install a pack through the registry with trust evaluation. Resolves the version, uses the registry-stored typed content, checks compatibility across the dependency closure, evaluates trust policy, and delegates to the type-specific installer. Produces an auditable install record whose actor comes from the configured pack-registry admin token. Rejected or failed installs return HTTP 422.",
   {
@@ -4887,7 +5170,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_upgrade_pack_from_registry",
   "Upgrade a pack through the registry with trust evaluation. Same flow as install but uses the newly resolved registry artifact and delegates to the upgrade path. The audit actor comes from the configured pack-registry admin token. Rejected or failed upgrades return HTTP 422.",
   {
@@ -4904,7 +5188,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_list_pack_install_records",
   "List auditable pack install/rejection records for a project.",
   {
@@ -4922,7 +5207,8 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
+  "admin",
   "gc_get_pack_install_record",
   "Get a specific pack install record by ID.",
   {
@@ -4941,9 +5227,28 @@ server.tool(
 // Start
 // ==========================================================================
 
+// Inventory drift catch (ADR-035). Every name passed to `tool(...)` must
+// appear in the catalogs.js inventory, and every inventory entry must have a
+// matching `tool(...)` call. A drifted entry would silently ship in zero
+// catalogs (i.e. unreachable); throwing here makes the regression loud.
+const inventoryErrors = validateInventory(ALL_TOOL_NAMES);
+if (inventoryErrors.length > 0) {
+  console.error(
+    `Ground Control MCP catalog inventory is inconsistent with the registered tool set:\n  - ${inventoryErrors.join("\n  - ")}`,
+  );
+  process.exit(1);
+}
+
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  // Surface the active catalog selection on stderr at startup so operators
+  // can confirm what the LLM actually loaded. Stderr only — does not pollute
+  // the stdio MCP transport.
+  console.error(
+    `[ground-control] catalogs active: ${[...ACTIVE_CATALOGS].sort().join(",")}; ` +
+      `tools registered: ${ACTIVE_TOOL_NAMES.size}/${ALL_TOOL_NAMES.size} (catalogs available: ${[...CATALOG_NAMES].length})`,
+  );
 }
 
 main().catch((e) => {

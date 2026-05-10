@@ -624,7 +624,10 @@ function requiresAdminRole(path) {
 //     (ADR-026), so deployments that migrated from the legacy admin-only var
 //     keep working for ordinary requirement / project / graph reads.
 // When neither is set the header is omitted (dev profile / disabled security).
-function addAuthorizationHeader(path, headers) {
+//
+// Exported so the gc_query escape hatch (mcp/ground-control/gc-query.js) can
+// reuse the same admin/non-admin token routing as the curated tools.
+export function addAuthorizationHeader(path, headers) {
   if (!path.startsWith("/api/v1/")) {
     return;
   }
