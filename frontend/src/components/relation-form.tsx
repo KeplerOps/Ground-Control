@@ -13,16 +13,8 @@ import type {
   RelationType,
   RequirementResponse,
 } from "@/types/api";
+import { RELATION_TYPES } from "@/types/api";
 import { useCallback, useState } from "react";
-
-const RELATION_TYPES: RelationType[] = [
-  "DEPENDS_ON",
-  "PARENT",
-  "REFINES",
-  "CONFLICTS_WITH",
-  "SUPERSEDES",
-  "RELATED",
-];
 
 interface RelationFormProps {
   sourceId: string;

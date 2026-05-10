@@ -229,6 +229,7 @@ import {
   RELATION_TYPES,
   ARTIFACT_TYPES,
   LINK_TYPES,
+  CHANGE_CATEGORIES,
   CONFIDENCE_LEVELS,
   METRIC_TYPES,
   COMPARISON_OPERATORS,
@@ -968,7 +969,7 @@ server.tool(
   "Get a unified audit timeline for a requirement, merging requirement, relation, and traceability link changes with field-level diffs. Paginated (default 100 entries).",
   {
     id: z.string().uuid().describe("Requirement UUID"),
-    change_category: z.enum(["REQUIREMENT", "RELATION", "TRACEABILITY_LINK"]).optional().describe("Filter by change category"),
+    change_category: z.enum(CHANGE_CATEGORIES).optional().describe("Filter by change category"),
     actor: z.string().optional().describe("Filter by actor (exact match)"),
     from: z.string().optional().describe("Start of date range (ISO-8601 instant)"),
     to: z.string().optional().describe("End of date range (ISO-8601 instant)"),
@@ -1009,7 +1010,7 @@ server.tool(
   "Get a unified audit timeline across all requirements in a project. Merges requirement, relation, and traceability link changes with field-level diffs. Paginated (default 100 entries).",
   {
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
-    change_category: z.enum(["REQUIREMENT", "RELATION", "TRACEABILITY_LINK"]).optional().describe("Filter by change category"),
+    change_category: z.enum(CHANGE_CATEGORIES).optional().describe("Filter by change category"),
     actor: z.string().optional().describe("Filter by actor (exact match)"),
     from: z.string().optional().describe("Start of date range (ISO-8601 instant)"),
     to: z.string().optional().describe("End of date range (ISO-8601 instant)"),
@@ -1032,7 +1033,7 @@ server.tool(
   "Export the project audit timeline as CSV for compliance reporting. Returns CSV text with columns: timestamp, actor, reason, change_category, revision_type, entity_id, changes.",
   {
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
-    change_category: z.enum(["REQUIREMENT", "RELATION", "TRACEABILITY_LINK"]).optional().describe("Filter by change category"),
+    change_category: z.enum(CHANGE_CATEGORIES).optional().describe("Filter by change category"),
     actor: z.string().optional().describe("Filter by actor (exact match)"),
     from: z.string().optional().describe("Start of date range (ISO-8601 instant)"),
     to: z.string().optional().describe("End of date range (ISO-8601 instant)"),

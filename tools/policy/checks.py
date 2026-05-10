@@ -578,6 +578,263 @@ def run_deploy_compose_credential_passthrough(root: Path = REPO_ROOT) -> list[Vi
     return violations
 
 
+# ---------------------------------------------------------------------------
+# API enum contract check (issue #433, ADR-034).
+#
+# The backend Java enums under domain/requirements/state/ are the single source
+# of truth for the requirement/traceability enum vocabularies. Every such enum
+# that is mirrored at the API boundary — frontend/src/types/api.ts (union types
+# and, where the UI iterates them, constant arrays) and mcp/ground-control/lib.js
+# constants — is listed in ENUM_CONTRACT_INVENTORY. Earlier the frontend carried
+# impossible values (PERFORMANCE, GITHUB_PR, TRACES_TO, ...) and then, after a
+# partial fix, the inverse drift (ArtifactType missing PULL_REQUEST /
+# RISK_SCENARIO / CONTROL; SyncStatus still typed SYNCED/NOT_SYNCED/ERROR while
+# the backend has SYNCED/STALE/BROKEN). This static post-condition parses the
+# Java enum sources and asserts every mirror matches — so the next diff that lets
+# them diverge fails `make policy` (the `policy` CI job runs `bin/policy` on every
+# PR). Adding another mirrored enum is one inventory row, not new parsing logic.
+# (ADR-017 contemplates OpenAPI-generated TypeScript types; until that exists this
+# source extractor is the authoritative contract — see ADR-034. The frontend
+# vitest mirror in enum-contract.test.ts is a developer convenience, not the CI
+# gate, because the frontend test suite does not run in PR CI today.)
+# ---------------------------------------------------------------------------
+
+FRONTEND_API_TYPES_PATH = "frontend/src/types/api.ts"
+MCP_LIB_PATH = "mcp/ground-control/lib.js"
+_ENUM_STATE_DIR = "backend/src/main/java/com/keplerops/groundcontrol/domain/requirements/state"
+
+# Java enum body: from the opening `{` to whichever comes first — the `;` that
+# terminates the constant list (present when the enum has methods/fields, e.g.
+# Status) or the closing `}` (constant-only enums). `[^{;]*` between `enum NAME`
+# and `{` tolerates `implements`/generics clauses.
+_JAVA_ENUM_BODY_RE = re.compile(r"\benum\s+\w+[^{;]*\{(.*?)(?:;|\})", re.DOTALL)
+_PAREN_GROUP_RE = re.compile(r"\([^)]*\)")  # strip enum-constant constructor args: FOO("x")
+_LINE_COMMENT_RE = re.compile(r"//[^\n]*")
+_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_ENUM_CONSTANT_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_STRING_LITERAL_RE = re.compile(r'"([^"\\]*)"')
+
+
+def _strip_comments(text: str) -> str:
+    """Remove ``//`` line comments and ``/* ... */`` block comments.
+
+    Java, TypeScript, and JavaScript all use this comment syntax. Block comments
+    are replaced with a space (so adjacent tokens are not glued); line comments
+    are removed up to the newline. Used so a value that exists only inside a
+    comment — or a value that was commented *out* — is not counted as an active
+    enum member by the regex extractors below.
+    """
+    text = _BLOCK_COMMENT_RE.sub(" ", text)
+    return _LINE_COMMENT_RE.sub("", text)
+
+
+@dataclass(frozen=True)
+class EnumContract:
+    label: str
+    java_path: str
+    ts_union: str
+    # The api.ts iterated constant array (``export const FOO: T[] = [...]``), or
+    # None for enums the UI does not iterate (only the union type is mirrored).
+    ts_const: str | None
+    # The lib.js constant array, or None for enums with no MCP-side mirror.
+    mcp_const: str | None
+
+
+ENUM_CONTRACT_INVENTORY: tuple[EnumContract, ...] = (
+    EnumContract("RequirementType", f"{_ENUM_STATE_DIR}/RequirementType.java", "RequirementType", "REQUIREMENT_TYPES", "REQUIREMENT_TYPES"),
+    EnumContract("RelationType", f"{_ENUM_STATE_DIR}/RelationType.java", "RelationType", "RELATION_TYPES", "RELATION_TYPES"),
+    EnumContract("ArtifactType", f"{_ENUM_STATE_DIR}/ArtifactType.java", "ArtifactType", "ARTIFACT_TYPES", "ARTIFACT_TYPES"),
+    EnumContract("LinkType", f"{_ENUM_STATE_DIR}/LinkType.java", "LinkType", "LINK_TYPES", "LINK_TYPES"),
+    EnumContract("Status", f"{_ENUM_STATE_DIR}/Status.java", "Status", "STATUSES", "STATUSES"),
+    EnumContract("Priority", f"{_ENUM_STATE_DIR}/Priority.java", "Priority", "PRIORITIES", "PRIORITIES"),
+    # SyncStatus has no MCP mirror today; only the api.ts union type carries it.
+    EnumContract("SyncStatus", f"{_ENUM_STATE_DIR}/SyncStatus.java", "SyncStatus", None, None),
+    EnumContract("ChangeCategory", f"{_ENUM_STATE_DIR}/ChangeCategory.java", "ChangeCategory", "CHANGE_CATEGORIES", "CHANGE_CATEGORIES"),
+)
+
+
+def parse_java_enum_constants(text: str) -> list[str]:
+    """Return the ordered enum constants of the (single) ``enum X { ... }`` in ``text``.
+
+    Comments are stripped first. The constant list is the body between the
+    opening ``{`` and the first ``;`` (for enums with methods/fields) or closing
+    ``}`` (constant-only enums); constructor-argument groups (``FOO("x")``) are
+    stripped, then the body is split on commas/whitespace and the
+    ``[A-Z][A-Z0-9_]*`` tokens are returned in declaration order. Returns ``[]``
+    when no enum declaration is found (the caller treats that as a parse error).
+    """
+    without_comments = _strip_comments(text)
+    match = _JAVA_ENUM_BODY_RE.search(without_comments)
+    if not match:
+        return []
+    body = _PAREN_GROUP_RE.sub(" ", match.group(1))
+    tokens: list[str] = []
+    for raw in re.split(r"[,\s]+", body):
+        token = raw.strip()
+        if token and _ENUM_CONSTANT_RE.match(token):
+            tokens.append(token)
+    return tokens
+
+
+def parse_const_string_array(text: str, name: str) -> list[str] | None:
+    """Return the ordered string literals of ``const <name> [: T[]] = [ ... ]``.
+
+    Works for both TypeScript (``export const FOO: FooType[] = [...]``) and
+    plain JS (``export const FOO = [...]``). Comments are stripped first, so a
+    commented-out element is not counted. Returns ``None`` when no such
+    declaration exists, or the (possibly empty) ordered list of string-literal
+    values when it does. The name is matched whole-word so ``LINK_TYPES`` does
+    not match ``ASSET_LINK_TYPES`` and ``ARTIFACT_TYPES`` does not match
+    ``ARTIFACT_TYPES_FOO``.
+    """
+    pattern = re.compile(
+        r"\bconst\s+" + re.escape(name) + r"\b\s*(?::[^=]*)?=\s*\[(.*?)\]",
+        re.DOTALL,
+    )
+    match = pattern.search(_strip_comments(text))
+    if not match:
+        return None
+    return _STRING_LITERAL_RE.findall(match.group(1))
+
+
+def parse_ts_union_literals(text: str, name: str) -> set[str] | None:
+    """Return the set of string-literal members of ``type <name> = "A" | "B" | ...;``.
+
+    Comments are stripped first. Returns ``None`` when no such type alias exists.
+    Union member order is not significant, so a set is returned.
+    """
+    pattern = re.compile(r"\btype\s+" + re.escape(name) + r"\b\s*=([^;]*);", re.DOTALL)
+    match = pattern.search(_strip_comments(text))
+    if not match:
+        return None
+    return set(_STRING_LITERAL_RE.findall(match.group(1)))
+
+
+def run_enum_contract_check(root: Path = REPO_ROOT) -> list[Violation]:
+    """Assert backend Java enums == frontend api.ts == MCP lib.js for the enum inventory.
+
+    A static post-condition (independent of ``changed_files``) so any diff that
+    lets the layers diverge fails ``make policy``. Emits:
+      ``enum-contract-source-missing`` — a required source file is absent.
+      ``enum-contract-parse-error``    — a file exists but the enum/const/union
+                                         could not be parsed out of it.
+      ``enum-contract-drift``          — the values do not match (the message
+                                         names the enum, the layer, and the
+                                         symmetric difference).
+    """
+    violations: list[Violation] = []
+
+    api_ts_path = root / FRONTEND_API_TYPES_PATH
+    mcp_path = root / MCP_LIB_PATH
+    api_ts_text: str | None = None
+    mcp_text: str | None = None
+    if api_ts_path.exists():
+        api_ts_text = api_ts_path.read_text(encoding="utf-8")
+    else:
+        violations.append(
+            Violation(
+                code="enum-contract-source-missing",
+                message="Frontend API types file is missing — enum contract cannot be verified.",
+                details=[f"expected at {FRONTEND_API_TYPES_PATH}"],
+            )
+        )
+    if mcp_path.exists():
+        mcp_text = mcp_path.read_text(encoding="utf-8")
+    else:
+        violations.append(
+            Violation(
+                code="enum-contract-source-missing",
+                message="MCP library file is missing — enum contract cannot be verified.",
+                details=[f"expected at {MCP_LIB_PATH}"],
+            )
+        )
+
+    for contract in ENUM_CONTRACT_INVENTORY:
+        java_path = root / contract.java_path
+        if not java_path.exists():
+            violations.append(
+                Violation(
+                    code="enum-contract-source-missing",
+                    message=f"Backend enum source for {contract.label} is missing.",
+                    details=[f"expected at {contract.java_path}"],
+                )
+            )
+            continue
+        java_consts = parse_java_enum_constants(java_path.read_text(encoding="utf-8"))
+        if not java_consts:
+            violations.append(
+                Violation(
+                    code="enum-contract-parse-error",
+                    message=f"Could not parse the {contract.label} enum constants from the Java source.",
+                    details=[f"file: {contract.java_path}"],
+                )
+            )
+            continue
+        java_set = set(java_consts)
+
+        if api_ts_text is not None:
+            if contract.ts_const is not None:
+                ts_const = parse_const_string_array(api_ts_text, contract.ts_const)
+                if ts_const is None:
+                    violations.append(
+                        Violation(
+                            code="enum-contract-parse-error",
+                            message=f"Frontend constant {contract.ts_const} not found in {FRONTEND_API_TYPES_PATH}.",
+                            details=[f"backend {contract.label} = {java_consts}"],
+                        )
+                    )
+                elif ts_const != java_consts:
+                    violations.append(_drift_violation(contract.label, f"frontend {contract.ts_const} (api.ts)", java_consts, ts_const))
+
+            ts_union = parse_ts_union_literals(api_ts_text, contract.ts_union)
+            if ts_union is None:
+                violations.append(
+                    Violation(
+                        code="enum-contract-parse-error",
+                        message=f"Frontend union type {contract.ts_union} not found in {FRONTEND_API_TYPES_PATH}.",
+                        details=[f"backend {contract.label} = {java_consts}"],
+                    )
+                )
+            elif ts_union != java_set:
+                violations.append(_drift_violation(contract.label, f"frontend type {contract.ts_union} (api.ts)", sorted(java_set), sorted(ts_union)))
+
+        if mcp_text is not None and contract.mcp_const is not None:
+            mcp_const = parse_const_string_array(mcp_text, contract.mcp_const)
+            if mcp_const is None:
+                violations.append(
+                    Violation(
+                        code="enum-contract-parse-error",
+                        message=f"MCP constant {contract.mcp_const} not found in {MCP_LIB_PATH}.",
+                        details=[f"backend {contract.label} = {java_consts}"],
+                    )
+                )
+            elif mcp_const != java_consts:
+                violations.append(_drift_violation(contract.label, f"MCP {contract.mcp_const} (lib.js)", java_consts, mcp_const))
+
+    return violations
+
+
+def _drift_violation(label: str, layer: str, expected: list[str], actual: list[str]) -> Violation:
+    expected_set, actual_set = set(expected), set(actual)
+    missing = sorted(expected_set - actual_set)
+    extra = sorted(actual_set - expected_set)
+    details = [
+        f"backend {label} (source of truth): {expected}",
+        f"{layer}: {actual}",
+    ]
+    if missing:
+        details.append(f"missing from {layer}: {missing}")
+    if extra:
+        details.append(f"not in backend {label}: {extra}")
+    if not missing and not extra:
+        details.append(f"order differs from backend {label} declaration order")
+    return Violation(
+        code="enum-contract-drift",
+        message=f"{label} enum drift between backend and {layer} (issue #433 / ADR-034).",
+        details=details,
+    )
+
+
 def run_pr_body_check(event_path: Path) -> list[Violation]:
     """Backwards-compatible wrapper that loads the PR body from a GitHub event payload."""
     event = json.loads(event_path.read_text(encoding="utf-8"))
@@ -739,6 +996,7 @@ def main(argv: list[str] | None = None) -> int:
     violations.extend(run_controller_contracts(changed_files))
     violations.extend(run_migration_policy(changed_files))
     violations.extend(run_deploy_compose_credential_passthrough())
+    violations.extend(run_enum_contract_check())
 
     if not args.skip_pr_body:
         body = _resolve_pr_body(args)

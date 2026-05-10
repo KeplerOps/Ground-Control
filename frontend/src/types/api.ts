@@ -1,6 +1,14 @@
 // Enums
+//
+// The requirement/traceability enum vocabularies below mirror the backend Java
+// enums under `domain/requirements/state/`, which are the single source of truth
+// (ADR-034). `tools/policy/checks.py::run_enum_contract_check` (run by
+// `bin/policy` in CI) fails the build on any drift; `enum-contract.test.ts` is
+// the developer-local mirror of that gate.
 export type Status = "DRAFT" | "ACTIVE" | "DEPRECATED" | "ARCHIVED";
+export const STATUSES: Status[] = ["DRAFT", "ACTIVE", "DEPRECATED", "ARCHIVED"];
 export type Priority = "MUST" | "SHOULD" | "COULD" | "WONT";
+export const PRIORITIES: Priority[] = ["MUST", "SHOULD", "COULD", "WONT"];
 export type ControlFunction =
   | "PREVENTIVE"
   | "DETECTIVE"
@@ -24,14 +32,23 @@ export const REQUIREMENT_TYPES: RequirementType[] = [
   "INTERFACE",
 ];
 export type RelationType =
-  | "DEPENDS_ON"
   | "PARENT"
-  | "REFINES"
+  | "DEPENDS_ON"
   | "CONFLICTS_WITH"
+  | "REFINES"
   | "SUPERSEDES"
   | "RELATED";
+export const RELATION_TYPES: RelationType[] = [
+  "PARENT",
+  "DEPENDS_ON",
+  "CONFLICTS_WITH",
+  "REFINES",
+  "SUPERSEDES",
+  "RELATED",
+];
 export type ArtifactType =
   | "GITHUB_ISSUE"
+  | "PULL_REQUEST"
   | "CODE_FILE"
   | "ADR"
   | "CONFIG"
@@ -39,9 +56,12 @@ export type ArtifactType =
   | "TEST"
   | "SPEC"
   | "PROOF"
-  | "DOCUMENTATION";
+  | "DOCUMENTATION"
+  | "RISK_SCENARIO"
+  | "CONTROL";
 export const ARTIFACT_TYPES: ArtifactType[] = [
   "GITHUB_ISSUE",
+  "PULL_REQUEST",
   "CODE_FILE",
   "ADR",
   "CONFIG",
@@ -50,6 +70,8 @@ export const ARTIFACT_TYPES: ArtifactType[] = [
   "SPEC",
   "PROOF",
   "DOCUMENTATION",
+  "RISK_SCENARIO",
+  "CONTROL",
 ];
 export type LinkType =
   | "IMPLEMENTS"
@@ -64,7 +86,7 @@ export const LINK_TYPES: LinkType[] = [
   "CONSTRAINS",
   "VERIFIES",
 ];
-export type SyncStatus = "SYNCED" | "NOT_SYNCED" | "ERROR";
+export type SyncStatus = "SYNCED" | "STALE" | "BROKEN";
 export type RevisionType = "ADD" | "MOD" | "DEL";
 export type PackType = "CONTROL_PACK" | "REQUIREMENTS_PACK" | "CUSTOM";
 export type CatalogStatus = "AVAILABLE" | "WITHDRAWN" | "SUPERSEDED";
@@ -247,6 +269,11 @@ export interface TraceabilityLinkHistoryResponse {
 }
 
 export type ChangeCategory = "REQUIREMENT" | "RELATION" | "TRACEABILITY_LINK";
+export const CHANGE_CATEGORIES: ChangeCategory[] = [
+  "REQUIREMENT",
+  "RELATION",
+  "TRACEABILITY_LINK",
+];
 
 export interface FieldChangeResponse {
   oldValue: unknown;
@@ -406,7 +433,8 @@ export interface UpdateProjectRequest {
 export interface RequirementRequest {
   uid: string;
   title: string;
-  statement?: string;
+  // Backend RequirementRequest annotates `statement` @NotBlank — required on create.
+  statement: string;
   rationale?: string;
   requirementType?: RequirementType;
   priority?: Priority;
