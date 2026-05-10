@@ -316,6 +316,20 @@ class AuditHistoryIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$", hasSize(0)));
     }
 
+    @Test
+    @Order(12)
+    void relationHistory_resolvesViaTargetRequirement_returns200() throws Exception {
+        // Relation ownership is source-OR-target, consistent with GET /requirements/{id}/relations.
+        // The relation created in step 4 was AUDIT-001 -> AUDIT-003; here we look it up via the
+        // target requirement and expect the same ADD revision, not a 404.
+        mockMvc.perform(get("/api/v1/requirements/" + targetRequirementId + "/relations/" + relationId + "/history"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()", is(1)))
+                .andExpect(jsonPath("$[0].revisionType", is("ADD")))
+                .andExpect(jsonPath("$[0].snapshot.sourceId", is(requirementId.toString())))
+                .andExpect(jsonPath("$[0].snapshot.targetId", is(targetRequirementId.toString())));
+    }
+
     // --- Version diff endpoint tests (builds on data from steps 1-5) ---
 
     @Test

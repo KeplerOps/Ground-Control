@@ -386,6 +386,20 @@ class RequirementControllerTest {
             mockMvc.perform(delete("/api/v1/requirements/" + reqId + "/relations/" + relationId))
                     .andExpect(status().isNotFound());
         }
+
+        @Test
+        void mismatchedRequirement_returns404() throws Exception {
+            var wrongReqId = UUID.randomUUID();
+            var relationId = UUID.randomUUID();
+            doThrow(new NotFoundException("Relation not found: " + relationId))
+                    .when(requirementService)
+                    .deleteRelation(wrongReqId, relationId);
+
+            mockMvc.perform(delete("/api/v1/requirements/" + wrongReqId + "/relations/" + relationId))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.error.code", is("not_found")))
+                    .andExpect(jsonPath("$.error.message", is("Relation not found: " + relationId)));
+        }
     }
 
     @Nested
@@ -449,7 +463,8 @@ class RequirementControllerTest {
 
             mockMvc.perform(delete("/api/v1/requirements/" + wrongReqId + "/traceability/" + linkId))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.error.code", is("not_found")));
+                    .andExpect(jsonPath("$.error.code", is("not_found")))
+                    .andExpect(jsonPath("$.error.message", is("Traceability link not found: " + linkId)));
         }
 
         @Test
@@ -653,7 +668,8 @@ class RequirementControllerTest {
 
             mockMvc.perform(get("/api/v1/requirements/" + wrongReqId + "/relations/" + relId + "/history"))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.error.code", is("not_found")));
+                    .andExpect(jsonPath("$.error.code", is("not_found")))
+                    .andExpect(jsonPath("$.error.message", is("Relation not found: " + relId)));
         }
     }
 
@@ -878,7 +894,8 @@ class RequirementControllerTest {
 
             mockMvc.perform(get("/api/v1/requirements/" + wrongReqId + "/traceability/" + linkId + "/history"))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.error.code", is("not_found")));
+                    .andExpect(jsonPath("$.error.code", is("not_found")))
+                    .andExpect(jsonPath("$.error.message", is("Traceability link not found: " + linkId)));
         }
     }
 }
