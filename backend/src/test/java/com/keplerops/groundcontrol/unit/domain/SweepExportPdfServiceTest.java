@@ -67,25 +67,20 @@ class SweepExportPdfServiceTest {
 
     @Test
     void toPdf_rendersStatusDriftSectionWithEvidenceArtifact() throws IOException {
-        // Extract the rendered text so a no-op'd addStatusDrift would be caught: GC-T010 and the
-        // evidence artifact identifier (826) appear only in the status-drift section of fullReport().
+        // Extract the rendered text so a no-op'd addStatusDrift would be caught: "GC-T010" and the
+        // evidence artifact identifier ("826") appear only in the status-drift section of fullReport().
         var text = extractText(service.toPdf(fullReport()));
-        assertThat(text).contains("Status Drift");
-        assertThat(text).contains("GC-T010");
-        assertThat(text).contains("826");
+        assertThat(text).contains("Status Drift", "GC-T010", "826");
     }
 
     private static String extractText(byte[] pdfBytes) throws IOException {
-        var reader = new PdfReader(pdfBytes);
-        try {
+        try (var reader = new PdfReader(pdfBytes)) {
             var extractor = new PdfTextExtractor(reader);
             var sb = new StringBuilder();
             for (int page = 1; page <= reader.getNumberOfPages(); page++) {
                 sb.append(extractor.getTextFromPage(page)).append('\n');
             }
             return sb.toString();
-        } finally {
-            reader.close();
         }
     }
 
