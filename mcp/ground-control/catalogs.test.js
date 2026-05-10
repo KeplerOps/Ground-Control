@@ -226,13 +226,27 @@ describe("registerCatalogTool", () => {
     };
   }
 
-  it("registers when the catalog is active and returns true", () => {
+  it("registers when the catalog is active and returns true, forwarding all four args verbatim", () => {
     const server = makeFakeServer();
     const active = new Set(["workflow"]);
-    const result = registerCatalogTool(server, "workflow", "gc_query", "desc", {}, async () => ({}), active);
+    const sentinelSchema = { path: "sentinel-schema" };
+    const sentinelHandler = async () => ({ marker: "sentinel-handler" });
+    const result = registerCatalogTool(
+      server,
+      "workflow",
+      "gc_query",
+      "desc",
+      sentinelSchema,
+      sentinelHandler,
+      active,
+    );
     assert.equal(server.calls.length, 1);
     assert.equal(server.calls[0][0], "gc_query");
     assert.equal(server.calls[0][1], "desc");
+    // Assert schema and handler are forwarded by identity, not just shape — a
+    // regression where the wrapper dropped or substituted either would fail.
+    assert.strictEqual(server.calls[0][2], sentinelSchema);
+    assert.strictEqual(server.calls[0][3], sentinelHandler);
     assert.equal(result, true);
   });
 

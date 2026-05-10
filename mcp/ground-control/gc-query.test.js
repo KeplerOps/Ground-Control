@@ -153,13 +153,20 @@ describe("executeGcQuery", () => {
   );
 
   it(
-    "surfaces a 5xx error and does NOT eat the body",
+    "surfaces a 5xx error and does NOT eat the body (preserves it as the error message)",
     withBaseUrl("http://localhost:8000", async () => {
       const fetchImpl = async () =>
         fakeResponse({ status: 500, body: "internal explosion" });
       await assert.rejects(
         () => executeGcQuery("/api/v1/requirements", undefined, { fetchImpl }),
-        (err) => err instanceof RequestError && err.status === 500,
+        // `parseErrorBody` returns the raw body as `message` when it's not JSON.
+        // The assertion below would fail if a regression swallowed the body and
+        // surfaced an empty or generic error message.
+        (err) =>
+          err instanceof RequestError &&
+          err.status === 500 &&
+          typeof err.message === "string" &&
+          err.message.includes("internal explosion"),
       );
     }),
   );
