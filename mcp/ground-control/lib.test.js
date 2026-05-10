@@ -1459,6 +1459,20 @@ describe("buildCodexArchitecturePreflightPrompt", () => {
     assert.ok(prompt.includes("Do not spend time re-fetching requirement details"));
     assert.ok(!prompt.includes("Do not spend time re-fetching issue details"));
   });
+
+  it("asks codex to design repo-wide against security / maintainability / extensibility / whole-repo (#830)", () => {
+    const prompt = buildCodexArchitecturePreflightPrompt({
+      requirement: null,
+      issueContext: { number: 830, title: "x" },
+    });
+    assert.ok(prompt.includes("Design-up-front, repo-wide"));
+    assert.ok(prompt.includes("Security:"));
+    assert.ok(prompt.includes("Maintainability:"));
+    assert.ok(prompt.includes("Extensibility:"));
+    assert.ok(prompt.includes("Whole-repo view:"));
+    assert.ok(prompt.includes("validate()"));
+    assert.ok(prompt.includes("which cross-cutting layers it must pass"));
+  });
 });
 
 describe("buildCodexArchitectureExecArgs", () => {
@@ -1501,6 +1515,21 @@ describe("buildCodexReviewCorePrompt", () => {
     assert.ok(prompt.includes("No triage"));
     assert.ok(prompt.includes("The caller intends to fix everything now."));
     assert.ok(prompt.includes("precise file and line reference"));
+  });
+
+  it("requires per-finding one-off/class classification with category shape + instances (#830)", () => {
+    const prompt = buildCodexReviewCorePrompt({
+      baseBranch: "dev",
+      uncommitted: true,
+      diffText: diff,
+    });
+    assert.ok(prompt.includes("one-off or one instance of a recurring CATEGORY"));
+    assert.ok(prompt.includes("`classification`"));
+    assert.ok(prompt.includes('"one-off"'));
+    assert.ok(prompt.includes('"class"'));
+    assert.ok(prompt.includes("`category`"));
+    assert.ok(prompt.includes("`shape`"));
+    assert.ok(prompt.includes("`instances`"));
   });
 
   it("tells codex not to re-derive the diff and embeds it inside delimiters", () => {
@@ -1901,8 +1930,15 @@ describe("parseCodexReviewFindingsTail", () => {
 
   it("parses a well-formed FINDINGS block and strips it from the body", () => {
     const findingsJson = JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "The handler does not validate the `name` parameter against length limits." },
-      { path: "src/bar.java", line: 88, title: "Bypass of existing helper", body: "Uses raw JdbcTemplate instead of the project's ScopedRequirementRepository." },
+      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "The handler does not validate the `name` parameter against length limits.", classification: "one-off" },
+      {
+        path: "src/bar.java",
+        line: 88,
+        title: "Bypass of existing helper",
+        body: "Uses raw JdbcTemplate instead of the project's ScopedRequirementRepository.",
+        classification: "class",
+        category: { shape: "controller method that hits the DB via raw JdbcTemplate instead of a scoped repository", instances: ["src/bar.java:88", "src/baz.java:140"] },
+      },
     ]);
     const stdout = `**Findings**\n\n- src/foo.java:42 missing validation\n- src/bar.java:88 bypass\n\n===FINDINGS===\n${findingsJson}\n===END===\n`;
     const { findings, body } = parseCodexReviewFindingsTail(stdout, repoRoot);
@@ -1912,11 +1948,57 @@ describe("parseCodexReviewFindingsTail", () => {
       line: 42,
       title: "Missing input validation",
       body: "The handler does not validate the `name` parameter against length limits.",
+      classification: "one-off",
     });
     assert.equal(findings[1].path, "src/bar.java");
+    assert.equal(findings[1].classification, "class");
+    assert.deepEqual(findings[1].category, {
+      shape: "controller method that hits the DB via raw JdbcTemplate instead of a scoped repository",
+      instances: ["src/bar.java:88", "src/baz.java:140"],
+    });
     assert.ok(!body.includes("===FINDINGS==="));
     assert.ok(!body.includes("===END==="));
     assert.ok(body.includes("**Findings**"));
+  });
+
+  it("requires a `classification` on every finding", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "y" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /classification/);
+  });
+
+  it("rejects an unknown `classification` value", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "minor" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /classification/);
+  });
+
+  it("requires `category` {shape, instances} when classification is class", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "class" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /category/);
+  });
+
+  it("rejects an empty `category.instances` array", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "class", category: { shape: "a recurring pattern", instances: [] } },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /instances/);
+  });
+
+  it("rejects a `category` on a one-off finding", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "one-off", category: { shape: "x", instances: ["src/foo.java:42"] } },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /one-off/);
   });
 
   it("parses an empty FINDINGS block", () => {
@@ -2031,29 +2113,44 @@ describe("parseCodexReviewFindingsTail", () => {
     assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /body/);
   });
 
-  it("throws when `body` exceeds the cap that accounts for the rendered prefix (review-cycle-3 finding)", () => {
-    // The poster prepends `[reviewerLabel] title\n\n` to the body before
-    // POSTing. Worst case prefix is `[security] ` (11) + 200-char title +
-    // \n\n (2) = 213 chars. Codex review flagged that a body of exactly
-    // 65535 chars would render to >65535 and get rejected by GitHub.
-    // Validator caps body so the rendered comment always fits.
+  it("throws when `body` exceeds the cap that reserves room for the rendered prefix + classification note (#828 cycle-3, #830 cycle-1)", () => {
+    // The poster prepends `[reviewerLabel] title\n\n` (≤213 chars) and, for
+    // class findings, a bounded classification note (≤800 chars) before the
+    // body. The validator caps body at 65535 - 213 - 800 = 64522 so the
+    // rendered comment always fits GitHub's 65535-char limit even in the
+    // class-finding path.
     const findingsJson = JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "x", body: "y".repeat(65336) },
+      { path: "src/foo.java", line: 42, title: "x", body: "y".repeat(65336), classification: "one-off" },
     ]);
     const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
     assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /body/);
   });
 
-  it("accepts a body up to the cap that leaves room for the rendered prefix", () => {
-    // The cap is 65322 chars (65535 - 213-char worst-case prefix). A body
-    // of exactly that length must validate and render to <= 65535.
-    const safeLen = 65322;
+  it("accepts a body up to the cap that leaves room for the rendered prefix + classification note", () => {
+    // 64522 = 65535 - 213 (worst-case prefix) - 800 (worst-case classification note).
+    const safeLen = 64522;
     const findingsJson = JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "x".repeat(200), body: "y".repeat(safeLen) },
+      { path: "src/foo.java", line: 42, title: "x".repeat(200), body: "y".repeat(safeLen), classification: "one-off" },
     ]);
     const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
     const { findings } = parseCodexReviewFindingsTail(stdout, repoRoot);
     assert.equal(findings[0].body.length, safeLen);
+  });
+
+  it("validates each `category.instances` entry as <path>:<line> inside the repo and requires the finding's own site", () => {
+    const mk = (instances) =>
+      `===FINDINGS===\n${JSON.stringify([
+        { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "class", category: { shape: "a recurring pattern", instances } },
+      ])}\n===END===`;
+    // Not in <path>:<line> form.
+    assert.throws(() => parseCodexReviewFindingsTail(mk(["later"]), repoRoot), /<path>:<line>|instances/);
+    // Path escapes the repo.
+    assert.throws(() => parseCodexReviewFindingsTail(mk(["../etc/passwd:1", "src/foo.java:42"]), repoRoot), /path|traversal|instances/i);
+    // Own site (src/foo.java:42) missing from the list.
+    assert.throws(() => parseCodexReviewFindingsTail(mk(["src/bar.java:7"]), repoRoot), /own site/i);
+    // Valid: own site present, deduped.
+    const { findings } = parseCodexReviewFindingsTail(mk(["src/foo.java:42", "src/foo.java:42", "src/bar.java:7"]), repoRoot);
+    assert.deepEqual(findings[0].category.instances, ["src/foo.java:42", "src/bar.java:7"]);
   });
 
   it("throws when a `path` escapes the repo via traversal", () => {
@@ -2079,8 +2176,8 @@ describe("parseCodexReviewFindingsTail", () => {
 
   it("includes the finding index in the error so codex output is debuggable", () => {
     const findingsJson = JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "x", body: "y" },
-      { path: "src/bar.java", line: 99, title: "ok", body: "" }, // bad: empty body
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "one-off" },
+      { path: "src/bar.java", line: 99, title: "ok", body: "", classification: "one-off" }, // bad: empty body
     ]);
     const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
     assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /\b1\b/); // finding index 1
@@ -4084,8 +4181,8 @@ process.stdin.on("end", () => {
     // prefix and both return empty pages — that's fine, the canned response
     // works for both.
     const findingsTail = "===FINDINGS===\n" + JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "Detail A" },
-      { path: "src/bar.java", line: 88, title: "Bypasses ScopedRequirementRepository", body: "Detail B" },
+      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "Detail A", classification: "one-off" },
+      { path: "src/bar.java", line: 88, title: "Bypasses ScopedRequirementRepository", body: "Detail B", classification: "one-off" },
     ]) + "\n===END===\n";
     // Closing-issues fetch is part of the post-push gate; return one closing
     // issue (#998) that has a `plan` phase marker on its thread.
@@ -4285,7 +4382,7 @@ process.stdin.on("end", () => {
     // surface a structured error — same fail-fast posture as the pre-push
     // cycle marker.
     const findingsTail = "===FINDINGS===\n" + JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "x", body: "y" },
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "one-off" },
     ]) + "\n===END===\n";
     const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
 
@@ -4363,7 +4460,7 @@ process.stdin.on("end", () => {
     // post_failures envelope records each per-reviewer per-finding failure
     // so the calling agent sees the partial-write condition.
     const findingsTail = "===FINDINGS===\n" + JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "Detail" },
+      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "Detail", classification: "one-off" },
     ]) + "\n===END===\n";
     const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
 
@@ -4438,8 +4535,8 @@ process.stdin.on("end", () => {
     // landed (parse-only failure, or all-POST failure due to head-SHA
     // fetch / network).
     const findingsTail = "===FINDINGS===\n" + JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "x", body: "y" },
-      { path: "src/bar.java", line: 99, title: "x2", body: "y2" },
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "one-off" },
+      { path: "src/bar.java", line: 99, title: "x2", body: "y2", classification: "one-off" },
     ]) + "\n===END===\n";
     const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
 
@@ -4523,7 +4620,7 @@ process.stdin.on("end", () => {
     // We exercise this on the no-PR / uncommitted=true path because
     // postResults is empty there and the placeholder branch fires.
     const findingsTail = "===FINDINGS===\n" + JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "Detail title", body: "Authoritative body content the agent must see." },
+      { path: "src/foo.java", line: 42, title: "Detail title", body: "Authoritative body content the agent must see.", classification: "one-off" },
     ]) + "\n===END===\n";
 
     const shim = makeFullShimRepo({
@@ -4677,7 +4774,7 @@ process.stdin.on("end", () => {
     // post_failures, and the response is ok=false so the agent doesn't treat
     // the run as complete.
     const findingsTail = "===FINDINGS===\n" + JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "x", body: "y" },
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "one-off" },
     ]) + "\n===END===\n";
     const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
 

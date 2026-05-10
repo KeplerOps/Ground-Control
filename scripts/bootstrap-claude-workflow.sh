@@ -58,6 +58,7 @@ HOOKS_DST="${HOME}/.claude/hooks"
 
 WORKFLOW_HOOKS=(
   "git-merge-guard.py"
+  "block-defer-language.py"
   "log-skill-call.sh"
   "verify-implementation.sh"
 )

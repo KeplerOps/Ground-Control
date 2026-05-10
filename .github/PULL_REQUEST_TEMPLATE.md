@@ -30,7 +30,7 @@
 
 - [ ] `make policy` passes
 - [ ] `gc_evaluate_quality_gates` passes or is unchanged by this repo-only change
-- [ ] `gc_run_sweep` reviewed or intentionally deferred with reason
+- [ ] `gc_run_sweep` reviewed; findings fixed or recorded with rationale
 
 ## Traceability
 

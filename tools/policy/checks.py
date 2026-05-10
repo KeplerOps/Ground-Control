@@ -20,6 +20,175 @@ CONTROLLER_PATH_RE = re.compile(
 MIGRATION_PATH_RE = re.compile(r"^backend/src/main/resources/db/migration/V\d+__.+\.sql$")
 PR_REQUIREMENT_RE = re.compile(r"\b[A-Z][A-Z0-9]+-[A-Z0-9]+(?:-\d+|\d+)\b")
 
+# ---------------------------------------------------------------------------
+# Deferral-disposition classifier (issue #830, ADR-029).
+#
+# ADR-029's contract: every reviewer finding gets a recorded disposition, and
+# the only valid ones are `fix`, `wontfix` (with explicit user authorization),
+# or `not-applicable` (with rationale). `defer` — "to a follow-up PR / issue /
+# later iteration" — is not in the contract. This classifier is the shared
+# logic behind two mechanical layers: the PreToolUse hook at
+# `.claude/hooks/block-defer-language.py` (tool-call time) and
+# `run_no_deferral_disposition_check` below (completion-gate time, via
+# `bin/policy`). The hook carries a byte-for-byte copy of the regex tables and
+# `classify_deferral_language` because it is copied standalone to
+# ~/.claude/hooks/ and cannot import this module; `tools/policy/deferral_cases.json`
+# is the shared golden-case file both test suites load, so the two copies
+# cannot drift without a test failing.
+#
+# Two tiers:
+#   Tier 1 — explicit forward-deferral disposition phrases ("deferred to a
+#     follow-up PR", "in a subsequent PR", "will be addressed in a follow-up",
+#     "fixed in a subsequent PR", "handled as a follow-up issue"). Forbidden on
+#     EVERY surface, including a brand-new issue body.
+#   Tier 2 — softer deferral signals (bare "defer*", "TBD later",
+#     "to be filed/done/addressed later/separately"). Forbidden ONLY on the
+#     two surfaces where you are closing or commenting on the very issue under
+#     implementation (`issue-close`, `issue-comment`) — that is the
+#     "deferring in a closing comment" failure mode from #830 case #2. On
+#     issue/PR creation, editing, or PR comments, these phrases are too
+#     overloaded with legitimate scope-bounding / sibling-PR-reference uses to
+#     flag mechanically.
+#
+# Bare "out of scope" is intentionally NOT a pattern: a PR body or new issue
+# legitimately scope-bounds its own work with an "## Out of scope" section, and
+# the dangerous "out of scope, deferred to a follow-up #831" construction is
+# already caught by the Tier-1 deferral-verb patterns.
+# ---------------------------------------------------------------------------
+
+DEFERRAL_CASES_PATH = Path(__file__).resolve().parent / "deferral_cases.json"
+
+# Surfaces where Tier 2 (the softer signals) is enforced in addition to Tier 1.
+_DEFERRAL_TIER2_SURFACES: frozenset[str] = frozenset({"issue-close", "issue-comment"})
+
+_DEFERRAL_TIER1_PATTERNS: tuple[tuple[str, str], ...] = (
+    (
+        "defer-to-followup",
+        r"\bdefer(?:red|s|ring|ral)?\b[^.\n]{0,40}?\b(?:to|until|for|into)\b[^.\n]{0,25}?"
+        r"\b(?:follow[-\s]?up|subsequent|later|future|next|another)\b",
+    ),
+    (
+        "in-subsequent-unit",
+        r"\b(?:in|to|as)\s+(?:a\s+|the\s+|another\s+)?(?:subsequent|follow[-\s]?up)\s+"
+        r"(?:PR|pull\s+request|issue|ticket|commit|iteration|sprint|cycle|change)\b",
+    ),
+    (
+        "addressed-in-followup",
+        r"\b(?:will|to|shall|can)\s+be\s+(?:addressed|handled|done|fixed|implemented|resolved|filed|tracked)\s+"
+        r"(?:in|by|as)\s+(?:a\s+|the\s+|another\s+)?(?:follow[-\s]?up|subsequent|later|future|next)\b",
+    ),
+    (
+        "fix-in-followup",
+        r"\b(?:address|handle|fix|implement|resolve)(?:ed|d)?\s+(?:this\s+|that\s+|it\s+|them\s+|the\s+rest\s+)?"
+        r"(?:in|as)\s+(?:a\s+|the\s+|another\s+)?(?:follow[-\s]?up|subsequent)\s+"
+        r"(?:PR|pull\s+request|issue|ticket|commit|change)\b",
+    ),
+)
+
+_DEFERRAL_TIER2_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("tbd-postponement", r"\bTBD\b\s*(?:[.;:,)\]]|$|\b(?:later|in\b|for\b|—|-))"),
+    (
+        "to-be-done-later",
+        r"\bto\s+be\s+(?:done|addressed|filed|tracked|handled|fixed)\s+(?:later|separately|in\s+a\b|elsewhere)\b",
+    ),
+)
+
+# Bare "defer*" word, Tier 2, applied with a negation guard on the preceding
+# window and an exemption for the historical "deferred from #N" framing.
+_DEFERRAL_BARE_WORD_RE = re.compile(r"\bdefer(?:red|s|ring|ral)?\b", re.IGNORECASE)
+_DEFERRAL_NEGATION_BEFORE_RE = re.compile(
+    r"\b(?:do\s+not|don'?t|never|no|not|should\s+not|shall\s+not|cannot|can'?t|without|avoid|stop)\b"
+    r"(?:\W+\w+){0,3}\W*$",
+    re.IGNORECASE,
+)
+_DEFERRAL_BARE_WORD_HISTORICAL_AFTER_RE = re.compile(r"^\W*from\b", re.IGNORECASE)
+
+_DEFERRAL_TIER1_RES = tuple(
+    (name, re.compile(pat, re.IGNORECASE | re.DOTALL)) for name, pat in _DEFERRAL_TIER1_PATTERNS
+)
+_DEFERRAL_TIER2_RES = tuple(
+    (name, re.compile(pat, re.IGNORECASE)) for name, pat in _DEFERRAL_TIER2_PATTERNS
+)
+
+
+def classify_deferral_language(text: str, surface: str) -> tuple[str, str | None]:
+    """Classify body/comment text for deferral-disposition language.
+
+    Returns ``("deny", "<tier>:<pattern-name>")`` when the text contains
+    forbidden deferral language for the given ``surface``, or ``("allow", None)``
+    otherwise. ``surface`` is one of ``issue-create``, ``issue-edit``,
+    ``issue-close``, ``issue-comment``, ``pr-create``, ``pr-edit``,
+    ``pr-comment``, ``pr-body``.
+
+    Tier 1 patterns deny on every surface; Tier 2 patterns deny only on the
+    surfaces in :data:`_DEFERRAL_TIER2_SURFACES` (closing/commenting on the
+    issue under implementation).
+    """
+    if not text:
+        return ("allow", None)
+    for name, rx in _DEFERRAL_TIER1_RES:
+        if rx.search(text):
+            return ("deny", f"tier1:{name}")
+    if surface in _DEFERRAL_TIER2_SURFACES:
+        for name, rx in _DEFERRAL_TIER2_RES:
+            if rx.search(text):
+                return ("deny", f"tier2:{name}")
+        for match in _DEFERRAL_BARE_WORD_RE.finditer(text):
+            before = text[max(0, match.start() - 32) : match.start()]
+            if _DEFERRAL_NEGATION_BEFORE_RE.search(before):
+                continue
+            after = text[match.end() : match.end() + 12]
+            if _DEFERRAL_BARE_WORD_HISTORICAL_AFTER_RE.match(after):
+                continue
+            return ("deny", "tier2:bare-defer")
+    return ("allow", None)
+
+
+_DEFERRAL_DENIAL_GUIDANCE = (
+    "Deferral is not a valid disposition (ADR-029). Every reviewer finding must "
+    "be one of: (a) fixed now in the same diff; (b) recorded `wontfix` with "
+    "explicit user authorization quoted; or (c) recorded `not-applicable` with a "
+    "rationale. 'Defer to a follow-up PR / issue / later iteration' is not in the "
+    "contract — filing a tracking issue does not make it one. Re-route to fix-now "
+    "or escalate to the user on the issue thread for authorization."
+)
+
+
+def run_no_deferral_disposition_check(
+    *, pr_body: str | None = None, root: Path = REPO_ROOT
+) -> list[Violation]:
+    """Flag deferral-disposition language in the PR body at completion gate.
+
+    This is the completion-gate layer over ADR-029's contract; the PreToolUse
+    hook at ``.claude/hooks/block-defer-language.py`` is the tool-call-time
+    layer. The PR body is treated as a ``pr-body`` surface — Tier 1 deferral
+    phrases are flagged; the ``## Out of scope`` section heading and
+    sibling-PR references are not (Tier 2 is not applied to ``pr-body``).
+    Text scanning cannot prove a *silently dropped* finding — that remains the
+    province of the issue-thread findings-vs-decisions record (ADR-029); this
+    check only catches deferral language that was actually written.
+
+    ``root`` is accepted for signature symmetry with the other ``run_*`` checks
+    and is unused here.
+    """
+    del root  # signature symmetry; this check operates purely on the PR body text
+    if pr_body is None:
+        return []
+    decision, pattern = classify_deferral_language(pr_body, "pr-body")
+    if decision == "deny":
+        return [
+            Violation(
+                code="pr-body-deferral-disposition",
+                message="PR body contains deferral-disposition language (ADR-029 / #830).",
+                details=[
+                    f"matched pattern: {pattern}",
+                    _DEFERRAL_DENIAL_GUIDANCE,
+                ],
+            )
+        ]
+    return []
+
+
 DEPLOY_COMPOSE_PROD_PATH = Path("deploy/docker/docker-compose.prod.yml")
 REQUIRED_ADR026_CREDENTIAL_SLOT_COUNT = 5
 REQUIRED_ADR026_ALLOWLIST_SLOT_COUNT = 5
@@ -465,7 +634,7 @@ def check_pr_body(body: str) -> list[Violation]:
     required_checks = [
         "- [x] `make policy` passes",
         "- [x] `gc_evaluate_quality_gates` passes or is unchanged by this repo-only change",
-        "- [x] `gc_run_sweep` reviewed or intentionally deferred with reason",
+        "- [x] `gc_run_sweep` reviewed; findings fixed or recorded with rationale",
     ]
     missing_checks = [entry for entry in required_checks if entry not in body]
     if missing_checks:
@@ -487,6 +656,12 @@ def check_pr_body(body: str) -> list[Violation]:
                 details=missing_traceability,
             )
         )
+
+    # The no-deferral check is composed into the PR-body validator so EVERY
+    # PR-body validation route — bin/policy main(), run_pr_body_check (the
+    # GitHub-event-payload path / bin/check-pr-body), and a direct
+    # check_pr_body(body) call — enforces ADR-029's contract, not just main().
+    violations.extend(run_no_deferral_disposition_check(pr_body=body))
 
     return violations
 
@@ -568,6 +743,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.skip_pr_body:
         body = _resolve_pr_body(args)
         if body is not None:
+            # check_pr_body composes the no-deferral check (ADR-029) so all
+            # PR-body validation routes share the same contract.
             violations.extend(check_pr_body(body))
 
     return render_and_exit(violations)

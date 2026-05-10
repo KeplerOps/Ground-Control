@@ -1999,10 +1999,17 @@ export function buildCodexArchitecturePreflightPrompt({ requirement = null, trac
     "- Add or update ADRs/design docs only if needed to lock in guardrails or clarify boundaries.",
     "- State explicit non-goals and anti-patterns to avoid.",
     "",
+    "Design-up-front, repo-wide — not file-locally. The implementation that follows you will design the change with the file or feature in front of it; your job is to make it design with the repository in front of it. For the change this requirement/issue calls for, evaluate the intended design against ALL FOUR of:",
+    "- Security: every cross-cutting layer the design passes through that has a validate()/shape-check/parser/policy gate — the auth surface, the secret-handling surface, env-binding shapes, config validators, OS-level exposure (e.g. a token in process argv), error-envelope leakage. Name each layer the design touches and how it satisfies it. A design that 'sits correctly within the edited file's existing style' but fails a validator outside that file is exactly the failure to catch here.",
+    "- Maintainability: every place in the repo that already does this kind of thing. Reuse the existing helper/config/script before inventing a new one. Name the canonical incumbents the implementation must build on.",
+    "- Extensibility: the next reasonable change in the same direction. Does the design foreclose it? Is it parameterized so one obvious future variation does not require re-editing the canonical artifact? Call out where a parameter/seam belongs.",
+    "- Whole-repo view: the canonical configs, the canonical scripts, the cross-cutting rules, and the host/OS/runtime layers that will see the artifact — not just the file being edited. Enumerate the ones in scope.",
+    "",
     "Final response requirements:",
     "- List files changed.",
     "- Summarize architecture decisions and guardrails.",
     "- Summarize required cross-cutting concerns to reuse.",
+    "- For the intended design, state which cross-cutting layers it must pass (security validators, config shapes, OS-level exposure, error envelopes) and how it satisfies each; name the canonical incumbents it must build on; and call out the seam/parameter the extensibility view requires.",
     "- Summarize gotchas and anti-patterns to avoid.",
     "- Summarize non-goals and implementation boundaries.",
     "",
@@ -2260,19 +2267,22 @@ function buildFindingsEmissionInstructions({ reviewerLabel }) {
     "    `line`   — line number in the new (RIGHT) side of the diff, as a positive integer. File-level comments are not yet supported; anchor every finding to a specific line in the diff.",
     "    `title`  — one-line summary, ≤200 characters, non-empty.",
     "    `body`   — detailed explanation, ≤65322 characters, non-empty. Self-contained — do NOT reference 'see above'. Do NOT paste full file contents, secret values, or environment variables into the body — quote only the short snippets needed to anchor the finding.",
-    `- The MCP server will prepend \`[${reviewerLabel}]\` to the posted comment's first line so PR readers can tell which reviewer surfaced each finding. Do NOT add the prefix yourself; do NOT include the reviewer label inside any field.`,
+    '    `classification` — exactly "one-off" or "class". "one-off": this exact site, no analogues elsewhere in the diff or in the nearby repo code you can see. "class": this site is one instance of a pattern that recurs — the same brittle construction, the same missing pre-condition, the same bypassed helper — at other sites. Decide this BEFORE emitting: scan the whole diff (and adjacent repo code where the pattern plausibly extends) for analogues. Under-classifying a recurring pattern as "one-off" wastes a review cycle, because the agent fixes the named site and the next cycle surfaces another instance.',
+    '    `category` — REQUIRED when `classification` is "class"; MUST be omitted (or null) when "one-off". An object with exactly: `shape` — the pattern that defines membership in the category, as a one-line description a reader can use to recognize a new instance (≤300 chars, non-empty); `instances` — a JSON array of `"<path>:<line>"` strings, one per known instance (including this finding\'s own site), every analogue you can see in the diff and in adjacent repo code. Non-empty when present.',
+    `- The MCP server will prepend \`[${reviewerLabel}]\` and a one-line classification note to the posted comment's first lines so PR readers can tell which reviewer surfaced each finding and whether it is a class. Do NOT add either prefix yourself; do NOT include the reviewer label inside any field.`,
     "- For zero findings, emit exactly:",
     "",
     "    ===FINDINGS===",
     "    []",
     "    ===END===",
     "",
-    "- Example for two findings:",
+    "- Example for three findings — a one-off and a two-site class:",
     "",
     "    ===FINDINGS===",
     "    [",
-    '      {"path":"src/Foo.java","line":42,"title":"Missing input validation","body":"Detailed explanation..."},',
-    '      {"path":"src/Bar.java","line":88,"title":"Bypasses ScopedRequirementRepository","body":"Use the existing helper instead..."}',
+    '      {"path":"src/Foo.java","line":42,"title":"Missing input validation","body":"Detailed explanation...","classification":"one-off"},',
+    '      {"path":"deploy/scripts/sync.sh","line":99,"title":"Bearer token in curl argv","body":"Other local users can read it via /proc/<pid>/cmdline. Pass it through --config <(printf ...) instead.","classification":"class","category":{"shape":"curl invocation that interpolates a secret into a command-line -H/-u argument instead of a config FD/file","instances":["deploy/scripts/sync.sh:99","deploy/scripts/sync.sh:131","deploy/scripts/other.sh:44"]}},',
+    '      {"path":"src/Bar.java","line":88,"title":"Bypasses ScopedRequirementRepository","body":"Use the existing helper instead...","classification":"one-off"}',
     "    ]",
     "    ===END===",
     "",
@@ -2843,6 +2853,7 @@ export function buildCodexReviewCorePrompt({
     "- Do not silently omit findings because they seem minor. The caller intends to fix everything now.",
     "- Call out cases where the change reinvents existing infrastructure, bypasses existing validation or error handling, duplicates schemas or DTOs, weakens observability, or introduces brittle abstractions.",
     "- Each finding must have a precise file and line reference.",
+    "- For each finding, decide whether it is a one-off or one instance of a recurring CATEGORY (the same brittle construction / missing pre-condition / bypassed helper at other sites). If it is a category, name the category's shape in a way a reader can use to recognize a new instance, and enumerate every instance you can see — in the diff AND in adjacent repo code the diff touches. The agent will design the fix at the category level and apply it to all instances at once; if you under-report the instances, the next review cycle surfaces another one. This classification goes in the `classification`/`category` fields of each finding object (see below).",
     "",
     ...buildFindingsEmissionInstructions({ reviewerLabel: "core" }),
     "",
@@ -2889,6 +2900,7 @@ export function buildCodexSecurityReviewPrompt({
     "- Read the whole diff before forming conclusions.",
     "- Enumerate every issue that meets the 'concrete, exploitable' bar. The caller fixes them all; there is no triage bucket.",
     "- Each finding must have a precise file and line reference and must name the attacker model and the attack path in the body.",
+    "- For each finding, decide whether it is a one-off or one instance of a recurring CATEGORY of exposure (e.g. 'every curl that puts a secret in argv', 'every endpoint missing project-scoping'). If it is a category, name the category's shape and enumerate every instance you can see in the diff and in adjacent repo code the diff touches — so the agent can close the whole category, not just the named site. This goes in the `classification`/`category` fields of each finding object (see below).",
     "",
     ...buildFindingsEmissionInstructions({ reviewerLabel: "security" }),
     "",
@@ -2934,8 +2946,15 @@ export function buildCodexReviewExecArgs({ repoPath, outputPath }) {
 // validation but be rejected by GitHub's POST (closes a gap flagged in
 // #793 review cycle 3).
 const FINDING_TITLE_MAX = 200;
-const FINDING_PREFIX_MAX = 213;
-const FINDING_BODY_MAX = 65535 - FINDING_PREFIX_MAX;
+const FINDING_PREFIX_MAX = 213; // `[security] ` (11) + 200-char title + `\n\n` (2)
+// Posted `class` findings prepend a bounded classification note before the
+// body (see formatFindingClassificationNote). Reserve worst-case room for it
+// in the body cap so a valid finding can never render a comment over
+// GitHub's 65535-char limit (issue #830, codex cycle 1).
+const FINDING_CLASSIFICATION_NOTE_MAX = 800;
+const FINDING_BODY_MAX = 65535 - FINDING_PREFIX_MAX - FINDING_CLASSIFICATION_NOTE_MAX;
+const FINDING_CATEGORY_SHAPE_MAX = 300;
+const FINDING_CLASSIFICATIONS = new Set(["one-off", "class"]);
 const CODEX_FINDINGS_TAIL_RE = /===FINDINGS===\s*\n([\s\S]*?)\n===END===\s*$/;
 
 // Lexical containment check for a codex-supplied finding path. Returns the
@@ -3059,7 +3078,95 @@ function validateFinding(raw, idx, repoRoot) {
       `finding at index ${idx} has 'body' longer than ${FINDING_BODY_MAX} chars (${raw.body.length})`,
     );
   }
-  return { path, line, title: raw.title, body: raw.body };
+  // classification (#830): every finding declares whether it is a one-off or
+  // one instance of a recurring category, so the agent designs the fix at the
+  // category level rather than whack-a-mole'ing the reviewer-named site only.
+  if (raw.classification === undefined || raw.classification === null) {
+    throw new Error(
+      `finding at index ${idx} is missing required field 'classification' (must be "one-off" or "class")`,
+    );
+  }
+  if (!FINDING_CLASSIFICATIONS.has(raw.classification)) {
+    throw new Error(
+      `finding at index ${idx} has invalid 'classification' (must be "one-off" or "class", got ${JSON.stringify(raw.classification)})`,
+    );
+  }
+  let category = null;
+  if (raw.classification === "class") {
+    if (raw.category === null || typeof raw.category !== "object" || Array.isArray(raw.category)) {
+      throw new Error(
+        `finding at index ${idx} has classification "class" but is missing required object field 'category' ({shape, instances})`,
+      );
+    }
+    if (typeof raw.category.shape !== "string" || raw.category.shape.trim() === "") {
+      throw new Error(
+        `finding at index ${idx} 'category.shape' must be a non-empty string`,
+      );
+    }
+    if (raw.category.shape.length > FINDING_CATEGORY_SHAPE_MAX) {
+      throw new Error(
+        `finding at index ${idx} 'category.shape' longer than ${FINDING_CATEGORY_SHAPE_MAX} chars (${raw.category.shape.length})`,
+      );
+    }
+    if (!Array.isArray(raw.category.instances) || raw.category.instances.length === 0) {
+      throw new Error(
+        `finding at index ${idx} 'category.instances' must be a non-empty array of "<path>:<line>" strings`,
+      );
+    }
+    // Each instance must be a real "<path>:<line>" — same containment rules as
+    // the finding's own `path` (no leading `/`, no `..` segments, inside the
+    // repo) and a positive-integer line. Dedupe; the finding's own site must
+    // appear so the category list is anchored to a concrete reviewed location.
+    const seen = new Set();
+    const normalized = [];
+    for (const [j, inst] of raw.category.instances.entries()) {
+      if (typeof inst !== "string" || inst.trim() === "") {
+        throw new Error(
+          `finding at index ${idx} 'category.instances[${j}]' must be a non-empty string`,
+        );
+      }
+      const lastColon = inst.lastIndexOf(":");
+      if (lastColon <= 0 || lastColon === inst.length - 1) {
+        throw new Error(
+          `finding at index ${idx} 'category.instances[${j}]' must be "<path>:<line>" (got ${JSON.stringify(inst)})`,
+        );
+      }
+      const instPath = inst.slice(0, lastColon);
+      const instLineStr = inst.slice(lastColon + 1);
+      if (!/^\d+$/.test(instLineStr) || Number.parseInt(instLineStr, 10) <= 0) {
+        throw new Error(
+          `finding at index ${idx} 'category.instances[${j}]' must end with a positive-integer line (got ${JSON.stringify(inst)})`,
+        );
+      }
+      let normPath;
+      try {
+        normPath = validateFindingPath(instPath, repoRoot);
+      } catch (err) {
+        throw new Error(`finding at index ${idx} 'category.instances[${j}]' path: ${err.message}`);
+      }
+      const normInst = `${normPath}:${Number.parseInt(instLineStr, 10)}`;
+      if (!seen.has(normInst)) {
+        seen.add(normInst);
+        normalized.push(normInst);
+      }
+    }
+    const ownSite = `${path}:${line}`;
+    if (!seen.has(ownSite)) {
+      throw new Error(
+        `finding at index ${idx} 'category.instances' must include this finding's own site ${JSON.stringify(ownSite)}`,
+      );
+    }
+    category = { shape: raw.category.shape, instances: normalized };
+  } else if (raw.category !== undefined && raw.category !== null) {
+    throw new Error(
+      `finding at index ${idx} has classification "one-off" but also carries a 'category' — omit it (or set null) for one-off findings`,
+    );
+  }
+  const finding = { path, line, title: raw.title, body: raw.body, classification: raw.classification };
+  if (category !== null) {
+    finding.category = category;
+  }
+  return finding;
 }
 
 // Post each codex-supplied finding to the pull request as an inline review
@@ -3183,6 +3290,44 @@ async function getPullRequestHeadSha(repoRoot, prNumber) {
   return data.headRefOid;
 }
 
+// One-line classification note prepended to a posted finding body so a PR
+// reader sees at a glance whether the finding is one instance of a recurring
+// category (and what the category is). Empty string for one-off findings.
+// Bounded to FINDING_CLASSIFICATION_NOTE_MAX chars (the body cap reserves
+// that much room) — the instances list is truncated with an ellipsis if the
+// note would otherwise overrun.
+function formatFindingClassificationNote(finding) {
+  if (finding.classification !== "class" || !finding.category) {
+    return "";
+  }
+  const head = `_class finding — category: ${finding.category.shape}`;
+  const tail = ". Fix the category, not just this site._\n\n";
+  const instances = finding.category.instances || [];
+  let listed = [];
+  let listLen = 0;
+  for (const inst of instances) {
+    // " — instances: " (≈14) + joins; budget conservatively.
+    const add = (listed.length === 0 ? 14 : 2) + inst.length;
+    if (head.length + listLen + add + tail.length + 1 > FINDING_CLASSIFICATION_NOTE_MAX) {
+      break;
+    }
+    listed.push(inst);
+    listLen += add;
+  }
+  let note = head;
+  if (listed.length > 0) {
+    note += ` — instances: ${listed.join(", ")}`;
+    if (listed.length < instances.length) {
+      note += ", …";
+    }
+  }
+  note += tail;
+  if (note.length > FINDING_CLASSIFICATION_NOTE_MAX) {
+    note = note.slice(0, FINDING_CLASSIFICATION_NOTE_MAX - 4) + "…_\n\n";
+  }
+  return note;
+}
+
 async function postSingleReviewComment({
   repoRoot,
   owner,
@@ -3192,7 +3337,7 @@ async function postSingleReviewComment({
   reviewerLabel,
   finding,
 }) {
-  const body = `[${reviewerLabel}] ${finding.title}\n\n${finding.body}`;
+  const body = `[${reviewerLabel}] ${finding.title}\n\n${formatFindingClassificationNote(finding)}${finding.body}`;
   // GitHub's REST shape for inline review comments. `commit_id` anchors the
   // comment to the PR's current head SHA. `side: RIGHT` anchors to the new
   // (post-change) side of the diff. `line` is always a positive integer here
@@ -4652,7 +4797,10 @@ async function buildReviewerCommentsList({
     // No POST attempted (no PR, or zero findings). The placeholder carries
     // the full finding so the agent can act on it — `body` is the
     // authoritative finding detail per the new prompt (closes a gap flagged
-    // in #793 review cycle 4 / post-push cycle 2).
+    // in #793 review cycle 4 / post-push cycle 2). `classification`/`category`
+    // (#830) ride along so the agent's review-response loop can take the
+    // class-finding path (design at the category level, fix all instances at
+    // once) instead of whack-a-mole'ing the named site.
     return findings.map((finding) => ({
       comment_id: null,
       thread_id: null,
@@ -4661,6 +4809,8 @@ async function buildReviewerCommentsList({
       line: finding.line,
       title: `[${reviewer}] ${finding.title}`.slice(0, 200),
       body: finding.body,
+      classification: finding.classification,
+      ...(finding.category ? { category: finding.category } : {}),
       html_url: null,
     }));
   }
@@ -4686,6 +4836,8 @@ async function buildReviewerCommentsList({
       path: finding.path,
       line: finding.line,
       title: `[${reviewer}] ${finding.title}`.slice(0, 200),
+      classification: finding.classification,
+      ...(finding.category ? { category: finding.category } : {}),
       html_url: result.html_url,
     };
   });
