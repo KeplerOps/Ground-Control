@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **MCP server reads its bearer token from the consumer repo's `.env`**
+  (`mcp/ground-control/index.js`, `.mcp.json`, `.env.example`,
+  `mcp/ground-control/README.md`, issue #828 follow-up). A small stdlib
+  dotenv loader runs at MCP startup, populating `process.env` from
+  `<cwd>/.env` before any HTTP request resolves the bearer token. The
+  `${GROUND_CONTROL_API_TOKEN}` substitution is removed from the
+  canonical `.mcp.json` because it is no longer needed — the token never
+  passes through the launching agent's environment, never appears in
+  the JSON config the LLM reads, and does not have to be exported in
+  the operator's shell. A shell-exported value still wins (the loader
+  preserves existing `process.env` entries) so CI / ad-hoc env-var-only
+  callers keep working unchanged.
+
 ### Fixed
 
 - **`NoResourceFoundException` now returns `404 not_found` instead of

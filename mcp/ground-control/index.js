@@ -12,6 +12,16 @@
 //                                             on paths requiring ROLE_ADMIN. Used as
 //                                             a fallback when GROUND_CONTROL_API_TOKEN
 //                                             is unset.
+//
+// These values are read from the consumer repo's `.env` file (in the cwd this
+// process was launched from) at startup. .mcp.json no longer needs to plumb
+// them through the launching agent's environment, so the bearer token never
+// touches the JSON config the LLM sees and never has to be exported in the
+// operator's shell. A shell-exported value still wins (the loader does not
+// override existing process.env entries) for ad-hoc / CI callers that prefer
+// an env-var-only flow.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -286,6 +296,40 @@ import {
   TRUST_POLICY_FIELDS,
   TRUST_POLICY_RULE_OPERATORS,
 } from "./lib.js";
+
+// Load .env from the consumer repo's root (the cwd this process was launched
+// from) before anything reads env. lib.js's auth helpers read process.env at
+// request time, so this runs early enough to be visible. Existing entries are
+// preserved (shell-export still wins) so the legacy var-only flow keeps
+// working for CI / ad-hoc callers.
+function loadDotenvFromCwd() {
+  let body;
+  try {
+    body = readFileSync(join(process.cwd(), ".env"), "utf-8");
+  } catch (err) {
+    if (err.code === "ENOENT") return;
+    throw err;
+  }
+  for (const rawLine of body.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined || process.env[key] === "") {
+      process.env[key] = value;
+    }
+  }
+}
+
+loadDotenvFromCwd();
 
 function ok(text) {
   return { content: [{ type: "text", text }] };
