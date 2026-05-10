@@ -53,6 +53,9 @@ class AnalysisControllerTest {
     @MockitoBean
     private com.keplerops.groundcontrol.domain.requirements.service.SimilarityService similarityService;
 
+    @MockitoBean
+    private com.keplerops.groundcontrol.domain.requirements.service.StatusDriftService statusDriftService;
+
     private static final UUID PROJECT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final Project TEST_PROJECT = createTestProject();
 
@@ -214,6 +217,64 @@ class AnalysisControllerTest {
                     .andExpect(jsonPath("$.recentChanges", hasSize(1)))
                     .andExpect(jsonPath("$.recentChanges[0].uid", is("REQ-A")))
                     .andExpect(jsonPath("$.recentChanges[0].revisionType", is("MOD")));
+        }
+    }
+
+    @Nested
+    class StatusDrift {
+
+        @Test
+        void returns200WithDefaultThreshold() throws Exception {
+            var evidence = new com.keplerops.groundcontrol.domain.requirements.service.StatusDriftResult.Evidence(
+                    com.keplerops.groundcontrol.domain.requirements.state.StatusDriftSignal.IMPLEMENTS_LINK_ON_DRAFT,
+                    com.keplerops.groundcontrol.domain.requirements.state.ConfidenceLevel.HIGH,
+                    "GITHUB_ISSUE",
+                    "826",
+                    "GC-T010: Risk Assessment Result Entity",
+                    "https://gh/826",
+                    "issue CLOSED");
+            var finding = new com.keplerops.groundcontrol.domain.requirements.service.StatusDriftResult.Finding(
+                    "GC-T010",
+                    "Risk Assessment Result Entity",
+                    com.keplerops.groundcontrol.domain.requirements.state.ConfidenceLevel.HIGH,
+                    com.keplerops.groundcontrol.domain.requirements.state.StatusDriftSignal.IMPLEMENTS_LINK_ON_DRAFT,
+                    List.of(evidence));
+            var result = new com.keplerops.groundcontrol.domain.requirements.service.StatusDriftResult(
+                    5, com.keplerops.groundcontrol.domain.requirements.state.ConfidenceLevel.MEDIUM, List.of(finding));
+            when(statusDriftService.analyze(
+                            PROJECT_ID, com.keplerops.groundcontrol.domain.requirements.state.ConfidenceLevel.MEDIUM))
+                    .thenReturn(result);
+
+            mockMvc.perform(get("/api/v1/analysis/status-drift"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.draftRequirementsScanned", is(5)))
+                    .andExpect(jsonPath("$.minimumConfidence", is("MEDIUM")))
+                    .andExpect(jsonPath("$.findings", hasSize(1)))
+                    .andExpect(jsonPath("$.findings[0].uid", is("GC-T010")))
+                    .andExpect(jsonPath("$.findings[0].confidence", is("HIGH")))
+                    .andExpect(jsonPath("$.findings[0].strongestSignal", is("IMPLEMENTS_LINK_ON_DRAFT")))
+                    .andExpect(jsonPath("$.findings[0].evidence", hasSize(1)))
+                    .andExpect(jsonPath("$.findings[0].evidence[0].signal", is("IMPLEMENTS_LINK_ON_DRAFT")))
+                    .andExpect(jsonPath("$.findings[0].evidence[0].artifactIdentifier", is("826")));
+        }
+
+        @Test
+        void honorsMinimumConfidenceParam() throws Exception {
+            when(statusDriftService.analyze(
+                            PROJECT_ID, com.keplerops.groundcontrol.domain.requirements.state.ConfidenceLevel.HIGH))
+                    .thenReturn(new com.keplerops.groundcontrol.domain.requirements.service.StatusDriftResult(
+                            0, com.keplerops.groundcontrol.domain.requirements.state.ConfidenceLevel.HIGH, List.of()));
+
+            mockMvc.perform(get("/api/v1/analysis/status-drift").param("minimumConfidence", "HIGH"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.minimumConfidence", is("HIGH")))
+                    .andExpect(jsonPath("$.findings", hasSize(0)));
+        }
+
+        @Test
+        void rejectsInvalidMinimumConfidence() throws Exception {
+            mockMvc.perform(get("/api/v1/analysis/status-drift").param("minimumConfidence", "BOGUS"))
+                    .andExpect(status().isBadRequest());
         }
     }
 }

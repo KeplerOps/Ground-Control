@@ -12,6 +12,7 @@ Accepted
 
 2026-03-09 — Implementation details updated to reflect ADR-013 (Java/Spring Boot rewrite). Core decisions unchanged.
 2026-04-10 — Traceability identifier conventions updated to match the implemented service, ADR reverse-lookup, and GitHub sync contracts.
+2026-05-10 — Status drift analysis boundary added: derived implementation evidence is a sweep finding, not a traceability edge or lifecycle mutation.
 
 ## Context
 
@@ -88,6 +89,20 @@ All entities in the requirements domain are governed by service-layer ownership:
 Controllers and orchestration components call services in sequence. Services do not call each other horizontally. No Spring events for cross-service communication.
 
 See [Phase 1 design notes](../notes/phase1-requirements-design.md#service-layer-architecture) for the full rationale and rules.
+
+### 9. Status Drift Is Derived Analysis Evidence
+
+Ground Control keeps `IMPLEMENTS` links restricted to `ACTIVE` requirements. That rule remains load-bearing: `DRAFT` requirements may have implementation-like evidence before formal verification and transition, but that evidence must not be stored by weakening the traceability constraint or by introducing a second implementation-link schema.
+
+Status drift detection is therefore modeled as read-only analysis output. Every signal is derived from data owned by the requirement's own project — its `DRAFT` requirements, their canonical traceability links, and accepted ADR records. It deliberately does **not** read the GitHub issue/PR sync tables, because those caches are not project- or repo-scoped, so reading them from a project-scoped analysis could surface another project's (or another repo's, including a private one's) artifacts. The output carries confidence and evidence artifacts so a user or agent can verify the clauses and then run the normal status transition and traceability reconciliation workflow.
+
+Status drift analysis must not:
+
+- transition requirements automatically
+- create `IMPLEMENTS` links for `DRAFT` requirements through the public traceability path
+- encode artifacts outside the existing `ArtifactType` / `LinkType` conventions
+- bypass project scoping, read project- or repo-unscoped caches (e.g. the GitHub issue/PR sync tables), or assume UID uniqueness outside a project
+- shell out to GitHub or scan arbitrary filesystem paths from the analysis service
 
 ### Data Model
 
@@ -213,6 +228,7 @@ Audit trail for each import/sync operation.
 - Envers provides automatic audit trail with minimal configuration
 - Service-layer write ownership prevents mutation spaghetti without premature package splitting
 - Artifact-type-scoped identifiers keep reverse lookup and sync flows simple while accommodating code, docs, ADRs, and verification artifacts without a second schema layer
+- Status drift can surface lifecycle bookkeeping rot without confusing evidence with authoritative traceability or lifecycle state
 
 ### Negative
 
@@ -226,6 +242,7 @@ Audit trail for each import/sync operation.
 - StrictDoc format may have edge cases not covered by the parser (mitigated: import is a one-time migration)
 - DAG traversal via JPA adjacency list is O(depth x branching_factor) per query (mitigated: AGE provides O(1)-ish traversal for production use)
 - Multiple textual encodings for the same artifact fragment uniqueness and break sync or reverse lookup (mitigated: keep canonical identifier conventions per `artifactType` and route writes through the existing service layer)
+- Treating status drift evidence as implementation truth can create false positives or premature lifecycle changes (mitigated: report confidence and artifacts only; verification plus DRAFT -> ACTIVE transition stays explicit)
 
 ## Related ADRs
 

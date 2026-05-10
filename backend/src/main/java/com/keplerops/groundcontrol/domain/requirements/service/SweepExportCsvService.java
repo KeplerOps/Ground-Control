@@ -16,6 +16,7 @@ public class SweepExportCsvService {
         appendCoverageGaps(sb, report.coverageGaps());
         appendCrossWaveViolations(sb, report.crossWaveViolations());
         appendConsistencyViolations(sb, report.consistencyViolations());
+        appendStatusDrift(sb, report.statusDrift());
         appendCompleteness(sb, report.completeness());
         appendQualityGates(sb, report);
 
@@ -95,6 +96,29 @@ public class SweepExportCsvService {
             sb.append(CsvUtils.escapeCsv(v.targetStatus())).append(',');
             sb.append(CsvUtils.escapeCsv(v.violationType()));
             sb.append('\n');
+        }
+    }
+
+    private void appendStatusDrift(StringBuilder sb, List<StatusDriftResult.Finding> statusDrift) {
+        sb.append("\n# Status Drift\n");
+        sb.append(
+                "uid,title,confidence,strongest_signal,"
+                        + "evidence_signal,evidence_confidence,artifact_type,artifact_identifier,artifact_title,artifact_url,detail\n");
+        for (var finding : statusDrift) {
+            for (var ev : finding.evidence()) {
+                sb.append(CsvUtils.escapeCsv(finding.uid())).append(',');
+                sb.append(CsvUtils.escapeCsv(finding.title())).append(',');
+                sb.append(CsvUtils.escapeCsv(finding.confidence().name())).append(',');
+                sb.append(CsvUtils.escapeCsv(finding.strongestSignal().name())).append(',');
+                sb.append(CsvUtils.escapeCsv(ev.signal().name())).append(',');
+                sb.append(CsvUtils.escapeCsv(ev.confidence().name())).append(',');
+                sb.append(CsvUtils.escapeCsv(ev.artifactType())).append(',');
+                sb.append(CsvUtils.escapeCsv(ev.artifactIdentifier())).append(',');
+                sb.append(CsvUtils.escapeCsv(ev.artifactTitle())).append(',');
+                sb.append(CsvUtils.escapeCsv(ev.artifactUrl())).append(',');
+                sb.append(CsvUtils.escapeCsv(ev.detail()));
+                sb.append('\n');
+            }
         }
     }
 

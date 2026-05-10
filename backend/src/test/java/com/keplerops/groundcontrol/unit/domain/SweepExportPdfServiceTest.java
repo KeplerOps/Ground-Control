@@ -8,9 +8,15 @@ import com.keplerops.groundcontrol.domain.requirements.service.CompletenessIssue
 import com.keplerops.groundcontrol.domain.requirements.service.CompletenessResult;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
+import com.keplerops.groundcontrol.domain.requirements.service.StatusDriftResult;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepExportPdfService;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport;
+import com.keplerops.groundcontrol.domain.requirements.state.ConfidenceLevel;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
+import com.keplerops.groundcontrol.domain.requirements.state.StatusDriftSignal;
+import com.lowagie.text.pdf.PdfReader;
+import com.lowagie.text.pdf.parser.PdfTextExtractor;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
@@ -42,6 +48,7 @@ class SweepExportPdfServiceTest {
                 Map.of(),
                 List.of(),
                 List.of(),
+                List.of(),
                 new CompletenessResult(1, Map.of("DRAFT", 1), List.of()),
                 null);
         var orphanBytes = service.toPdf(reportWithOrphan);
@@ -58,6 +65,25 @@ class SweepExportPdfServiceTest {
         assertThat(bytes.length).isGreaterThan(service.toPdf(emptyReport()).length);
     }
 
+    @Test
+    void toPdf_rendersStatusDriftSectionWithEvidenceArtifact() throws IOException {
+        // Extract the rendered text so a no-op'd addStatusDrift would be caught: "GC-T010" and the
+        // evidence artifact identifier ("826") appear only in the status-drift section of fullReport().
+        var text = extractText(service.toPdf(fullReport()));
+        assertThat(text).contains("Status Drift", "GC-T010", "826");
+    }
+
+    private static String extractText(byte[] pdfBytes) throws IOException {
+        try (var reader = new PdfReader(pdfBytes)) {
+            var extractor = new PdfTextExtractor(reader);
+            var sb = new StringBuilder();
+            for (int page = 1; page <= reader.getNumberOfPages(); page++) {
+                sb.append(extractor.getTextFromPage(page)).append('\n');
+            }
+            return sb.toString();
+        }
+    }
+
     private SweepReport emptyReport() {
         return new SweepReport(
                 "test-project",
@@ -65,6 +91,7 @@ class SweepExportPdfServiceTest {
                 List.of(),
                 List.of(),
                 Map.of(),
+                List.of(),
                 List.of(),
                 List.of(),
                 new CompletenessResult(0, Map.of(), List.of()),
@@ -79,6 +106,19 @@ class SweepExportPdfServiceTest {
         var crossWave = List.of(new SweepReport.CrossWaveViolationSummary("GC-005", 1, "GC-006", 2, "DEPENDS_ON"));
         var consistency = List.of(
                 new SweepReport.ConsistencyViolationSummary("GC-007", "ACTIVE", "GC-008", "ACTIVE", "ACTIVE_CONFLICT"));
+        var statusDrift = List.of(new StatusDriftResult.Finding(
+                "GC-T010",
+                "Risk Assessment Result Entity",
+                ConfidenceLevel.HIGH,
+                StatusDriftSignal.IMPLEMENTS_LINK_ON_DRAFT,
+                List.of(new StatusDriftResult.Evidence(
+                        StatusDriftSignal.IMPLEMENTS_LINK_ON_DRAFT,
+                        ConfidenceLevel.HIGH,
+                        "GITHUB_ISSUE",
+                        "826",
+                        "GC-T010: Risk Assessment Result Entity",
+                        "https://github.com/KeplerOps/Ground-Control/issues/826",
+                        "IMPLEMENTS link on a DRAFT requirement"))));
         var completeness = new CompletenessResult(
                 5, Map.of("DRAFT", 3, "ACTIVE", 2), List.of(new CompletenessIssue("GC-009", "missing statement")));
         var gate = new QualityGateResult(
@@ -93,6 +133,7 @@ class SweepExportPdfServiceTest {
                 coverageGap,
                 crossWave,
                 consistency,
+                statusDrift,
                 completeness,
                 qgResult);
     }

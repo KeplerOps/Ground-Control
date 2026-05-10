@@ -48,6 +48,7 @@ import {
   crossWaveValidation,
   detectConsistencyViolations,
   analyzeCompleteness,
+  analyzeStatusDrift,
   getDashboardStats,
   getWorkOrder,
   importStrictdoc,
@@ -228,6 +229,7 @@ import {
   RELATION_TYPES,
   ARTIFACT_TYPES,
   LINK_TYPES,
+  CONFIDENCE_LEVELS,
   METRIC_TYPES,
   COMPARISON_OPERATORS,
   ADR_STATUSES,
@@ -1225,6 +1227,29 @@ server.tool(
   },
 );
 
+server.tool(
+  "gc_analyze_status_drift",
+  "Detect DRAFT requirements that carry independent evidence of implementation or design completion (lifecycle status drift): an IMPLEMENTS traceability link on a DRAFT requirement, a DOCUMENTS link to an ACCEPTED ADR, links to GitHub issues / pull requests, or links to code/test/spec/proof artifacts. Project-scoped — evidence comes only from the requirement's own project's traceability links and accepted ADR records; never the project-unscoped GitHub sync caches or the filesystem. Read-only: it does not transition requirements or create links. Each finding carries confidence (HIGH/MEDIUM/LOW), the strongest signal, and the evidence artifacts.",
+  {
+    project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
+    minimum_confidence: z
+      .enum(CONFIDENCE_LEVELS)
+      .optional()
+      .describe("Lowest confidence band to report (default MEDIUM: HIGH and MEDIUM shown, LOW omitted)"),
+  },
+  async ({ project, minimum_confidence }) => {
+    try {
+      const result = await analyzeStatusDrift(project, minimum_confidence);
+      if (Array.isArray(result.findings) && result.findings.length === 0) {
+        return ok(`No status drift detected (${result.draft_requirements_scanned} DRAFT requirement(s) scanned).`);
+      }
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) {
+      return err(e);
+    }
+  },
+);
+
 // ==========================================================================
 // Dashboard stats tool
 // ==========================================================================
@@ -1598,7 +1623,7 @@ server.tool(
 
 server.tool(
   "gc_run_sweep",
-  "Run a full analysis sweep (orphans, coverage gaps, cross-wave, cycles, consistency) on a project. Returns a report of all detected problems. Optionally triggers configured notifications (GitHub issues, webhooks).",
+  "Run a full analysis sweep (orphans, coverage gaps, cross-wave, cycles, consistency, status drift) on a project. Returns a report of all detected problems. Optionally triggers configured notifications (GitHub issues, webhooks).",
   {
     project: z.string().optional().describe("Project identifier (auto-resolved if only one project exists)"),
   },

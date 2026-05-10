@@ -3,6 +3,8 @@ package com.keplerops.groundcontrol.api.admin;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.service.AnalysisService;
 import com.keplerops.groundcontrol.domain.requirements.service.SimilarityService;
+import com.keplerops.groundcontrol.domain.requirements.service.StatusDriftService;
+import com.keplerops.groundcontrol.domain.requirements.state.ConfidenceLevel;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import java.util.List;
 import java.util.UUID;
@@ -17,18 +19,23 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/analysis")
 public class AnalysisController {
 
+    private static final ConfidenceLevel DEFAULT_STATUS_DRIFT_THRESHOLD = ConfidenceLevel.MEDIUM;
+
     private final AnalysisService analysisService;
     private final SimilarityService similarityService;
+    private final StatusDriftService statusDriftService;
     private final ProjectService projectService;
     private final double defaultSimilarityThreshold;
 
     public AnalysisController(
             AnalysisService analysisService,
             SimilarityService similarityService,
+            StatusDriftService statusDriftService,
             ProjectService projectService,
             @Value("${groundcontrol.embedding.similarity-threshold:0.85}") double defaultSimilarityThreshold) {
         this.analysisService = analysisService;
         this.similarityService = similarityService;
+        this.statusDriftService = statusDriftService;
         this.projectService = projectService;
         this.defaultSimilarityThreshold = defaultSimilarityThreshold;
     }
@@ -106,5 +113,14 @@ public class AnalysisController {
         var projectId = projectService.resolveProjectId(project);
         var effectiveThreshold = threshold != null ? threshold : defaultSimilarityThreshold;
         return SimilarityResultResponse.from(similarityService.findSimilarRequirements(projectId, effectiveThreshold));
+    }
+
+    @GetMapping("/status-drift")
+    public StatusDriftResponse findStatusDrift(
+            @RequestParam(required = false) String project,
+            @RequestParam(required = false) ConfidenceLevel minimumConfidence) {
+        var projectId = projectService.resolveProjectId(project);
+        var threshold = minimumConfidence != null ? minimumConfidence : DEFAULT_STATUS_DRIFT_THRESHOLD;
+        return StatusDriftResponse.from(statusDriftService.analyze(projectId, threshold));
     }
 }

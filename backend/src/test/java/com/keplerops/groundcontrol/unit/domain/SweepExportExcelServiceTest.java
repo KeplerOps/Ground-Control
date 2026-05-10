@@ -8,9 +8,12 @@ import com.keplerops.groundcontrol.domain.requirements.service.CompletenessIssue
 import com.keplerops.groundcontrol.domain.requirements.service.CompletenessResult;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
+import com.keplerops.groundcontrol.domain.requirements.service.StatusDriftResult;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepExportExcelService;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport;
+import com.keplerops.groundcontrol.domain.requirements.state.ConfidenceLevel;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
+import com.keplerops.groundcontrol.domain.requirements.state.StatusDriftSignal;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.time.Instant;
@@ -38,14 +41,15 @@ class SweepExportExcelServiceTest {
         var report = emptyReport();
         byte[] bytes = service.toExcel(report);
         try (var workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
-            assertThat(workbook.getNumberOfSheets()).isEqualTo(7);
+            assertThat(workbook.getNumberOfSheets()).isEqualTo(8);
             assertThat(workbook.getSheetName(0)).isEqualTo("Summary");
             assertThat(workbook.getSheetName(1)).isEqualTo("Cycles");
             assertThat(workbook.getSheetName(2)).isEqualTo("Orphans");
             assertThat(workbook.getSheetName(3)).isEqualTo("Coverage Gaps");
             assertThat(workbook.getSheetName(4)).isEqualTo("Violations");
-            assertThat(workbook.getSheetName(5)).isEqualTo("Completeness");
-            assertThat(workbook.getSheetName(6)).isEqualTo("Quality Gates");
+            assertThat(workbook.getSheetName(5)).isEqualTo("Status Drift");
+            assertThat(workbook.getSheetName(6)).isEqualTo("Completeness");
+            assertThat(workbook.getSheetName(7)).isEqualTo("Quality Gates");
         }
     }
 
@@ -64,6 +68,10 @@ class SweepExportExcelServiceTest {
             assertThat(workbook.getSheet("Coverage Gaps").getLastRowNum()).isEqualTo(1);
             // Violations: 1 cross-wave + 1 consistency
             assertThat(workbook.getSheet("Violations").getLastRowNum()).isEqualTo(2);
+            // Status Drift: header + 1 evidence row, carrying the artifact identifier
+            assertThat(workbook.getSheet("Status Drift").getLastRowNum()).isEqualTo(1);
+            assertThat(workbook.getSheet("Status Drift").getRow(1).getCell(7).getStringCellValue())
+                    .isEqualTo("826");
             // Completeness: header + 2 status rows + blank + "Issues" label + 1 issue
             assertThat(workbook.getSheet("Completeness").getLastRowNum()).isGreaterThan(2);
             // Quality Gates has header + 1 gate row
@@ -80,6 +88,7 @@ class SweepExportExcelServiceTest {
                 Map.of(),
                 List.of(),
                 List.of(),
+                List.of(),
                 new CompletenessResult(0, Map.of(), List.of()),
                 null);
     }
@@ -92,6 +101,19 @@ class SweepExportExcelServiceTest {
         var crossWave = List.of(new SweepReport.CrossWaveViolationSummary("GC-005", 1, "GC-006", 2, "DEPENDS_ON"));
         var consistency = List.of(
                 new SweepReport.ConsistencyViolationSummary("GC-007", "ACTIVE", "GC-008", "ACTIVE", "ACTIVE_CONFLICT"));
+        var statusDrift = List.of(new StatusDriftResult.Finding(
+                "GC-T010",
+                "Risk Assessment Result Entity",
+                ConfidenceLevel.HIGH,
+                StatusDriftSignal.IMPLEMENTS_LINK_ON_DRAFT,
+                List.of(new StatusDriftResult.Evidence(
+                        StatusDriftSignal.IMPLEMENTS_LINK_ON_DRAFT,
+                        ConfidenceLevel.HIGH,
+                        "GITHUB_ISSUE",
+                        "826",
+                        "GC-T010: Risk Assessment Result Entity",
+                        "https://github.com/KeplerOps/Ground-Control/issues/826",
+                        "IMPLEMENTS link on a DRAFT requirement"))));
         var completeness = new CompletenessResult(
                 5, Map.of("DRAFT", 3, "ACTIVE", 2), List.of(new CompletenessIssue("GC-009", "missing statement")));
         var gate = new QualityGateResult(
@@ -106,6 +128,7 @@ class SweepExportExcelServiceTest {
                 coverageGap,
                 crossWave,
                 consistency,
+                statusDrift,
                 completeness,
                 qgResult);
     }
