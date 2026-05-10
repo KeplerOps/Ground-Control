@@ -45,6 +45,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verification. Cross-links the canonical compose file and the
   `make policy` gate so the source-of-truth invariant is enforced.
 
+- **Image-tag semantics + digest-resolution clarification**
+  (`docs/deployment/DEPLOYMENT.md`, `deploy/docker/.env.template`,
+  issue #828 follow-up). The runbook now explains that `:latest` only
+  updates on push to `main` (so post-merge-to-`dev` it is still the
+  previous release), shows how to resolve a stable digest from the `:dev`
+  or `:sha-<commit>` tags, and pins the cutover to that digest so the
+  image you dry-ran against is the image you deploy.
+
+- **`deploy/scripts/deploy.sh` reconciled with the runtime copy at
+  `/opt/gc/deploy.sh`** (issue #828 follow-up). Removes the AWS-era
+  references (`gc-dev`, `refresh-env.sh`, SSM bootstrap) that ADR-030
+  retired and aligns the optional image-ref override with the digest /
+  tag conventions in `.env.template`. The forced-command SSH path used
+  by the CI deploy job runs without arguments; the optional ref is for
+  operator-driven manual rollbacks or one-off image verifications.
+
 ### Security
 
 - **AGE adapter migrated to native Cypher parameter binding** (issue #244,

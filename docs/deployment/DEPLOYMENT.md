@@ -198,12 +198,29 @@ within seconds. Order matters; do not skip ahead.
    - **Security-enabled local instance using the candidate ADR-026 image.**
      The dry-run MUST use the candidate image (the one targeted by the
      cutover) — running the pre-ADR image locally reproduces the
-     reachability-only false green this step is designed to prevent. To
-     keep prod's schema untouched, point the dry-run at a throwaway
-     database directory (the prod compose file's `db` service uses a
-     bind-mount under `/data/postgres/`; set a different host path for the
-     dry-run via the `POSTGRES_DATA_DIR` env var if your operator copy
-     parameterizes it, or run the dry-run on a different host).
+     reachability-only false green this step is designed to prevent.
+
+     **Resolving the candidate image.** `:latest` only updates on push to
+     `main`, so post-merge-to-`dev` it is still the previous release. Use
+     `:dev` (head of unreleased work, tracks dev tip) or `:sha-<commit>`
+     (immutable) to refer to the actual candidate. Resolve a stable digest
+     from either with:
+     ```bash
+     docker pull ghcr.io/keplerops/ground-control:dev
+     docker inspect ghcr.io/keplerops/ground-control:dev \
+       --format '{{index .RepoDigests 0}}'
+     # → ghcr.io/keplerops/ground-control@sha256:<digest>
+     ```
+     Pin the dry-run AND the production `/opt/gc/.env` to that digest so
+     the image you tested is the image you deploy.
+
+     **Isolating the dry-run database.** The production compose file's
+     `db` service bind-mounts `/data/postgres/`. To keep prod's schema
+     untouched, run the dry-run with a separate compose project name and
+     swap the bind-mount for an isolated Docker named volume. Use a
+     non-default port (e.g. `18000:8000`) so it does not collide with the
+     running production backend on `:8000`. Tear down with `down -v` to
+     destroy the throwaway DB volume when finished.
      ```bash
      # mktemp + chmod 600 so the scratch env file is never world-readable
      # while it carries draft credential token values.
@@ -213,13 +230,13 @@ within seconds. Order matters; do not skip ahead.
      # Edit ${dryrun_env} to fill GC_DATABASE_PASSWORD, POSTGRES_PASSWORD,
      # and GROUNDCONTROL_SECURITY_CREDENTIALS_<N>_* slots with the same
      # token values that will land in /opt/gc/.env. Set GC_IMAGE to the
-     # candidate ADR-026 image (NOT the currently deployed pre-ADR image
-     # — that one would still 200 unauthenticated requests).
-     GC_IMAGE=ghcr.io/keplerops/ground-control:<candidate-digest> \
-       docker compose --env-file "${dryrun_env}" \
+     # candidate digest you resolved above. Run with a separate compose
+     # project name (gc-dryrun) and rebind the prod port + DB volume:
+     GC_IMAGE=ghcr.io/keplerops/ground-control@sha256:<digest> \
+       docker compose -p gc-dryrun --env-file "${dryrun_env}" \
        -f deploy/docker/docker-compose.prod.yml up -d
      # When done:
-     docker compose --env-file "${dryrun_env}" \
+     docker compose -p gc-dryrun --env-file "${dryrun_env}" \
        -f deploy/docker/docker-compose.prod.yml down -v
      shred -u "${dryrun_env}"
      ```
@@ -274,12 +291,18 @@ within seconds. Order matters; do not skip ahead.
    forward-only migrations:
    ```bash
    ssh red-dragon /opt/gc/backup.sh
+   # OR (if running on red-dragon directly):
+   docker exec gc-db-1 pg_dump -Fc -U gc ground_control \
+     > /data/backups/gc-pre-cutover-$(date -u +%Y%m%dT%H%M%SZ).dump
    ```
 
-6. **Update `/opt/gc/.env`.** Pin the new image digest and add the
-   credential block. Use the indexed `GROUNDCONTROL_SECURITY_CREDENTIALS_*`
-   shape (matches the env-var table above and `deploy/docker/.env.template`).
-   `chmod 600` afterward.
+6. **Update `/opt/gc/.env` with the credential block + the candidate
+   digest.** Use the indexed `GROUNDCONTROL_SECURITY_CREDENTIALS_*` shape
+   (matches the env-var table above and `deploy/docker/.env.template`).
+   The same digest you dry-ran against in step 4 belongs in `GC_IMAGE`
+   here — pinning by digest (`ghcr.io/keplerops/ground-control@sha256:...`)
+   guarantees the cutover rolls the image you tested, not whatever has
+   moved under `:dev` since. After editing, `chmod 600`.
 
 7. **Sync `/opt/gc/docker-compose.yml` byte-for-byte from this repo's
    `deploy/docker/docker-compose.prod.yml`.** That file is the canonical
@@ -289,11 +312,21 @@ within seconds. Order matters; do not skip ahead.
    (`tools/policy/checks.py::run_deploy_compose_credential_passthrough`)
    enforces the credential keys stay present in the canonical file.
 
-8. **Roll the image.**
-   ```bash
-   cd /opt/gc
-   docker compose --env-file .env up -d --force-recreate backend
-   ```
+8. **Roll the image.** Pick one path:
+   - **Manual (recommended for the first cutover).** From red-dragon (or
+     any tailnet host with the deploy SSH key):
+     ```bash
+     cd /opt/gc
+     docker compose --env-file .env up -d --force-recreate backend
+     # OR via the SSH forced-command target:
+     ssh gc-deploy@red-dragon
+     ```
+   - **CI auto-deploy.** Merge `dev` → `main`. The `deploy` job in
+     `.github/workflows/ci.yml` runs `/opt/gc/deploy.sh` over the
+     fabricator-managed self-hosted runner pool's tailnet bridge. Only
+     use this path AFTER steps 1-7 are confirmed; the deploy job has no
+     awareness of consumer-token state and will happily 401 every
+     consumer if you skip them.
 
 9. **Verify Flyway and the threat-model surface.** `V055`-`V058` apply on
    first start of the new image; the `threat_model` table appears in the
