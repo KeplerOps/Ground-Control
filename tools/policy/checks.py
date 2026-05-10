@@ -20,6 +20,44 @@ CONTROLLER_PATH_RE = re.compile(
 MIGRATION_PATH_RE = re.compile(r"^backend/src/main/resources/db/migration/V\d+__.+\.sql$")
 PR_REQUIREMENT_RE = re.compile(r"\b[A-Z][A-Z0-9]+-[A-Z0-9]+(?:-\d+|\d+)\b")
 
+DEPLOY_COMPOSE_PROD_PATH = Path("deploy/docker/docker-compose.prod.yml")
+REQUIRED_ADR026_CREDENTIAL_SLOT_COUNT = 5
+REQUIRED_ADR026_ALLOWLIST_SLOT_COUNT = 5
+
+
+def _required_adr026_backend_env_keys() -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return the (always-set, inherit-only) ADR-026 keys.
+
+    Always-set keys are typed config (security toggles); list or map form is
+    fine for them because their defaults are guaranteed non-empty. Inherit-only
+    keys are the optional indexed credential / allowlist slots — those MUST
+    use bare list form (``- KEY`` with no ``=``) so unset host variables
+    are NOT injected as empty strings (Spring's
+    ``SecurityProperties.validate()`` rejects blank principal/token/role/CIDR
+    entries and the container fails startup).
+    """
+    always_set: list[str] = ["GC_SECURITY_ENABLED", "GC_SECURITY_OPENAPI_PUBLIC"]
+    inherit_only: list[str] = []
+    for index in range(REQUIRED_ADR026_CREDENTIAL_SLOT_COUNT):
+        inherit_only.append(f"GROUNDCONTROL_SECURITY_CREDENTIALS_{index}_PRINCIPAL_NAME")
+        inherit_only.append(f"GROUNDCONTROL_SECURITY_CREDENTIALS_{index}_TOKEN")
+        inherit_only.append(f"GROUNDCONTROL_SECURITY_CREDENTIALS_{index}_ROLE")
+    for index in range(REQUIRED_ADR026_ALLOWLIST_SLOT_COUNT):
+        inherit_only.append(f"GROUNDCONTROL_SECURITY_IP_ALLOWLIST_{index}")
+    return tuple(always_set), tuple(inherit_only)
+
+
+(
+    REQUIRED_ADR026_ALWAYS_SET_KEYS,
+    REQUIRED_ADR026_INHERIT_ONLY_KEYS,
+) = _required_adr026_backend_env_keys()
+REQUIRED_ADR026_BACKEND_ENV_KEYS: tuple[str, ...] = (
+    *REQUIRED_ADR026_ALWAYS_SET_KEYS,
+    *REQUIRED_ADR026_INHERIT_ONLY_KEYS,
+)
+COMPOSE_ENV_KEY_RE = re.compile(r"^\s*-\s*([A-Z][A-Z0-9_]*)(?:=.*)?\s*$|^\s*([A-Z][A-Z0-9_]*)\s*:.*$")
+COMPOSE_ENV_INHERIT_FORM_RE = re.compile(r"^\s*-\s*([A-Z][A-Z0-9_]*)\s*$")
+
 
 @dataclass
 class Violation:
@@ -245,6 +283,132 @@ def run_migration_policy(changed_files: list[str], root: Path = REPO_ROOT) -> li
     return violations
 
 
+def _extract_compose_backend_env_entries(text: str) -> dict[str, str]:
+    """Extract environment entries declared on the `backend` service.
+
+    Returns a mapping of key → form, where form is one of:
+      ``"inherit"`` — list shorthand ``- KEY`` (no value, host-inheritance only).
+      ``"list-value"`` — list form with explicit value ``- KEY=...``.
+      ``"map"``    — map form ``KEY: ...``.
+
+    Compose allows both list-form (``- KEY=VALUE`` / ``- KEY``) and map-form
+    (``KEY: VALUE``) under ``environment:``; honor either. A handwritten
+    indentation walker is intentional here — adding a PyYAML dependency for
+    one check would make ``make policy`` fail with ``ModuleNotFoundError`` on
+    a clean Python installation, since the rest of ``tools/policy/`` is
+    stdlib-only.
+    """
+    found: dict[str, str] = {}
+    in_backend = False
+    backend_indent = -1
+    in_environment = False
+    env_indent = -1
+    for raw_line in text.splitlines():
+        stripped = raw_line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(raw_line) - len(stripped)
+
+        # Track sibling-out-of-block exits before recognizing new starts.
+        if in_environment and indent <= env_indent:
+            in_environment = False
+        if in_backend and indent <= backend_indent and not stripped.startswith("backend:"):
+            in_backend = False
+
+        if stripped.startswith("backend:"):
+            in_backend = True
+            backend_indent = indent
+            in_environment = False
+            continue
+        if in_backend and stripped.startswith("environment:") and not in_environment:
+            in_environment = True
+            env_indent = indent
+            continue
+        if in_environment:
+            inherit_match = COMPOSE_ENV_INHERIT_FORM_RE.match(raw_line)
+            if inherit_match:
+                found.setdefault(inherit_match.group(1), "inherit")
+                continue
+            match = COMPOSE_ENV_KEY_RE.match(raw_line)
+            if match:
+                key = match.group(1) or match.group(2)
+                form = "list-value" if match.group(1) is not None else "map"
+                found.setdefault(key, form)
+    return found
+
+
+def run_deploy_compose_credential_passthrough(root: Path = REPO_ROOT) -> list[Violation]:
+    """Assert the production compose file enumerates ADR-026 credential env vars.
+
+    #828 was triggered because the operator filled `GROUNDCONTROL_SECURITY_*`
+    values into `/opt/gc/.env` but `deploy/docker/docker-compose.prod.yml` did
+    not list them on the backend service's `environment:` block, so docker
+    compose never propagated them into the container. The first deploy of the
+    ADR-026 image therefore 401'd every consumer. The check below is a static
+    post-condition — independent of `changed_files` — so any future diff that
+    silently strips one of the required keys fails `make policy`. All five
+    documented credential slots and all five allowlist slots must remain
+    enumerated; partial removal is itself the regression.
+    """
+    compose_path = root / DEPLOY_COMPOSE_PROD_PATH
+    if not compose_path.exists():
+        return [
+            Violation(
+                code="deploy-compose-missing",
+                message=(
+                    "Canonical production compose file is missing — ADR-026 "
+                    "credential passthrough cannot be verified."
+                ),
+                details=[f"expected at {DEPLOY_COMPOSE_PROD_PATH.as_posix()}"],
+            )
+        ]
+
+    text = compose_path.read_text(encoding="utf-8")
+    entries = _extract_compose_backend_env_entries(text)
+
+    violations: list[Violation] = []
+
+    missing = [key for key in REQUIRED_ADR026_BACKEND_ENV_KEYS if key not in entries]
+    if missing:
+        violations.append(
+            Violation(
+                code="deploy-compose-adr026-passthrough",
+                message=(
+                    "deploy/docker/docker-compose.prod.yml backend service is "
+                    "missing ADR-026 credential env-var passthroughs (GC-P011)."
+                ),
+                details=[f"missing keys: {', '.join(missing)}"],
+            )
+        )
+
+    # Indexed credential / allowlist slots MUST use bare list form (- KEY).
+    # Map form with ${VAR:-} or list-with-value form ${VAR:-} both inject the
+    # variable into the container as an empty string when the host variable
+    # is unset, which Spring's SecurityProperties.validate() then rejects —
+    # exactly the brittle path #828 cycle 1 surfaced. Bare list form inherits
+    # only when the host has the variable set.
+    wrong_form = [
+        key
+        for key in REQUIRED_ADR026_INHERIT_ONLY_KEYS
+        if key in entries and entries[key] != "inherit"
+    ]
+    if wrong_form:
+        violations.append(
+            Violation(
+                code="deploy-compose-adr026-inherit-only",
+                message=(
+                    "Optional ADR-026 credential / allowlist slots in "
+                    "deploy/docker/docker-compose.prod.yml must use bare list form "
+                    "(- KEY) so unset host variables are not injected as blank "
+                    "(GC-P011 / SecurityProperties.validate)."
+                ),
+                details=[f"keys not in inherit-only form: {', '.join(wrong_form)}"],
+            )
+        )
+
+    return violations
+
+
 def run_pr_body_check(event_path: Path) -> list[Violation]:
     """Backwards-compatible wrapper that loads the PR body from a GitHub event payload."""
     event = json.loads(event_path.read_text(encoding="utf-8"))
@@ -399,6 +563,7 @@ def main(argv: list[str] | None = None) -> int:
     violations.extend(run_adr_guard(changed_files))
     violations.extend(run_controller_contracts(changed_files))
     violations.extend(run_migration_policy(changed_files))
+    violations.extend(run_deploy_compose_credential_passthrough())
 
     if not args.skip_pr_body:
         body = _resolve_pr_body(args)

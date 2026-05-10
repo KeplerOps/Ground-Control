@@ -46,18 +46,33 @@ jobs:
     # intended target, not the empty-default behavior.
     runs-on: [self-hosted, linux, x64]
     needs: [policy]
-    if: vars.GC_BASE_URL != ''
+    # The live token may NEVER run against attacker-controlled refs. `main` is
+    # the only branch with merge protection, so restrict execution to it on
+    # both `push` and `workflow_dispatch`. PR runs, dev/tag pushes, and
+    # workflow_dispatch on a feature branch all otherwise expose
+    # `secrets.GROUND_CONTROL_API_TOKEN` to checked-out JS that the attacker
+    # could rewrite to exfiltrate the bearer token (#828 cycle 3 security
+    # finding). Cancel-in-progress is governed by the workflow-level concurrency
+    # block; this guard is purely about which refs may see the secret.
+    if: vars.GC_BASE_URL != '' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install MCP helper dependencies
         run: npm --prefix mcp/ground-control ci
       - name: Live Ground Control ADR drift check
         env:
+          # ADR-026 / GC-P011: the live instance enforces bearer auth, so the
+          # MCP client below needs GROUND_CONTROL_API_TOKEN exposed (it falls
+          # back to GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN for legacy
+          # pack-registry calls). Without this passthrough the job 401s every
+          # request — exactly the failure mode #828 was filed against.
           GC_BASE_URL: ${{ vars.GC_BASE_URL }}
+          GROUND_CONTROL_API_TOKEN: ${{ secrets.GROUND_CONTROL_API_TOKEN }}
         run: node tools/ground_control/check_adr_drift.mjs
       - name: Live Ground Control policy check
         env:
           GC_BASE_URL: ${{ vars.GC_BASE_URL }}
+          GROUND_CONTROL_API_TOKEN: ${{ secrets.GROUND_CONTROL_API_TOKEN }}
         run: node tools/ground_control/check_live_policy.mjs
 
   # ---------------------------------------------------------------------------
