@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.115.3] - 2026-05-10
+
+### Security
+
+- **Audit actor provenance is now verified end-to-end under security-enabled
+  conditions** (issue #431). ADR-033 (*Authenticated Audit Actor Provenance*)
+  pins the contract: when `groundcontrol.security.enabled=true` the Envers
+  revision actor resolves from the authenticated `SecurityContext` principal
+  only; the `X-Actor` request header is inert (it survives solely as a
+  security-disabled dev/test convenience); and an unauthenticated
+  mutation/audit-relevant request is rejected by the security chain (401
+  `authentication_required`) before any controller runs, so no `anonymous`
+  revision is written. The real authentication boundary, the
+  `ActorFilter → ActorHolder → GroundControlRevisionListener` path, and the
+  trusted-service-identity credential model were already in place (issue #243 /
+  ADR-026); this change documents the audit-specific narrowing and adds the
+  missing provenance coverage.
+
+### Fixed
+
+- **Actor now appears in production structured logs** (issue #431). `ActorFilter`
+  wrote the calling actor under MDC key `actor`, but `logback-spring.xml`'s
+  production JSON appender only includes `actor_id` — so the actor was silently
+  dropped from prod logs. The key is aligned to `actor_id` (matching the sibling
+  `request_id` / `tenant_id` correlation keys), and `ActorFilterTest` now pins
+  the key `ActorFilter` writes. ADR-033 §4 records the contract.
+
+### Added
+
+- **`AuditActorProvenanceIntegrationTest`** (issue #431) — security-enabled
+  integration coverage proving (a) an authenticated mutation records the
+  configured principal name as the Envers actor, (b) a spoofed `X-Actor` header
+  does not override that principal, and (c) an unauthenticated mutation returns
+  the standard 401 envelope and creates no requirement (hence no audit
+  revision). `AuditHistoryIntegrationTest` and `ComplianceIntegrationTest` gain
+  class-level Javadoc clarifying they are controller slice tests under the
+  security-disabled `test` profile and, per ADR-033 §5, are not the
+  audit-provenance evidence for #431.
+
 ## [0.115.2] - 2026-05-10
 
 ### Security

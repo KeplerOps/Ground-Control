@@ -127,7 +127,7 @@ class ActorFilterTest {
             filter.doFilter(request, new MockHttpServletResponse(), new MockFilterChain());
 
             assertThat(ActorHolder.get()).isNull();
-            assertThat(MDC.get("actor")).isNull();
+            assertThat(MDC.get("actor_id")).isNull();
         }
     }
 
@@ -206,7 +206,8 @@ class ActorFilterTest {
         @Override
         public void doFilter(ServletRequest req, ServletResponse res) {
             capturedActor = ActorHolder.get();
-            capturedMdc = MDC.get("actor");
+            // Must match ActorFilter's MDC key (and logback-spring.xml's <includeMdcKeyName>).
+            capturedMdc = MDC.get("actor_id");
         }
     }
 }
