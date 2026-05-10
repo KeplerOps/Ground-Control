@@ -188,6 +188,7 @@ export const ARTIFACT_TYPES = [
   "CONTROL",
 ];
 export const LINK_TYPES = ["IMPLEMENTS", "TESTS", "DOCUMENTS", "CONSTRAINS", "VERIFIES"];
+export const CONFIDENCE_LEVELS = ["HIGH", "MEDIUM", "LOW"];
 export const METRIC_TYPES = ["COVERAGE", "ORPHAN_COUNT", "COMPLETENESS"];
 export const COMPARISON_OPERATORS = ["GTE", "LTE", "EQ", "GT", "LT"];
 export const ADR_STATUSES = ["PROPOSED", "ACCEPTED", "DEPRECATED", "SUPERSEDED"];
@@ -507,6 +508,13 @@ const TO_CAMEL = {
   framework_mappings: "frameworkMappings",
   pack_metadata: "packMetadata",
   control_pack_entries: "controlPackEntries",
+  // Analysis sweep + status-drift response fields
+  has_problems: "hasProblems",
+  total_problems: "totalProblems",
+  status_drift: "statusDrift",
+  draft_requirements_scanned: "draftRequirementsScanned",
+  minimum_confidence: "minimumConfidence",
+  strongest_signal: "strongestSignal",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -521,7 +529,7 @@ function toCamelCase(obj) {
   return out;
 }
 
-function toSnakeCase(obj) {
+export function toSnakeCase(obj) {
   if (obj === null || obj === undefined || typeof obj !== "object") return obj;
   if (Array.isArray(obj)) return obj.map(toSnakeCase);
   const out = {};
@@ -788,6 +796,12 @@ export async function detectConsistencyViolations(project) {
 
 export async function analyzeCompleteness(project) {
   return request("GET", "/api/v1/analysis/completeness", { params: { project } });
+}
+
+export async function analyzeStatusDrift(project, minimumConfidence) {
+  return request("GET", "/api/v1/analysis/status-drift", {
+    params: { project, minimumConfidence },
+  });
 }
 
 export async function getDashboardStats(project) {

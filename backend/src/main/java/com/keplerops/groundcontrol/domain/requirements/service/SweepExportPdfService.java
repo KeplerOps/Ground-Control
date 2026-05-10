@@ -38,6 +38,7 @@ public class SweepExportPdfService {
             addCoverageGaps(document, report.coverageGaps());
             addCrossWaveViolations(document, report.crossWaveViolations());
             addConsistencyViolations(document, report.consistencyViolations());
+            addStatusDrift(document, report.statusDrift());
             addCompleteness(document, report.completeness());
             addQualityGates(document, report);
 
@@ -160,6 +161,44 @@ public class SweepExportPdfService {
             addTableCell(table, v.targetUid());
             addTableCell(table, v.targetStatus());
             addTableCell(table, v.violationType());
+        }
+        document.add(table);
+    }
+
+    private void addStatusDrift(Document document, List<StatusDriftResult.Finding> statusDrift) {
+        if (statusDrift.isEmpty()) {
+            return;
+        }
+        addSection(document, "Status Drift (" + statusDrift.size() + ")");
+        var table = new PdfPTable(11);
+        table.setWidthPercentage(100);
+        addTableHeader(
+                table,
+                "UID",
+                "Title",
+                "Confidence",
+                "Strongest Signal",
+                "Evidence Signal",
+                "Evidence Confidence",
+                "Artifact Type",
+                "Artifact Identifier",
+                "Artifact Title",
+                "Artifact URL",
+                "Detail");
+        for (var finding : statusDrift) {
+            for (var ev : finding.evidence()) {
+                addTableCell(table, finding.uid());
+                addTableCell(table, finding.title());
+                addTableCell(table, finding.confidence().name());
+                addTableCell(table, finding.strongestSignal().name());
+                addTableCell(table, ev.signal().name());
+                addTableCell(table, ev.confidence().name());
+                addTableCell(table, ev.artifactType());
+                addTableCell(table, ev.artifactIdentifier());
+                addTableCell(table, ev.artifactTitle());
+                addTableCell(table, ev.artifactUrl());
+                addTableCell(table, ev.detail());
+            }
         }
         document.add(table);
     }

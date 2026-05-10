@@ -13,6 +13,7 @@ public record SweepReport(
         Map<String, List<RequirementSummary>> coverageGaps,
         List<CrossWaveViolationSummary> crossWaveViolations,
         List<ConsistencyViolationSummary> consistencyViolations,
+        List<StatusDriftResult.Finding> statusDrift,
         CompletenessResult completeness,
         QualityGateEvaluationResult qualityGateResults) {
 
@@ -22,12 +23,17 @@ public record SweepReport(
                 || coverageGaps.values().stream().anyMatch(l -> !l.isEmpty())
                 || !crossWaveViolations.isEmpty()
                 || !consistencyViolations.isEmpty()
+                || !statusDrift.isEmpty()
                 || (qualityGateResults != null && !qualityGateResults.passed());
     }
 
     /** Counts each distinct finding; a requirement may appear in multiple categories. */
     public int totalProblems() {
-        int count = cycles.size() + orphans.size() + crossWaveViolations.size() + consistencyViolations.size();
+        int count = cycles.size()
+                + orphans.size()
+                + crossWaveViolations.size()
+                + consistencyViolations.size()
+                + statusDrift.size();
         for (List<RequirementSummary> gaps : coverageGaps.values()) {
             count += gaps.size();
         }

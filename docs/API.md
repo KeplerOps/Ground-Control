@@ -120,6 +120,7 @@ http://localhost:8000/api/v1/
 | GET | `/analysis/work-order` | — | 200 | Topological work order |
 | GET | `/analysis/dashboard-stats` | — | 200 | Aggregate project health stats |
 | GET | `/analysis/semantic-similarity` | — | 200 | Find semantically similar requirement pairs |
+| GET | `/analysis/status-drift` | — | 200 | Flag DRAFT requirements that have implementation evidence |
 | POST | `/analysis/sweep` | — | 200 | Run analysis sweep on one project |
 | POST | `/analysis/sweep/all` | — | 200 | Run analysis sweep on all projects |
 
@@ -147,6 +148,53 @@ form it, including the relation type between each consecutive pair.
 |-----------|------|---------|-------------|
 | `project` | string | auto-resolved | Project identifier |
 | `threshold` | double | 0.85 | Minimum similarity score (0–1) |
+
+`GET /analysis/status-drift` flags `DRAFT` requirements that carry independent
+evidence of implementation or design completion (read-only — it never transitions
+requirements or creates links). Query parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `project` | string | auto-resolved | Project identifier |
+| `minimumConfidence` | enum (`HIGH` \| `MEDIUM` \| `LOW`) | `MEDIUM` | Lowest confidence band to report (default reports `HIGH` and `MEDIUM`; `LOW` is opt-in) |
+
+**StatusDriftResponse** (`GET /analysis/status-drift`):
+
+```json
+{
+  "draftRequirementsScanned": 14,
+  "minimumConfidence": "MEDIUM",
+  "findings": [
+    {
+      "uid": "GC-T010",
+      "title": "Risk Assessment Result Entity",
+      "confidence": "HIGH",
+      "strongestSignal": "IMPLEMENTS_LINK_ON_DRAFT",
+      "evidence": [
+        {
+          "signal": "IMPLEMENTS_LINK_ON_DRAFT",
+          "confidence": "HIGH",
+          "artifactType": "GITHUB_ISSUE",
+          "artifactIdentifier": "826",
+          "artifactTitle": "GC-T010: Risk Assessment Result Entity",
+          "artifactUrl": "https://github.com/KeplerOps/Ground-Control/issues/826",
+          "detail": "IMPLEMENTS link on a DRAFT requirement"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Evidence signals, strongest first: `IMPLEMENTS_LINK_ON_DRAFT` (`HIGH`);
+`ACCEPTED_ADR_DOCUMENTS_LINK`, `LINKED_GITHUB_ISSUE`, `LINKED_PULL_REQUEST`
+(`MEDIUM`); `LINKED_CODE_ARTIFACT`, `LINKED_DOC_ARTIFACT` (`LOW`). All signals are
+derived from the requirement's own project — its canonical traceability links and
+accepted ADR records — so the endpoint never reads the project-unscoped GitHub
+issue/PR sync tables or the filesystem. A finding's `confidence` is the strongest
+band across its `evidence`. Status drift is also surfaced inside
+`POST /analysis/sweep` as a new problem class (`statusDrift` array, counted in
+`totalProblems`).
 
 **SimilarityResultResponse:**
 

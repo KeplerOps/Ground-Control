@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.116.0] - 2026-05-10
+
+### Added
+
+- **Status-drift analysis** (issue #822). A new read-only requirements analysis,
+  `StatusDriftService`, flags `DRAFT` requirements that carry independent
+  evidence of implementation or design completion: an `IMPLEMENTS` traceability
+  link on a `DRAFT` requirement (the strongest signal — the GC-O007/#794
+  shape), a `DOCUMENTS` link to an `ACCEPTED` ADR, links to GitHub issues /
+  pull requests, and links to code / test / spec / proof artifacts. Each
+  finding reports a confidence band (`HIGH` / `MEDIUM` / `LOW`), the strongest
+  signal, and the full evidence artifacts (artifact type, identifier, title,
+  URL, detail). It is exposed as
+  `GET /api/v1/analysis/status-drift?project=&minimumConfidence=` and the MCP
+  tool `gc_analyze_status_drift`, and is integrated into the unified sweep as a
+  new problem class: `gc_run_sweep` / `SweepReport` / `SweepReportResponse`,
+  the CSV / Excel / PDF sweep exports (one row per evidence artifact), the
+  GitHub-issue (nested evidence bullets) and webhook sweep notifiers, and
+  `hasProblems` / `totalProblems` all surface it. The sweep and the bare
+  endpoint default to the `MEDIUM` threshold (so `HIGH` and `MEDIUM` findings
+  are reported; `LOW` is opt-in). The analysis is project-scoped per ADR-016
+  and read-only: every signal is derived only from the requirement's own
+  project — its canonical traceability links and accepted ADR records — so it
+  never reads the project-unscoped GitHub issue/PR sync tables, never shells
+  out to `gh`, never scans the filesystem, never transitions requirements, and
+  never creates `IMPLEMENTS` links for `DRAFT` requirements. Also fixes a
+  pre-existing bug where `gc_run_sweep` always reported "no problems detected"
+  because its handler read an unmapped `result.has_problems` (the relevant
+  sweep + status-drift response fields are now registered in the MCP
+  snake_case mapper, with a `toSnakeCase` regression test). New
+  `ConfidenceLevel` and `StatusDriftSignal` enums in the requirements domain;
+  new `architecture/adrs/011-requirements-data-model.md` §9 ("Status Drift Is
+  Derived Analysis Evidence") and a "Status Drift Analysis" section in
+  `docs/architecture/ARCHITECTURE.md`.
 ## [0.115.3] - 2026-05-10
 
 ### Security

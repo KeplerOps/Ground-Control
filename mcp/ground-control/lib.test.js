@@ -58,7 +58,72 @@ import {
   RELATION_TYPES,
   ARTIFACT_TYPES,
   LINK_TYPES,
+  toSnakeCase,
 } from "./lib.js";
+
+// ---------------------------------------------------------------------------
+// toSnakeCase (backend response normalization)
+// ---------------------------------------------------------------------------
+
+describe("toSnakeCase", () => {
+  it("maps sweep + status-drift response fields to snake_case, recursively", () => {
+    const backend = {
+      projectIdentifier: "ground-control",
+      hasProblems: true,
+      totalProblems: 1,
+      statusDrift: [
+        {
+          uid: "GC-T010",
+          title: "Risk Assessment Result Entity",
+          confidence: "HIGH",
+          strongestSignal: "IMPLEMENTS_LINK_ON_DRAFT",
+          evidence: [
+            {
+              signal: "IMPLEMENTS_LINK_ON_DRAFT",
+              confidence: "HIGH",
+              artifactType: "GITHUB_ISSUE",
+              artifactIdentifier: "826",
+              artifactTitle: "GC-T010: ...",
+              artifactUrl: "https://gh/826",
+              detail: "IMPLEMENTS link on a DRAFT requirement",
+            },
+          ],
+        },
+      ],
+    };
+    const out = toSnakeCase(backend);
+    assert.equal(out.has_problems, true);
+    assert.equal(out.total_problems, 1);
+    assert.ok(Array.isArray(out.status_drift));
+    const finding = out.status_drift[0];
+    assert.equal(finding.uid, "GC-T010");
+    assert.equal(finding.confidence, "HIGH");
+    assert.equal(finding.strongest_signal, "IMPLEMENTS_LINK_ON_DRAFT");
+    const evidence = finding.evidence[0];
+    assert.equal(evidence.signal, "IMPLEMENTS_LINK_ON_DRAFT");
+    assert.equal(evidence.artifact_type, "GITHUB_ISSUE");
+    assert.equal(evidence.artifact_identifier, "826");
+    assert.equal(evidence.artifact_url, "https://gh/826");
+    assert.equal(evidence.detail, "IMPLEMENTS link on a DRAFT requirement");
+  });
+
+  it("maps the standalone status-drift result envelope", () => {
+    const out = toSnakeCase({
+      draftRequirementsScanned: 14,
+      minimumConfidence: "MEDIUM",
+      findings: [],
+    });
+    assert.equal(out.draft_requirements_scanned, 14);
+    assert.equal(out.minimum_confidence, "MEDIUM");
+    assert.deepEqual(out.findings, []);
+  });
+
+  it("passes unknown keys through unchanged and tolerates null/scalars", () => {
+    assert.equal(toSnakeCase(null), null);
+    assert.equal(toSnakeCase(42), 42);
+    assert.deepEqual(toSnakeCase({ alreadyPlain: 1 }), { alreadyPlain: 1 });
+  });
+});
 
 // ---------------------------------------------------------------------------
 // buildUrl

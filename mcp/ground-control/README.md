@@ -67,7 +67,7 @@ be related, linked, or analyzed.
 1. **Create requirements** — `gc_create_requirement` with uid, title, statement
 2. **Create relations** — `gc_create_relation` between two existing requirements
 3. **Add traceability links** — `gc_create_traceability_link` to connect code, tests, issues, ADRs
-4. **Run analysis** — `gc_analyze_cycles`, `gc_analyze_orphans`, `gc_analyze_coverage_gaps`, `gc_analyze_impact`, `gc_analyze_cross_wave`, `gc_analyze_consistency`, `gc_analyze_completeness`
+4. **Run analysis** — `gc_analyze_cycles`, `gc_analyze_orphans`, `gc_analyze_coverage_gaps`, `gc_analyze_impact`, `gc_analyze_cross_wave`, `gc_analyze_consistency`, `gc_analyze_completeness`, `gc_analyze_status_drift`
 5. **Embed requirements** — `gc_embed_project` to generate vector embeddings, `gc_analyze_similarity` to find near-duplicates
 6. **Transition status** — `gc_transition_status` moves requirements forward: DRAFT → ACTIVE → DEPRECATED → ARCHIVED
 7. **Bulk operations** — `gc_import_strictdoc` for .sdoc files, `gc_import_reqif` for .reqif files, `gc_sync_github` for issue sync
@@ -94,6 +94,7 @@ be related, linked, or analyzed.
 | `gc_analyze_cross_wave` | _(none)_ | Find cross-wave dependency violations |
 | `gc_analyze_consistency` | `project` (optional) | Detect consistency violations (active conflicts, active supersedes) |
 | `gc_analyze_completeness` | `project` (optional) | Analyze completeness: status distribution and missing fields |
+| `gc_analyze_status_drift` | `project` (optional), `minimum_confidence` (optional: HIGH/MEDIUM/LOW, default MEDIUM) | Find DRAFT requirements with independent evidence of implementation (IMPLEMENTS links, accepted ADRs, linked issues/PRs, code-artifact links — all from the project's own traceability links). Read-only; reports confidence and evidence artifacts |
 | `gc_dashboard_stats` | `project` (optional) | Aggregate project health: counts by status/wave, coverage percentages, recent changes |
 | `gc_get_work_order` | `project` (optional) | Topological work order with MoSCoW priority |
 | `gc_dashboard_stats` | `project` (optional) | Aggregate project health: counts, coverage, recent changes |

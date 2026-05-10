@@ -36,6 +36,8 @@ public interface RequirementRepository extends JpaRepository<Requirement, UUID>,
 
     List<Requirement> findByProjectIdAndArchivedAtIsNull(UUID projectId);
 
+    List<Requirement> findByProjectIdAndStatusAndArchivedAtIsNull(UUID projectId, Status status);
+
     @Query("SELECT r.id FROM Requirement r WHERE r.project.id = :projectId AND r.archivedAt IS NULL")
     List<UUID> findIdsByProjectIdAndArchivedAtIsNull(@Param("projectId") UUID projectId);
 

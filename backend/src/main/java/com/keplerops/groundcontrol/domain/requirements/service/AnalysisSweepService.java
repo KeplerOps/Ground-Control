@@ -7,6 +7,7 @@ import com.keplerops.groundcontrol.domain.qualitygates.service.QualityGateEvalua
 import com.keplerops.groundcontrol.domain.qualitygates.service.QualityGateService;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.model.RequirementRelation;
+import com.keplerops.groundcontrol.domain.requirements.state.ConfidenceLevel;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -24,17 +25,23 @@ public class AnalysisSweepService {
 
     private static final Logger log = LoggerFactory.getLogger(AnalysisSweepService.class);
 
+    /** Default confidence band for status drift inside the sweep: HIGH and MEDIUM findings, not LOW. */
+    private static final ConfidenceLevel SWEEP_STATUS_DRIFT_THRESHOLD = ConfidenceLevel.MEDIUM;
+
     private final AnalysisService analysisService;
+    private final StatusDriftService statusDriftService;
     private final ProjectService projectService;
     private final QualityGateService qualityGateService;
     private final List<SweepNotifier> notifiers;
 
     public AnalysisSweepService(
             AnalysisService analysisService,
+            StatusDriftService statusDriftService,
             ProjectService projectService,
             QualityGateService qualityGateService,
             List<SweepNotifier> notifiers) {
         this.analysisService = analysisService;
+        this.statusDriftService = statusDriftService;
         this.projectService = projectService;
         this.qualityGateService = qualityGateService;
         this.notifiers = notifiers;
@@ -71,6 +78,10 @@ public class AnalysisSweepService {
                 .map(AnalysisSweepService::toConsistencySummary)
                 .toList();
 
+        var statusDrift = statusDriftService
+                .analyze(projectId, SWEEP_STATUS_DRIFT_THRESHOLD)
+                .findings();
+
         var completeness = analysisService.analyzeCompleteness(projectId);
 
         QualityGateEvaluationResult qualityGateResults = null;
@@ -90,6 +101,7 @@ public class AnalysisSweepService {
                 coverageGaps,
                 crossWaveViolations,
                 consistencyViolations,
+                statusDrift,
                 completeness,
                 qualityGateResults);
 

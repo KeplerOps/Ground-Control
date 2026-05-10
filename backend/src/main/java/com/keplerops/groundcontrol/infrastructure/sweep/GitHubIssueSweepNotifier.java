@@ -2,6 +2,7 @@ package com.keplerops.groundcontrol.infrastructure.sweep;
 
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
 import com.keplerops.groundcontrol.domain.requirements.service.GitHubClient;
+import com.keplerops.groundcontrol.domain.requirements.service.StatusDriftResult;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepNotifier;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport.ConsistencyViolationSummary;
@@ -122,6 +123,42 @@ public class GitHubIssueSweepNotifier implements SweepNotifier {
                         .append("]: ")
                         .append(v.violationType())
                         .append("\n");
+            }
+            sb.append("\n");
+        }
+
+        if (!report.statusDrift().isEmpty()) {
+            sb.append("### Status Drift (DRAFT with implementation evidence)\n\n");
+            for (StatusDriftResult.Finding f : report.statusDrift()) {
+                sb.append("- ")
+                        .append(f.uid())
+                        .append(": ")
+                        .append(f.title())
+                        .append(" — ")
+                        .append(f.confidence())
+                        .append(" (")
+                        .append(f.strongestSignal())
+                        .append(")\n");
+                for (StatusDriftResult.Evidence ev : f.evidence()) {
+                    sb.append("  - ")
+                            .append(ev.signal())
+                            .append(" [")
+                            .append(ev.confidence())
+                            .append("]: ")
+                            .append(ev.artifactType())
+                            .append(' ')
+                            .append(ev.artifactIdentifier());
+                    if (!ev.artifactTitle().isEmpty()) {
+                        sb.append(" — ").append(ev.artifactTitle());
+                    }
+                    if (!ev.detail().isEmpty()) {
+                        sb.append(" (").append(ev.detail()).append(')');
+                    }
+                    if (!ev.artifactUrl().isEmpty()) {
+                        sb.append(' ').append(ev.artifactUrl());
+                    }
+                    sb.append('\n');
+                }
             }
             sb.append("\n");
         }

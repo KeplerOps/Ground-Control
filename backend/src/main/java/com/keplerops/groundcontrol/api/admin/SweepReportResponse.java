@@ -17,6 +17,7 @@ public record SweepReportResponse(
         Map<String, List<RequirementRef>> coverageGaps,
         List<CrossWaveViolationRef> crossWaveViolations,
         List<ConsistencyViolationRef> consistencyViolations,
+        List<StatusDriftResponse.FindingRef> statusDrift,
         CompletenessResponse completeness,
         QualityGateEvaluationResponse qualityGateResults) {
 
@@ -46,6 +47,10 @@ public record SweepReportResponse(
                         v.sourceUid(), v.sourceStatus(), v.targetUid(), v.targetStatus(), v.violationType()))
                 .toList();
 
+        var statusDrift = report.statusDrift().stream()
+                .map(StatusDriftResponse.FindingRef::from)
+                .toList();
+
         var qualityGateResults = report.qualityGateResults() != null
                 ? QualityGateEvaluationResponse.from(report.qualityGateResults())
                 : null;
@@ -60,6 +65,7 @@ public record SweepReportResponse(
                 coverageGaps,
                 crossWave,
                 consistency,
+                statusDrift,
                 CompletenessResponse.from(report.completeness()),
                 qualityGateResults);
     }

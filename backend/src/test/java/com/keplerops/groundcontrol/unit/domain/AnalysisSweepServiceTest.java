@@ -2,6 +2,7 @@ package com.keplerops.groundcontrol.unit.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -19,11 +20,15 @@ import com.keplerops.groundcontrol.domain.requirements.service.CompletenessResul
 import com.keplerops.groundcontrol.domain.requirements.service.ConsistencyViolation;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
+import com.keplerops.groundcontrol.domain.requirements.service.StatusDriftResult;
+import com.keplerops.groundcontrol.domain.requirements.service.StatusDriftService;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepNotifier;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport;
+import com.keplerops.groundcontrol.domain.requirements.state.ConfidenceLevel;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.Status;
+import com.keplerops.groundcontrol.domain.requirements.state.StatusDriftSignal;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -40,6 +45,9 @@ class AnalysisSweepServiceTest {
 
     @Mock
     private AnalysisService analysisService;
+
+    @Mock
+    private StatusDriftService statusDriftService;
 
     @Mock
     private ProjectService projectService;
@@ -63,7 +71,11 @@ class AnalysisSweepServiceTest {
 
     @BeforeEach
     void setUp() {
-        sweepService = new AnalysisSweepService(analysisService, projectService, qualityGateService, List.of(notifier));
+        sweepService = new AnalysisSweepService(
+                analysisService, statusDriftService, projectService, qualityGateService, List.of(notifier));
+        lenient()
+                .when(statusDriftService.analyze(any(), any()))
+                .thenReturn(new StatusDriftResult(0, ConfidenceLevel.MEDIUM, List.of()));
     }
 
     private void stubCleanProject() {
@@ -257,6 +269,37 @@ class AnalysisSweepServiceTest {
             assertThat(summary.targetUid()).isEqualTo("GC-TGT");
             assertThat(summary.targetStatus()).isEqualTo("ACTIVE");
             assertThat(summary.violationType()).isEqualTo("ACTIVE_CONFLICT");
+        }
+
+        @Test
+        void includesStatusDriftInReport() {
+            when(projectService.resolveProjectId("test-project")).thenReturn(PROJECT_ID);
+            when(projectService.getById(PROJECT_ID)).thenReturn(TEST_PROJECT);
+            when(analysisService.detectCycles(PROJECT_ID)).thenReturn(List.of());
+            when(analysisService.findOrphans(PROJECT_ID)).thenReturn(List.of());
+            for (LinkType lt : LinkType.values()) {
+                when(analysisService.findCoverageGaps(PROJECT_ID, lt)).thenReturn(List.of());
+            }
+            when(analysisService.crossWaveValidation(PROJECT_ID)).thenReturn(List.of());
+            when(analysisService.detectConsistencyViolations(PROJECT_ID)).thenReturn(List.of());
+            when(analysisService.analyzeCompleteness(PROJECT_ID))
+                    .thenReturn(new CompletenessResult(1, Map.of(), List.of()));
+            var finding = new StatusDriftResult.Finding(
+                    "GC-T010",
+                    "Risk Assessment Result Entity",
+                    ConfidenceLevel.HIGH,
+                    StatusDriftSignal.IMPLEMENTS_LINK_ON_DRAFT,
+                    List.of());
+            when(statusDriftService.analyze(PROJECT_ID, ConfidenceLevel.MEDIUM))
+                    .thenReturn(new StatusDriftResult(1, ConfidenceLevel.MEDIUM, List.of(finding)));
+
+            var report = sweepService.sweep("test-project");
+
+            assertThat(report.statusDrift())
+                    .extracting(StatusDriftResult.Finding::uid)
+                    .containsExactly("GC-T010");
+            assertThat(report.hasProblems()).isTrue();
+            assertThat(report.totalProblems()).isEqualTo(1);
         }
     }
 
