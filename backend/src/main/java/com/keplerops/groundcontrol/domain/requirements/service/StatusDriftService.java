@@ -84,16 +84,12 @@ public class StatusDriftService {
 
         List<StatusDriftResult.Finding> findings = new ArrayList<>();
         for (Requirement requirement : drafts) {
-            var evidence = collectEvidence(linksByRequirement.getOrDefault(requirement.getId(), List.of()), adrsByUid);
-            if (evidence.isEmpty()) {
-                continue;
-            }
-            var confidence = strongestConfidence(evidence);
-            if (!confidence.atLeast(minimumConfidence)) {
-                continue;
-            }
-            findings.add(new StatusDriftResult.Finding(
-                    requirement.getUid(), requirement.getTitle(), confidence, strongestSignal(evidence), evidence));
+            buildFinding(
+                            requirement,
+                            linksByRequirement.getOrDefault(requirement.getId(), List.of()),
+                            adrsByUid,
+                            minimumConfidence)
+                    .ifPresent(findings::add);
         }
 
         findings.sort(Comparator.comparing(StatusDriftResult.Finding::confidence, Comparator.reverseOrder())
@@ -111,6 +107,23 @@ public class StatusDriftService {
     // ------------------------------------------------------------------------
     // Evidence collection — link-based and project-scoped only
     // ------------------------------------------------------------------------
+
+    private Optional<StatusDriftResult.Finding> buildFinding(
+            Requirement requirement,
+            List<TraceabilityLink> links,
+            Map<String, ArchitectureDecisionRecord> adrsByUid,
+            ConfidenceLevel minimumConfidence) {
+        var evidence = collectEvidence(links, adrsByUid);
+        if (evidence.isEmpty()) {
+            return Optional.empty();
+        }
+        var confidence = strongestConfidence(evidence);
+        if (!confidence.atLeast(minimumConfidence)) {
+            return Optional.empty();
+        }
+        return Optional.of(new StatusDriftResult.Finding(
+                requirement.getUid(), requirement.getTitle(), confidence, strongestSignal(evidence), evidence));
+    }
 
     private List<StatusDriftResult.Evidence> collectEvidence(
             List<TraceabilityLink> links, Map<String, ArchitectureDecisionRecord> adrsByUid) {

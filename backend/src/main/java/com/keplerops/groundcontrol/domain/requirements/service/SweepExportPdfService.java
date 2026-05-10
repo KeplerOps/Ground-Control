@@ -18,6 +18,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class SweepExportPdfService {
 
+    private static final String COL_UID = "UID";
+    private static final String COL_TITLE = "Title";
+
     private static final com.lowagie.text.Font TITLE_FONT = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 16);
     private static final com.lowagie.text.Font SECTION_FONT = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 12);
     private static final com.lowagie.text.Font HEADER_FONT = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8);
@@ -102,7 +105,7 @@ public class SweepExportPdfService {
         addSection(document, "Orphaned Requirements (" + orphans.size() + ")");
         var table = new PdfPTable(2);
         table.setWidthPercentage(100);
-        addTableHeader(table, "UID", "Title");
+        addTableHeader(table, COL_UID, COL_TITLE);
         for (var orphan : orphans) {
             addTableCell(table, orphan.uid());
             addTableCell(table, orphan.title());
@@ -118,7 +121,7 @@ public class SweepExportPdfService {
         addSection(document, "Coverage Gaps (" + totalGaps + ")");
         var table = new PdfPTable(3);
         table.setWidthPercentage(100);
-        addTableHeader(table, "Link Type", "UID", "Title");
+        addTableHeader(table, "Link Type", COL_UID, COL_TITLE);
         for (var entry : coverageGaps.entrySet()) {
             for (var req : entry.getValue()) {
                 addTableCell(table, entry.getKey());
@@ -174,8 +177,8 @@ public class SweepExportPdfService {
         table.setWidthPercentage(100);
         addTableHeader(
                 table,
-                "UID",
-                "Title",
+                COL_UID,
+                COL_TITLE,
                 "Confidence",
                 "Strongest Signal",
                 "Evidence Signal",
@@ -219,7 +222,7 @@ public class SweepExportPdfService {
             var issueTable = new PdfPTable(2);
             issueTable.setWidthPercentage(100);
             issueTable.setSpacingBefore(10f);
-            addTableHeader(issueTable, "UID", "Issue");
+            addTableHeader(issueTable, COL_UID, "Issue");
             for (var issue : completeness.issues()) {
                 addTableCell(issueTable, issue.uid());
                 addTableCell(issueTable, issue.issue());

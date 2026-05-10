@@ -14,6 +14,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class SweepExportExcelService {
 
+    private static final String COL_UID = "UID";
+    private static final String COL_TITLE = "Title";
+
     public byte[] toExcel(SweepReport report) {
         try (var workbook = new XSSFWorkbook()) {
             var headerStyle = createHeaderStyle(workbook);
@@ -72,7 +75,7 @@ public class SweepExportExcelService {
     private void writeOrphansSheet(
             XSSFWorkbook workbook, CellStyle headerStyle, List<SweepReport.RequirementSummary> orphans) {
         Sheet sheet = workbook.createSheet("Orphans");
-        writeHeader(sheet, headerStyle, "UID", "Title");
+        writeHeader(sheet, headerStyle, COL_UID, COL_TITLE);
 
         int rowNum = 1;
         for (var orphan : orphans) {
@@ -88,7 +91,7 @@ public class SweepExportExcelService {
             CellStyle headerStyle,
             Map<String, List<SweepReport.RequirementSummary>> coverageGaps) {
         Sheet sheet = workbook.createSheet("Coverage Gaps");
-        writeHeader(sheet, headerStyle, "Link Type", "UID", "Title");
+        writeHeader(sheet, headerStyle, "Link Type", COL_UID, COL_TITLE);
 
         int rowNum = 1;
         for (var entry : coverageGaps.entrySet()) {
@@ -135,8 +138,8 @@ public class SweepExportExcelService {
         writeHeader(
                 sheet,
                 headerStyle,
-                "UID",
-                "Title",
+                COL_UID,
+                COL_TITLE,
                 "Confidence",
                 "Strongest Signal",
                 "Evidence Signal",

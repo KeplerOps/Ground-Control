@@ -91,12 +91,12 @@ class StatusDriftServiceTest {
     }
 
     private static ArchitectureDecisionRecord adr(String uid, AdrStatus status) {
-        var record = new ArchitectureDecisionRecord(
+        var adrRecord = new ArchitectureDecisionRecord(
                 TEST_PROJECT, uid, "ADR " + uid, FIXED_DATE, "context", "decision", "consequences", "tester");
         if (status == AdrStatus.ACCEPTED) {
-            record.transitionStatus(AdrStatus.ACCEPTED);
+            adrRecord.transitionStatus(AdrStatus.ACCEPTED);
         }
-        return record;
+        return adrRecord;
     }
 
     private void stubDrafts(Requirement... reqs) {
