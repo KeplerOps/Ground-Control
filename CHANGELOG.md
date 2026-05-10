@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.116.1] - 2026-05-10
+
+### Added
+
+- **API enum contract is now mechanically enforced across backend, frontend, and
+  MCP** (issue #433). New ADR-034 (*API Enum Contract Single Source of Truth*)
+  pins the contract: the backend Java enums under `domain/requirements/state/`
+  are the source of truth; `frontend/src/types/api.ts` (union types and, where
+  the UI iterates them, constant arrays) and the MCP layer (`lib.js` constants,
+  consumed by `index.js` `z.enum(...)` schemas) are mirrors. `bin/policy` gains
+  `run_enum_contract_check`, a static post-condition that parses the Java enum
+  sources and fails `make policy` (the `policy` CI job) on any divergence. It
+  covers every API-exposed requirement/traceability enum — `RequirementType`,
+  `RelationType`, `ArtifactType`, `LinkType`, `Status`, `Priority`, `SyncStatus`,
+  `ChangeCategory` — and is parameterized by an enum inventory, so adding another
+  is one row. The parsers strip comments before extracting literals/tokens, so a
+  value commented *out* of a mirror cannot satisfy the check.
+- **`frontend/src/types/enum-contract.test.ts`** is rewritten to read the actual
+  Java enum source files instead of hardcoding a second copy of the value lists
+  (the previous form only "moved the drift"); it is the developer-local mirror of
+  the `bin/policy` gate.
+- `RELATION_TYPES`, `STATUSES`, and `PRIORITIES` constants added to
+  `frontend/src/types/api.ts`; `relation-form.tsx`, `requirement-form.tsx`, and
+  the `requirements.tsx` filters now import them instead of carrying their own
+  literal arrays. `CHANGE_CATEGORIES` added to `mcp/ground-control/lib.js`;
+  `index.js`'s timeline tools now use `z.enum(CHANGE_CATEGORIES)` instead of an
+  inline literal.
+
+### Fixed
+
+- **Frontend traceability `ArtifactType` was missing `PULL_REQUEST`,
+  `RISK_SCENARIO`, and `CONTROL`** (issue #433) — the backend and MCP have all
+  twelve values, but an earlier partial fix dropped these three from the frontend
+  union and `ARTIFACT_TYPES`, so the traceability form could not target a pull
+  request, risk scenario, or control. All twelve are restored, in backend
+  declaration order.
+- **`SyncStatus` in `frontend/src/types/api.ts` was drifted** (issue #433) — it
+  was typed `SYNCED | NOT_SYNCED | ERROR`, but the backend
+  `SyncStatus` enum is `SYNCED | STALE | BROKEN`. The frontend type is corrected;
+  the only consumer (the traceability-tab status display) renders the value
+  verbatim, so no behavior changed beyond removing the impossible labels.
+- **Create-requirement form now requires `statement`** (issue #433). The backend
+  `RequirementRequest` annotates `statement` `@NotBlank`, but the React form left
+  it optional and `RequirementRequest.statement` was typed `string | undefined`;
+  the field is now `required` in the form and `string` in the type, matching the
+  backend contract (the edit form already enforced a non-blank statement on the
+  client and the backend rejects a blank statement on update via `@Size(min=1)`).
+
 ## [0.116.0] - 2026-05-10
 
 ### Added

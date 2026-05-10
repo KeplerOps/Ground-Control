@@ -23,7 +23,7 @@ import type {
   Status,
   UpdateRequirementRequest,
 } from "@/types/api";
-import { REQUIREMENT_TYPES } from "@/types/api";
+import { PRIORITIES, REQUIREMENT_TYPES, STATUSES } from "@/types/api";
 import * as Checkbox from "@radix-ui/react-checkbox";
 import { Check, FileText, Plus } from "lucide-react";
 import { useCallback, useState } from "react";
@@ -197,7 +197,7 @@ export function Requirements() {
             setPage(0);
           }}
           placeholder="Status"
-          options={["DRAFT", "ACTIVE", "DEPRECATED", "ARCHIVED"]}
+          options={STATUSES}
         />
         <FilterSelect
           value={typeFilter}
@@ -215,7 +215,7 @@ export function Requirements() {
             setPage(0);
           }}
           placeholder="Priority"
-          options={["MUST", "SHOULD", "COULD", "WONT"]}
+          options={PRIORITIES}
         />
         <input
           type="number"
