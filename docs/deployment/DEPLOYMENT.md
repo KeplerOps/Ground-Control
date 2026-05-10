@@ -131,12 +131,35 @@ first in `deploy/docker/docker-compose.prod.yml`; after a clean sync,
 the compose file at `/opt/gc/docker-compose.yml` should match that repo file
 byte-for-byte. Operator-local secret material remains only in `/opt/gc/.env`.
 
-The production compose file currently publishes the backend as `8000:8000`,
-which Docker binds on all host interfaces. If red-dragon's host firewall or
-Tailscale `ts-input` rules do not drop non-tailnet traffic, ADR-026 bearer
-auth is the only API boundary for public callers. Treat network exposure as a
-separate deploy prerequisite: either prove non-tailnet traffic is blocked or
-change the bind/firewall posture deliberately.
+The production compose file publishes the backend on `${GC_BIND_IP:-0.0.0.0}:8000:8000`.
+On red-dragon, set `GC_BIND_IP=100.98.28.66` (the host's tailnet IP) in
+`/opt/gc/.env` so docker-proxy listens only on the tailnet interface — public
+IPv4 / IPv6 attempts to reach the API never even establish a TCP connection
+to the proxy. Defense in depth on top of ADR-026 bearer auth: even if the
+backend has a future auth bypass, an attacker would need a tailnet identity
+to reach it.
+
+A second, host-firewall layer drops TCP packets that arrive on the public
+interface bound for port 8000, regardless of what docker-proxy is listening
+on. The systemd unit lives at `deploy/scripts/gc-firewall.service`; install
+it once per host:
+
+```bash
+sudo install -o root -g root -m 644 \
+  deploy/scripts/gc-firewall.service /etc/systemd/system/gc-firewall.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now gc-firewall.service
+```
+
+Verify with `sudo iptables -L INPUT -n -v | head` — rule 1 should be
+`DROP -i enp8s0 tcp dport 8000`. The unit reads the public interface name
+from the rule itself (`enp8s0` matches red-dragon); change the unit if your
+deployment uses a different public NIC. Tailnet traffic enters via
+`tailscale0` (or via `lo` when the host talks to itself by its tailnet IP)
+and is unaffected.
+
+Both layers are idempotent and stateless — re-running `up -d` or
+`systemctl restart gc-firewall` is safe.
 
 ### Migrating an existing deployment to ADR-026 auth
 
