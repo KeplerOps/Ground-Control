@@ -70,7 +70,18 @@ The skill handles the entire lifecycle: plan, implement, verify, commit, push, P
 
 10. **Fetch the existing traceability links for the issue** via `gc_get_traceability_by_artifact` with `artifact_type: GITHUB_ISSUE` and `artifact_identifier: <issue-number>`. Cache the result — you will need it to reconcile the issue's relationship to requirements in Step 16.
 
-11. **Switch to the issue's feature branch**: run `gh issue develop <issue-number> --checkout --base {cfg.workflow.base_branch|default dev}`. If the branch already exists, `gh` reuses it.
+11. **Switch to the issue's feature branch**: run `gh issue develop <issue-number> --checkout --base {cfg.workflow.base_branch|default dev}`. If the branch already exists, `gh` reuses it. Then run `git branch --show-current` and cache that exact string as `<branch>` — sub-step 12 uses it verbatim; do not reconstruct it from the issue number.
+
+12. **Flag the issue as in-progress** so a human scanning the issue list — or another agent — can see at a glance that work is underway. The values below are stated together so a repo that prefers a different visible signal changes one place; pass everything to `gh` as argv, never as a shell-interpolated string:
+    - **label** `in-progress` — color `FBCA04`, description `An agent is actively working this issue via /implement`.
+    - **pickup comment** — `🛠️ Picked up by /implement — driver <Claude Code | Codex>, branch \`<branch>\`, <ISO-8601 UTC timestamp>.` where `<branch>` is the value cached in sub-step 11 from `git branch --show-current`.
+
+    Run, in order:
+    1. `gh label create in-progress --color FBCA04 --description "An agent is actively working this issue via /implement" 2>/dev/null || true` — creates the label if the repo lacks it, and is a harmless no-op otherwise. Do NOT pass `--force`: `gh` treats `--force` as "overwrite", so it would rewrite a repo's existing `in-progress` label's color/description on every `/implement` run — broader than this issue-lifecycle signal. (If creation fails for a real reason — e.g., the token can't manage labels — the next sub-step's `gh issue edit --add-label` surfaces it.)
+    2. `gh issue edit <issue-number> --add-label in-progress`.
+    3. `gh issue comment <issue-number> --body "<pickup comment>"`.
+
+    This is operational visibility only: the pickup comment is **not** a phase marker, the plan comment, a review-findings record, or the final report, and it gates nothing. If the label create/apply or the comment post fails, surface the failure before continuing to Step 2 — a silent failure defeats the duplicate-work signal. The label is **not** removed on an error path or a partial pause: a run that escalates to the user before Step 18 leaves the issue flagged, because it *was* picked up and the work is paused, not finished. Only Step 18 (issue closure) clears it.
 
 ### Step 2: Read the Issue and Gather Context
 
@@ -488,7 +499,7 @@ Reconciliation is idempotent: running it on an already-correct branch is a no-op
 
 ### Step 18: Close the Issue
 
-Close the GitHub issue now via `gh issue close <issue-number>`. The work is done, the PR records it, GitHub's auto-close on merge is unreliable.
+Close the GitHub issue now via `gh issue close <issue-number>`, then clear the in-progress flag set in Step 1: `gh issue edit <issue-number> --remove-label in-progress`. The work is done, the PR records it, GitHub's auto-close on merge is unreliable. If the label removal fails, surface it in the Step 19 report rather than claiming the issue was closed cleanly.
 
 ### Step 19: Report (DO NOT MERGE)
 

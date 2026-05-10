@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.116.2] - 2026-05-10
+
+### Changed
+
+- **`/implement` now flags the GitHub issue it picks up as in-progress** (issue
+  #842, amends ADR-021). After checking out the feature branch (Step 1), the
+  workflow applies an `in-progress` label — created on demand if the repo lacks
+  it, without clobbering an existing label's color/description (no
+  `gh label create --force`) — and posts a short pickup comment on the issue
+  thread recording the driver, the checked-out branch, and a timestamp, so
+  a maintainer scanning the issue list, or another agent, can see at a glance
+  that the issue is in flight. Step 18 removes the label when the issue is
+  closed; a run that escalates without completing intentionally leaves it set.
+  The change lives in the canonical `skills/implement/SKILL.md` plus the workflow
+  docs and ADR-021 (kept in sync by the existing `workflow-guardrail-sync` policy
+  rule — no new rule added); design context in
+  `architecture/notes/in-progress-issue-flag-preflight.md`.
 ## [0.116.1] - 2026-05-10
 
 ### Added
