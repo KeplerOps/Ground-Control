@@ -16,7 +16,7 @@ Add to your Claude Code MCP config (`.claude/settings.json` or project
       "command": "node",
       "args": ["/path/to/Ground-Control/mcp/ground-control/index.js"],
       "env": {
-        "GC_BASE_URL": "http://gc-dev:8000"
+        "GC_BASE_URL": "http://red-dragon:8000"
       }
     }
   }
@@ -31,6 +31,30 @@ make up && make dev
 
 `GC_BASE_URL` is required. The repo does not provide a committed default host.
 Set it in your user-local MCP config or shell environment.
+
+### Bearer token (ADR-026)
+
+Production deployments enforce `groundcontrol.security.enabled=true` and
+require `Authorization: Bearer <token>` on every `/api/v1/**` call. The
+MCP server reads the token from a `.env` file in the consumer repo's
+root (the cwd it was launched from) at startup:
+
+```sh
+# In each repo where you start Claude Code / Codex against Ground Control:
+cp .env.example .env       # if your repo has the template — Ground-Control does
+chmod 600 .env
+# Edit .env and set GROUND_CONTROL_API_TOKEN=<32-byte-hex token>
+```
+
+The token never appears in `.mcp.json` and is never exposed to the LLM.
+A shell-exported `GROUND_CONTROL_API_TOKEN` still wins over the `.env`
+value for one-off / CI callers that prefer the env-var-only flow. Make
+sure `.env` is gitignored.
+
+The legacy `GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN` is also resolved
+from `.env`; it is preferred over `GROUND_CONTROL_API_TOKEN` for paths
+requiring `ROLE_ADMIN` (`/api/v1/admin/**`, `/api/v1/embeddings/**`,
+`/api/v1/analysis/sweep/**`, `/api/v1/pack-registry/**`).
 
 Codex-backed workflow tools additionally require the Codex CLI to be installed
 and available on `PATH`.
