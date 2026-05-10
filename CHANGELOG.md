@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.115.2] - 2026-05-10
+
+### Security
+
+- **`DELETE /requirements/{id}/relations/{relationId}` no longer leaks whether
+  a relation exists under a different requirement** (issue #432). The ownership
+  check previously rejected a mismatched parent with
+  `Relation <id> does not belong to requirement <parent>`, a message distinct
+  from the genuinely-missing `Relation not found: <id>` — an existence oracle on
+  a P0 security-boundary route. It now throws the identical "not found" message,
+  so an ownership mismatch is indistinguishable from a missing relation, matching
+  `getRelationHistory`, `getTraceabilityLinkHistory`, and `deleteLink`.
+
+### Added
+
+- **End-to-end coverage for parent-child ownership on nested requirement
+  routes** (issue #432). New `NestedRouteOwnershipIntegrationTest` exercises
+  `GET /requirements/{id}/relations/{relationId}/history`,
+  `GET /requirements/{id}/traceability/{linkId}/history`,
+  `DELETE /requirements/{id}/relations/{relationId}`, and
+  `DELETE /requirements/{id}/traceability/{linkId}`: when the child resource
+  belongs to a different requirement, each route returns the same 404 +
+  `ErrorResponse` envelope (down to `error.message`, with no `error.detail`
+  block) that a genuinely-missing child of the same id would produce, and the
+  targeted child is left intact. `AuditHistoryIntegrationTest` gains a positive
+  case confirming relation history resolves via the relation's *target*
+  requirement, keeping the source-or-target ownership rule consistent with
+  `GET /requirements/{id}/relations`. The history-route ownership checks shipped
+  in #451; this PR closes the issue's remaining integration-test requirement and
+  the message-leak above.
+
 ## [0.115.1] - 2026-05-10
 
 ### Added

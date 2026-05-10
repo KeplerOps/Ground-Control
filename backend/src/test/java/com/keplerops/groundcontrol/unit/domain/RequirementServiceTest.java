@@ -726,7 +726,9 @@ class RequirementServiceTest {
             var relationId = UUID.randomUUID();
             when(relationRepository.findById(relationId)).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> service.deleteRelation(reqId, relationId)).isInstanceOf(NotFoundException.class);
+            assertThatThrownBy(() -> service.deleteRelation(reqId, relationId))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessage("Relation not found: " + relationId);
         }
 
         @Test
@@ -742,7 +744,11 @@ class RequirementServiceTest {
 
             when(relationRepository.findById(relationId)).thenReturn(Optional.of(relation));
 
-            assertThatThrownBy(() -> service.deleteRelation(reqId, relationId)).isInstanceOf(NotFoundException.class);
+            // Indistinguishable from a missing relation: identical message, no leak of the
+            // relation's real source/target requirement.
+            assertThatThrownBy(() -> service.deleteRelation(reqId, relationId))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessage("Relation not found: " + relationId);
         }
     }
 }

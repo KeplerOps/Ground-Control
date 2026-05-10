@@ -231,7 +231,10 @@ public class RequirementService {
         var sourceId = relation.getSource().getId();
         var targetId = relation.getTarget().getId();
         if (!requirementId.equals(sourceId) && !requirementId.equals(targetId)) {
-            throw new NotFoundException("Relation " + relationId + " does not belong to requirement " + requirementId);
+            // Ownership mismatch must be indistinguishable from a missing relation: same message,
+            // no leak of the relation's real parent requirement. Mirrors getRelationHistory,
+            // getTraceabilityLinkHistory, and deleteLink.
+            throw new NotFoundException("Relation not found: " + relationId);
         }
         relationRepository.delete(relation);
     }
