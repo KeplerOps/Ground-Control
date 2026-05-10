@@ -8,6 +8,7 @@ import type {
   FieldChangeResponse,
   TimelineEntryResponse,
 } from "@/types/api";
+import { CHANGE_CATEGORIES } from "@/types/api";
 import {
   ChevronDown,
   ChevronRight,
@@ -181,9 +182,7 @@ export function HistoryTab({ requirementId }: { requirementId: string }) {
           Filter:
         </span>
         <div className="flex items-center gap-3">
-          {(
-            ["REQUIREMENT", "RELATION", "TRACEABILITY_LINK"] as ChangeCategory[]
-          ).map((cat) => (
+          {CHANGE_CATEGORIES.map((cat) => (
             <label key={cat} className="flex items-center gap-1.5 text-xs">
               <input
                 type="radio"
@@ -272,20 +271,15 @@ export function HistoryTab({ requirementId }: { requirementId: string }) {
       {timeline.length > 0 && (
         <div className="flex items-center gap-4 text-xs text-muted-foreground pt-2 border-t border-border">
           <span>Legend:</span>
-          {activeCategories.has("REQUIREMENT") && (
-            <span className="flex items-center gap-1">
-              <FileText className="h-3 w-3" /> Requirement
-            </span>
-          )}
-          {activeCategories.has("RELATION") && (
-            <span className="flex items-center gap-1">
-              <GitBranch className="h-3 w-3" /> Relation
-            </span>
-          )}
-          {activeCategories.has("TRACEABILITY_LINK") && (
-            <span className="flex items-center gap-1">
-              <Link2 className="h-3 w-3" /> Traceability
-            </span>
+          {CHANGE_CATEGORIES.filter((cat) => activeCategories.has(cat)).map(
+            (cat) => {
+              const Icon = CATEGORY_ICONS[cat];
+              return (
+                <span key={cat} className="flex items-center gap-1">
+                  <Icon className="h-3 w-3" /> {CATEGORY_LABELS[cat]}
+                </span>
+              );
+            },
           )}
           <span className="ml-4 flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-green-500" /> Added
