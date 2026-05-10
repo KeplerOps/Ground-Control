@@ -270,13 +270,13 @@ def read_changed_files(
         raw = os.getenv(env_var, "")
         return sorted({normalize_path(path) for path in raw.splitlines() if path.strip()})
     if base:
-        output = run_git(["diff", "--name-only", "--diff-filter=ACMRTUXB", base, "--"], root=root)
+        output = run_git(["diff", "--name-only", "--diff-filter=ACDMRTUXB", base, "--"], root=root)
         return sorted({normalize_path(path) for path in output.splitlines() if path.strip()})
     if staged:
-        output = run_git(["diff", "--cached", "--name-only", "--diff-filter=ACMRTUXB", "--"], root=root)
+        output = run_git(["diff", "--cached", "--name-only", "--diff-filter=ACDMRTUXB", "--"], root=root)
         return sorted({normalize_path(path) for path in output.splitlines() if path.strip()})
 
-    tracked = run_git(["diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD", "--"], root=root)
+    tracked = run_git(["diff", "--name-only", "--diff-filter=ACDMRTUXB", "HEAD", "--"], root=root)
     untracked = run_git(["ls-files", "--others", "--exclude-standard"], root=root)
     combined = tracked.splitlines() + untracked.splitlines()
     return sorted({normalize_path(path) for path in combined if path.strip()})
@@ -504,6 +504,241 @@ def _extract_compose_backend_env_entries(text: str) -> dict[str, str]:
                 form = "list-value" if match.group(1) is not None else "map"
                 found.setdefault(key, form)
     return found
+
+
+# ---------------------------------------------------------------------------
+# Changelog-fragment workflow (issue #848, ADR-021 Phase B amendment).
+#
+# Ground-Control routes per-PR changelog entries through towncrier-style
+# fragments under `changelog.d/` instead of direct `CHANGELOG.md` edits so
+# concurrent PRs cannot conflict on the same line range. Two structural
+# gates back the convention here:
+#
+#   1. `parse_fragment_filename` — parses a fragment file's basename against
+#      a closed vocabulary. Accepts `<digits>.<type>.md` (issue-anchored) or
+#      `+<slug>.<type>.md` (issue-free), where `<type>` is one of the six
+#      Keep-a-Changelog categories. Anything else returns ``None``. This is
+#      not a substring test against fragment prose — it is a parser over a
+#      fixed grammar, which is the kind of structural gate the documentation
+#      carve-out at SKILL Step 4.4 requires when the diff is otherwise doc.
+#
+#   2. `run_changelog_fragment_check` — completion-gate enforcement. Two
+#      independent rules:
+#        - Together-ness: if `changelog.d/` exists in the repo, the
+#          canonical infrastructure files (`towncrier.toml`,
+#          `changelog.d/_template.md.jinja`, `changelog.d/README.md`) must
+#          all exist. A repo that ships `changelog.d/` without those is
+#          broken (towncrier won't run).
+#        - Diff signal: if a diff touches application source, it MUST carry
+#          a valid fragment under `changelog.d/`. Direct `CHANGELOG.md`
+#          edits do NOT satisfy a source-changing diff — accepting them
+#          would re-open the rebase-storm pathology this convention exists
+#          to prevent (codex review finding, issue #848). Release-collation
+#          commits (`towncrier build`) touch `CHANGELOG.md` and delete the
+#          fragments they consumed, neither of which is application source,
+#          so they fall through the predicate naturally. CI-only and
+#          docs-only diffs likewise carry no source paths and require no
+#          signal.
+#
+# The same vocabulary is mirrored in
+# `.claude/hooks/verify-implementation.sh` (host-local Stop hook) so the
+# repo-native check and the user-level hook agree on what counts.
+# ---------------------------------------------------------------------------
+
+CHANGELOG_FRAGMENT_TYPES: tuple[str, ...] = (
+    "security",
+    "added",
+    "changed",
+    "deprecated",
+    "removed",
+    "fixed",
+)
+
+_FRAGMENT_INFRASTRUCTURE_FILES: tuple[str, ...] = (
+    "towncrier.toml",
+    "changelog.d/_template.md.jinja",
+    "changelog.d/README.md",
+)
+
+# Reserved files inside `changelog.d/` that are infrastructure, not fragments.
+# Towncrier itself reads `_template.md.jinja`; `README.md` documents the
+# convention. Neither should be parsed by `parse_fragment_filename`.
+_FRAGMENT_RESERVED_NAMES: frozenset[str] = frozenset({"README.md", "_template.md.jinja"})
+
+# Filename grammar:
+#   <issue>   ::= 1+ ASCII digit
+#   <slug>    ::= "+" then 1+ chars from [a-zA-Z0-9._-]
+#   filename  ::= (<issue> | <slug>) "." <type> ".md"
+_FRAGMENT_ISSUE_RE = re.compile(r"^(\d+)\.([a-z]+)\.md$")
+_FRAGMENT_SLUG_RE = re.compile(r"^(\+[A-Za-z0-9][A-Za-z0-9._-]*)\.([a-z]+)\.md$")
+
+# Path prefixes for diffs that count as "application source" for the
+# diff-signal rule. Anything under these prefixes requires a changelog
+# signal; anything outside (docs, ADRs, skills prose, plan-rules,
+# `.github/workflows/`, repo metadata, tests-for-policy-tooling) does not.
+_SOURCE_PATH_PREFIXES: tuple[str, ...] = (
+    "backend/src/main/",
+    "backend/src/test/",
+    "frontend/src/",
+    "mcp/",
+)
+
+# `tools/` mostly carries policy tooling (which is itself infrastructure for
+# the workflow rather than application source). Subdirectories of `tools/`
+# that exist purely to support `bin/policy` and its tests are not counted
+# as "application source" for the diff-signal rule.
+_TOOLS_NON_SOURCE_PREFIXES: tuple[str, ...] = (
+    "tools/policy/",
+    "tools/tests/",
+)
+
+
+def parse_fragment_filename(name: str) -> tuple[str, str] | None:
+    """Parse a fragment filename against the convention vocabulary.
+
+    Returns ``(stem, type)`` for a well-formed fragment name, or ``None``
+    otherwise. The grammar is intentionally narrow: anything that doesn't
+    match exactly is rejected so towncrier can't silently skip a
+    misspelled fragment a contributor thought they had filed.
+
+    Reserved names inside ``changelog.d/`` (``README.md`` and the Jinja
+    template) are not fragments — they return ``None`` too.
+    """
+    if name in _FRAGMENT_RESERVED_NAMES:
+        return None
+
+    issue_match = _FRAGMENT_ISSUE_RE.match(name)
+    if issue_match:
+        stem, ftype = issue_match.group(1), issue_match.group(2)
+        if ftype in CHANGELOG_FRAGMENT_TYPES:
+            return (stem, ftype)
+        return None
+
+    slug_match = _FRAGMENT_SLUG_RE.match(name)
+    if slug_match:
+        stem, ftype = slug_match.group(1), slug_match.group(2)
+        # Reject the bare ``+`` slug — the slug body must be non-empty.
+        if stem == "+":
+            return None
+        if ftype in CHANGELOG_FRAGMENT_TYPES:
+            return (stem, ftype)
+        return None
+
+    return None
+
+
+def _diff_touches_application_source(changed_files: Iterable[str]) -> bool:
+    for path in changed_files:
+        normalized = normalize_path(path)
+        if normalized.startswith(_SOURCE_PATH_PREFIXES):
+            return True
+        if normalized.startswith("tools/") and not normalized.startswith(
+            _TOOLS_NON_SOURCE_PREFIXES
+        ):
+            return True
+    return False
+
+
+def run_changelog_fragment_check(
+    changed_files: list[str], root: Path = REPO_ROOT
+) -> list[Violation]:
+    violations: list[Violation] = []
+
+    changelog_d_dir = root / "changelog.d"
+    if changelog_d_dir.is_dir():
+        missing = [
+            rel
+            for rel in _FRAGMENT_INFRASTRUCTURE_FILES
+            if not (root / rel).exists()
+        ]
+        if missing:
+            violations.append(
+                Violation(
+                    code="changelog-fragment-infrastructure",
+                    message=(
+                        "changelog.d/ exists but the canonical fragment "
+                        "infrastructure is incomplete (towncrier will not run)."
+                    ),
+                    details=[f"missing: {', '.join(missing)}"],
+                )
+            )
+
+    # Validate any fragments staged in this diff. A fragment with a bad
+    # filename is invisible to towncrier, so the contributor would think
+    # they had filed an entry that never gets collated.
+    #
+    # The signal predicate is "fragment file exists in the working tree
+    # AFTER the diff applies" — not "any valid-looking fragment path is
+    # named anywhere in the diff". `read_changed_files` now includes
+    # deletions (filter `ACDMRTUXB`), so a release-collation commit that
+    # deletes `changelog.d/old.added.md` will list that path in
+    # `changed_files`; without the on-disk check, that deleted path would
+    # count as a "signal" for an unrelated source change in the same PR.
+    fragments_in_diff: list[str] = []
+    invalid_fragment_names: list[str] = []
+    for path in changed_files:
+        normalized = normalize_path(path)
+        if not normalized.startswith("changelog.d/"):
+            continue
+        relative = normalized[len("changelog.d/") :]
+        if relative in _FRAGMENT_RESERVED_NAMES:
+            continue
+        # Nested paths (`changelog.d/foo/848.added.md`) are NOT part of the
+        # convention — towncrier won't consume them — and silently skipping
+        # them would let a contributor file a fragment that never lands.
+        # Treat them as invalid so the violation surfaces in `make policy`.
+        if "/" in relative:
+            invalid_fragment_names.append(normalized)
+            continue
+        parsed = parse_fragment_filename(relative)
+        if parsed is None:
+            invalid_fragment_names.append(normalized)
+        elif (root / normalized).is_file():
+            fragments_in_diff.append(normalized)
+        # Else: parsed correctly but absent from the working tree —
+        # i.e. the fragment was deleted. Deleted fragments do not count
+        # as a release-notes signal.
+
+    if invalid_fragment_names:
+        violations.append(
+            Violation(
+                code="changelog-fragment-invalid-name",
+                message=(
+                    "Changelog fragment filename does not match the convention "
+                    "<issue>.<type>.md or +<slug>.<type>.md where <type> is one "
+                    f"of {', '.join(CHANGELOG_FRAGMENT_TYPES)}."
+                ),
+                details=[f"invalid: {name}" for name in invalid_fragment_names],
+            )
+        )
+
+    # Diff-signal rule: source-changing diff MUST carry a valid fragment
+    # under `changelog.d/`. A direct `CHANGELOG.md` edit is intentionally
+    # NOT a substitute for source diffs — that branch would re-open the
+    # rebase-storm pathology this convention exists to prevent. Release-
+    # collation commits touch `CHANGELOG.md` and the fragments they
+    # consume, neither of which counts as application source, so they
+    # fall through the predicate and need no fragment signal.
+    if _diff_touches_application_source(changed_files):
+        if not fragments_in_diff:
+            violations.append(
+                Violation(
+                    code="changelog-signal-missing",
+                    message=(
+                        "Source-changing diff has no valid changelog fragment "
+                        "under changelog.d/. Add a fragment named "
+                        "<issue>.<type>.md (or +<slug>.<type>.md for "
+                        "issue-free entries), type in "
+                        f"{{{','.join(CHANGELOG_FRAGMENT_TYPES)}}}. Editing "
+                        "CHANGELOG.md directly is reserved for release "
+                        "collation and does not satisfy this gate. See "
+                        "changelog.d/README.md."
+                    ),
+                    details=[],
+                )
+            )
+
+    return violations
 
 
 def run_deploy_compose_credential_passthrough(root: Path = REPO_ROOT) -> list[Violation]:
@@ -995,6 +1230,7 @@ def main(argv: list[str] | None = None) -> int:
     violations.extend(run_adr_guard(changed_files))
     violations.extend(run_controller_contracts(changed_files))
     violations.extend(run_migration_policy(changed_files))
+    violations.extend(run_changelog_fragment_check(changed_files))
     violations.extend(run_deploy_compose_credential_passthrough())
     violations.extend(run_enum_contract_check())
 

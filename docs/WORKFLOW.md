@@ -256,6 +256,10 @@ Returns all transitively affected requirements — everything upstream and downs
 
 ## Phase 5: Release & Audit
 
+### Release Notes via Changelog Fragments
+
+Per-PR release notes ship as fragments under `changelog.d/<issue>.<type>.md` (or `+<slug>.<type>.md` for issue-free entries), where `<type>` is one of `security`, `added`, `changed`, `deprecated`, `removed`, `fixed`. The convention exists so concurrent PRs never conflict on the same `CHANGELOG.md` line range, and it is enforced by `tools/policy/checks.py::run_changelog_fragment_check` plus the `verify-implementation.sh` Stop hook. Source-changing diffs MUST file a fragment (refactors under application source included); CI-only and docs-only diffs may ship without one. Direct `CHANGELOG.md` edits are reserved for release-collation commits. At release time the maintainer runs `uvx towncrier build --version <X.Y.Z> --date <YYYY-MM-DD> --yes`; towncrier collates the fragments into `CHANGELOG.md` immediately after the `<!-- towncrier release notes start -->` marker and removes the fragments it consumed. See [`changelog.d/README.md`](../changelog.d/README.md) for the full convention.
+
 ### Create a Baseline
 
 Freeze the requirement set at a release milestone:

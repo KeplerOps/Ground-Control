@@ -97,7 +97,7 @@ Enforced by ArchUnit tests in `ArchitectureTest.java`.
 ## Commit Messages
 
 - Imperative mood: `Add risk scoring engine` not `Added risk scoring engine`
-- Every commit updates `CHANGELOG.md`
+- Source-changing commits add a fragment under `changelog.d/<issue>.<type>.md` (or `+<slug>.<type>.md` for issue-free entries); release-time `towncrier build` collates fragments into `CHANGELOG.md`. CI-only and docs-only changes may ship without a fragment; refactors under application source still file a fragment. Do not edit `CHANGELOG.md` directly. See [`changelog.d/README.md`](changelog.d/README.md).
 
 ## Pull Requests
 
