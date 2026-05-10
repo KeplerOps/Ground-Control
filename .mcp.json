@@ -6,7 +6,8 @@
       "args": ["/home/atomik/src/Ground-Control/mcp/ground-control/index.js"],
       "env": {
         "GC_BASE_URL": "http://red-dragon:8000",
-        "GH_REPO": "KeplerOps/Ground-Control"
+        "GH_REPO": "KeplerOps/Ground-Control",
+        "GROUND_CONTROL_API_TOKEN": "${GROUND_CONTROL_API_TOKEN}"
       }
     },
     "sonarqube": {

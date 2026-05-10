@@ -78,7 +78,12 @@ services:
       - JAVA_TOOL_OPTIONS=${JAVA_TOOL_OPTIONS}
       - SPRING_PROFILES_ACTIVE=prod
     ports:
-      - "8000:8000"
+      # Bind to a specific host IP via GC_BIND_IP when present. On red-dragon
+      # this is set to the host's tailnet IP (100.98.28.66) so the docker-proxy
+      # never listens on the public interface — defense in depth on top of
+      # ADR-026 bearer auth (#828). Local / dev stacks leave it unset so the
+      # default 0.0.0.0 still binds all interfaces.
+      - "${GC_BIND_IP:-0.0.0.0}:8000:8000"
     depends_on:
       db:
         condition: service_healthy
