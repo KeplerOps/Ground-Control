@@ -39,7 +39,15 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class ActorFilter extends OncePerRequestFilter {
 
     private static final String ACTOR_HEADER = "X-Actor";
-    private static final String MDC_ACTOR = "actor";
+
+    /**
+     * MDC key for the calling actor. Must match the {@code <includeMdcKeyName>} entry in
+     * {@code logback-spring.xml}'s production JSON appender ({@code actor_id}) so structured logs
+     * actually carry the actor. The {@code _id} suffix mirrors the sibling correlation keys
+     * ({@code request_id}, {@code tenant_id}).
+     */
+    private static final String MDC_ACTOR = "actor_id";
+
     private static final String DEFAULT_ACTOR = "anonymous";
 
     private final SecurityProperties securityProperties;

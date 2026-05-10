@@ -275,14 +275,15 @@ within seconds. Order matters; do not skip ahead.
      backend's structured logs and confirm the request appears with the
      expected principal name (`ground-control-mcp`, `operator-admin`,
      `automation`). The principal name comes from `ActorFilter` /
-     `ActorHolder` and is logged via the per-request MDC, NOT the bearer
-     token itself. This proves token delivery without the token ever
-     leaving the server-side process boundary, so the captured output is
-     safe to keep around for review:
+     `ActorHolder` and is logged via the per-request MDC key `actor_id`
+     (matching `logback-spring.xml`'s production JSON appender), NOT the
+     bearer token itself. This proves token delivery without the token
+     ever leaving the server-side process boundary, so the captured
+     output is safe to keep around for review:
      ```bash
      docker compose -f deploy/docker/docker-compose.prod.yml \
        --env-file "${dryrun_env}" logs --tail=200 backend | \
-       grep -E '"actor"|"principal"'
+       grep '"actor_id"'
      ```
    Do NOT capture wire-level traces (e.g. `curl --trace-ascii`,
    `tcpdump`, agent debug stdout) for this verification: those formats

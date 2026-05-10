@@ -117,13 +117,18 @@ opt out), every request passes through:
 IpAllowlistFilter           # CIDR check (skipped if allowlist empty)
   → BearerTokenAuthFilter   # Authorization: Bearer <token> → SecurityContext
     → AuthorizationFilter   # path-matrix / ROLE_USER / ROLE_ADMIN
-      → ActorFilter         # populates ActorHolder + MDC actor=<principal>
+      → ActorFilter         # populates ActorHolder + MDC actor_id=<principal>
         → controllers
 ```
 
 Authorization is centralized in `ApiSecurityConfig` (ADR-026); controllers
-do not perform per-method auth checks. `ActorFilter` runs after the
-security chain so audit identity tracks the authenticated principal.
+do not perform per-method auth checks — the one deliberate exception,
+`PackRegistryAccessGuard`, is a defense-in-depth bridge that re-derives the
+admin principal from the same `SecurityContext` and re-asserts `ROLE_ADMIN`
+(see ADR-033 §4). `ActorFilter` runs after the security chain so audit
+identity tracks the authenticated principal; it writes the principal to MDC
+key `actor_id`, the key `logback-spring.xml`'s production JSON appender
+exports (alongside `request_id` / `tenant_id`). See [ADR-033](../../architecture/adrs/033-authenticated-audit-actor-provenance.md).
 
 ## What Exists vs. What Doesn't
 
@@ -141,7 +146,9 @@ security chain so audit identity tracks the authenticated principal.
 
 ### Does not exist yet
 
-- Auth flows
+- Interactive login / OIDC flows (the REST API access-control boundary exists
+  via ADR-026; browser login UX and external identity-provider integration do
+  not)
 - Redis integration (Redis is in docker-compose.yml but nothing in the app uses it)
 - Production deployment infrastructure (local Docker Compose + EC2 via CDK)
 - Multi-tenancy
