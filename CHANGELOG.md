@@ -63,6 +63,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Backend port can bind to a specific host IP via `GC_BIND_IP`**
+  (`deploy/docker/docker-compose.prod.yml`,
+  `deploy/docker/.env.template`, `.mcp.json`, issue #828 follow-up).
+  Adds `${GC_BIND_IP:-0.0.0.0}` to the published port spec. On the
+  red-dragon production deployment (ADR-030), `GC_BIND_IP` is set in
+  `/opt/gc/.env` to the host's tailnet IP so the `docker-proxy` never
+  listens on the public interface — defense in depth on top of ADR-026
+  bearer auth. Local / dev stacks leave it unset, preserving the
+  existing all-interfaces default. The repo `.mcp.json` also gets a
+  `${GROUND_CONTROL_API_TOKEN}` env passthrough so the agent MCP
+  client carries a bearer token to every authenticated `/api/v1/**`
+  call.
+
+### Security
+
 - **AGE adapter migrated to native Cypher parameter binding** (issue #244,
   ADR-032). `AgeGraphService` now routes every user-controlled string value
   (UIDs, project identifiers, free-form requirement properties like titles
