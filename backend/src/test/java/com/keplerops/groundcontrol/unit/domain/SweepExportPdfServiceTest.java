@@ -14,6 +14,9 @@ import com.keplerops.groundcontrol.domain.requirements.service.SweepReport;
 import com.keplerops.groundcontrol.domain.requirements.state.ConfidenceLevel;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
 import com.keplerops.groundcontrol.domain.requirements.state.StatusDriftSignal;
+import com.lowagie.text.pdf.PdfReader;
+import com.lowagie.text.pdf.parser.PdfTextExtractor;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
@@ -60,6 +63,30 @@ class SweepExportPdfServiceTest {
         assertThat(new String(bytes, 0, 5, StandardCharsets.UTF_8)).startsWith("%PDF");
         // Full report should be significantly larger than empty report
         assertThat(bytes.length).isGreaterThan(service.toPdf(emptyReport()).length);
+    }
+
+    @Test
+    void toPdf_rendersStatusDriftSectionWithEvidenceArtifact() throws IOException {
+        // Extract the rendered text so a no-op'd addStatusDrift would be caught: GC-T010 and the
+        // evidence artifact identifier (826) appear only in the status-drift section of fullReport().
+        var text = extractText(service.toPdf(fullReport()));
+        assertThat(text).contains("Status Drift");
+        assertThat(text).contains("GC-T010");
+        assertThat(text).contains("826");
+    }
+
+    private static String extractText(byte[] pdfBytes) throws IOException {
+        var reader = new PdfReader(pdfBytes);
+        try {
+            var extractor = new PdfTextExtractor(reader);
+            var sb = new StringBuilder();
+            for (int page = 1; page <= reader.getNumberOfPages(); page++) {
+                sb.append(extractor.getTextFromPage(page)).append('\n');
+            }
+            return sb.toString();
+        } finally {
+            reader.close();
+        }
     }
 
     private SweepReport emptyReport() {

@@ -28,6 +28,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -203,46 +205,56 @@ class StatusDriftServiceTest {
                 .containsExactlyInAnyOrder("GC-A001", "GC-A002", "GC-A003");
     }
 
-    @Test
-    void implementsLinkToAnyArtifact_flaggedHigh() {
-        var req = draft("GC-T010");
+    @ParameterizedTest(name = "{0}/{1} -> {2} ({3})")
+    @CsvSource({
+        // artifactType, linkType, expectedSignal, expectedConfidence
+        // Any IMPLEMENTS link on a DRAFT requirement is the strongest signal, regardless of artifact type.
+        "GITHUB_ISSUE,  IMPLEMENTS,  IMPLEMENTS_LINK_ON_DRAFT,     HIGH",
+        "CODE_FILE,     IMPLEMENTS,  IMPLEMENTS_LINK_ON_DRAFT,     HIGH",
+        "TEST,          IMPLEMENTS,  IMPLEMENTS_LINK_ON_DRAFT,     HIGH",
+        // Non-IMPLEMENTS links to issues / PRs are medium evidence.
+        "GITHUB_ISSUE,  DOCUMENTS,   LINKED_GITHUB_ISSUE,         MEDIUM",
+        "PULL_REQUEST,  DOCUMENTS,   LINKED_PULL_REQUEST,         MEDIUM",
+        "PULL_REQUEST,  CONSTRAINS,  LINKED_PULL_REQUEST,         MEDIUM",
+        // Non-IMPLEMENTS links to code / test / spec / proof artifacts are low evidence.
+        "CODE_FILE,     TESTS,       LINKED_CODE_ARTIFACT,        LOW",
+        "TEST,          TESTS,       LINKED_CODE_ARTIFACT,        LOW",
+        "SPEC,          DOCUMENTS,   LINKED_CODE_ARTIFACT,        LOW",
+        "PROOF,         VERIFIES,    LINKED_CODE_ARTIFACT,        LOW",
+        // Non-IMPLEMENTS links to documentation / config / policy artifacts are low evidence.
+        "DOCUMENTATION, DOCUMENTS,   LINKED_DOC_ARTIFACT,         LOW",
+        "CONFIG,        DOCUMENTS,   LINKED_DOC_ARTIFACT,         LOW",
+        "POLICY,        CONSTRAINS,  LINKED_DOC_ARTIFACT,         LOW",
+    })
+    void linkClassification(
+            ArtifactType artifactType,
+            LinkType linkType,
+            StatusDriftSignal expectedSignal,
+            ConfidenceLevel expectedConfidence) {
+        var req = draft("GC-X100");
         stubDrafts(req);
-        stubLinks(link(req, ArtifactType.CODE_FILE, "backend/src/.../Foo.java", LinkType.IMPLEMENTS));
+        stubLinks(link(req, artifactType, "art-1", linkType));
 
-        var result = service.analyze(PROJECT_ID, ConfidenceLevel.MEDIUM);
-
-        assertThat(result.findings()).hasSize(1);
-        assertThat(result.findings().getFirst().confidence()).isEqualTo(ConfidenceLevel.HIGH);
-        assertThat(result.findings().getFirst().strongestSignal())
-                .isEqualTo(StatusDriftSignal.IMPLEMENTS_LINK_ON_DRAFT);
-    }
-
-    @Test
-    void linkedPullRequest_flaggedMedium() {
-        var req = draft("GC-V001");
-        stubDrafts(req);
-        stubLinks(link(req, ArtifactType.PULL_REQUEST, "279", LinkType.DOCUMENTS));
-
-        var finding =
-                service.analyze(PROJECT_ID, ConfidenceLevel.MEDIUM).findings().getFirst();
-        assertThat(finding.confidence()).isEqualTo(ConfidenceLevel.MEDIUM);
-        assertThat(finding.strongestSignal()).isEqualTo(StatusDriftSignal.LINKED_PULL_REQUEST);
-    }
-
-    @Test
-    void linkedCodeArtifact_isLowConfidence_omittedAtDefaultThreshold() {
-        var req = draft("GC-T003");
-        stubDrafts(req);
-        stubLinks(link(req, ArtifactType.TEST, "backend/src/test/.../FooTest.java", LinkType.TESTS));
-
-        assertThat(service.analyze(PROJECT_ID, ConfidenceLevel.MEDIUM).findings())
-                .isEmpty();
+        // Use the LOW threshold so even LOW-confidence signals surface.
         assertThat(service.analyze(PROJECT_ID, ConfidenceLevel.LOW).findings())
                 .singleElement()
                 .satisfies(f -> {
-                    assertThat(f.confidence()).isEqualTo(ConfidenceLevel.LOW);
-                    assertThat(f.strongestSignal()).isEqualTo(StatusDriftSignal.LINKED_CODE_ARTIFACT);
+                    assertThat(f.confidence()).isEqualTo(expectedConfidence);
+                    assertThat(f.strongestSignal()).isEqualTo(expectedSignal);
+                    assertThat(f.evidence())
+                            .extracting(StatusDriftResult.Evidence::signal)
+                            .containsExactly(expectedSignal);
                 });
+    }
+
+    @ParameterizedTest(name = "non-IMPLEMENTS {0} link -> not evidence")
+    @CsvSource({"RISK_SCENARIO, CONSTRAINS", "CONTROL, CONSTRAINS"})
+    void nonImplementsLinkToRiskOrControl_isNotEvidence(ArtifactType artifactType, LinkType linkType) {
+        var req = draft("GC-X101");
+        stubDrafts(req);
+        stubLinks(link(req, artifactType, "x-1", linkType));
+
+        assertThat(service.analyze(PROJECT_ID, ConfidenceLevel.LOW).findings()).isEmpty();
     }
 
     @Test
