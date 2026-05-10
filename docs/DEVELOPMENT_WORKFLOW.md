@@ -183,7 +183,7 @@ The hook no longer enforces `/review` and `/security-review` — those were remo
 PostToolUse hook on `Skill` — writes JSONL to `/tmp/claude-skill-log/<PID>.jsonl` (per-session, not per-branch). The Stop hook previously read this log to verify `/review` and `/security-review` were actually invoked; it's still wired up for forward compat in case we reintroduce skill-based checks. Stale logs (>24h) are auto-pruned.
 
 #### Git Merge Guard — `git-merge-guard.py`
-PreToolUse hook on `Bash` — blocks `git merge`, `git push --force`, `git reset --hard`, and `gh pr merge`. The user handles all merges.
+PreToolUse hook on `Bash`. The user owns every actual merge. Blocked unconditionally: `git merge`, `gh pr merge`, `git reset --hard`, and a plain `git push --force` / `git push -f`. A `git push --force-with-lease` to a *feature* branch is allowed — that's the rebase-feature-branch-onto-base-then-update-the-PR flow — but a force-push of any kind to a ref named `main` or `dev` is blocked.
 
 ### Repo-Native Policy Layer
 
@@ -194,16 +194,22 @@ PreToolUse hook on `Bash` — blocks `git merge`, `git push --force`, `git reset
 
 ## Standalone Skills
 
-The skills below are checked into this repo under `.claude/skills/<name>/SKILL.md`. This repo is the source of truth; `~/.claude/skills/` is symlinked into the repo copies by `scripts/bootstrap-claude-workflow.sh` (see **Tooling** below). Edit the file in the repo, commit, and the change takes effect for every Claude Code session using the symlinked user-level path.
+Workflow skills live in **two** repo roots, each with its own installer. The two name sets are disjoint, so the two install paths can never resolve the same name to different definitions:
 
-| Skill | Purpose |
-|-------|---------|
-| `/implement <uid>` | Full end-to-end: plan through PR-ready |
-| `/ship` | Ship an already-committed branch (CI, reviews, fix, report) |
-| `/stage` | Stage files + pre-commit loop |
-| `/gh-workflow-monitor` | Monitor GitHub Actions workflow runs |
-| `/review-tests` | Test-quality review — catches false-assurance tests |
-| `/repo-setup` | Set up branch protection + pre-commit + SonarQube wiring on a fresh repo |
+- **`skills/<name>/SKILL.md`** — agent-neutral skills shared by Claude Code *and* Codex (per ADR-027). `bin/install-skills.sh` installs each into `~/.claude/skills/<name>`, `~/.codex/skills/<name>`, and (legacy alias) `~/.codex/prompts/<name>.md`.
+- **`.claude/skills/<name>/SKILL.md`** — Claude-Code-only skills. `scripts/bootstrap-claude-workflow.sh` symlinks each into `~/.claude/skills/<name>` (see **Tooling** below).
+
+In both cases this repo is the source of truth: edit the `SKILL.md`, commit, and the change takes effect for the next Claude Code (or Codex) session on a host whose install paths are symlinks into the repo. Re-run the relevant installer after a host reset.
+
+| Skill | Repo root | Purpose |
+|-------|-----------|---------|
+| `/implement <issue-number \| uid>` | `skills/` | Full end-to-end: plan through PR-ready |
+| `/review-tests` | `skills/` | Test-quality review — catches false-assurance tests |
+| `/ship` | `.claude/skills/` | Ship an already-committed branch (CI, reviews, fix, report) |
+| `/stage` | `.claude/skills/` | Stage files + pre-commit loop |
+| `/gh-workflow-monitor` | `.claude/skills/` | Monitor GitHub Actions workflow runs |
+| `/repo-setup` | `.claude/skills/` | Set up branch protection + pre-commit + SonarQube wiring on a fresh repo |
+| `/wave-issue-coverage` | `.claude/skills/` | Back-fill GitHub issues for a wave's DRAFT requirements |
 
 ## Tooling
 
@@ -211,7 +217,8 @@ Repo-local scripts live under `scripts/` (bash) and `bin/` (Python). The ones yo
 
 | Command | Purpose |
 |---------|---------|
-| `scripts/bootstrap-claude-workflow.sh` | Install the workflow surfaces Claude Code loads from `~/.claude/`. Skills are symlinked into `.claude/skills/<name>` (edit takes effect live). Hooks are **copied** from `.claude/hooks/` as real files so runtime does not depend on which branch this repo is checked out to. Idempotent; safe to re-run. Pass `--dry-run` to preview, `--force` to clobber non-matching host copies. The hook allowlist is explicit, so generic host-local hooks (e.g. `block-break-system-packages.sh`) are left alone. Re-run after editing a hook file in the repo to push the new version into `~/.claude/hooks/`. |
+| `scripts/bootstrap-claude-workflow.sh` | Wire the Claude-Code-only surfaces from `~/.claude/`: the `.claude/skills/<name>/` skills (symlinked — edit takes effect live) and the `WORKFLOW_HOOKS` allowlist under `.claude/hooks/` (**copied** as real files so runtime does not depend on which branch this repo is checked out to). Idempotent; safe to re-run. Pass `--dry-run` to preview, `--force` to clobber non-matching host content. The hook allowlist is explicit, so generic host-local hooks (e.g. `block-break-system-packages.sh`) are left alone. Re-run after editing a hook file in the repo to push the new version into `~/.claude/hooks/`. Does **not** touch the `skills/<name>/` agent-neutral skills — that's `bin/install-skills.sh`'s job. |
+| `bin/install-skills.sh` | Install the agent-neutral `skills/<name>/` skills (`/implement`, `/review-tests`) into `~/.claude/skills/<name>`, `~/.codex/skills/<name>`, and `~/.codex/prompts/<name>.md` (legacy alias). Symlinks by default (`--copy` to hard-copy, `--dry-run` to preview, `--no-codex` to skip the Codex targets, `--force` to overwrite divergent host content). Idempotent; refuses to clobber unmanaged host targets without `--force`. |
 | `scripts/pack-sync.sh` | Trigger the `pack-registry-sync` GitHub workflow against this repo. |
 | `bin/policy` | Run the repo-native policy guardrails (ADR sync, controller/MCP/docs parity, migration policy, PR-body checks). Invoked by `make policy`, pre-commit, and CI. |
 | `bin/adr-guard` | ADR-specific policy checks run standalone. |
@@ -220,15 +227,18 @@ Repo-local scripts live under `scripts/` (bash) and `bin/` (Python). The ones yo
 
 ### Bootstrapping a fresh host
 
-After cloning this repo onto a new host (or after any `rm -rf ~/.claude/skills/` or `rm -rf ~/.claude/hooks/` reset), run:
+After cloning this repo onto a new host (or after any `rm -rf ~/.claude/skills/` or `rm -rf ~/.claude/hooks/` reset), run **both** installers:
 
 ```
-scripts/bootstrap-claude-workflow.sh
+scripts/bootstrap-claude-workflow.sh   # .claude/skills/* skills + the WORKFLOW_HOOKS allowlist under .claude/hooks/
+bin/install-skills.sh                  # skills/* (agent-neutral) into ~/.claude/skills, ~/.codex/skills, ~/.codex/prompts
 ```
 
-It walks:
+`scripts/bootstrap-claude-workflow.sh` walks:
 - `.claude/skills/*/` — every skill directory gets a matching `~/.claude/skills/<name>` **symlink**. Editing a skill in the repo takes effect immediately in the next session.
-- `.claude/hooks/` — only the hooks listed in the script's `WORKFLOW_HOOKS` allowlist (`git-merge-guard.py`, `log-skill-call.sh`, `verify-implementation.sh`) are installed as **real file copies** at `~/.claude/hooks/<name>`. Editing a hook in the repo requires re-running this script to push the new version out. Repo-scoped hooks (`protect_files.sh`, `verify-extra.sh`) stay where they are because they're wired via `$CLAUDE_PROJECT_DIR` in `.claude/settings.json`, not via `~/.claude/`.
+- `.claude/hooks/` — only the hooks listed in the script's `WORKFLOW_HOOKS` allowlist (`git-merge-guard.py`, `block-defer-language.py`, `log-skill-call.sh`, `verify-implementation.sh`) are installed as **real file copies** at `~/.claude/hooks/<name>`. Editing a hook in the repo requires re-running this script to push the new version out. Repo-scoped hooks (`protect_files.sh`, `verify-extra.sh`) stay where they are because they're wired via `$CLAUDE_PROJECT_DIR` in `.claude/settings.json`, not via `~/.claude/`.
+
+`bin/install-skills.sh` symlinks each `skills/<name>/` directory (the agent-neutral skills shared with Codex — `/implement`, `/review-tests`) into `~/.claude/skills/<name>`, `~/.codex/skills/<name>`, and `~/.codex/prompts/<name>.md`. Pass `--no-codex` if Codex isn't on the host.
 
 If a pre-existing host file or directory has local changes that are NOT in the repo, the script refuses to clobber it and exits non-zero — re-run with `--force` only after you've confirmed the repo copy is the version you want. Already-correct entries are left alone.
 

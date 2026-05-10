@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.116.3] - 2026-05-10
+
+### Changed
+
+- **GC-T001 (*Risk Register Record*) verified and promoted `DRAFT` → `ACTIVE`**
+  (issue #823). A clause-by-clause audit against `dev` confirmed the refined
+  requirement statement is fully implemented by the `riskscenarios` entity /
+  service / controller / repository set plus migration `V043`: canonical
+  scenario reference (`RiskRegisterRecord.riskScenarios`), affected
+  operational-asset context (`AssetLinkTargetType.RISK_REGISTER_RECORD` +
+  `assetScopeSummary`), methodology-agnostic `categoryTags`, `owner`, the
+  seven-state `RiskRegisterStatus` lifecycle (identified → analyzing →
+  assessed → treating → monitoring → accepted → closed), `reviewCadence` /
+  `nextReviewAt`, linked controls (`ControlLinkTargetType.RISK_REGISTER_RECORD`),
+  linked treatments (`TreatmentPlan.riskRegisterRecord`), evidence/finding
+  context via the existing typed-link surfaces and the
+  `RiskAssessmentResult` → register-record chain, `decisionMetadata`, and
+  separation of quantitative/qualitative values into linked
+  `RiskAssessmentResult`s. Traceability was reconciled with `IMPLEMENTS` links
+  to the implementing source + migration, `TESTS` links to the existing unit
+  tests, and `DOCUMENTS` links. No production code changed. The Codex
+  architecture-preflight note for the verification is recorded at
+  `architecture/notes/risk-register-record-preflight.md`.
+- **`git-merge-guard.py` relaxed to allow the rebase-then-update-PR flow.** The
+  hook still blocks `git merge`, `gh pr merge`, `git reset --hard`, and a plain
+  `git push --force` / `git push -f`, and still blocks any force-push to a ref
+  named `main` or `dev`; it now permits `git push --force-with-lease` to a
+  feature branch so the agent can rebase its branch onto an updated base and
+  update its PR without the user handing it through. `docs/DEVELOPMENT_WORKFLOW.md`
+  describes the new behavior.
+- **`bin/install-skills.sh` now also installs the agent-neutral `skills/<name>/`
+  skills into `~/.codex/skills/<name>/`** — where newer Codex builds discover
+  `SKILL.md` files — while keeping the legacy `~/.codex/prompts/<name>.md`
+  aliases for older builds. It gained `--force` and a `--codex-prompts-dir`
+  flag, and it no longer clobbers a host skill/prompt target blindly: a target
+  that is a symlink, or a copy byte-identical to the repo source, is refreshed
+  in place; anything that differs is left alone and the run fails until `--force`
+  is passed (mirroring `scripts/bootstrap-claude-workflow.sh`'s safety rail).
+- **`docs/DEVELOPMENT_WORKFLOW.md` "Standalone Skills" / "Tooling" sections
+  reconciled with the two skill-source roots:** the agent-neutral `skills/<name>/`
+  skills (`/implement`, `/review-tests`, installed by `bin/install-skills.sh` for
+  both Claude Code and Codex) and the Claude-Code-only `.claude/skills/<name>/`
+  skills (`/ship`, `/stage`, `/gh-workflow-monitor`, `/repo-setup`,
+  `/wave-issue-coverage`, installed by `scripts/bootstrap-claude-workflow.sh`).
+  The two name sets are disjoint, so the two install paths cannot resolve the
+  same skill name to different definitions.
+
 ## [0.116.2] - 2026-05-10
 
 ### Changed
