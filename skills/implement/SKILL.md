@@ -70,7 +70,78 @@ The skill handles the entire lifecycle: plan, implement, verify, commit, push, P
 
 10. **Fetch the existing traceability links for the issue** via `gc_get_traceability_by_artifact` with `artifact_type: GITHUB_ISSUE` and `artifact_identifier: <issue-number>`. Cache the result — you will need it to reconcile the issue's relationship to requirements in Step 16.
 
-11. **Switch to the issue's feature branch**: run `gh issue develop <issue-number> --checkout --base {cfg.workflow.base_branch|default dev}`. If the branch already exists, `gh` reuses it. Then run `git branch --show-current` and cache that exact string as `<branch>` — sub-step 12 uses it verbatim; do not reconstruct it from the issue number.
+11. **Switch to the issue's feature branch**: run `gh issue develop <issue-number> --checkout --base {cfg.workflow.base_branch|default dev} --name <issue-number>-<short-slug>`.
+
+    **Always pass `--name` with a short slug.** Without it, `gh` derives the branch name from the full issue title and you get monstrosities like `55-the-ec2-instance-management-permissions-are-overly-broad-with-resource-=-this-allows-terraform-to-manage-any-ec2-instance-in-the-account-not-just-the-ones-it-creates-consider-scoping-these-permissions-using-tags-or-name-patterns-for-example`. These break terminal display, copy-paste, CI logs, GitHub UI breadcrumbs, and any downstream tool that touches the branch name. The total branch name (`<issue-number>-<short-slug>`) MUST be ≤ 50 characters; aim for 30–40.
+
+    To derive `<short-slug>`: read the issue title, pick the 2–4 words that name the *thing being changed* (the noun and the verb on it), drop filler words (`the`, `a`, `with`, `for`, `consider`, etc.), kebab-case them, and ASCII-only (no `→`, no Unicode arrows, no slashes, no equals signs — `gh` and most CI tools tolerate them but they regularly break shell quoting downstream). Examples:
+
+    - Title: "Verify GC-T004 (Risk Treatment Plans): clause-by-clause audit, transition DRAFT→ACTIVE, reconcile traceability" → `--name 825-verify-gc-t004`.
+    - Title: "The ec2 instance management permissions are overly broad with resource = *. This allows terraform to manage any EC2 instance in the account, not just the ones it creates. Consider scoping these permissions using tags or name patterns, for example..." → `--name 55-scope-ec2-iam`.
+    - Title: "GC-T004 / C8: categorised reassessment triggers + event publisher / listener wiring" → `--name 863-gc-t004-c8-triggers`.
+
+    If the branch already exists (issue was previously picked up), `gh` reuses it and your `--name` is ignored — you stay on whatever branch the previous pickup created.
+
+    Then run `git branch --show-current` and cache that exact string as `<branch>` — sub-step 12 uses it verbatim; do not reconstruct it from the issue number.
+
+    **Validate the actual checked-out branch against the same rule** — if the previous pickup ran before this rule existed (or didn't follow it), the cached `<branch>` will violate the invariant and would otherwise flow through the pickup comment, push, CI breadcrumbs, and the PR head ref. Check `<branch>`:
+
+    - **Compliant** when it starts with `<issue-number>-`, is ≤ 50 characters, contains only `[a-z0-9-]` (no Unicode arrows, no slashes, no `=`), and has at least one `-` after the number prefix. Proceed to sub-step 12.
+    - **Non-compliant AND safe to rename.** "Safe to rename" requires BOTH (i) zero commits relative to the configured base branch on the *remote* (the local base may be stale; fetch first), and (ii) no PR exists for this branch. Concretely:
+      ```
+      git fetch origin {cfg.workflow.base_branch|default dev}
+      git rev-list --count origin/{cfg.workflow.base_branch|default dev}..HEAD   # must equal 0
+      gh pr list --head <branch> --json number                                    # must equal []
+      ```
+      When both predicates hold: rename in place AND repair the issue's `LinkedBranch` so the GitHub Development sidebar matches the new branch. The full sequence is mandatory — skipping the LinkedBranch repair leaves the issue pointing at the deleted branch (silently) AND can hand a subsequent `gh issue develop` re-pickup the dangling metadata, which is the original failure mode this post-check exists to prevent:
+      ```
+      # 1. Local + remote rename.
+      git branch -m <new-compliant-name>
+      git push origin :<old-branch> <new-compliant-name>
+
+      # 2. Find the existing LinkedBranch id (may be empty if the branch was created manually).
+      OLD_LINK_ID=$(gh api graphql -f query='
+        query($owner:String!, $repo:String!, $number:Int!) {
+          repository(owner:$owner, name:$repo) {
+            issue(number:$number) {
+              linkedBranches(first: 50) { nodes { id ref { name } } }
+            }
+          }
+        }
+      ' -F owner=<owner> -F repo=<repo> -F number=<issue-number> \
+        --jq '.data.repository.issue.linkedBranches.nodes[] | select(.ref.name == "<old-branch>") | .id')
+
+      # 3. If a stale LinkedBranch exists, delete it.
+      if [ -n "$OLD_LINK_ID" ]; then
+        gh api graphql -f query='
+          mutation($id:ID!) { deleteLinkedBranch(input:{linkedBranchId:$id}) { issue { id } } }
+        ' -F id="$OLD_LINK_ID"
+      fi
+
+      # 4. Resolve the issue node id and the new branch HEAD oid (which equals base SHA, since no commits exist).
+      ISSUE_NODE_ID=$(gh api graphql -f query='
+        query($owner:String!, $repo:String!, $number:Int!) {
+          repository(owner:$owner, name:$repo) { issue(number:$number) { id } }
+        }
+      ' -F owner=<owner> -F repo=<repo> -F number=<issue-number> --jq '.data.repository.issue.id')
+      HEAD_OID=$(git rev-parse HEAD)
+
+      # 5. Create the new LinkedBranch.
+      gh api graphql -f query='
+        mutation($issueId:ID!, $oid:GitObjectID!) {
+          createLinkedBranch(input:{issueId:$issueId, oid:$oid}) {
+            linkedBranch { id ref { name } }
+          }
+        }
+      ' -F issueId="$ISSUE_NODE_ID" -F oid="$HEAD_OID"
+      ```
+      Re-run `git branch --show-current` and re-cache `<branch>`. Continue to sub-step 12.
+
+      `<owner>` and `<repo>` are the GitHub owner and repo for the current run (resolvable via `gh repo view --json owner,name`). The mutations are idempotent enough for the post-check's purpose: `deleteLinkedBranch` skipped when no stale link exists; `createLinkedBranch` errors with a recognizable conflict if a link with the same ref already exists (treat as success — the sidebar already points at the right branch).
+
+    - **Non-compliant AND not safe to rename** (commits exist OR a PR exists): STOP. Renaming a published branch with an open PR is a force-push that breaks the PR head ref and any reviews already posted to inline comments. **Apply the in-progress signal first** — execute sub-step 12 in full (label + pickup comment) so the issue is visibly flagged as picked-up-but-paused, then post a SECOND issue comment summarizing the situation (current branch, commit count, PR number if any) and ask the user whether to (a) proceed with the long branch name as a one-shot exception (the rule is not yet repo-policy-enforced; the user owns the call), or (b) close the existing PR, delete the branch, and retry `/implement` from scratch on a fresh compliant branch. Wait for the user's answer; do not push commits while the question is open. The label stays set until Step 18 closes the issue OR the user resolves the situation by retrying on a fresh branch (in which case the new run's Step 1 sub-step 12 re-flags).
+
+    The post-check is the dispositive enforcement of the invariant — `--name` only governs first-time pickups; this check governs every actual run.
 
 12. **Flag the issue as in-progress** so a human scanning the issue list — or another agent — can see at a glance that work is underway. The values below are stated together so a repo that prefers a different visible signal changes one place; pass everything to `gh` as argv, never as a shell-interpolated string:
     - **label** `in-progress` — color `FBCA04`, description `An agent is actively working this issue via /implement`.
