@@ -17,6 +17,57 @@ The skill handles the entire lifecycle: plan, implement, verify, commit, push, P
 
 ---
 
+## Per-step model routing (ADR-036)
+
+Per ADR-036, every step below carries a **capability tier** (`low`, `medium`, `high`). The tier is provider-neutral; drivers map it to a concrete model. Routing is opt-in per repo via `cfg.routing.enabled` in `.ground-control.yaml` (default `false`). When the knob is off, this entire section is advisory and every step runs on the parent session's model — current behavior.
+
+**Tier semantics:**
+
+- `low` — mechanical action, polling, gh wrapping, structured input handed to a deterministic tool, file reads.
+- `medium` — bounded reading + applying a designed decision; structured drafting; per-iteration TDD; clause mapping.
+- `high` — architectural reasoning, novel-fork interpretation, first-cycle review consume.
+
+**Claude Code mapping** (the canonical concrete map; other drivers maintain their own):
+
+| Tier | Claude Code model |
+|------|-------------------|
+| `low` | `haiku-4.5` |
+| `medium` | `sonnet-4.6` |
+| `high` | `opus-4.7` (the parent — no subagent spawn) |
+
+**Routing matrix** (per step; the per-step prose below repeats the tier for the routed step):
+
+| Step | Tier | Notes |
+|------|------|-------|
+| 1 — issue/branch resolution | `low` | gh + git side effects |
+| 2 — read issue + comments | `low` | reads only |
+| 2.5 — preflight handoff parse | `low` | codex does the reasoning |
+| 3 — codebase coverage assessment | `medium` | bounded reading + judgment |
+| 4 — plan writing | `high` | architectural reasoning (parent) |
+| 4.4 — TDD loop | `medium` | per-iteration coding |
+| 4.5 — clause mapping | `medium` | bounded reading + listing |
+| 5 — pre-commit run | `low` | tool-driven |
+| 6 — completion gate | `low` | tool-driven |
+| 6.5 cycle 1 — review consume | `high` | first-cycle interpretation (parent) |
+| 6.5 cycles 2–3 — fix application | `medium` | applying a designed decision |
+| 7–8 — stage / commit / push | `low` | mechanical |
+| 9 — PR body (tool-rendered) | `low` | tool does the rendering |
+| 10 — CI monitor | `low` | polling |
+| 11 — SonarCloud | `low` | polling |
+| 13 — test-quality review consume | `medium` | reading test files |
+| 14 — final CI re-verify | `low` | polling |
+| 15–17 — transitions + reconcile | `medium` | judgment-bounded |
+| 18 — close issue | `low` | one gh call |
+| 19 — final report (tool-rendered) | `low` | tool does the rendering |
+
+**Mechanism** (Claude Code): for any routed step whose tier is `low` or `medium`, the parent agent spawns an `Agent` subagent with the corresponding model and delegates the step's actual work to it. Subagent returns a structured result; parent integrates and proceeds. `high`-tier steps stay on the parent. The decision-record / final-report / PR-body comments are no longer agent free-prose — they are produced by deterministic MCP tools (`gc_post_decision_record`, `gc_post_final_report`, `gc_render_pr_body`), so the routed-step prose is reduced to "collect structured input + call the tool".
+
+**Mechanism** (Codex and other drivers): no equivalent of `Agent`-with-model today. Codex drivers ignore the tier annotation and run every step on the session model. The architecture is forward-compatible — a future Codex-side router consumes the same step-id + tier contract without changing this SKILL.
+
+**Telemetry** (per ADR-036). When `cfg.telemetry.enabled` is true, the agent calls `gc_log_step_telemetry` at the end of every routed step with `{ step, tier, model, wall_time_ms, outcome, input_tokens?, output_tokens? }`. The writer appends one JSONL line to `.gc/telemetry/<issue>-<sanitized-branch>.jsonl` (gitignored, repo-relative, containment-validated). `wall_time_ms` is mandatory and measured by the agent around its delegation call. `input_tokens` / `output_tokens` are passed as `null` when the harness does not surface them (Claude Code today). Telemetry is operational measurement only — it never gates any phase, never replaces the issue thread as the durable record, and never feeds back into the cycle-cap counter.
+
+---
+
 ## Phase A: Plan & Implement
 
 ### Step 1: Resolve the Issue and Branch
@@ -320,13 +371,23 @@ Run `gc_codex_review` with `uncommitted=true` against the staged + unstaged chan
 
 Each codex review cycle takes ~5 min locally; each CI cycle to discover the same findings takes 10–15 min. Iterating locally collapses N CI runs into N local runs and one push.
 
+**Cycle semantics — what each cycle is, and what the completion predicate is.**
+
+Two things must be kept separate.
+
+*What a cycle does (semantics).* Every cycle reviews the whole diff, including any code the agent wrote in a prior cycle to address prior findings. Fix code is new code; the next cycle reviews it as it does everything else. A cycle is NOT "verify my fix to cycle N−1's findings" — verification of fixes is the agent's own responsibility (run the relevant tests, `cfg.workflow.completion_command`, `make policy`, read the fix code against the finding's intent). Cycles surface NEW classes of production-readiness defect that the reviewer's bounded depth in a prior pass couldn't reach.
+
+*What completes the loop (completion predicate — unchanged from ADR-029).* The pre-push review loop is required to reach reviewer-clean before the push, OR hit the hard-cap-3 and escalate to the user. There is no "skip the next cycle because the local gates are green" path: local gates verify that fix code does the agent's intended thing, but the reviewer is the one that catches what the agent didn't intend. After applying fixes for cycle N's findings AND self-verifying locally, re-invoke `gc_codex_review`. Stop only when the reviewer reports zero findings, or when the cap refuses the next invocation.
+
+Why multiple cycles exist at all: a single review pass has bounded depth — typically one or two classes of issue per pass. Cycles let the reviewer go deeper as the obvious issues clear out. ADR-029's hard cap of 3 reflects empirical experience: clean by cycle 3 in practice; concerns past cycle 3 are a signal to escalate (user authorizes cycle 4 with `override_cap`, or restructures the change), not to push to merge.
+
 1. Stage everything you intend to push (`git add -A` for the full diff).
 2. Call the `gc_codex_review` MCP tool with:
    - `repo_path`: absolute path from Step 1
    - `base_branch`: `{cfg.workflow.base_branch|default dev}`
    - `uncommitted`: `true`
    - `issue_number`: the issue number resolved at Step 1, so the MCP server anchors the cycle counter to the issue thread (per ADR-029). When omitted, the server derives it from the current branch's leading numeric prefix (e.g. `796-cap-pre-push` → 796); pass it explicitly when the branch was named manually.
-3. Apply the **Review loop rules** (defined below) to the returned findings, fix locally, re-stage, and re-invoke `gc_codex_review` until clean.
+3. Apply the **Review loop rules** (defined below) to the returned findings. **Fix every finding AND self-verify locally** (re-run `cfg.workflow.completion_command`, `make policy`, the relevant test suite; read the fix code against the finding's intent). Then re-stage the diff AND re-invoke `gc_codex_review`. The loop completes when the reviewer reports zero findings, OR the hard cap refuses the next invocation. Self-verification is the agent's own responsibility; it does not substitute for the reviewer's re-read of the fix code.
 4. **Hard cap: 3 iterations** (enforced by the MCP server, issues #796 and #804). The next invocation reads existing markers on the issue thread, counts pre-push cycles **per issue** (the current branch is recorded in the marker for audit context but is NOT part of the cap key — a branch rename on the same issue cannot reset the counter), and refuses cycle 4 with `error: "codex_review_prepush_cap_reached"` and `next_action: "post_summary_and_escalate_to_user"`. After cycle 3, if findings remain, STOP, post the remaining findings + your fix history as an issue comment, and escalate to the user. If the user authorizes cycle 4, retry with `override_cap=true` and `override_reason="<one-line quote of the user's authorization>"`.
 5. **Findings record**: every successful cycle posts a verbatim findings comment to the resolved issue thread (per ADR-029). The comment carries the cycle/cap/mode header and both reviewers' verbatim text. If that post fails, the run returns `ok: false, error: "review_comment_post_failed"` — fix the underlying GitHub issue (network, gh auth, repo perms) and retry.
 6. Once clean, proceed to Phase C with the staged diff.
@@ -363,12 +424,26 @@ Skip this step only if the diff is so trivial (one-liner typo fix) that codex wo
 ### Step 9: Create PR
 
 1. Check if a PR already exists for this branch: `gh pr list --head <branch> --json number,url`
-2. If no PR exists, create one:
+2. If no PR exists, **render the PR body via `gc_render_pr_body`** (per ADR-036). Pass:
+   - `repo_path`, `issue_number`
+   - `change_class`: `doc-only` if the diff is entirely documentation per Step 6's two-check sweep; `source+migration` if the diff includes a database migration; otherwise `source`.
+   - `requirement_uids`: the in-scope UIDs from Step 1.
+   - `adr_refs`: the ADR identifiers this PR touches (e.g. `ADR-036`, `ADR-021 (amended)`); pass an empty array to render "No ADR required".
+   - `summary`: one paragraph.
+   - `changes`: array of bullet strings describing each change.
+   - `traceability`: `{ implements: [...], tests: [...] }` strings — typically `<UID> ← <file path>` shape; the tool emits the IMPLEMENTS / TESTS markers `check_pr_body` requires.
+   - `changelog_fragment`: path under `changelog.d/` (required for `source` / `source+migration`; omit for `doc-only`).
+   - `test_notes` (optional): extra prose under the Test Plan section.
+
+   The tool returns `{ ok, body, byte_length }`. Use `body` as the PR description.
+
+3. Create the PR with the rendered body:
    ```
-   gh pr create --base {cfg.workflow.base_branch|default dev} --title "<concise title>" --body "<description with requirement reference>"
+   gh pr create --base {cfg.workflow.base_branch|default dev} --title "<concise title>" --body "<rendered body from gc_render_pr_body>"
    ```
-   The PR body should end with `Closes #<issue-number>` so the issue and PR are cross-linked in GitHub's UI.
-3. Note the PR number and URL.
+   The renderer emits `Closes #<issue-number>` under Related Issues, so GitHub's UI cross-link is wired automatically.
+
+4. Note the PR number and URL. Tier for this step: `low` — the tool does the rendering; the agent just collects structured input.
 
 ### Step 10: CI Monitor
 
@@ -432,9 +507,9 @@ Codex review now runs as a single pre-push pass at Step 6.5; the remaining revie
 
      A `class` finding that you fixed only on the codex-named site is a process violation in the same shape as silent deferral — it leaves the category un-addressed, and the next review cycle surfaces another instance, burning a cycle the cap is not meant to absorb. If a category genuinely spans 5+ files outside the current feature's scope, that is the architectural-change escalation point — STOP, post the category + the affected files as an issue comment, and ask the user.
 4. **Fix every finding, pre-existing or not.** The zero-deferral rule applies: there is no `defer` decision — not "out of scope for this PR", not "follow-up issue to track it", not "addressed in a subsequent PR", not "deferred to a later iteration", not "TBD later" in a closing comment. Filing a tracking issue does **not** convert a deferral into a valid disposition. The PreToolUse hook (`.claude/hooks/block-defer-language.py`) and `bin/policy` enforce this mechanically; the contract is fix-or-escalate. If you think a finding is dangerous to fix, unwise in context, or a false positive, STOP, post your reasoning as an issue comment with `decision: <fix|wontfix|not-applicable>` and rationale, and ask the user. Wait for their answer; do not push commits while the question is open. `wontfix` requires explicit user approval; `not-applicable` is for findings that don't actually apply (false positive on this codebase, finding outside the diff's scope, etc.).
-5. **Record decisions on the issue thread.** Per ADR-029, every finding decision (`fix` / `wontfix` / `not-applicable`) gets a one-line rationale comment on the GitHub issue — a `class` finding's decision says how the category was closed, not just that the named site was patched. Agent silence on a finding is a process violation; text scanning catches *written* deferral language, but the issue-thread findings-vs-decisions reconciliation is what catches *silent* omission.
-6. **Re-run the SAME review after fixing.** Do not assume your fixes are complete — the re-run is the verification.
-7. **Repeat until the reviewer reports zero findings, OR the cycle cap is hit.**
+5. **Record decisions on the issue thread.** Per ADR-029 + ADR-036, after every cycle the agent calls **`gc_post_decision_record`** with the cycle number, reviewer, and the full `findings[]` list. Each finding entry carries: `id`, `title`, `classification` (`one-off` or `class`), `decision` (`fix` / `wontfix` / `not-applicable`), `rationale`, optional `location` / `comment_url` / `instances` (required when classification is `class`), and **`user_authorization`** — required when `decision: "wontfix"`. The `user_authorization` value is either a URL to the user's authorizing comment on the issue thread OR a verbatim quote with the issue/comment id; the runner refuses a wontfix without it (`decision_record_input_invalid` envelope). The tool renders the canonical decision-record Markdown, filters sensitive content, posts to the issue thread under a `gc:decision-record` marker, and rejects `decision: "defer"` server-side. Do NOT `gh issue comment` decision records directly — the tool is now the only canonical surface. A `class` finding's `rationale` says how the category was closed, not just that the named site was patched. Agent silence on a finding is a process violation; text scanning catches *written* deferral language, but the issue-thread findings-vs-decisions reconciliation is what catches *silent* omission.
+6. **Self-verify the fix locally before re-invoking the review.** Re-run the relevant test suite, the completion gate (`cfg.workflow.completion_command`), and `make policy` after every fix. Local verification proves the fix does the agent's intended thing — but the reviewer's re-read is what catches what the agent didn't intend, including defects in the fix code itself.
+7. **Re-invoke the SAME review after fixing.** The loop continues until the reviewer reports zero findings, OR the hard cap (3 cycles per issue, per ADR-029) refuses the next invocation. The reason multiple cycles exist is bounded review depth — each pass surfaces one or two classes of defect that the prior pass couldn't reach. Cycles are NOT for "fix verification" (that's the agent's own loop); they are for finding new classes of defect in the *current* state of the diff. A cycle that surfaces zero findings is the completion signal; a cap-refused cycle 4 is the escalation signal.
 
 For every cycle, after applying fixes the agent must update the tree the reviewer sees BEFORE re-running:
 
@@ -576,12 +651,18 @@ Close the GitHub issue now via `gh issue close <issue-number>`, then clear the i
 
 **You MUST NOT merge the PR. You MUST NOT run `gh pr merge`. The user reviews and merges.**
 
-Provide a final summary as a comment on the issue thread (the durable record per ADR-029):
-- Issue number and title
-- `in_scope_requirements[]` — each UID + title, with its new status (ACTIVE for implemented, DRAFT for forward-looking)
-- Plan-comment URL (cached in Step 4)
-- Files created, modified, renamed, or deleted
-- Traceability reconciliation summary — links added, deleted, updated; which requirements gained coverage
-- Review findings and decisions (codex / refactor / test-quality / SonarCloud) — with their issue-comment links
-- Confirmation: CI green, SonarCloud passed (or skipped), PR ready for user review and merge
-- PR URL
+Per ADR-036, the final summary is posted via the deterministic **`gc_post_final_report`** MCP tool, not free-form `gh issue comment` prose. Pass:
+
+- `repo_path`, `issue_number`, `pr_number`
+- `requirements`: array of `{ uid, title, status, note? }` — one entry per UID in `in_scope_requirements[]`; `status` is the new status (`ACTIVE` for implemented, `DRAFT` for forward-looking with a `note` like `"forward-looking"`).
+- `files`: `{ added: [...], modified: [...], renamed: [...], deleted: [...] }` (any key may be omitted).
+- `reviews`: array of `{ reviewer, summary }` — one per reviewer (`codex`, `test-quality`, `sonarcloud`, etc.) with a one-line summary like `"3 cycles, all fix, 0 remaining"`.
+- `traceability`: `{ added: [...], updated: [...], deleted: [...], notes? }` — short identifier strings describing the reconciliation outcome.
+- `ci_status`: `"green"` (or `"red"`; never `"skipped"` for a real PR).
+- `sonar_status`: `"passed"`, `"failed"`, or `"skipped"` (when `cfg.sonarcloud` is null).
+- `plan_comment_url`: the URL cached in Step 4 from `gc_post_implementation_plan`.
+- `summary` (optional): one extra paragraph if there is something the structured fields don't cover.
+
+The tool renders the canonical final-report Markdown, filters sensitive content, posts to the issue thread under a `gc:final-report` marker, and returns `{ ok, comment_url, comment_id }`. Cache the URL.
+
+Tier for this step: `low` — the tool does the rendering; the agent just collects structured input. Do NOT post the final report as free-form `gh issue comment` — the deterministic tool is now the only canonical surface.

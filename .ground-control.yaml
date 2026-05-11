@@ -36,3 +36,11 @@ cross_cutting_concerns:
     Tests: @WebMvcTest controllers (with @AutoConfigureMockMvc(addFilters=false) for slice tests), @SpringBootTest integration tests under @Tag("integration"), ArchUnit architecture tests, jqwik property tests
     HTTP: Spring's RestClient/WebClient as needed; standard Jackson ObjectMapper
     Config: @ConfigurationProperties POJOs registered via @ConfigurationPropertiesScan on GroundControlApplication
+# Per ADR-036 — opt in to /implement cost reduction. Routing routes per-step
+# delegation to lower tiers (haiku/sonnet); telemetry appends one JSONL line
+# per routed step under .gc/telemetry/ (gitignored). Both are operational and
+# can be flipped off without changing the gate contract.
+routing:
+  enabled: true
+telemetry:
+  enabled: true

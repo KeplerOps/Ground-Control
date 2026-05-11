@@ -71,6 +71,10 @@ import {
   getRepoGroundControlContext,
   runCodexArchitecturePreflight, runCodexReview, runCodexVerifyFinding,
   runPostImplementationPlan,
+  runPostDecisionRecord, runPostFinalReport, runRenderPrBody, runLogStepTelemetry,
+  DECISION_RECORD_REVIEWERS, DECISION_RECORD_DECISIONS, DECISION_RECORD_CLASSIFICATIONS,
+  PR_BODY_CHANGE_CLASSES, PR_REQUIREMENT_RE, EXACT_REQUIREMENT_UID_RE,
+  TELEMETRY_TIERS, TELEMETRY_OUTCOMES,
   buildCodexReviewToolDescription, buildCodexReviewOverrideCapDescription,
   buildCodexReviewOverrideReasonDescription,
   CODEX_REVIEW_HARD_CAP, CODEX_REVIEW_PREPUSH_HARD_CAP,
@@ -456,6 +460,168 @@ server.tool(
         overrideReason: override_reason ?? null,
         overridePhaseGate: Boolean(override_phase_gate),
         overridePhaseReason: override_phase_reason ?? null,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_post_decision_record",
+  "Post the canonical review-cycle decision record as a comment on the GitHub issue (per ADR-029, the issue thread is the durable record). Renders structured findings into the standard decision-record Markdown layout; rejects 'defer' decisions and any body containing detected secrets. Replaces free-prose decision comments from the Step 6.5 review loop. Returns the posted comment's URL and id.",
+  {
+    repo_path: z.string(),
+    issue_number: z.number().int().positive(),
+    cycle: z.number().int().positive(),
+    reviewer: z.enum(DECISION_RECORD_REVIEWERS),
+    findings: z.array(z.object({
+      id: z.string().min(1),
+      title: z.string().min(1),
+      classification: z.enum(DECISION_RECORD_CLASSIFICATIONS),
+      decision: z.enum(DECISION_RECORD_DECISIONS),
+      rationale: z.string().min(1),
+      // Required at runtime when decision === "wontfix" — see ADR-029. The
+      // Zod object cannot conditionally require a field, so the validator in
+      // lib.js performs the conditional check; expose the field here so MCP
+      // callers can supply it. Pass a URL to the user's authorization
+      // comment on the issue thread OR a verbatim quote with comment id.
+      user_authorization: z.string().optional(),
+      location: z.string().optional(),
+      comment_url: z.string().optional(),
+      instances: z.array(z.string().min(1)).optional(),
+    })),
+  },
+  async ({ repo_path, issue_number, cycle, reviewer, findings }) => {
+    try {
+      return ok(JSON.stringify(await runPostDecisionRecord({
+        repoPath: repo_path, issueNumber: issue_number, cycle, reviewer, findings,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_post_final_report",
+  "Post the canonical /implement Step 19 final report as a comment on the GitHub issue. Renders structured input (in-scope requirements, files-by-change-kind, reviews, traceability reconciliation, CI/SonarCloud status) into the standard final-report Markdown layout. Replaces free-prose Step 19 comments. Returns the posted comment's URL and id.",
+  {
+    repo_path: z.string(),
+    issue_number: z.number().int().positive(),
+    pr_number: z.number().int().positive(),
+    requirements: z.array(z.object({
+      // Anchored UID match — `requirements[].uid` must BE a UID (codex cycle-4 F2).
+      uid: z.string().regex(EXACT_REQUIREMENT_UID_RE),
+      title: z.string().min(1),
+      status: z.string().min(1),
+      note: z.string().optional(),
+    })),
+    files: z.object({
+      added: z.array(z.string().min(1)).optional(),
+      modified: z.array(z.string().min(1)).optional(),
+      renamed: z.array(z.string().min(1)).optional(),
+      deleted: z.array(z.string().min(1)).optional(),
+    }).optional(),
+    reviews: z.array(z.object({
+      reviewer: z.string().min(1),
+      summary: z.string().min(1),
+    })),
+    traceability: z.object({
+      added: z.array(z.string()).optional(),
+      updated: z.array(z.string()).optional(),
+      deleted: z.array(z.string()).optional(),
+      notes: z.string().optional(),
+    }).optional(),
+    ci_status: z.enum(["green", "red", "skipped"]),
+    sonar_status: z.enum(["passed", "failed", "skipped"]),
+    plan_comment_url: z.string().optional(),
+    summary: z.string().optional(),
+  },
+  async ({ repo_path, issue_number, pr_number, requirements, files, reviews, traceability, ci_status, sonar_status, plan_comment_url, summary }) => {
+    try {
+      return ok(JSON.stringify(await runPostFinalReport({
+        repoPath: repo_path,
+        issueNumber: issue_number,
+        prNumber: pr_number,
+        requirements,
+        files: files ?? {},
+        reviews,
+        traceability: traceability ?? {},
+        ciStatus: ci_status,
+        sonarStatus: sonar_status,
+        planCommentUrl: plan_comment_url ?? null,
+        summary: summary ?? null,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_render_pr_body",
+  "Render a PR body that satisfies the Ground Control policy gates (template sections, requirement UIDs, ADR impact, three Ground Control Checks, IMPLEMENTS/TESTS markers, no defer language). Returns the rendered body string for the caller to pass to `gh pr create --body`. change_class shapes a few cells: doc-only marks integration tests / changelog fragment N/A; source requires changelog fragment; source+migration adds the MigrationSmokeTest reminder.",
+  {
+    repo_path: z.string(),
+    issue_number: z.number().int().positive(),
+    change_class: z.enum(PR_BODY_CHANGE_CLASSES),
+    // Use the ANCHORED EXACT_REQUIREMENT_UID_RE for structured UID fields
+    // (codex cycle-4 F2). The unanchored PR_REQUIREMENT_RE is a body-search
+    // predicate; here each array element must BE a UID, not contain one.
+    requirement_uids: z.array(z.string().regex(EXACT_REQUIREMENT_UID_RE)),
+    adr_refs: z.array(z.string().min(1)),
+    summary: z.string().min(1),
+    changes: z.array(z.string().min(1)),
+    traceability: z.object({
+      implements: z.array(z.string()),
+      tests: z.array(z.string()),
+    }),
+    changelog_fragment: z.string().optional(),
+    test_notes: z.string().optional(),
+  },
+  async ({ repo_path, issue_number, change_class, requirement_uids, adr_refs, summary, changes, traceability, changelog_fragment, test_notes }) => {
+    try {
+      return ok(JSON.stringify(await runRenderPrBody({
+        repoPath: repo_path,
+        issueNumber: issue_number,
+        changeClass: change_class,
+        requirementUids: requirement_uids,
+        adrRefs: adr_refs,
+        summary,
+        changes,
+        traceability,
+        changelogFragment: changelog_fragment ?? null,
+        testNotes: test_notes ?? null,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_log_step_telemetry",
+  "Append a single JSONL telemetry record for a /implement step to `.gc/telemetry/<issue>-<sanitized-branch>.jsonl`. Operational measurement only — NOT workflow state (per ADR-036). wall_time_ms is mandatory; input_tokens / output_tokens are optional. Path is repo-relative and validated for containment.",
+  {
+    repo_path: z.string(),
+    issue_number: z.number().int().positive(),
+    branch: z.string().min(1),
+    step: z.string().min(1),
+    tier: z.enum(TELEMETRY_TIERS),
+    model: z.string().min(1),
+    wall_time_ms: z.number().int().nonnegative(),
+    input_tokens: z.number().int().nonnegative().nullable().optional(),
+    output_tokens: z.number().int().nonnegative().nullable().optional(),
+    outcome: z.enum(TELEMETRY_OUTCOMES),
+    ts: z.string().optional(),
+  },
+  async ({ repo_path, issue_number, branch, step, tier, model, wall_time_ms, input_tokens, output_tokens, outcome, ts }) => {
+    try {
+      return ok(JSON.stringify(await runLogStepTelemetry({
+        repoPath: repo_path,
+        issueNumber: issue_number,
+        branch,
+        step,
+        tier,
+        model,
+        wallTimeMs: wall_time_ms,
+        inputTokens: input_tokens ?? null,
+        outputTokens: output_tokens ?? null,
+        outcome,
+        ts: ts ?? null,
       }), null, 2));
     } catch (e) { return err(e); }
   },

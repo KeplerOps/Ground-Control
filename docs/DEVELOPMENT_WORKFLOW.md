@@ -130,6 +130,18 @@ flowchart TB
 
 Claude does NOT merge. The user reviews the PR and merges.
 
+## Per-step routing, tool surfaces, and telemetry (ADR-036)
+
+Per ADR-036 the `/implement` skill carries three cost-side optimizations layered on top of the GC-O007 gate model (which is unchanged: one human touchpoint at PR merge, ADR-029's three-cycle Codex cap, zero deferral, four-phase structure).
+
+| Optimization | What it changes | Opt-in knob |
+|--------------|-----------------|-------------|
+| Per-step routing | Each step carries a provider-neutral tier (`low`, `medium`, `high`); routed steps spawn an `Agent` subagent at the corresponding concrete model (Claude Code: `haiku-4.5` / `sonnet-4.6` / parent-tier `opus-4.7`). Codex drivers ignore the tier today. | `.ground-control.yaml` → `routing.enabled` (default `false`) |
+| Durable-record MCP tools | `gc_post_decision_record` (Step 6.5 cycle decisions), `gc_post_final_report` (Step 19 summary), `gc_render_pr_body` (Step 9 PR body) replace agent free-prose with deterministic structured-input renderers. All three filter sensitive content, post under a structured marker family, and reject `decision: "defer"` server-side. | Always available; SKILL calls them unconditionally once the tools are present |
+| Per-step telemetry | `gc_log_step_telemetry` writes one JSONL line per routed step to `.gc/telemetry/<issue>-<sanitized-branch>.jsonl` (gitignored, repo-relative, containment-validated). Operational measurement only — never workflow state. The tool refuses with `telemetry_disabled` when the opt-in knob is off; the agent prose is not the gate. Summarizer reports wall time + token counts (when present) per step and per model; dollar-cost translation is future work. Target: `make implement-cost-summary`. | `.ground-control.yaml` → `telemetry.enabled` (default `false`) |
+
+Each new tool is Temporal-shaped (deterministic, structured-input/output, no LLM call) so GC-O009 inherits them as activities when the Temporal workflow lands.
+
 ## Review Pipeline
 
 One mandatory pre-implementation architecture pass, then a single pre-push codex review pass (Step 6.5), then test-quality review before the user sees the PR. The post-push codex review (former Step 12) was removed by issue #804 — the canonical codex pass is the pre-push one, which catches everything codex would normally flag while collapsing the asymmetric "post-push finding → guaranteed CI/SonarCloud roundtrip" cost. Merge-commit drift relative to base is the responsibility of CI (compile/tests/integration) and SonarCloud (quality), not a separate codex pass.

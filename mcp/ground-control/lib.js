@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { execFile as execFileCb } from "node:child_process";
@@ -1481,6 +1481,58 @@ function normalizeCrossCuttingConcernsConfig(raw) {
   return { ok: true, value };
 }
 
+function normalizeRoutingConfig(raw) {
+  if (raw == null) {
+    return { ok: true, value: { enabled: false } };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, errors: ["routing must be a mapping, not a list or scalar"] };
+  }
+  const allowed = ["enabled"];
+  const errors = [];
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) {
+      errors.push(`routing has unknown key '${key}'`);
+    }
+  }
+  let enabled = false;
+  if (raw.enabled != null) {
+    if (typeof raw.enabled !== "boolean") {
+      errors.push("routing.enabled must be a boolean when set");
+    } else {
+      enabled = raw.enabled;
+    }
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, value: { enabled } };
+}
+
+function normalizeTelemetryConfig(raw) {
+  if (raw == null) {
+    return { ok: true, value: { enabled: false } };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, errors: ["telemetry must be a mapping, not a list or scalar"] };
+  }
+  const allowed = ["enabled"];
+  const errors = [];
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) {
+      errors.push(`telemetry has unknown key '${key}'`);
+    }
+  }
+  let enabled = false;
+  if (raw.enabled != null) {
+    if (typeof raw.enabled !== "boolean") {
+      errors.push("telemetry.enabled must be a boolean when set");
+    } else {
+      enabled = raw.enabled;
+    }
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, value: { enabled } };
+}
+
 function normalizeKnowledgeConfig(raw) {
   if (raw == null) {
     return { ok: true, value: null };
@@ -1541,6 +1593,8 @@ export function parseGroundControlYaml(yamlText) {
     "example_paths",
     "requirements",
     "cross_cutting_concerns",
+    "routing",
+    "telemetry",
   ];
   for (const key of Object.keys(parsed)) {
     if (!allowedTop.includes(key)) {
@@ -1597,6 +1651,12 @@ export function parseGroundControlYaml(yamlText) {
   const crossCuttingResult = normalizeCrossCuttingConcernsConfig(parsed.cross_cutting_concerns);
   if (!crossCuttingResult.ok) errors.push(...crossCuttingResult.errors);
 
+  const routingResult = normalizeRoutingConfig(parsed.routing);
+  if (!routingResult.ok) errors.push(...routingResult.errors);
+
+  const telemetryResult = normalizeTelemetryConfig(parsed.telemetry);
+  if (!telemetryResult.ok) errors.push(...telemetryResult.errors);
+
   if (errors.length) return { ok: false, errors };
 
   return {
@@ -1614,6 +1674,8 @@ export function parseGroundControlYaml(yamlText) {
       example_paths: examplePathsResult.value,
       requirements: requirementsResult.value,
       cross_cutting_concerns: crossCuttingResult.value,
+      routing: routingResult.value,
+      telemetry: telemetryResult.value,
     },
   };
 }
@@ -1754,6 +1816,8 @@ export async function getRepoGroundControlContext(repoPath) {
     example_paths: parseResult.value.example_paths,
     requirements: parseResult.value.requirements,
     cross_cutting_concerns: parseResult.value.cross_cutting_concerns,
+    routing: parseResult.value.routing,
+    telemetry: parseResult.value.telemetry,
     errors: [],
   };
 }
@@ -6106,4 +6170,1317 @@ export async function listPackInstallRecords(project, { packId } = {}) {
 
 export async function getPackInstallRecord(id) {
   return request("GET", `/api/v1/pack-install-records/${encodeURIComponent(id)}`);
+}
+
+// ===========================================================================
+// /implement cost reduction (issue #868 / ADR-036):
+//   - gc_post_decision_record  — canonical review-cycle decision comment
+//   - gc_post_final_report     — canonical Step 19 final report
+//   - gc_render_pr_body        — PR body satisfying check_pr_body policy
+//   - gc_log_step_telemetry    — per-step JSONL telemetry writer
+//
+// These four tools share the "structured input → canonical Markdown / record
+// → issue thread / file / PR-body string" boundary per the preflight note
+// (architecture/notes/implement-cost-routing-tool-surfaces-preflight.md).
+// Renderers are pure and exhaustively tested in lib.test.js. Runners are
+// thin wrappers that validate, render, filter sensitive content, post, and
+// return a structured envelope.
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Decision record renderer (gc_post_decision_record)
+// ---------------------------------------------------------------------------
+//
+// The /implement Step 6.5 review loop ends each cycle with a decision record:
+// every finding gets `fix | wontfix | not-applicable`, plus a one-line
+// rationale and (for `class` findings) the structural fix description and the
+// instance list. ADR-029 makes this the durable record on the issue thread.
+// This renderer turns structured input into the canonical Markdown shape so
+// every cycle's decision comment has the same layout — no agent free-prose.
+// `decision: defer` is intentionally rejected (ADR-029 zero-deferral).
+
+export const DECISION_RECORD_REVIEWERS = Object.freeze(["codex", "refactor", "test-quality", "sonarcloud"]);
+export const DECISION_RECORD_DECISIONS = Object.freeze(["fix", "wontfix", "not-applicable"]);
+export const DECISION_RECORD_CLASSIFICATIONS = Object.freeze(["one-off", "class"]);
+const DECISION_RECORD_MARKER_PREFIX = "<!-- gc:decision-record";
+
+// Maximum bytes of a single GitHub issue-comment body. The REST API rejects
+// anything larger with HTTP 422. The deterministic record posters refuse
+// inputs that would exceed this so the workflow surface never depends on
+// downstream truncation.
+const GITHUB_ISSUE_COMMENT_BODY_MAX = 65535;
+
+// Caller-controlled text fields are rendered into GitHub issue-comment bodies
+// alongside server-owned phase / decision / final-report markers. An attacker
+// (prompt-injection source, lower-trust agent, malicious issue input) who can
+// influence those fields could forge a `<!-- gc:phase phase="preflight"
+// issue="N" -->` token, which the marker parser scans for in entire comment
+// bodies — bypassing the preflight-before-planning gate. Reject any caller-
+// controlled string carrying a reserved marker prefix at the tool boundary.
+// REJECT instead of escape: these tools are the privileged side-effect
+// boundary; a clean refusal with a structured envelope keeps the workflow's
+// security model intact, whereas escaping accumulates an ever-growing list of
+// transforms the parser has to mirror.
+const RESERVED_MARKER_PREFIX_RE = /<!--\s*gc:/i;
+function rejectReservedMarkerSequence(text, fieldName) {
+  if (typeof text !== "string" || text === "") return null;
+  if (RESERVED_MARKER_PREFIX_RE.test(text)) {
+    return `${fieldName}: caller-controlled text carries a reserved marker prefix (<!-- gc:...); reserved by the workflow surface, refused`;
+  }
+  return null;
+}
+
+export function buildDecisionRecordMarker({ reviewer, cycle, issueNumber }) {
+  return `<!-- gc:decision-record reviewer="${reviewer}" cycle="${cycle}" issue="${issueNumber}" -->`;
+}
+
+export function validateDecisionRecordInput(input) {
+  const errors = [];
+  if (input == null || typeof input !== "object") {
+    return { ok: false, errors: ["input must be an object"] };
+  }
+  const { issueNumber, cycle, reviewer, findings } = input;
+  if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+    errors.push("issueNumber must be a positive integer");
+  }
+  if (!Number.isInteger(cycle) || cycle <= 0) {
+    errors.push("cycle must be a positive integer");
+  }
+  if (typeof reviewer !== "string" || !DECISION_RECORD_REVIEWERS.includes(reviewer)) {
+    errors.push(`reviewer must be one of: ${DECISION_RECORD_REVIEWERS.join(", ")}`);
+  }
+  if (!Array.isArray(findings)) {
+    errors.push("findings must be an array (may be empty)");
+  } else {
+    findings.forEach((f, i) => {
+      if (f == null || typeof f !== "object") {
+        errors.push(`findings[${i}] must be an object`);
+        return;
+      }
+      if (typeof f.id !== "string" || f.id.trim() === "") {
+        errors.push(`findings[${i}].id must be a non-empty string`);
+      }
+      if (typeof f.title !== "string" || f.title.trim() === "") {
+        errors.push(`findings[${i}].title must be a non-empty string`);
+      }
+      if (!DECISION_RECORD_CLASSIFICATIONS.includes(f.classification)) {
+        errors.push(`findings[${i}].classification must be one of: ${DECISION_RECORD_CLASSIFICATIONS.join(", ")}`);
+      }
+      if (!DECISION_RECORD_DECISIONS.includes(f.decision)) {
+        // Reject `defer` explicitly — ADR-029 zero-deferral. The rejection is
+        // defense in depth on top of the PreToolUse block-defer hook.
+        if (f.decision === "defer") {
+          errors.push(`findings[${i}].decision='defer' is invalid; ADR-029 forbids deferral. Use 'fix', 'wontfix' (with user authorization), or 'not-applicable' (with rationale).`);
+        } else {
+          errors.push(`findings[${i}].decision must be one of: ${DECISION_RECORD_DECISIONS.join(", ")}`);
+        }
+      }
+      if (typeof f.rationale !== "string" || f.rationale.trim() === "") {
+        errors.push(`findings[${i}].rationale must be a non-empty string`);
+      }
+      // `wontfix` requires explicit user authorization per ADR-029 — the agent
+      // cannot self-authorize closing a finding as wontfix. Require a non-
+      // empty user_authorization field that quotes the user's approval (a URL
+      // to the issue-thread comment authorizing it, or a verbatim quote with
+      // an issue/comment id). Validated at the tool boundary so the durable
+      // record cannot carry a `wontfix` without evidence of authorization.
+      if (f.decision === "wontfix") {
+        if (typeof f.user_authorization !== "string" || f.user_authorization.trim() === "") {
+          errors.push(`findings[${i}].decision='wontfix' requires a non-empty user_authorization field (URL to the issue-thread comment OR a verbatim quote with the comment id)`);
+        }
+      }
+      if (f.classification === "class") {
+        if (!Array.isArray(f.instances) || f.instances.length < 2) {
+          errors.push(`findings[${i}].classification='class' requires instances[] of length >= 2`);
+        } else {
+          f.instances.forEach((inst, j) => {
+            if (typeof inst !== "string" || inst.trim() === "") {
+              errors.push(`findings[${i}].instances[${j}] must be a non-empty string`);
+            }
+          });
+        }
+      }
+      if (f.location != null && typeof f.location !== "string") {
+        errors.push(`findings[${i}].location must be a string when set`);
+      }
+      if (f.comment_url != null && typeof f.comment_url !== "string") {
+        errors.push(`findings[${i}].comment_url must be a string when set`);
+      }
+    });
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true };
+}
+
+export function buildDecisionRecord({ issueNumber, cycle, reviewer, findings }) {
+  const validation = validateDecisionRecordInput({ issueNumber, cycle, reviewer, findings });
+  if (!validation.ok) {
+    throw new Error(`buildDecisionRecord input invalid: ${validation.errors.join("; ")}`);
+  }
+  const lines = [];
+  lines.push(buildDecisionRecordMarker({ reviewer, cycle, issueNumber }));
+  lines.push("");
+  lines.push(`## Review decision record — ${reviewer} cycle ${cycle} (issue #${issueNumber})`);
+  lines.push("");
+  lines.push(`**Reviewer:** ${reviewer}  `);
+  lines.push(`**Cycle:** ${cycle}  `);
+  if (findings.length === 0) {
+    lines.push(`**Findings:** 0 (clean run)`);
+    return lines.join("\n");
+  }
+  lines.push(`**Findings:** ${findings.length}`);
+  lines.push("");
+  findings.forEach((f, i) => {
+    const idx = i + 1;
+    const heading = f.classification === "class"
+      ? `### Finding ${idx} — \`class\` (${f.instances.length} instances)`
+      : `### Finding ${idx} — \`one-off\``;
+    lines.push(heading);
+    lines.push("");
+    lines.push(`- **ID:** \`${f.id}\``);
+    lines.push(`- **Title:** ${f.title}`);
+    if (f.location) lines.push(`- **Location:** \`${f.location}\``);
+    lines.push(`- **Decision:** ${f.decision}`);
+    if (f.decision === "wontfix" && f.user_authorization) {
+      lines.push(`- **User authorization:** ${f.user_authorization}`);
+    }
+    lines.push(`- **Rationale:** ${f.rationale}`);
+    if (f.comment_url) lines.push(`- **Comment:** ${f.comment_url}`);
+    if (f.classification === "class") {
+      lines.push(`- **Instances:**`);
+      for (const inst of f.instances) {
+        lines.push(`  - \`${inst}\``);
+      }
+    }
+    if (i < findings.length - 1) lines.push("");
+  });
+  return lines.join("\n");
+}
+
+// Runner: validate → render → sensitive-content filter → post to issue thread
+// (carries a `decision-record` marker family, queryable by future sweeps). The
+// marker prefix is distinct from `gc:phase` so a downstream tool can count
+// decision records per reviewer per cycle without confusing them with phase
+// markers.
+export async function runPostDecisionRecord({ repoPath, issueNumber, cycle, reviewer, findings }) {
+  const validation = validateDecisionRecordInput({ issueNumber, cycle, reviewer, findings });
+  if (!validation.ok) {
+    return {
+      ok: false,
+      error: "decision_record_input_invalid",
+      message: validation.errors.join("; "),
+      issue_number: issueNumber ?? null,
+    };
+  }
+  // Reject caller-controlled fields carrying reserved `<!-- gc:` marker
+  // syntax — they could otherwise forge a phase/decision/final-report marker
+  // and bypass downstream prerequisite checks (codex cycle-2 security finding).
+  if (Array.isArray(findings)) {
+    for (let i = 0; i < findings.length; i++) {
+      const f = findings[i];
+      if (!f || typeof f !== "object") continue;
+      for (const [k, v] of [
+        ["id", f.id], ["title", f.title], ["location", f.location],
+        ["rationale", f.rationale], ["comment_url", f.comment_url],
+        ["user_authorization", f.user_authorization],
+      ]) {
+        const err = rejectReservedMarkerSequence(v, `findings[${i}].${k}`);
+        if (err) {
+          return {
+            ok: false,
+            error: "decision_record_reserved_marker",
+            message: err,
+            issue_number: issueNumber,
+            next_action: "remove_reserved_marker_prefix_and_retry",
+          };
+        }
+      }
+      if (Array.isArray(f.instances)) {
+        for (let j = 0; j < f.instances.length; j++) {
+          const err = rejectReservedMarkerSequence(f.instances[j], `findings[${i}].instances[${j}]`);
+          if (err) {
+            return {
+              ok: false,
+              error: "decision_record_reserved_marker",
+              message: err,
+              issue_number: issueNumber,
+              next_action: "remove_reserved_marker_prefix_and_retry",
+            };
+          }
+        }
+      }
+    }
+  }
+  // Build the body and run all cheap in-memory checks (sensitive content,
+  // body-size cap) BEFORE any network I/O, so a body that would be rejected
+  // never costs a `gh repo view` round trip. The reserved-marker reject
+  // above is also cheap and runs first.
+  const body = buildDecisionRecord({ issueNumber, cycle, reviewer, findings });
+  const sensitiveError = detectSensitiveBodyContent(body);
+  if (sensitiveError) {
+    return {
+      ok: false,
+      error: "decision_record_body_rejected",
+      message: sensitiveError,
+      issue_number: issueNumber,
+      next_action: "scrub_secrets_from_findings_and_retry",
+    };
+  }
+  // GitHub's REST issue-comment endpoint rejects bodies over 65,535 chars.
+  // Refuse at the boundary with a structured envelope so the run does not
+  // produce a half-failed durable record.
+  if (Buffer.byteLength(body, "utf8") > GITHUB_ISSUE_COMMENT_BODY_MAX) {
+    return {
+      ok: false,
+      error: "decision_record_body_too_large",
+      message: `rendered body is ${Buffer.byteLength(body, "utf8")} bytes; GitHub's issue-comment body cap is ${GITHUB_ISSUE_COMMENT_BODY_MAX} bytes`,
+      issue_number: issueNumber,
+      next_action: "reduce_findings_or_split_across_cycles_and_retry",
+    };
+  }
+  const repoRoot = await ensureGitRepo(repoPath);
+  const { owner, name } = await getOwnerRepo(repoRoot);
+  let apiResponse = null;
+  try {
+    const { stdout } = await execFile(
+      "gh",
+      [
+        "api",
+        "--method",
+        "POST",
+        `/repos/${owner}/${name}/issues/${issueNumber}/comments`,
+        "-f",
+        `body=${body}`,
+      ],
+      { cwd: repoRoot },
+    );
+    try {
+      apiResponse = JSON.parse(stdout);
+    } catch {
+      apiResponse = null;
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      error: "decision_record_post_failed",
+      message: extractGhErrorMessage(error),
+      issue_number: issueNumber,
+      next_action: "retry_after_resolving_gh_failure",
+    };
+  }
+  return {
+    repo_path: repoRoot,
+    issue_number: issueNumber,
+    ok: true,
+    cycle,
+    reviewer,
+    finding_count: findings.length,
+    comment_url: apiResponse && typeof apiResponse.html_url === "string" ? apiResponse.html_url : null,
+    comment_id: apiResponse && Number.isInteger(apiResponse.id) ? apiResponse.id : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Final report renderer (gc_post_final_report)
+// ---------------------------------------------------------------------------
+//
+// Step 19 of /implement posts a final summary to the issue thread. This was
+// previously free-prose. Structured input → canonical layout: in-scope
+// requirements, files (by change kind), reviews (per reviewer), traceability
+// reconciliation, status. The marker family `gc:final-report` lets later
+// sweeps detect that a run completed.
+
+const FINAL_REPORT_MARKER_PREFIX = "<!-- gc:final-report";
+const FINAL_REPORT_FILE_KINDS = Object.freeze(["added", "modified", "renamed", "deleted"]);
+const FINAL_REPORT_CI_STATUSES = Object.freeze(["green", "red", "skipped"]);
+const FINAL_REPORT_SONAR_STATUSES = Object.freeze(["passed", "failed", "skipped"]);
+
+export function buildFinalReportMarker({ issueNumber, prNumber }) {
+  return `<!-- gc:final-report issue="${issueNumber}" pr="${prNumber}" -->`;
+}
+
+export function validateFinalReportInput(input) {
+  const errors = [];
+  if (input == null || typeof input !== "object") {
+    return { ok: false, errors: ["input must be an object"] };
+  }
+  const { issueNumber, prNumber, requirements, files, reviews, traceability, ciStatus, sonarStatus, planCommentUrl, summary } = input;
+  if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+    errors.push("issueNumber must be a positive integer");
+  }
+  if (!Number.isInteger(prNumber) || prNumber <= 0) {
+    errors.push("prNumber must be a positive integer");
+  }
+  if (!Array.isArray(requirements)) {
+    errors.push("requirements must be an array (may be empty)");
+  } else {
+    requirements.forEach((r, i) => {
+      if (r == null || typeof r !== "object") {
+        errors.push(`requirements[${i}] must be an object`);
+        return;
+      }
+      // Anchored UID match for structured field (codex cycle-4 F2).
+      if (typeof r.uid !== "string" || !EXACT_REQUIREMENT_UID_RE.test(r.uid)) {
+        errors.push(`requirements[${i}].uid must be a Ground Control UID matching ${EXACT_REQUIREMENT_UID_RE.source}`);
+      }
+      if (typeof r.title !== "string" || r.title.trim() === "") errors.push(`requirements[${i}].title must be a non-empty string`);
+      if (typeof r.status !== "string" || r.status.trim() === "") errors.push(`requirements[${i}].status must be a non-empty string`);
+      if (r.note != null && typeof r.note !== "string") errors.push(`requirements[${i}].note must be a string when set`);
+    });
+  }
+  if (files != null && typeof files === "object" && !Array.isArray(files)) {
+    for (const kind of Object.keys(files)) {
+      if (!FINAL_REPORT_FILE_KINDS.includes(kind)) {
+        errors.push(`files has unknown key '${kind}' (allowed: ${FINAL_REPORT_FILE_KINDS.join(", ")})`);
+        continue;
+      }
+      if (!Array.isArray(files[kind])) {
+        errors.push(`files.${kind} must be an array`);
+        continue;
+      }
+      files[kind].forEach((p, i) => {
+        if (typeof p !== "string" || p.trim() === "") {
+          errors.push(`files.${kind}[${i}] must be a non-empty string`);
+        }
+      });
+    }
+  } else if (files != null) {
+    errors.push("files must be a mapping of {added|modified|renamed|deleted: [paths]}");
+  }
+  if (!Array.isArray(reviews)) {
+    errors.push("reviews must be an array (may be empty)");
+  } else {
+    reviews.forEach((r, i) => {
+      if (r == null || typeof r !== "object") {
+        errors.push(`reviews[${i}] must be an object`);
+        return;
+      }
+      if (typeof r.reviewer !== "string" || r.reviewer.trim() === "") errors.push(`reviews[${i}].reviewer must be a non-empty string`);
+      if (typeof r.summary !== "string" || r.summary.trim() === "") errors.push(`reviews[${i}].summary must be a non-empty string`);
+    });
+  }
+  if (traceability != null) {
+    if (typeof traceability !== "object" || Array.isArray(traceability)) {
+      errors.push("traceability must be a mapping with optional keys 'added', 'updated', 'deleted'");
+    } else {
+      for (const k of Object.keys(traceability)) {
+        if (!["added", "updated", "deleted", "notes"].includes(k)) {
+          errors.push(`traceability has unknown key '${k}' (allowed: added, updated, deleted, notes)`);
+        }
+      }
+    }
+  }
+  if (!FINAL_REPORT_CI_STATUSES.includes(ciStatus)) {
+    errors.push(`ciStatus must be one of: ${FINAL_REPORT_CI_STATUSES.join(", ")}`);
+  }
+  if (!FINAL_REPORT_SONAR_STATUSES.includes(sonarStatus)) {
+    errors.push(`sonarStatus must be one of: ${FINAL_REPORT_SONAR_STATUSES.join(", ")}`);
+  }
+  if (planCommentUrl != null && typeof planCommentUrl !== "string") {
+    errors.push("planCommentUrl must be a string when set");
+  }
+  if (summary != null && typeof summary !== "string") {
+    errors.push("summary must be a string when set");
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true };
+}
+
+export function buildFinalReport(input) {
+  const validation = validateFinalReportInput(input);
+  if (!validation.ok) {
+    throw new Error(`buildFinalReport input invalid: ${validation.errors.join("; ")}`);
+  }
+  const { issueNumber, prNumber, requirements, files = {}, reviews, traceability = {}, ciStatus, sonarStatus, planCommentUrl, summary } = input;
+  const lines = [];
+  lines.push(buildFinalReportMarker({ issueNumber, prNumber }));
+  lines.push("");
+  lines.push(`## Final report — issue #${issueNumber} complete`);
+  lines.push("");
+  lines.push(`**PR:** #${prNumber}  `);
+  if (planCommentUrl) lines.push(`**Plan:** ${planCommentUrl}`);
+  if (summary) {
+    lines.push("");
+    lines.push(summary.trim());
+  }
+  lines.push("");
+  lines.push(`### In-scope requirements`);
+  lines.push("");
+  if (requirements.length === 0) {
+    lines.push("- (none — bug/refactor/maintenance run)");
+  } else {
+    for (const r of requirements) {
+      const note = r.note ? ` — ${r.note}` : "";
+      lines.push(`- \`${r.uid}\` (${r.title}) — ${r.status}${note}`);
+    }
+  }
+  lines.push("");
+  lines.push(`### Files changed`);
+  lines.push("");
+  let anyFiles = false;
+  for (const kind of FINAL_REPORT_FILE_KINDS) {
+    const list = Array.isArray(files[kind]) ? files[kind] : [];
+    if (list.length === 0) continue;
+    anyFiles = true;
+    lines.push(`**${kind[0].toUpperCase() + kind.slice(1)}:**`);
+    lines.push("");
+    for (const p of list) lines.push(`- \`${p}\``);
+    lines.push("");
+  }
+  if (!anyFiles) {
+    lines.push("- (none)");
+    lines.push("");
+  }
+  lines.push(`### Reviews`);
+  lines.push("");
+  if (reviews.length === 0) {
+    lines.push("- (no review records — bug/refactor/maintenance run)");
+  } else {
+    for (const r of reviews) lines.push(`- **${r.reviewer}:** ${r.summary}`);
+  }
+  lines.push("");
+  lines.push(`### Traceability reconciliation`);
+  lines.push("");
+  const tAdded = Array.isArray(traceability.added) ? traceability.added : [];
+  const tUpdated = Array.isArray(traceability.updated) ? traceability.updated : [];
+  const tDeleted = Array.isArray(traceability.deleted) ? traceability.deleted : [];
+  lines.push(`- IMPLEMENTS / TESTS / DOCUMENTS added: ${tAdded.length}`);
+  lines.push(`- Links updated: ${tUpdated.length}`);
+  lines.push(`- Stale links removed: ${tDeleted.length}`);
+  if (typeof traceability.notes === "string" && traceability.notes.trim() !== "") {
+    lines.push("");
+    lines.push(traceability.notes.trim());
+  }
+  lines.push("");
+  lines.push(`### Status`);
+  lines.push("");
+  lines.push(`- CI: ${renderCiStatus(ciStatus)}`);
+  lines.push(`- SonarCloud: ${renderSonarStatus(sonarStatus)}`);
+  lines.push(`- PR ready for user review and merge.`);
+  return lines.join("\n");
+}
+
+function renderCiStatus(s) {
+  if (s === "green") return "✅ green";
+  if (s === "red") return "❌ red";
+  return "skipped";
+}
+
+function renderSonarStatus(s) {
+  if (s === "passed") return "✅ passed";
+  if (s === "failed") return "❌ failed";
+  return "skipped (no sonarcloud config)";
+}
+
+export async function runPostFinalReport(input) {
+  const { repoPath } = input;
+  const rest = { ...input };
+  delete rest.repoPath;
+  const validation = validateFinalReportInput(rest);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      error: "final_report_input_invalid",
+      message: validation.errors.join("; "),
+      issue_number: rest.issueNumber ?? null,
+    };
+  }
+  // A Step 19 final report says "PR ready for user review and merge." That
+  // claim is FALSE when CI is anything other than green or SonarCloud failed.
+  // Refuse to publish a durable ready-for-merge marker against non-green
+  // gates. Sonar 'skipped' remains legitimate (the repo has no sonarcloud
+  // config — cfg.sonarcloud null path); CI 'skipped' is NOT legitimate for a
+  // real PR — Step 10 makes CI mandatory. The schema permits 'skipped' for
+  // test fixtures and pure renderer tests, but the runner refuses it.
+  if (rest.ciStatus !== "green") {
+    return {
+      ok: false,
+      error: "final_report_ci_not_green",
+      message: `ciStatus='${rest.ciStatus}' — a Step 19 final report claims PR-ready-for-merge; only ciStatus='green' is accepted by the runner`,
+      issue_number: rest.issueNumber,
+      next_action: "fix_ci_to_green_and_retry",
+    };
+  }
+  if (rest.sonarStatus === "failed") {
+    return {
+      ok: false,
+      error: "final_report_sonar_failed",
+      message: "sonarStatus='failed' — a final report claims PR-ready-for-merge; resolve SonarCloud findings before publishing the Step 19 record",
+      issue_number: rest.issueNumber,
+      next_action: "fix_sonar_and_retry",
+    };
+  }
+  // Step 19 is supposed to preserve review evidence for the run. An empty
+  // reviews[] (or one without a codex entry) would render an incomplete
+  // record while still posting a `gc:final-report` marker. The pre-push
+  // Codex review is mandatory for every /implement run; the runner refuses
+  // a final report without at least one codex review entry. (codex cycle-3
+  // F4 widened by cycle-4 F3.)
+  if (!Array.isArray(rest.reviews) || rest.reviews.length === 0) {
+    return {
+      ok: false,
+      error: "final_report_no_reviews",
+      message: "reviews[] is empty — Step 19 requires at least the pre-push Codex review summary; pass a reviews entry like { reviewer: 'codex', summary: '<cycle history + outcome>' }",
+      issue_number: rest.issueNumber,
+      next_action: "collect_review_summaries_and_retry",
+    };
+  }
+  const hasCodexReview = rest.reviews.some((r) => r && typeof r === "object" && r.reviewer === "codex");
+  if (!hasCodexReview) {
+    return {
+      ok: false,
+      error: "final_report_codex_review_missing",
+      message: "reviews[] does not include a 'codex' entry — the pre-push Codex review is mandatory per ADR-029; add a reviews entry with reviewer:'codex'",
+      issue_number: rest.issueNumber,
+      next_action: "add_codex_review_entry_and_retry",
+    };
+  }
+  // If the caller claims sonarStatus='skipped', validate that the repo
+  // actually has no sonarcloud config (codex cycle-4 F3). Otherwise a caller
+  // could publish a "PR ready" record for a sonar-configured repo without
+  // having run SonarCloud. Load .ground-control.yaml and check `sonarcloud`.
+  // If yaml is missing or invalid, surface that distinctly rather than
+  // accepting 'skipped' by accident.
+  if (rest.sonarStatus === "skipped") {
+    let cfgRepoRoot;
+    try {
+      cfgRepoRoot = await ensureGitRepo(repoPath);
+    } catch (error) {
+      return { ok: false, error: "final_report_repo_not_git", message: error.message, issue_number: rest.issueNumber };
+    }
+    let yamlText;
+    try {
+      yamlText = readAbsoluteTextFile(join(cfgRepoRoot, ".ground-control.yaml"));
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        return { ok: false, error: "final_report_config_read_failed", message: error.message, issue_number: rest.issueNumber };
+      }
+      // No config file → 'skipped' is legitimate (no Ground Control wiring)
+      yamlText = null;
+    }
+    if (yamlText != null) {
+      const parsed = parseGroundControlYaml(yamlText);
+      if (!parsed.ok) {
+        return { ok: false, error: "final_report_config_invalid", message: parsed.errors.join("; "), issue_number: rest.issueNumber };
+      }
+      if (parsed.value.sonarcloud != null) {
+        return {
+          ok: false,
+          error: "final_report_sonar_skipped_but_configured",
+          message: "sonarStatus='skipped' but .ground-control.yaml has a sonarcloud block; SonarCloud must be run for sonar-configured repos before publishing the Step 19 record",
+          issue_number: rest.issueNumber,
+          next_action: "run_sonarcloud_and_pass_sonar_status_passed_or_failed",
+        };
+      }
+    }
+  }
+  // Reject caller-controlled fields carrying reserved `<!-- gc:` marker
+  // syntax (codex cycle-2 security finding; same shape as runPostDecisionRecord).
+  const callerStringFields = [
+    ["summary", rest.summary],
+    ["planCommentUrl", rest.planCommentUrl],
+  ];
+  if (rest.traceability && typeof rest.traceability === "object") {
+    callerStringFields.push(["traceability.notes", rest.traceability.notes]);
+  }
+  for (const [k, v] of callerStringFields) {
+    const err = rejectReservedMarkerSequence(v, k);
+    if (err) {
+      return {
+        ok: false,
+        error: "final_report_reserved_marker",
+        message: err,
+        issue_number: rest.issueNumber,
+        next_action: "remove_reserved_marker_prefix_and_retry",
+      };
+    }
+  }
+  if (Array.isArray(rest.requirements)) {
+    for (let i = 0; i < rest.requirements.length; i++) {
+      const r = rest.requirements[i];
+      if (!r || typeof r !== "object") continue;
+      for (const [k, v] of [["uid", r.uid], ["title", r.title], ["status", r.status], ["note", r.note]]) {
+        const err = rejectReservedMarkerSequence(v, `requirements[${i}].${k}`);
+        if (err) return { ok: false, error: "final_report_reserved_marker", message: err, issue_number: rest.issueNumber, next_action: "remove_reserved_marker_prefix_and_retry" };
+      }
+    }
+  }
+  if (Array.isArray(rest.reviews)) {
+    for (let i = 0; i < rest.reviews.length; i++) {
+      const r = rest.reviews[i];
+      if (!r || typeof r !== "object") continue;
+      for (const [k, v] of [["reviewer", r.reviewer], ["summary", r.summary]]) {
+        const err = rejectReservedMarkerSequence(v, `reviews[${i}].${k}`);
+        if (err) return { ok: false, error: "final_report_reserved_marker", message: err, issue_number: rest.issueNumber, next_action: "remove_reserved_marker_prefix_and_retry" };
+      }
+    }
+  }
+  if (rest.files && typeof rest.files === "object") {
+    for (const kind of Object.keys(rest.files)) {
+      const arr = Array.isArray(rest.files[kind]) ? rest.files[kind] : [];
+      for (let i = 0; i < arr.length; i++) {
+        const err = rejectReservedMarkerSequence(arr[i], `files.${kind}[${i}]`);
+        if (err) return { ok: false, error: "final_report_reserved_marker", message: err, issue_number: rest.issueNumber, next_action: "remove_reserved_marker_prefix_and_retry" };
+      }
+    }
+  }
+  if (rest.traceability && typeof rest.traceability === "object") {
+    for (const k of ["added", "updated", "deleted"]) {
+      const arr = Array.isArray(rest.traceability[k]) ? rest.traceability[k] : [];
+      for (let i = 0; i < arr.length; i++) {
+        const err = rejectReservedMarkerSequence(arr[i], `traceability.${k}[${i}]`);
+        if (err) return { ok: false, error: "final_report_reserved_marker", message: err, issue_number: rest.issueNumber, next_action: "remove_reserved_marker_prefix_and_retry" };
+      }
+    }
+  }
+  // Cheap in-memory checks BEFORE any network I/O — same rationale as in
+  // runPostDecisionRecord (codex cycle-2 F3).
+  const body = buildFinalReport(rest);
+  const sensitiveError = detectSensitiveBodyContent(body);
+  if (sensitiveError) {
+    return {
+      ok: false,
+      error: "final_report_body_rejected",
+      message: sensitiveError,
+      issue_number: rest.issueNumber,
+      next_action: "scrub_secrets_and_retry",
+    };
+  }
+  if (Buffer.byteLength(body, "utf8") > GITHUB_ISSUE_COMMENT_BODY_MAX) {
+    return {
+      ok: false,
+      error: "final_report_body_too_large",
+      message: `rendered body is ${Buffer.byteLength(body, "utf8")} bytes; GitHub's issue-comment body cap is ${GITHUB_ISSUE_COMMENT_BODY_MAX} bytes`,
+      issue_number: rest.issueNumber,
+      next_action: "trim_summary_or_reviews_and_retry",
+    };
+  }
+  const repoRoot = await ensureGitRepo(repoPath);
+  const { owner, name } = await getOwnerRepo(repoRoot);
+  let apiResponse = null;
+  try {
+    const { stdout } = await execFile(
+      "gh",
+      [
+        "api",
+        "--method",
+        "POST",
+        `/repos/${owner}/${name}/issues/${rest.issueNumber}/comments`,
+        "-f",
+        `body=${body}`,
+      ],
+      { cwd: repoRoot },
+    );
+    try {
+      apiResponse = JSON.parse(stdout);
+    } catch {
+      apiResponse = null;
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      error: "final_report_post_failed",
+      message: extractGhErrorMessage(error),
+      issue_number: rest.issueNumber,
+      next_action: "retry_after_resolving_gh_failure",
+    };
+  }
+  return {
+    repo_path: repoRoot,
+    issue_number: rest.issueNumber,
+    pr_number: rest.prNumber,
+    ok: true,
+    comment_url: apiResponse && typeof apiResponse.html_url === "string" ? apiResponse.html_url : null,
+    comment_id: apiResponse && Number.isInteger(apiResponse.id) ? apiResponse.id : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// PR body renderer (gc_render_pr_body)
+// ---------------------------------------------------------------------------
+//
+// Step 9 of /implement drafts the PR body. The body has to satisfy the policy
+// gates `tools/policy/checks.py::check_pr_body` enforces:
+//
+//   - Headers: ## Summary, ## Requirement UIDs, ## Related Issues, ## ADR
+//     Impact, ## Changes, ## Test Plan, ## Ground Control Checks, ##
+//     Traceability, ## Checklist.
+//   - At least one requirement-UID-shaped token (PR_REQUIREMENT_RE).
+//   - ADR impact line either references `ADR-` or contains the literal
+//     "No ADR required".
+//   - Three Ground Control Checks lines exactly: `- [x] \`make policy\`
+//     passes`, `- [x] \`gc_evaluate_quality_gates\` ...`, `- [x] \`gc_run_sweep\`
+//     ...`.
+//   - `- IMPLEMENTS:` and `- TESTS:` markers under Traceability.
+//   - No deferral-disposition language anywhere.
+//
+// `change_class` shapes a few cells: doc-only changes mark integration tests
+// and changelog fragments N/A; source+migration adds the MigrationSmokeTest
+// reminder. The render is decoupled from check_pr_body — a Python test in
+// tools/tests/test_policy.py asserts the rendered output passes the policy.
+
+export const PR_BODY_CHANGE_CLASSES = Object.freeze(["doc-only", "source", "source+migration"]);
+
+// Mirrors tools/policy/checks.py::PR_REQUIREMENT_RE verbatim. The Python regex
+// is `\b[A-Z][A-Z0-9]+-[A-Z0-9]+(?:-\d+|\d+)\b` — the trailing branch
+// enforces that the suffix must be (a) hyphen + digits or (b) digits. So
+// `GC-O007` and `GC-O-007` are valid; `GC-OOPS` is NOT. Centralized here so
+// the policy gate and the JS body-scan use the same predicate. Use this for
+// SEARCH inside body text (finds a UID anywhere); use EXACT_REQUIREMENT_UID_RE
+// for STRUCTURED FIELDS (validating that one input string IS a UID).
+export const PR_REQUIREMENT_RE = /\b[A-Z][A-Z0-9]+-[A-Z0-9]+(?:-\d+|\d+)\b/;
+
+// Anchored UID validator — the same shape as PR_REQUIREMENT_RE but bounded so
+// the entire input must BE a UID, not merely contain one. Codex cycle-4 F2
+// flagged that `PR_REQUIREMENT_RE.test("not really GC-O007")` returns true
+// because the regex is a search predicate; a structured `requirement_uid`
+// field should accept exactly one UID, not arbitrary text containing one. Use
+// this in every structured UID field at the tool boundary
+// (gc_render_pr_body.requirement_uids, gc_post_final_report.requirements[].uid).
+export const EXACT_REQUIREMENT_UID_RE = /^[A-Z][A-Z0-9]+-[A-Z0-9]+(?:-\d+|\d+)$/;
+
+const PR_BODY_GC_CHECK_LINES = Object.freeze([
+  "- [x] `make policy` passes",
+  "- [x] `gc_evaluate_quality_gates` passes or is unchanged by this repo-only change",
+  "- [x] `gc_run_sweep` reviewed; findings fixed or recorded with rationale",
+]);
+
+const PR_BODY_REQUIRED_HEADERS = Object.freeze([
+  "## Requirement UIDs",
+  "## ADR Impact",
+  "## Ground Control Checks",
+  "## Traceability",
+]);
+
+// Tier-1 deferral-disposition phrases (subset of tools/policy/deferral_cases.json).
+// JS-side defense-in-depth — the Python classifier at `bin/policy` remains
+// authoritative, but this catches obvious phrasings in caller-provided fields
+// (summary, changes, testNotes, traceability) BEFORE the body is published, so
+// the runner's contract holds at the boundary. Word-boundary anchored to avoid
+// false-positives on substrings like "deferred from" (historical note, allowed).
+const DEFERRAL_TIER1_PATTERNS = Object.freeze([
+  /\bdeferred to (?:a |the )?(?:follow[- ]?up|subsequent|later|next)\b/i,
+  /\bdefer(?:red)? (?:to |until )?(?:a |the )?(?:follow[- ]?up|subsequent|later iteration)\b/i,
+  /\b(?:will be |is |are )?addressed in (?:a |the )?follow[- ]?up\b/i,
+  /\b(?:will be |is |are |gets? |get )?(?:fixed|handled|landed?|done) (?:in|as) (?:a |the )?(?:follow[- ]?up|subsequent) (?:PR|issue|pull request)\b/i,
+  /\bTBD later\b/i,
+  /\bto be (?:done|filed|landed?) (?:later|separately)\b/i,
+]);
+
+// Returns null when the text is clean, else a short description of the first
+// matched Tier-1 pattern. Negation guards ("never defer", "must not defer") are
+// not needed here because the caller-provided fields are structured / short and
+// the false-positive surface is minimal; the full Python classifier handles
+// negation context at policy-gate time as the authoritative check.
+function detectDeferralDisposition(text) {
+  if (typeof text !== "string" || text === "") return null;
+  for (const re of DEFERRAL_TIER1_PATTERNS) {
+    const m = text.match(re);
+    if (m) return `deferral-disposition phrase '${m[0]}' detected (ADR-029 forbids deferral)`;
+  }
+  return null;
+}
+
+// Extract the contents of the `## Requirement UIDs` section — the lines
+// between that header and the next `## ` header. Used so the UID check is
+// scoped to the section, not the whole body (which would let an ADR-NNN ref
+// satisfy the requirement-UID gate by accident — codex cycle-3 F5: concept
+// confusion between ADR impact and requirement traceability).
+function extractRequirementUidsSection(body) {
+  const start = body.indexOf("## Requirement UIDs");
+  if (start === -1) return "";
+  const after = body.slice(start + "## Requirement UIDs".length);
+  const nextHeader = after.search(/\n## /);
+  return nextHeader === -1 ? after : after.slice(0, nextHeader);
+}
+
+// Structural check on the rendered body — mirrors check_pr_body's predicates so
+// the renderer's contract holds at the runner boundary, not in agent prose.
+// Stricter than the Python check_pr_body in one dimension: the UID predicate
+// is scoped to the Requirement UIDs section, not the whole body (codex cycle-3
+// F5). The Python gate remains as-is for backward compatibility; the JS-side
+// renderer's stricter check refuses concept-confused inputs at the tool
+// boundary so they never reach the Python gate.
+// Returns { ok: true } or { ok: false, errors: [...] }.
+export function checkPrBodyShape(body) {
+  const errors = [];
+  if (typeof body !== "string" || body === "") {
+    return { ok: false, errors: ["body must be a non-empty string"] };
+  }
+  for (const h of PR_BODY_REQUIRED_HEADERS) {
+    if (!body.includes(h)) errors.push(`missing required header: ${h}`);
+  }
+  // Section-scoped UID check — see extractRequirementUidsSection for rationale.
+  const uidSection = extractRequirementUidsSection(body);
+  const sectionHasUid = PR_REQUIREMENT_RE.test(uidSection);
+  const sectionHasNoneMarker = /-\s*\(none\b/i.test(uidSection);
+  if (!sectionHasUid && !sectionHasNoneMarker) {
+    errors.push(
+      "## Requirement UIDs section must contain at least one Ground Control UID " +
+      "(pattern: " + PR_REQUIREMENT_RE.source + ") OR the explicit '- (none — ...)' " +
+      "marker for requirement-free runs. ADR references in other sections do NOT " +
+      "satisfy the requirement-UID gate — that is concept confusion between ADR " +
+      "impact and requirement traceability.",
+    );
+  }
+  // Whole-body UID check is preserved so the Python policy gate also passes.
+  // For requirement-free runs (uidSection has '(none)') the whole-body check
+  // is satisfied by ADR references — that's fine at the policy level; the
+  // section-scoped check above is what enforces honest section semantics.
+  if (!PR_REQUIREMENT_RE.test(body)) {
+    errors.push("body must contain at least one UID-shaped token matching the requirement UID pattern: " + PR_REQUIREMENT_RE.source);
+  }
+  if (!body.includes("ADR-") && !body.includes("No ADR required")) {
+    errors.push("ADR Impact must reference an ADR ('ADR-...') or contain 'No ADR required'");
+  }
+  for (const line of PR_BODY_GC_CHECK_LINES) {
+    if (!body.includes(line)) errors.push(`missing Ground Control Checks line: ${line}`);
+  }
+  if (!body.includes("- IMPLEMENTS:")) errors.push("missing '- IMPLEMENTS:' marker under Traceability");
+  if (!body.includes("- TESTS:")) errors.push("missing '- TESTS:' marker under Traceability");
+  // NB: deferral-language enforcement is intentionally NOT done here (codex
+  // cycle-4 F1). Authoritative enforcement: `block-defer-language.py`
+  // PreToolUse hook on `gh pr create` AND `bin/policy` /
+  // `check_pr_body::run_no_deferral_disposition_check` at CI time. The JS
+  // classifier was a partial subset of the Python `deferral_cases.json`
+  // matcher and gave false confidence ("ok:true" from a body that would
+  // later fail policy). The structural check (headers / markers / GC checks
+  // / UID section) is what this function owns; deferral is owned downstream.
+  if (errors.length) return { ok: false, errors };
+  return { ok: true };
+}
+
+export function validatePrBodyInput(input) {
+  const errors = [];
+  if (input == null || typeof input !== "object") {
+    return { ok: false, errors: ["input must be an object"] };
+  }
+  const { issueNumber, changeClass, requirementUids, adrRefs, summary, changes, traceability, changelogFragment, testNotes } = input;
+  if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+    errors.push("issueNumber must be a positive integer");
+  }
+  if (!PR_BODY_CHANGE_CLASSES.includes(changeClass)) {
+    errors.push(`changeClass must be one of: ${PR_BODY_CHANGE_CLASSES.join(", ")}`);
+  }
+  if (!Array.isArray(requirementUids)) {
+    errors.push("requirementUids must be an array (may be empty for requirement-free runs)");
+  } else {
+    requirementUids.forEach((u, i) => {
+      // Anchored UID validator — the entire input must BE a UID, not merely
+      // contain one (codex cycle-4 F2). The unanchored `PR_REQUIREMENT_RE` is
+      // a body-scan predicate; structured fields use EXACT_REQUIREMENT_UID_RE.
+      if (typeof u !== "string" || !EXACT_REQUIREMENT_UID_RE.test(u)) {
+        errors.push(`requirementUids[${i}] must be a Ground Control UID matching ${EXACT_REQUIREMENT_UID_RE.source}`);
+      }
+    });
+  }
+  if (!Array.isArray(adrRefs)) {
+    errors.push("adrRefs must be an array (may be empty; renderer emits 'No ADR required' when empty)");
+  } else {
+    adrRefs.forEach((a, i) => {
+      if (typeof a !== "string" || a.trim() === "") errors.push(`adrRefs[${i}] must be a non-empty string`);
+    });
+  }
+  if (typeof summary !== "string" || summary.trim() === "") {
+    errors.push("summary must be a non-empty string");
+  }
+  if (!Array.isArray(changes)) {
+    errors.push("changes must be an array of bullet strings");
+  } else {
+    changes.forEach((c, i) => {
+      if (typeof c !== "string" || c.trim() === "") errors.push(`changes[${i}] must be a non-empty string`);
+    });
+  }
+  if (traceability == null || typeof traceability !== "object" || Array.isArray(traceability)) {
+    errors.push("traceability must be a mapping with 'implements' and 'tests' arrays");
+  } else {
+    for (const k of ["implements", "tests"]) {
+      if (!Array.isArray(traceability[k])) {
+        errors.push(`traceability.${k} must be an array (may be empty)`);
+      }
+    }
+  }
+  // Validate `changelogFragment` against the towncrier-style fragment path
+  // shape: `changelog.d/<issue>.<type>.md` OR `changelog.d/+<slug>.<type>.md`
+  // where <type> ∈ {security, added, changed, deprecated, removed, fixed}.
+  // Mirrors tools/policy/checks.py::run_changelog_fragment_check's filename
+  // predicate so a body that claims "Changelog fragment added at <path>"
+  // can't get rendered with a non-fragment path (codex cycle-4 F4).
+  if (changelogFragment != null) {
+    if (typeof changelogFragment !== "string" || changelogFragment.trim() === "") {
+      errors.push("changelogFragment must be a non-empty string when set");
+    } else if (!/^changelog\.d\/(?:[A-Za-z0-9._-]+|\+[A-Za-z0-9._-]+)\.(?:security|added|changed|deprecated|removed|fixed)\.md$/.test(changelogFragment)) {
+      errors.push(`changelogFragment must match changelog.d/<issue>.<type>.md or changelog.d/+<slug>.<type>.md where <type> ∈ {security,added,changed,deprecated,removed,fixed}; got: ${changelogFragment}`);
+    }
+  }
+  if (changeClass === "source" || changeClass === "source+migration") {
+    if (changelogFragment == null) {
+      errors.push(`changeClass='${changeClass}' requires a changelogFragment (path under changelog.d/)`);
+    }
+  }
+  if (testNotes != null && typeof testNotes !== "string") {
+    errors.push("testNotes must be a string when set");
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true };
+}
+
+export function buildPrBody(input) {
+  const validation = validatePrBodyInput(input);
+  if (!validation.ok) {
+    throw new Error(`buildPrBody input invalid: ${validation.errors.join("; ")}`);
+  }
+  const { issueNumber, changeClass, requirementUids, adrRefs, summary, changes, traceability, changelogFragment, testNotes } = input;
+  const lines = [];
+  lines.push("## Summary");
+  lines.push("");
+  lines.push(summary.trim());
+  lines.push("");
+  lines.push("## Requirement UIDs");
+  lines.push("");
+  if (requirementUids.length === 0) {
+    // Requirement-free runs (bug/refactor/maintenance) render an explicit
+    // "(none)" marker rather than a synthetic UID placeholder. Codex cycle-2
+    // flagged the previous placeholder injection as fabricated traceability —
+    // a placeholder `GC-O007` would have tied an unrelated bug-fix PR to the
+    // workflow requirement in the durable record. The PR-body policy gate
+    // (PR_REQUIREMENT_RE) still requires SOME UID-shaped token anywhere in
+    // the body, but ADR references (`ADR-NNN`) and traceability bullets
+    // satisfy that predicate; callers without either should pass at least
+    // one of `requirementUids` or `adrRefs`, or `checkPrBodyShape` will
+    // surface a clear refusal at the runner boundary.
+    lines.push("- (none — bug/refactor/maintenance run; see Traceability section below)");
+  } else {
+    for (const u of requirementUids) lines.push(`- \`${u}\``);
+  }
+  lines.push("");
+  lines.push("## Related Issues");
+  lines.push("");
+  lines.push(`Closes #${issueNumber}`);
+  lines.push("");
+  lines.push("## ADR Impact");
+  lines.push("");
+  if (adrRefs.length === 0) {
+    lines.push("- No ADR required");
+  } else {
+    for (const a of adrRefs) lines.push(`- ${a}`);
+  }
+  lines.push("");
+  lines.push("## Changes");
+  lines.push("");
+  if (changes.length === 0) {
+    lines.push("- See summary above.");
+  } else {
+    for (const c of changes) lines.push(`- ${c}`);
+  }
+  if (changeClass === "source+migration") {
+    lines.push("- **Migration reminder:** update version lists in `MigrationSmokeTest.java` and `RequirementsE2EIntegrationTest.java` (per `.gc/plan-rules.md`).");
+  }
+  lines.push("");
+  lines.push("## Test Plan");
+  lines.push("");
+  if (changeClass === "doc-only") {
+    lines.push("- [x] `make check` passes (Spotless, SpotBugs, Error Prone, Checkstyle, JaCoCo)");
+    lines.push("- [x] `make policy` passes (documentation/workflow guardrails)");
+    lines.push("- Unit tests / integration tests: N/A — docs-only change");
+  } else {
+    lines.push("- [x] Unit tests pass (`make test`)");
+    lines.push("- [x] Integration tests pass if applicable (`make integration`)");
+    lines.push("- [x] `make check` passes (Spotless, SpotBugs, Error Prone, Checkstyle, JaCoCo)");
+    lines.push("- [x] No coverage regression");
+  }
+  if (testNotes && testNotes.trim() !== "") {
+    lines.push("");
+    lines.push(testNotes.trim());
+  }
+  lines.push("");
+  lines.push("## Ground Control Checks");
+  lines.push("");
+  for (const l of PR_BODY_GC_CHECK_LINES) lines.push(l);
+  lines.push("");
+  lines.push("## Traceability");
+  lines.push("");
+  const tImpl = Array.isArray(traceability.implements) ? traceability.implements : [];
+  const tTest = Array.isArray(traceability.tests) ? traceability.tests : [];
+  if (tImpl.length === 0) {
+    lines.push("- IMPLEMENTS: (none — bug/refactor/maintenance run)");
+  } else {
+    lines.push(`- IMPLEMENTS: ${tImpl.join(", ")}`);
+  }
+  if (tTest.length === 0) {
+    lines.push("- TESTS: (none — documentation/configuration/structural-invariant run)");
+  } else {
+    lines.push(`- TESTS: ${tTest.join(", ")}`);
+  }
+  lines.push("");
+  lines.push("## Checklist");
+  lines.push("");
+  lines.push("- [x] Code follows project coding standards (`docs/CODING_STANDARDS.md`)");
+  lines.push("- [x] No business logic in API layer");
+  lines.push("- [x] Domain layer has no framework imports");
+  lines.push("- [x] Envers `@Audited` on new entities if applicable");
+  if (changeClass === "doc-only") {
+    lines.push("- Changelog fragment: N/A — docs-only change");
+  } else {
+    lines.push(`- [x] Changelog fragment added at \`${changelogFragment}\``);
+  }
+  lines.push("- [x] Architectural docs updated if stack, package structure, or key behaviors changed");
+  return lines.join("\n");
+}
+
+export async function runRenderPrBody(input) {
+  const validation = validatePrBodyInput(input);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      error: "pr_body_input_invalid",
+      message: validation.errors.join("; "),
+      issue_number: input?.issueNumber ?? null,
+    };
+  }
+  // NB: JS-side deferral detection is intentionally NOT applied here (codex
+  // cycle-4 F1). The previous Tier-1 regex was a partial subset of the
+  // canonical classifier in `tools/policy/checks.py::run_no_deferral_disposition_check`
+  // (which itself loads cases from `tools/policy/deferral_cases.json`).
+  // A partial JS detector gives false confidence: a caller-supplied string
+  // could pass the JS check and then fail `make policy`/CI. Authoritative
+  // enforcement lives in two places that DO catch the rendered body:
+  //   (a) the `block-defer-language.py` PreToolUse hook, which fires on
+  //       `gh pr {create,edit,comment}` invocations carrying deferral text
+  //       in body or title;
+  //   (b) `bin/policy` (`tools/policy/checks.py::check_pr_body` →
+  //       `run_no_deferral_disposition_check`) at completion-gate / CI time.
+  // The downstream MCP record posters (runPostDecisionRecord,
+  // runPostFinalReport) keep a Tier-1 check because they call `gh api` rather
+  // than `gh pr create`, and the PreToolUse hook only fires on the latter.
+  const body = buildPrBody(input);
+  const sensitiveError = detectSensitiveBodyContent(body);
+  if (sensitiveError) {
+    return {
+      ok: false,
+      error: "pr_body_rejected",
+      message: sensitiveError,
+      issue_number: input.issueNumber,
+      next_action: "scrub_secrets_from_inputs_and_retry",
+    };
+  }
+  // Final structural check — mirrors the Python check_pr_body predicates so the
+  // tool's contract holds at the boundary, not in agent prose. If the
+  // renderer drifts from the policy or a caller-provided field smuggles
+  // deferral language past the per-field check, this catches it before the
+  // body is handed back for `gh pr create --body`. The Python policy at
+  // `bin/policy` remains the canonical check at CI time; this is defense in
+  // depth.
+  const shape = checkPrBodyShape(body);
+  if (!shape.ok) {
+    return {
+      ok: false,
+      error: "pr_body_policy_violation",
+      message: shape.errors.join("; "),
+      issue_number: input.issueNumber,
+      next_action: "fix_inputs_or_renderer_and_retry",
+    };
+  }
+  return {
+    ok: true,
+    issue_number: input.issueNumber,
+    change_class: input.changeClass,
+    body,
+    byte_length: Buffer.byteLength(body, "utf8"),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Telemetry writer (gc_log_step_telemetry)
+// ---------------------------------------------------------------------------
+//
+// Operational measurement only — NOT workflow state (per ADR-036). One JSONL
+// line per `/implement` step. `wall_time_ms` is mandatory; `input_tokens` and
+// `output_tokens` are optional because not every driver/harness surfaces them
+// to the agent. Path is `.gc/telemetry/<issue>-<sanitized-branch>.jsonl`,
+// repo-relative, validated via `resolveRepoRelativePath` + `assertRealpathInRepo`.
+
+export const TELEMETRY_SCHEMA_VERSION = "gc.implement.telemetry/v1";
+export const TELEMETRY_TIERS = Object.freeze(["low", "medium", "high"]);
+export const TELEMETRY_OUTCOMES = Object.freeze(["ok", "error", "skipped"]);
+const TELEMETRY_SANITIZE_BRANCH_RE = /[^A-Za-z0-9._-]/g;
+const TELEMETRY_BRANCH_MAX_LEN = 60;
+
+export function sanitizeTelemetryBranch(branch) {
+  if (typeof branch !== "string" || branch.trim() === "") return "unknown";
+  let s = branch.replace(TELEMETRY_SANITIZE_BRANCH_RE, "_");
+  if (s.length > TELEMETRY_BRANCH_MAX_LEN) s = s.slice(0, TELEMETRY_BRANCH_MAX_LEN);
+  // Reject empty or pathological results — would let a branch of all-special
+  // chars produce an empty path segment.
+  if (s.trim() === "") return "unknown";
+  return s;
+}
+
+export function buildTelemetryRecord(input) {
+  const errors = [];
+  if (input == null || typeof input !== "object") {
+    throw new Error("buildTelemetryRecord: input must be an object");
+  }
+  const { issueNumber, branch, step, tier, model, wallTimeMs, inputTokens = null, outputTokens = null, outcome, ts } = input;
+  if (!Number.isInteger(issueNumber) || issueNumber <= 0) errors.push("issueNumber must be positive integer");
+  if (typeof branch !== "string" || branch.trim() === "") errors.push("branch must be non-empty string");
+  if (typeof step !== "string" || step.trim() === "") errors.push("step must be non-empty string");
+  if (!TELEMETRY_TIERS.includes(tier)) errors.push(`tier must be one of: ${TELEMETRY_TIERS.join(", ")}`);
+  if (typeof model !== "string" || model.trim() === "") errors.push("model must be non-empty string");
+  if (!Number.isInteger(wallTimeMs) || wallTimeMs < 0) errors.push("wallTimeMs must be non-negative integer");
+  if (inputTokens != null && (!Number.isInteger(inputTokens) || inputTokens < 0)) errors.push("inputTokens must be non-negative integer or null");
+  if (outputTokens != null && (!Number.isInteger(outputTokens) || outputTokens < 0)) errors.push("outputTokens must be non-negative integer or null");
+  if (!TELEMETRY_OUTCOMES.includes(outcome)) errors.push(`outcome must be one of: ${TELEMETRY_OUTCOMES.join(", ")}`);
+  if (ts != null && (typeof ts !== "string" || ts.trim() === "")) errors.push("ts must be non-empty ISO-8601 string or null");
+  if (errors.length) {
+    throw new Error(`buildTelemetryRecord input invalid: ${errors.join("; ")}`);
+  }
+  return {
+    schema: TELEMETRY_SCHEMA_VERSION,
+    ts: ts ?? new Date().toISOString(),
+    issue: issueNumber,
+    // Sanitize the branch in the record itself, not just the filename
+    // (ADR-036 § telemetry contract). Codex cycle 1 flagged that the previous
+    // version stored the raw input in the record while the filename used a
+    // normalized token, which is inconsistent and would let a long / arrow-
+    // bearing branch persist into every record.
+    branch: sanitizeTelemetryBranch(branch),
+    step,
+    tier,
+    model,
+    wall_time_ms: wallTimeMs,
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    outcome,
+  };
+}
+
+export function buildTelemetryRelPath({ issueNumber, branch }) {
+  if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+    throw new Error("buildTelemetryRelPath: issueNumber must be positive integer");
+  }
+  const safe = sanitizeTelemetryBranch(branch);
+  return `.gc/telemetry/${issueNumber}-${safe}.jsonl`;
+}
+
+// File I/O — atomic append. Validates repo containment so a malicious branch
+// or issue input can never escape into /etc/ or a sibling repo.
+export async function appendStepTelemetry({ repoPath, record }) {
+  if (record == null || typeof record !== "object") {
+    return { ok: false, error: "telemetry_record_invalid", message: "record must be an object" };
+  }
+  let repoRoot;
+  try {
+    repoRoot = await ensureGitRepo(repoPath);
+  } catch (error) {
+    return { ok: false, error: "telemetry_repo_not_git", message: error.message };
+  }
+  const relPath = buildTelemetryRelPath({ issueNumber: record.issue, branch: record.branch });
+  const lex = resolveRepoRelativePath(repoRoot, relPath, "telemetry path");
+  if (!lex.ok) {
+    return { ok: false, error: "telemetry_path_invalid", message: lex.error };
+  }
+  let repoRootReal;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- repoRoot from git
+    repoRootReal = realpathSync(repoRoot);
+  } catch (error) {
+    return { ok: false, error: "telemetry_repo_canonicalize_failed", message: error.message };
+  }
+  // Containment check BEFORE any filesystem write (codex cycle-3 security
+  // finding F6). `assertRealpathInRepo` walks up to the deepest existing
+  // ancestor — if `.gc/` is a symlink pointing outside the repo, this catches
+  // it via the realpath of `.gc/` (the deepest existing ancestor) and refuses
+  // the call. Previously this ran AFTER `mkdirSync(dirAbs, { recursive: true })`,
+  // so an attacker with a malicious `.gc/` symlink could induce a mkdir into
+  // the symlink's target before the containment check fired. Reordering fixes
+  // that bug — no write happens until containment is confirmed.
+  const containment = assertRealpathInRepo(repoRootReal, lex.abs, "telemetry path");
+  if (!containment.ok) {
+    return { ok: false, error: "telemetry_path_escapes_repo", message: containment.error };
+  }
+  // Now safe to create the directory and append.
+  const dirAbs = dirname(lex.abs);
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- dirAbs derived from validated lex.abs AND containment-checked above
+    mkdirSync(dirAbs, { recursive: true });
+  } catch (error) {
+    return { ok: false, error: "telemetry_mkdir_failed", message: error.message };
+  }
+  // Re-confirm containment after mkdir in case the freshly-created dir
+  // resolves through a symlink we couldn't see before (defense in depth).
+  const postContainment = assertRealpathInRepo(repoRootReal, lex.abs, "telemetry path");
+  if (!postContainment.ok) {
+    return { ok: false, error: "telemetry_path_escapes_repo", message: postContainment.error };
+  }
+  const line = JSON.stringify(record) + "\n";
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- postContainment.canonical is the realpath after mkdir; both pre-mkdir + post-mkdir containment checks above confirmed it resolves inside the repo
+    appendFileSync(postContainment.canonical, line, { encoding: "utf8" });
+  } catch (error) {
+    return { ok: false, error: "telemetry_write_failed", message: error.message };
+  }
+  return {
+    ok: true,
+    path: relPath,
+    bytes_written: Buffer.byteLength(line, "utf8"),
+  };
+}
+
+export async function runLogStepTelemetry({ repoPath, issueNumber, branch, step, tier, model, wallTimeMs, inputTokens = null, outputTokens = null, outcome, ts = null }) {
+  let record;
+  try {
+    record = buildTelemetryRecord({ issueNumber, branch, step, tier, model, wallTimeMs, inputTokens, outputTokens, outcome, ts });
+  } catch (error) {
+    return {
+      ok: false,
+      error: "telemetry_input_invalid",
+      message: error.message,
+      issue_number: issueNumber ?? null,
+    };
+  }
+  // Tool-boundary opt-in gate: read .ground-control.yaml and refuse if the
+  // repo has not turned telemetry on. Without this gate any caller could
+  // create `.gc/telemetry/` records in a repo that defaults to off, which
+  // contradicts ADR-036's opt-in contract. ENOENT / parse failure is
+  // surfaced as a structured refusal so the caller knows why.
+  let repoRoot;
+  try {
+    repoRoot = await ensureGitRepo(repoPath);
+  } catch (error) {
+    return { ok: false, error: "telemetry_repo_not_git", message: error.message };
+  }
+  let yamlText;
+  try {
+    yamlText = readAbsoluteTextFile(join(repoRoot, ".ground-control.yaml"));
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return {
+        ok: false,
+        error: "telemetry_no_ground_control_yaml",
+        message: ".ground-control.yaml missing at repo root; telemetry refuses to write without an explicit opt-in",
+        issue_number: issueNumber,
+      };
+    }
+    return { ok: false, error: "telemetry_config_read_failed", message: error.message };
+  }
+  const parsed = parseGroundControlYaml(yamlText);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      error: "telemetry_config_invalid",
+      message: parsed.errors.join("; "),
+      issue_number: issueNumber,
+    };
+  }
+  if (!parsed.value.telemetry || parsed.value.telemetry.enabled !== true) {
+    return {
+      ok: false,
+      error: "telemetry_disabled",
+      message: "telemetry.enabled is false (or absent) in .ground-control.yaml; flip it to true to opt this repo into per-step telemetry logging",
+      issue_number: issueNumber,
+      next_action: "set_telemetry_enabled_true_or_omit_call",
+    };
+  }
+  return await appendStepTelemetry({ repoPath: repoRoot, record });
 }

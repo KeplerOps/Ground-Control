@@ -242,3 +242,7 @@ archive/
 .claude/scheduled_tasks.lock
 
 docs/notes
+
+# /implement per-step telemetry (ADR-036) — operational measurement only,
+# never workflow state. Each /implement run appends to one file under here.
+.gc/telemetry/

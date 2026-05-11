@@ -20,9 +20,10 @@
           "requireAll": [
             "docs/DEVELOPMENT_WORKFLOW.md",
             "docs/WORKFLOW.md",
-            "architecture/adrs/021-gated-agentic-development-loop.md"
+            "architecture/adrs/021-gated-agentic-development-loop.md",
+            "architecture/adrs/036-per-step-routing-tool-surfaces-telemetry.md"
           ],
-          "message": "Workflow guardrails changed without syncing ADR-021 and workflow docs."
+          "message": "Workflow guardrails changed without syncing ADR-021 / ADR-036 and workflow docs."
         }
       ]
     },
