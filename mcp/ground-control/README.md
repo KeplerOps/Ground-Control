@@ -59,6 +59,133 @@ requiring `ROLE_ADMIN` (`/api/v1/admin/**`, `/api/v1/embeddings/**`,
 Codex-backed workflow tools additionally require the Codex CLI to be installed
 and available on `PATH`.
 
+## Admin-tool opt-in (`GC_MCP_ADMIN`)
+
+The `gc_admin` and `gc_pack` consolidated tools wrap `/api/v1/admin/**`,
+`/api/v1/embeddings/**`, `/api/v1/analysis/sweep/**`, and
+`/api/v1/pack-registry/**` operations that require `ROLE_ADMIN` at the
+backend (per ADR-026). To avoid surfacing those write/mutating actions to
+a default MCP session that happens to have an admin bearer token in its
+environment, both tools are registered **only when `GC_MCP_ADMIN=1`** (or
+`true` / `yes`). Without the flag, neither tool appears in the catalog. A
+session that needs admin operations sets the env var explicitly:
+
+```jsonc
+{
+  "mcpServers": {
+    "ground-control-admin": {
+      "command": "node",
+      "args": ["/path/to/Ground-Control/mcp/ground-control/index.js"],
+      "env": {
+        "GC_BASE_URL": "http://red-dragon:8000",
+        "GC_MCP_ADMIN": "1"
+      }
+    }
+  }
+}
+```
+
+Backend `ROLE_ADMIN` still enforces authorization; this flag controls only
+which named MCP tools are advertised to the LLM.
+
+## Tool surface (ADR-035)
+
+The MCP server registers **~30 named tools** plus the read-only `gc_query`
+escape hatch, down from 215 in earlier versions. The surface was consolidated
+under ADR-035 by combining `gc_create_X` / `gc_get_X` / `gc_list_X` /
+`gc_update_X` / `gc_delete_X` per-entity tools into a single
+`gc_<entity>` tool with an `action` discriminator, and by moving pure-read
+GETs (history, timeline, exports, list-by-X) onto `gc_query`.
+
+**Workflow primitives** (called by name from the `/implement` and `/ship`
+skills' SKILL.md prose, kept unchanged):
+
+| Tool | Purpose |
+|---|---|
+| `gc_get_repo_ground_control_context` | Read repo's `.ground-control.yaml` |
+| `gc_dashboard_stats` | Aggregate project health snapshot |
+| `gc_get_requirement` | Get requirement by UID |
+| `gc_get_traceability` | Get all traceability links for a requirement |
+| `gc_get_traceability_by_artifact` | Reverse lookup: artifact → requirements |
+| `gc_create_traceability_link` | Link an artifact to a requirement |
+| `gc_delete_traceability_link` | Delete a traceability link |
+| `gc_transition_status` | Transition a requirement's status |
+| `gc_bulk_transition_status` | Transition many requirements at once |
+| `gc_create_github_issue` | Create a GitHub issue from a requirement |
+| `gc_codex_architecture_preflight` | Codex preflight before `/implement` |
+| `gc_post_implementation_plan` | Post plan to issue thread |
+| `gc_codex_review` | Run Codex review with cycle caps |
+| `gc_codex_verify_finding` | Verify a specific finding resolved |
+| `gc_query` | Read-only ad-hoc `/api/v1/*` GET (see below) |
+
+**Consolidated entity tools** (one per entity, action-discriminated):
+
+| Tool | Actions |
+|---|---|
+| `gc_requirement` | list, create, update, delete, archive, clone |
+| `gc_relation` | create, get, delete |
+| `gc_adr` | create, update, delete, transition, requirements |
+| `gc_document` | create, update, delete, grammar_set, grammar_delete, reading_order |
+| `gc_section` | create, update, delete, tree, content_add, content_update, content_delete |
+| `gc_asset` | create, update, delete, archive, relation_*, link_*, external_id_* |
+| `gc_observation` | create, update, delete, latest |
+| `gc_risk_scenario` | create, update, delete, transition, requirements, link_* |
+| `gc_threat_model` | create, update, delete, transition, link_* |
+| `gc_control` | create, update, delete, transition, link_* |
+| `gc_risk_governance` | `{entity, action}` over methodology_profile, risk_register_record, risk_assessment_result, treatment_plan, verification_result |
+| `gc_analyze` | cycles, orphans, coverage_gaps, impact, cross_wave, consistency, completeness, status_drift, similarity, work_order |
+| `gc_graph` | ancestors, descendants, paths, find_paths, subgraph, visualization, traverse |
+| `gc_baseline` | create, delete, snapshot, compare |
+| `gc_quality_gate` | create, update, delete, evaluate |
+| `gc_admin` | imports, sync, embeddings, materialize_graph, project, sweep, exports |
+| `gc_pack` | `{subsystem, action}` over plugin, control_pack, registry, trust_policy, install |
+
+Reads (list, get-by-id, history, diff, timeline, exports) for any entity go
+through `gc_query` against the appropriate `/api/v1/*` path.
+
+## Read-only ad-hoc queries via `gc_query`
+
+`gc_query` is a tightly bounded GET-only escape hatch into `/api/v1/**` for
+hypothesis-checking that the curated tools don't pre-bake. It is registered
+under the `workflow` catalog, so it is always available.
+
+- **Method:** GET only (no `method` parameter exists).
+- **Path:** must be a relative `/api/v1/...` path under one of the
+  allowlisted prefixes. Absolute URLs, protocol-relative URLs, `..` segments,
+  embedded `?` / `#`, and any path outside `/api/v1/` are rejected before any
+  network call.
+- **Allowlist (canonical source: `GC_QUERY_PATH_ALLOWLIST` in
+  `mcp/ground-control/gc-query.js`):**
+  `/api/v1/adrs`, `/api/v1/analysis`, `/api/v1/assets`, `/api/v1/audit`,
+  `/api/v1/baselines`, `/api/v1/controls`, `/api/v1/dashboard`,
+  `/api/v1/documents`, `/api/v1/graph`, `/api/v1/methodology-profiles`,
+  `/api/v1/observations`, `/api/v1/projects`, `/api/v1/quality-gates`,
+  `/api/v1/relations`, `/api/v1/requirements`,
+  `/api/v1/risk-assessment-results`, `/api/v1/risk-register-records`,
+  `/api/v1/risk-scenarios`, `/api/v1/sections`, `/api/v1/threat-models`,
+  `/api/v1/timeline`, `/api/v1/traceability`, `/api/v1/treatment-plans`,
+  `/api/v1/verification-results`. A drift-catch test
+  (`gc-query.test.js`) compares this list against the implementation
+  constant on every test run, so the README is the documentation surface
+  but the constant in `gc-query.js` is the truth.
+- **Denylist:** `/api/v1/admin/**`, `/api/v1/embeddings/**`,
+  `/api/v1/analysis/sweep/**`, `/api/v1/pack-registry/**` are rejected even
+  though they live under `/api/v1/`. The denylist takes precedence over the
+  allowlist when prefixes overlap (e.g., `/api/v1/analysis` is allowed but
+  `/api/v1/analysis/sweep` is denied).
+- **Headers:** none accepted. `X-Actor: mcp-server` and the bearer token
+  resolved from `GROUND_CONTROL_API_TOKEN` (or the legacy admin token, when
+  appropriate per ADR-026's path matrix) are added automatically.
+- **Params:** flat object, values must be `string | number | boolean | null`.
+  `undefined` and `null` are dropped before URL construction.
+- **Cost cap:** 30s timeout via `AbortController`; 1 MiB response-body cap
+  with a clear truncation marker. Larger results need the catalog tool that
+  paginates the resource (in `analysis` or `requirements`).
+
+Adding a new read endpoint to the agent's reach requires updating the
+`GC_QUERY_PATH_ALLOWLIST` constant in `mcp/ground-control/gc-query.js`. The
+default-deny posture is intentional.
+
 ## Workflow
 
 Operations have a natural ordering. Requirements must exist before they can
