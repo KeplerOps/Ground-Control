@@ -27,6 +27,17 @@ jobs:
           fetch-depth: 0
       - name: Show Python version
         run: python3 --version
+      # Policy tests include a renderer-vs-check_pr_body compose check
+      # (`test_gc_render_pr_body_*_output_passes_check_pr_body`) that spawns
+      # `node tools/render_pr_body_fixture.mjs`, which imports the MCP
+      # server's `mcp/ground-control/lib.js`. The fixture therefore needs the
+      # MCP server's node_modules (js-yaml, zod, @modelcontextprotocol/sdk)
+      # available — install them before running policy tests so the compose
+      # check binds the actual JS renderer against the Python policy. Per
+      # ADR-036 (issue #868 cycle-1 F3): the compose test must invoke the
+      # real renderer rather than a copied Markdown fixture.
+      - name: Install MCP server deps (for renderer compose check)
+        run: npm --prefix mcp/ground-control ci
       - name: Policy tool tests
         run: python3 -m unittest discover -s tools/tests -p 'test_*.py'
       - name: Repo policy checks
