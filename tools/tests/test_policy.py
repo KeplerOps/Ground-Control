@@ -519,47 +519,60 @@ class ChangelogFragmentChecksTest(unittest.TestCase):
     # --- parse_fragment_filename ---------------------------------------------
 
     def test_fragment_filename_accepts_issue_form(self):
-        self.assertEqual(parse_fragment_filename("848.added.md"), ("848", "added"))
-        self.assertEqual(parse_fragment_filename("123.security.md"), ("123", "security"))
-        self.assertEqual(parse_fragment_filename("42.fixed.md"), ("42", "fixed"))
-        self.assertEqual(parse_fragment_filename("7.removed.md"), ("7", "removed"))
-        self.assertEqual(parse_fragment_filename("999.deprecated.md"), ("999", "deprecated"))
-        self.assertEqual(parse_fragment_filename("1.changed.md"), ("1", "changed"))
+        # Each row runs as an independent subTest so a regression that
+        # breaks two inputs surfaces both, not just the first.
+        cases = [
+            ("848.added.md", ("848", "added")),
+            ("123.security.md", ("123", "security")),
+            ("42.fixed.md", ("42", "fixed")),
+            ("7.removed.md", ("7", "removed")),
+            ("999.deprecated.md", ("999", "deprecated")),
+            ("1.changed.md", ("1", "changed")),
+        ]
+        for name, expected in cases:
+            with self.subTest(name=name):
+                self.assertEqual(parse_fragment_filename(name), expected)
 
     def test_fragment_filename_accepts_slug_form(self):
-        self.assertEqual(
-            parse_fragment_filename("+towncrier-adoption.added.md"),
-            ("+towncrier-adoption", "added"),
-        )
-        self.assertEqual(
-            parse_fragment_filename("+release-notes.changed.md"),
-            ("+release-notes", "changed"),
-        )
+        cases = [
+            ("+towncrier-adoption.added.md", ("+towncrier-adoption", "added")),
+            ("+release-notes.changed.md", ("+release-notes", "changed")),
+        ]
+        for name, expected in cases:
+            with self.subTest(name=name):
+                self.assertEqual(parse_fragment_filename(name), expected)
 
     def test_fragment_filename_rejects_unknown_type(self):
-        self.assertIsNone(parse_fragment_filename("848.bogus.md"))
-        self.assertIsNone(parse_fragment_filename("848.misc.md"))
-        self.assertIsNone(parse_fragment_filename("+slug.unknown.md"))
+        for name in ("848.bogus.md", "848.misc.md", "+slug.unknown.md"):
+            with self.subTest(name=name):
+                self.assertIsNone(parse_fragment_filename(name))
 
     def test_fragment_filename_rejects_missing_type(self):
-        self.assertIsNone(parse_fragment_filename("848.md"))
-        self.assertIsNone(parse_fragment_filename("848.added"))
-        self.assertIsNone(parse_fragment_filename("README.md"))
-        self.assertIsNone(parse_fragment_filename("_template.md.jinja"))
+        for name in (
+            "848.md",
+            "848.added",
+            "README.md",
+            "_template.md.jinja",
+        ):
+            with self.subTest(name=name):
+                self.assertIsNone(parse_fragment_filename(name))
 
     def test_fragment_filename_rejects_wrong_extension(self):
-        self.assertIsNone(parse_fragment_filename("848.added.txt"))
-        self.assertIsNone(parse_fragment_filename("848.added.rst"))
+        for name in ("848.added.txt", "848.added.rst"):
+            with self.subTest(name=name):
+                self.assertIsNone(parse_fragment_filename(name))
 
     def test_fragment_filename_rejects_empty_stem(self):
-        self.assertIsNone(parse_fragment_filename(".added.md"))
-        self.assertIsNone(parse_fragment_filename("+.added.md"))
+        for name in (".added.md", "+.added.md"):
+            with self.subTest(name=name):
+                self.assertIsNone(parse_fragment_filename(name))
 
     def test_fragment_filename_rejects_non_numeric_issue_stem(self):
         # Issue-anchored fragments must be plain digits; slug fragments must
         # carry the explicit `+` prefix.
-        self.assertIsNone(parse_fragment_filename("issue848.added.md"))
-        self.assertIsNone(parse_fragment_filename("abc.added.md"))
+        for name in ("issue848.added.md", "abc.added.md"):
+            with self.subTest(name=name):
+                self.assertIsNone(parse_fragment_filename(name))
 
     def test_fragment_types_vocabulary_is_keep_a_changelog_set(self):
         self.assertEqual(
