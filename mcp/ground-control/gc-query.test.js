@@ -5,8 +5,18 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { executeGcQuery, gcQueryToolHandler, gcQuerySchema } from "./gc-query.js";
-import { GC_QUERY_BODY_BYTE_CAP, GC_QUERY_TIMEOUT_MS, GC_QUERY_PATH_ALLOWLIST } from "./catalogs.js";
+import {
+  executeGcQuery,
+  gcQueryToolHandler,
+  gcQuerySchema,
+  GC_QUERY_BODY_BYTE_CAP,
+  GC_QUERY_TIMEOUT_MS,
+  GC_QUERY_PATH_ALLOWLIST,
+  GC_QUERY_PATH_DENYLIST,
+  validateGcQueryPath,
+  validateGcQueryParams,
+  truncateBody,
+} from "./gc-query.js";
 import { RequestError } from "./lib.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -387,6 +397,136 @@ describe("gcQuerySchema (Zod-level strict rejection)", () => {
 // ---------------------------------------------------------------------------
 // Documentation/constant drift catch
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// gc_query path validation
+// ---------------------------------------------------------------------------
+
+describe("validateGcQueryPath", () => {
+  it("accepts allowlisted /api/v1 read prefixes", () => {
+    for (const prefix of GC_QUERY_PATH_ALLOWLIST) {
+      assert.doesNotThrow(() => validateGcQueryPath(prefix));
+    }
+  });
+
+  it("accepts a sub-path under an allowlisted prefix", () => {
+    assert.doesNotThrow(() => validateGcQueryPath("/api/v1/requirements/abc-123"));
+    assert.doesNotThrow(() => validateGcQueryPath("/api/v1/traceability/by-artifact"));
+  });
+
+  it("rejects an absolute URL", () => {
+    assert.throws(() => validateGcQueryPath("http://evil/api/v1/requirements"), /invalid_query_path/);
+    assert.throws(() => validateGcQueryPath("https://evil/api/v1/requirements"), /invalid_query_path/);
+  });
+
+  it("rejects a protocol-relative URL", () => {
+    assert.throws(() => validateGcQueryPath("//evil/api/v1/requirements"), /invalid_query_path/);
+  });
+
+  it("rejects path traversal", () => {
+    assert.throws(() => validateGcQueryPath("/api/v1/requirements/../admin/users"), /invalid_query_path/);
+    assert.throws(() => validateGcQueryPath("/api/v1/../etc/passwd"), /invalid_query_path/);
+  });
+
+  it("rejects paths outside /api/v1/", () => {
+    assert.throws(() => validateGcQueryPath("/actuator/health"), /invalid_query_path/);
+    assert.throws(() => validateGcQueryPath("/api/v2/requirements"), /invalid_query_path/);
+    assert.throws(() => validateGcQueryPath("/swagger-ui/index.html"), /invalid_query_path/);
+  });
+
+  it("rejects denied admin prefixes even though they live under /api/v1/", () => {
+    for (const denied of GC_QUERY_PATH_DENYLIST) {
+      assert.throws(() => validateGcQueryPath(`${denied}/whatever`), /invalid_query_path/);
+    }
+  });
+
+  it("rejects an embedded query string", () => {
+    assert.throws(() => validateGcQueryPath("/api/v1/requirements?status=ACTIVE"), /invalid_query_path/);
+  });
+
+  it("rejects percent-encoded segments (security: encoded-dot denylist bypass)", () => {
+    assert.throws(
+      () => validateGcQueryPath("/api/v1/requirements/%2e%2e/admin/users"),
+      /invalid_query_path/,
+    );
+    assert.throws(() => validateGcQueryPath("/api/v1/requirements/%41"), /invalid_query_path/);
+  });
+
+  it("rejects backslash and other non-path characters", () => {
+    assert.throws(() => validateGcQueryPath("/api/v1/requirements\\admin"), /invalid_query_path/);
+    assert.throws(() => validateGcQueryPath("/api/v1/requirements@admin"), /invalid_query_path/);
+    assert.throws(() => validateGcQueryPath("/api/v1/requirements;admin"), /invalid_query_path/);
+  });
+
+  it("rejects a fragment", () => {
+    assert.throws(() => validateGcQueryPath("/api/v1/requirements#x"), /invalid_query_path/);
+  });
+
+  it("rejects a path that is not in the allowlist", () => {
+    assert.throws(() => validateGcQueryPath("/api/v1/some-future-endpoint"), /invalid_query_path/);
+  });
+
+  it("rejects empty / non-string path", () => {
+    assert.throws(() => validateGcQueryPath(""), /invalid_query_path/);
+    assert.throws(() => validateGcQueryPath(null), /invalid_query_path/);
+    assert.throws(() => validateGcQueryPath(undefined), /invalid_query_path/);
+    assert.throws(() => validateGcQueryPath(42), /invalid_query_path/);
+  });
+
+  it("denylist takes precedence over allowlist regardless of prefix overlap", () => {
+    assert.doesNotThrow(() => validateGcQueryPath("/api/v1/analysis/coverage-gaps"));
+    assert.throws(() => validateGcQueryPath("/api/v1/analysis/sweep/run"), /invalid_query_path/);
+  });
+});
+
+describe("validateGcQueryParams", () => {
+  it("accepts undefined / null / {} as 'no params'", () => {
+    assert.doesNotThrow(() => validateGcQueryParams(undefined));
+    assert.doesNotThrow(() => validateGcQueryParams(null));
+    assert.doesNotThrow(() => validateGcQueryParams({}));
+  });
+
+  it("accepts string, number, boolean, null primitive values", () => {
+    assert.doesNotThrow(() => validateGcQueryParams({ a: "x", b: 1, c: true, d: null }));
+  });
+
+  it("rejects array / nested / function values", () => {
+    assert.throws(() => validateGcQueryParams({ a: [1, 2] }), /invalid_query_params/);
+    assert.throws(() => validateGcQueryParams({ a: { b: 1 } }), /invalid_query_params/);
+    assert.throws(() => validateGcQueryParams({ a: () => 1 }), /invalid_query_params/);
+  });
+
+  it("rejects non-object params", () => {
+    assert.throws(() => validateGcQueryParams("a=1"), /invalid_query_params/);
+    assert.throws(() => validateGcQueryParams([1, 2]), /invalid_query_params/);
+  });
+});
+
+describe("truncateBody", () => {
+  it("returns body unchanged when under the cap", () => {
+    const body = "x".repeat(1024);
+    const out = truncateBody(body);
+    assert.equal(out.body, body);
+    assert.equal(out.truncated, false);
+    assert.equal(out.original_byte_length, 1024);
+  });
+
+  it("truncates body above the cap and marks it", () => {
+    const body = "y".repeat(GC_QUERY_BODY_BYTE_CAP + 100);
+    const out = truncateBody(body);
+    assert.equal(out.truncated, true);
+    assert.equal(out.original_byte_length, GC_QUERY_BODY_BYTE_CAP + 100);
+    assert.match(out.body, /truncated/i);
+  });
+
+  it("uses byte length for the cap (multi-byte safety)", () => {
+    const ch = "💥";
+    const body = ch.repeat(Math.ceil(GC_QUERY_BODY_BYTE_CAP / 4) + 10);
+    const out = truncateBody(body);
+    assert.equal(out.truncated, true);
+    assert.equal(out.original_byte_length, Buffer.byteLength(body, "utf8"));
+  });
+});
 
 describe("gc_query allowlist docs match the implemented constant", () => {
   // These tests guard against the recurring shape "doc text states a count or

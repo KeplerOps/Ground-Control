@@ -11,8 +11,10 @@
 //   - reuses lib.js's buildUrl, addAuthorizationHeader, RequestError, and
 //     parseErrorBody so error semantics match the rest of the adapter.
 //
-// Validation lives in catalogs.js so the same allowlist that hides admin
-// catalogs from the default surface also rejects admin paths from gc_query.
+// `gc_query` is the read fallback for every REST endpoint not covered by a
+// named consolidated tool. After the consolidation in ADR-035, the named
+// tools cover writes + non-trivial compute; pure GETs (history, timeline,
+// list-by-X, exports) flow through `gc_query`.
 
 import { z } from "zod";
 import {
@@ -21,32 +23,169 @@ import {
   RequestError,
   addAuthorizationHeader,
 } from "./lib.js";
-import {
-  GC_QUERY_BODY_BYTE_CAP,
-  GC_QUERY_TIMEOUT_MS,
-  truncateBody,
-  validateGcQueryParams,
-  validateGcQueryPath,
-} from "./catalogs.js";
+
+// ---------------------------------------------------------------------------
+// gc_query: path / params validation, body truncation, cost cap
+// ---------------------------------------------------------------------------
+
+/**
+ * Read-oriented `/api/v1/**` prefixes that gc_query is allowed to GET. This
+ * is intentionally narrower than the backend's authenticated read surface:
+ * default-deny for ad-hoc agent queries. Adding a new prefix is a deliberate
+ * decision; the README documents the maintenance step.
+ */
+export const GC_QUERY_PATH_ALLOWLIST = Object.freeze([
+  "/api/v1/adrs",
+  "/api/v1/analysis",
+  "/api/v1/assets",
+  "/api/v1/audit",
+  "/api/v1/baselines",
+  "/api/v1/controls",
+  "/api/v1/dashboard",
+  "/api/v1/documents",
+  "/api/v1/graph",
+  "/api/v1/methodology-profiles",
+  "/api/v1/observations",
+  "/api/v1/projects",
+  "/api/v1/quality-gates",
+  "/api/v1/relations",
+  "/api/v1/requirements",
+  "/api/v1/risk-assessment-results",
+  "/api/v1/risk-register-records",
+  "/api/v1/risk-scenarios",
+  "/api/v1/sections",
+  "/api/v1/threat-models",
+  "/api/v1/timeline",
+  "/api/v1/traceability",
+  "/api/v1/treatment-plans",
+  "/api/v1/verification-results",
+]);
+
+/**
+ * Prefixes that gc_query refuses even though they live under /api/v1/. The
+ * backend's path matrix (ADR-026) also rejects them for non-ROLE_ADMIN
+ * principals; defense in depth is the point. The denylist takes precedence
+ * over the allowlist when they overlap (e.g., /api/v1/analysis is allowed
+ * but /api/v1/analysis/sweep is denied).
+ */
+export const GC_QUERY_PATH_DENYLIST = Object.freeze([
+  "/api/v1/admin",
+  "/api/v1/analysis/sweep",
+  "/api/v1/embeddings",
+  "/api/v1/pack-registry",
+]);
+
+/** 1 MiB body cap for gc_query responses. */
+export const GC_QUERY_BODY_BYTE_CAP = 1024 * 1024;
+
+/** 30s wall-clock timeout for gc_query requests. */
+export const GC_QUERY_TIMEOUT_MS = 30_000;
+
+class GcQueryValidationError extends Error {
+  constructor(code, message) {
+    super(`${code}: ${message}`);
+    this.name = "GcQueryValidationError";
+    this.code = code;
+  }
+}
+
+/**
+ * Throw GcQueryValidationError unless `path` is a valid gc_query target.
+ */
+export function validateGcQueryPath(path) {
+  if (typeof path !== "string" || path.length === 0) {
+    throw new GcQueryValidationError("invalid_query_path", "path must be a non-empty string");
+  }
+  if (path.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(path)) {
+    throw new GcQueryValidationError(
+      "invalid_query_path",
+      `absolute or protocol-relative URLs are not allowed: ${path}`,
+    );
+  }
+  if (path.includes("..")) {
+    throw new GcQueryValidationError("invalid_query_path", `path must not contain '..': ${path}`);
+  }
+  if (path.includes("?") || path.includes("#")) {
+    throw new GcQueryValidationError(
+      "invalid_query_path",
+      `path must not contain '?' or '#'; use the params field instead: ${path}`,
+    );
+  }
+  for (const denied of GC_QUERY_PATH_DENYLIST) {
+    if (path === denied || path.startsWith(`${denied}/`)) {
+      throw new GcQueryValidationError(
+        "invalid_query_path",
+        `path is in the gc_query denylist (${denied}): ${path}`,
+      );
+    }
+  }
+  const allowed = GC_QUERY_PATH_ALLOWLIST.some(
+    (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+  );
+  if (!allowed) {
+    throw new GcQueryValidationError(
+      "invalid_query_path",
+      `path is not in the gc_query allowlist: ${path}`,
+    );
+  }
+  // Strict character whitelist — no percent-encoding (`%2e%2e` would otherwise
+  // canonicalize past the literal-`..` check at fetch time and bypass the
+  // denylist), no backslash, no `@/;` etc.
+  if (!/^[A-Za-z0-9/_.-]+$/.test(path)) {
+    throw new GcQueryValidationError(
+      "invalid_query_path",
+      `path contains characters outside [A-Za-z0-9/_.-]; use 'params' for any query value: ${path}`,
+    );
+  }
+}
+
+/**
+ * Throw GcQueryValidationError unless `params` is a valid gc_query params
+ * object: undefined, null, or a flat object whose values are
+ * string|number|boolean|null.
+ */
+export function validateGcQueryParams(params) {
+  if (params === undefined || params === null) return;
+  if (typeof params !== "object" || Array.isArray(params)) {
+    throw new GcQueryValidationError("invalid_query_params", "params must be a flat object");
+  }
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null) continue;
+    const t = typeof v;
+    if (t === "string" || t === "number" || t === "boolean") continue;
+    throw new GcQueryValidationError(
+      "invalid_query_params",
+      `params.${k}: only string|number|boolean|null are allowed (got ${Array.isArray(v) ? "array" : t})`,
+    );
+  }
+}
+
+/**
+ * Cap a response body string at GC_QUERY_BODY_BYTE_CAP bytes. Used as the
+ * fallback path when the response doesn't expose a stream (test stubs).
+ */
+export function truncateBody(body) {
+  const originalByteLength = Buffer.byteLength(body, "utf8");
+  if (originalByteLength <= GC_QUERY_BODY_BYTE_CAP) {
+    return { body, truncated: false, original_byte_length: originalByteLength };
+  }
+  const buf = Buffer.from(body, "utf8").subarray(0, GC_QUERY_BODY_BYTE_CAP);
+  const head = buf.toString("utf8");
+  const marker = `\n\n... [gc_query response truncated at ${GC_QUERY_BODY_BYTE_CAP} bytes; original was ${originalByteLength} bytes]`;
+  return {
+    body: `${head}${marker}`,
+    truncated: true,
+    original_byte_length: originalByteLength,
+  };
+}
 
 /**
  * Stream-read a Response.body up to byteCap bytes. Cancels the underlying
- * stream (and therefore stops the network read) once the cap is reached, so
- * the request does not buffer unbounded data into memory.
- *
- * Returns the bytes actually read as a Buffer, plus a flag indicating whether
- * truncation happened during reading. The cap covers the full request lifetime
- * (the AbortController must remain armed for the duration of this call so the
- * timeout still bites if the body never finishes).
- *
- * @param {ReadableStream<Uint8Array>} body
- * @param {number} byteCap
- * @returns {Promise<{ buffer: Buffer, hitCap: boolean }>}
+ * stream once the cap is reached, so the request does not buffer unbounded
+ * data into memory.
  */
 async function readBoundedBody(body, byteCap) {
   if (!body || typeof body.getReader !== "function") {
-    // Fallback for stub responses in tests that override `.text()` instead of
-    // exposing a stream — read the text and treat it as the bytes.
     return { buffer: null, hitCap: false };
   }
   const reader = body.getReader();
@@ -70,7 +209,7 @@ async function readBoundedBody(body, byteCap) {
     try {
       await reader.cancel();
     } catch {
-      // The stream may already be closed; cancellation is best-effort.
+      // best-effort
     }
   }
   const buffer = Buffer.concat(chunks.map((c) => Buffer.from(c)));
@@ -84,59 +223,33 @@ async function readBoundedBody(body, byteCap) {
  * AbortController so the 30s timeout covers the entire request lifetime, not
  * just header arrival.
  *
- * Validation throws are surfaced as RequestError(status=0, code) so the MCP
- * `err()` renderer reports them with the same envelope shape as backend
- * errors.
- *
- * @param {string} path        validated /api/v1/** prefix path
- * @param {object} [params]    flat object of primitive query params
- * @param {object} [opts]
- * @param {function} [opts.fetchImpl]  injection point for tests (default: globalThis.fetch)
- * @param {number}   [opts.timeoutMs]  injection point for tests (default: GC_QUERY_TIMEOUT_MS)
  * @returns {Promise<{status: number, body: string, truncated: boolean, original_byte_length: number}>}
  */
 export async function executeGcQuery(path, params, opts = {}) {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const timeoutMs = opts.timeoutMs ?? GC_QUERY_TIMEOUT_MS;
 
-  // Path / params validation. We map validation errors into RequestError so
-  // the calling MCP tool can pass them through the existing err() renderer.
   try {
     validateGcQueryPath(path);
     validateGcQueryParams(params);
   } catch (e) {
     if (e && e.name === "GcQueryValidationError") {
-      throw new RequestError({
-        status: 0,
-        code: e.code,
-        message: e.message,
-        detail: null,
-      });
+      throw new RequestError({ status: 0, code: e.code, message: e.message, detail: null });
     }
     throw e;
   }
 
   const url = buildUrl(path, params ?? undefined);
-  const headers = {
-    "X-Actor": "mcp-server",
-    Accept: "application/json",
-  };
+  const headers = { "X-Actor": "mcp-server", Accept: "application/json" };
   addAuthorizationHeader(path, headers);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  // The timer must NOT be cleared until body consumption is finished —
-  // otherwise a slow body read can stall arbitrarily long and the advertised
-  // 30s cost cap wouldn't bite.
   try {
     let res;
     try {
-      res = await fetchImpl(url, {
-        method: "GET",
-        headers,
-        signal: controller.signal,
-      });
+      res = await fetchImpl(url, { method: "GET", headers, signal: controller.signal });
     } catch (e) {
       if (e && (e.name === "AbortError" || e.code === "ABORT_ERR")) {
         throw new RequestError({
@@ -153,17 +266,12 @@ export async function executeGcQuery(path, params, opts = {}) {
       return { status: 204, body: "", truncated: false, original_byte_length: 0 };
     }
 
-    // Prefer streaming the body via res.body when present. Falls back to
-    // res.text() for stub responses in tests that don't expose a stream.
     let bodyText;
     let streamHitCap = false;
     let streamedByteLength = 0;
     try {
       if (res.body && typeof res.body.getReader === "function") {
-        const { buffer, hitCap } = await readBoundedBody(
-          res.body,
-          GC_QUERY_BODY_BYTE_CAP,
-        );
+        const { buffer, hitCap } = await readBoundedBody(res.body, GC_QUERY_BODY_BYTE_CAP);
         streamHitCap = hitCap;
         streamedByteLength = buffer.byteLength;
         bodyText = buffer.toString("utf8");
@@ -192,13 +300,8 @@ export async function executeGcQuery(path, params, opts = {}) {
       });
     }
 
-    // If the streaming reader hit the cap mid-body, the original byte length
-    // is at least what we read; we can't know the true total without
-    // continuing to read. Mark as truncated and report the bytes we got as
-    // a lower bound.
     if (streamHitCap) {
       const marker = `\n\n... [gc_query response truncated at ~${GC_QUERY_BODY_BYTE_CAP} bytes (stream stopped to bound cost); original size unknown]`;
-      // Trim the body to the cap to keep total response under the cap + marker.
       const buf = Buffer.from(bodyText, "utf8").subarray(0, GC_QUERY_BODY_BYTE_CAP);
       return {
         status: res.status,
@@ -221,14 +324,10 @@ export async function executeGcQuery(path, params, opts = {}) {
 }
 
 /**
- * MCP tool handler entrypoint for `gc_query`. The MCP SDK normalizes the raw
- * Zod shape via `z.object(...)` which strips unknown keys instead of rejecting
- * them; this handler is where contract enforcement lives. Unknown keys
- * (`headers`, `method`, etc.) are explicitly rejected so silently-dropped
- * extras can't masquerade as accepted.
- *
- * @param {object} args
- * @param {object} [opts] passed through to executeGcQuery (test injection)
+ * MCP tool handler entrypoint for `gc_query`. Defense-in-depth on top of the
+ * strict Zod schema below: explicitly rejects any args object key beyond
+ * `path` and `params` so a future SDK relaxation can't silently let unknown
+ * keys through.
  */
 export async function gcQueryToolHandler(args, opts = {}) {
   const allowedKeys = new Set(["path", "params"]);
@@ -247,10 +346,8 @@ export async function gcQueryToolHandler(args, opts = {}) {
 
 /**
  * Strict Zod schema for `gc_query` MCP arguments. Registering a strict
- * ZodObject (rather than a raw shape) means the MCP SDK's input validation
- * rejects unknown keys (`headers`, `method`, etc.) at the protocol layer
- * before the handler runs. The `gcQueryToolHandler`'s key check below is
- * defense-in-depth in case a future SDK change relaxes this.
+ * ZodObject (rather than a raw shape) means the MCP SDK rejects unknown keys
+ * at the protocol layer before the handler runs.
  */
 export const gcQuerySchema = z
   .object({
@@ -267,6 +364,3 @@ export const gcQuerySchema = z
       ),
   })
   .strict();
-
-// Re-export the cap so index.js can advertise it in tool descriptions.
-export { GC_QUERY_BODY_BYTE_CAP, GC_QUERY_TIMEOUT_MS };

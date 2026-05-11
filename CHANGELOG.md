@@ -13,25 +13,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- towncrier release notes start -->
 ## [0.117.0] - 2026-05-11
 
+### Changed
+
+- **MCP tool surface consolidated from 215 to ~30 named tools (issue #628, ADR-035).**
+  Every `gc_create_X` / `gc_get_X` / `gc_list_X` / `gc_update_X` /
+  `gc_delete_X` per-entity quintuplet collapses into a single
+  `gc_<entity>` tool with an `action` discriminator. The seven near-
+  identical graph-traversal tools (`gc_get_relations`, `gc_get_descendants`,
+  `gc_get_ancestors`, `gc_find_paths`, `gc_find_graph_paths`,
+  `gc_extract_subgraph`, `gc_traverse_graph`, plus `gc_analyze_impact`)
+  collapse into one `gc_graph` (modes: ancestors, descendants, paths,
+  find_paths, subgraph, visualization, traverse) and one `gc_analyze`
+  (kinds: cycles, orphans, coverage_gaps, impact, cross_wave, consistency,
+  completeness, status_drift, similarity, work_order). Similar
+  consolidation across documents, sections, ADRs, assets, observations,
+  risk scenarios, threat models, controls, baselines, quality gates,
+  admin operations (imports, sync, embeddings, materialize, sweep,
+  exports), and the pack ecosystem (plugins, control packs, pack registry,
+  trust policies, install records).
+
+  Workflow primitives the `/implement` and `/ship` skills call by name —
+  `gc_get_requirement`, `gc_get_traceability`,
+  `gc_get_traceability_by_artifact`, `gc_create_traceability_link`,
+  `gc_delete_traceability_link`, `gc_transition_status`,
+  `gc_bulk_transition_status`, `gc_create_github_issue`,
+  `gc_dashboard_stats`, plus all the codex tools — keep their names and
+  signatures. SKILL.md prose is unchanged.
+
+  Pure GETs (history, timeline, exports, list-by-X, get-by-id for niche
+  entities) are NOT registered as named tools — they're reachable via
+  the new `gc_query` read-only escape hatch with the right `/api/v1/*`
+  path. The path allowlist covers every read prefix the curated tools
+  used to expose.
+
 ### Added
 
-- **MCP tool catalog curation and `gc_query` read-only escape hatch (issue #628, ADR-035).**
-  The Ground Control MCP server now tags every tool with one of seven catalogs
-  (`workflow`, `requirements`, `documents`, `analysis`, `assets`, `risk`,
-  `admin`) and registers only the catalogs named in the new `GC_MCP_CATALOGS`
-  env var. Default selection is `workflow,requirements,documents,analysis`,
-  which loads ~92 of the 216 tools — sized to cover an `/implement` run end-
-  to-end without loading risk, asset, or admin surfaces. `GC_MCP_CATALOGS=all`
-  registers every tool. `workflow` is always registered regardless of the env
-  value. Unknown catalog names throw at startup; an inventory drift check
-  enforces that every registered tool has a catalog tag and vice versa.
-
-  `gc_query` is a new tool registered under `workflow` (always available). It
-  is a GET-only, allowlist-bounded escape hatch for ad-hoc agent queries
-  against `/api/v1/**`: 24 read-oriented prefixes are allowed (the canonical
-  list lives in `GC_QUERY_PATH_ALLOWLIST` in `mcp/ground-control/catalogs.js`
-  and is enforced against the README and ADR-035 by a drift-catch test),
-  the four `ROLE_ADMIN`-restricted prefixes (`/admin`, `/embeddings`,
+- **`gc_query` read-only escape hatch (issue #628, ADR-035).** A new MCP
+  tool that issues GET-only, allowlist-bounded requests against `/api/v1/**`
+  for ad-hoc agent queries the consolidated tools don't pre-bake. 24
+  read-oriented prefixes are allowed (canonical list lives in
+  `GC_QUERY_PATH_ALLOWLIST` in `mcp/ground-control/gc-query.js` and is
+  enforced against the README and ADR-035 by a drift-catch test); the
+  four `ROLE_ADMIN`-restricted prefixes (`/admin`, `/embeddings`,
   `/analysis/sweep`, `/pack-registry`) are denied even though they live
   under `/api/v1/`,
   callers cannot supply headers or override the method, params must be a

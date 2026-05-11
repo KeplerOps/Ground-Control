@@ -87,15 +87,16 @@ full configuration reference.
 ### MCP Server (Claude Code)
 
 Configured in `.mcp.json`, works automatically with Claude Code. Start the
-backend, then use tools like `gc_create_requirement`, `gc_analyze_cycles`, and
-`gc_create_github_issue` from your conversation. The default catalog selection
-loads about 92 of the 216 available tools — enough for an `/implement` run
-without surfacing risk-modelling, asset, or admin tools your session does not
-need. Set `GC_MCP_CATALOGS=all` for everything, or pick a narrower selection
-(`workflow,requirements`, etc.). The read-only `gc_query` tool is always
-available for ad-hoc GETs against `/api/v1/**`. See the
+backend, then call MCP tools from your conversation. The surface is ~30
+named tools (down from 215 in earlier versions per ADR-035) consolidated
+by entity with an `action` discriminator — `gc_requirement`, `gc_asset`,
+`gc_analyze`, `gc_graph`, etc. Workflow primitives the `/implement` and
+`/ship` skills use (`gc_get_requirement`, `gc_create_traceability_link`,
+`gc_transition_status`, the codex tools, etc.) are unchanged. The read-only
+`gc_query` tool covers ad-hoc GETs against `/api/v1/**` for hypotheses the
+consolidated tools don't pre-bake. See the
 [MCP server docs](mcp/ground-control/README.md) for the full tool reference,
-catalog list, and `gc_query` semantics.
+per-action contracts, and `gc_query` semantics.
 
 ## Development
 
