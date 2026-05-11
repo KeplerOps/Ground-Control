@@ -38,6 +38,115 @@ class PolicyChecksTest(unittest.TestCase):
         violations = run_adr_guard(["skills/implement/SKILL.md"])
         self.assertTrue(any(item.code == "workflow-guardrail-sync" for item in violations))
 
+    def _render_pr_body_via_js(self, input_dict):
+        """Invoke `tools/render_pr_body_fixture.mjs` against the JS renderer in
+        `mcp/ground-control/lib.js::buildPrBody`. Pipes JSON in, returns the
+        rendered body. Skips the test if `node` is unavailable on PATH.
+        The fixture script imports the actual lib.js, so this binds the
+        compose contract to the real renderer instead of a copied Python
+        string."""
+        import shutil
+        import subprocess
+
+        if shutil.which("node") is None:
+            self.skipTest("node not available on PATH; renderer compose check needs Node")
+        fixture = REPO_ROOT / "tools" / "render_pr_body_fixture.mjs"
+        proc = subprocess.run(
+            ["node", str(fixture)],
+            input=json.dumps(input_dict),
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
+        self.assertEqual(
+            proc.returncode,
+            0,
+            f"renderer fixture exited {proc.returncode}: stderr={proc.stderr}",
+        )
+        return proc.stdout
+
+    def test_gc_render_pr_body_output_passes_check_pr_body(self):
+        # Compose contract (ADR-036): the JS renderer in
+        # `mcp/ground-control/lib.js::buildPrBody` produces a PR body that
+        # MUST pass `check_pr_body`. Codex cycle 1 (F3) flagged the previous
+        # version: a copied Python string fixture means a JS renderer change
+        # cannot break this test. Fixed by invoking the actual renderer via
+        # `tools/render_pr_body_fixture.mjs` and feeding stdout through the
+        # Python policy predicate. Drift now breaks the test.
+        body = self._render_pr_body_via_js({
+            "issueNumber": 868,
+            "changeClass": "source",
+            "requirementUids": ["GC-O007", "GC-O009"],
+            "adrRefs": ["ADR-036", "ADR-021 (amended)"],
+            "summary": "Per-step routing + tool surfaces + telemetry.",
+            "changes": ["Added gc_post_decision_record"],
+            "traceability": {
+                "implements": ["GC-O007 ← skills/implement/SKILL.md"],
+                "tests": ["GC-O007 ← mcp/ground-control/lib.test.js"],
+            },
+            "changelogFragment": "changelog.d/868.changed.md",
+        })
+        violations = check_pr_body(body)
+        codes = [v.code for v in violations]
+        self.assertEqual(
+            violations,
+            [],
+            f"buildPrBody (source) output rejected by check_pr_body: {codes}",
+        )
+
+    def test_gc_render_pr_body_doc_only_output_passes_check_pr_body(self):
+        # Same compose test but for change_class='doc-only': integration tests
+        # marked N/A, changelog fragment marked N/A. Per F3 (codex cycle 1),
+        # this invokes the actual renderer rather than a copied fixture, so
+        # the compose contract holds even when the renderer changes.
+        #
+        # Per F1 (codex cycle 2), the renderer no longer fabricates a synthetic
+        # `GC-O007` placeholder for requirement-free runs — honest traceability.
+        # The PR-body policy gate (PR_REQUIREMENT_RE) still requires a UID-
+        # shaped token anywhere in the body; doc-only runs satisfy it by
+        # citing the ADR they document (this PR cites ADR-036). A doc-only
+        # run with NEITHER a requirement nor an ADR ref is refused by
+        # `runRenderPrBody`'s checkPrBodyShape gate (see lib.test.js).
+        body = self._render_pr_body_via_js({
+            "issueNumber": 999,
+            "changeClass": "doc-only",
+            "requirementUids": [],
+            "adrRefs": ["ADR-036"],
+            "summary": "Documentation update only.",
+            "changes": ["Clarified workflow doc wording"],
+            "traceability": {"implements": [], "tests": []},
+        })
+        violations = check_pr_body(body)
+        codes = [v.code for v in violations]
+        self.assertEqual(
+            violations,
+            [],
+            f"buildPrBody (doc-only) output rejected by check_pr_body: {codes}",
+        )
+
+    def test_workflow_guardrail_sync_requires_adr_036(self):
+        # ADR-036 amends ADR-021. workflow-guardrail-sync must keep ADR-036 in
+        # the requireAll list so that future SKILL changes have to update both
+        # ADR-021 (the original) AND ADR-036 (the routing/tools/telemetry
+        # amendment). Pinned here so a future edit to the policy that drops
+        # ADR-036 breaks this test.
+        policy_path = REPO_ROOT / "architecture/policies/adr-policy.json"
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        rule = None
+        for pol in policy.get("policies", []):
+            for r in pol.get("rules", []):
+                if r.get("id") == "workflow-guardrail-sync":
+                    rule = r
+                    break
+            if rule is not None:
+                break
+        self.assertIsNotNone(rule, "workflow-guardrail-sync rule must exist")
+        self.assertIn(
+            "architecture/adrs/036-per-step-routing-tool-surfaces-telemetry.md",
+            rule.get("requireAll", []),
+            "ADR-036 must be in workflow-guardrail-sync.requireAll",
+        )
+
     def test_controller_contracts_require_docs_mcp_and_webmvctest(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

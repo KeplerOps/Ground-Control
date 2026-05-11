@@ -313,6 +313,16 @@ The graph enables queries that cross-cut the entire lifecycle:
 | Which requirements does this ADR affect? | `gc_get_adr_requirements` |
 | What assets are impacted if this service goes down? | Asset impact analysis |
 
+## /implement cost reduction (ADR-036)
+
+The `/implement` workflow has three opt-in cost-side optimizations that ride on top of the same gate contract (one human touchpoint at PR merge, three-cycle Codex cap, zero deferral, ADR-021/ADR-029 phase structure).
+
+- **Per-step model routing.** Each `/implement` step carries a capability tier (`low`, `medium`, `high`). Drivers map tier to a concrete model. Claude Code uses `haiku-4.5` / `sonnet-4.6` / `opus-4.7`. Routed steps (`low` and `medium` tier) spawn an `Agent` subagent at the declared model; `high`-tier steps run on the parent. Codex drivers ignore the tier and run all steps on the session model — provider-neutral by design so a future Codex router can adopt the same matrix. Opt-in per repo via `.ground-control.yaml`'s `routing.enabled` knob (default `false`).
+- **Durable-record MCP tools.** Three new deterministic tools replace agent-authored long-form comments. `gc_post_decision_record` renders the canonical Step 6.5 decision-record from structured findings; `gc_post_final_report` renders Step 19's final summary from structured input; `gc_render_pr_body` composes a PR body that satisfies `check_pr_body`'s policy gates from structured input (`change_class ∈ {doc-only, source, source+migration}` shapes the integration-tests / changelog-fragment cells). All three filter sensitive content, post under a structured marker family (`gc:decision-record`, `gc:final-report`), and reject `decision: "defer"` server-side.
+- **Per-step telemetry.** `gc_log_step_telemetry` appends one JSONL record per routed step to `.gc/telemetry/<issue>-<sanitized-branch>.jsonl` (gitignored, repo-relative, containment-validated). Operational measurement only — never workflow state, never a cycle counter, never compliance evidence. The summarizer (`make implement-cost-summary`) reports wall time and token counts (when the harness surfaces them) per step and per model; dollar-cost translation is explicit future work. Opt-in via `.ground-control.yaml`'s `telemetry.enabled` knob (`gc_log_step_telemetry` itself refuses with a structured `telemetry_disabled` envelope when the knob is off, so callers cannot bypass the opt-in).
+
+All four tools are Temporal-shaped: deterministic, structured-input-in, structured-output-out, no LLM call. GC-O009 inherits them as activities when the Temporal workflow lands.
+
 ## MCP Integration
 
 Ground Control exposes its full API as MCP tools. This means an AI agent (Claude Code, Cursor, etc.) can:

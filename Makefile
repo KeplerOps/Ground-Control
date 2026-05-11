@@ -46,6 +46,9 @@ policy: policy-tests assert-backup-policy ## Run repo-native policy checks share
 assert-backup-policy: ## Assert GC-P021 backup cadence / retention / verification defaults are intact
 	bash scripts/assert-backup-policy.sh
 
+implement-cost-summary: ## Summarize /implement step telemetry — wall time + token counts (when available) per step / per model (ADR-036)
+	python3 tools/summarize_implement_telemetry.py
+
 test-backup-restore-local: ## Run the self-contained local backup/restore verification loop (requires Docker)
 	bash scripts/test-backup-restore-locally.sh
 
