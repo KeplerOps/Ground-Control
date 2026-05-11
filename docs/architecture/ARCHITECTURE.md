@@ -2,7 +2,7 @@
 
 ## Mission
 
-Ground Control is a requirements management system with traceability and graph analysis. It manages requirements, tracks relations, links to external artifacts, and runs graph-based analysis (cycles, orphans, coverage gaps, impact, cross-wave validation).
+Ground Control is a requirements management system with traceability and graph analysis. It manages requirements, tracks relations, links to external artifacts, and runs graph-based analysis (cycles, orphans, coverage gaps, impact, cross-wave validation). Status-drift analysis follows the contract below when added to the sweep surface.
 
 See [ADR-014](../../architecture/adrs/014-pluggable-verification-architecture.md) for the verification architecture and [ADR-011](../../architecture/adrs/011-requirements-data-model.md) for the requirements data model.
 
@@ -117,13 +117,18 @@ opt out), every request passes through:
 IpAllowlistFilter           # CIDR check (skipped if allowlist empty)
   → BearerTokenAuthFilter   # Authorization: Bearer <token> → SecurityContext
     → AuthorizationFilter   # path-matrix / ROLE_USER / ROLE_ADMIN
-      → ActorFilter         # populates ActorHolder + MDC actor=<principal>
+      → ActorFilter         # populates ActorHolder + MDC actor_id=<principal>
         → controllers
 ```
 
 Authorization is centralized in `ApiSecurityConfig` (ADR-026); controllers
-do not perform per-method auth checks. `ActorFilter` runs after the
-security chain so audit identity tracks the authenticated principal.
+do not perform per-method auth checks — the one deliberate exception,
+`PackRegistryAccessGuard`, is a defense-in-depth bridge that re-derives the
+admin principal from the same `SecurityContext` and re-asserts `ROLE_ADMIN`
+(see ADR-033 §4). `ActorFilter` runs after the security chain so audit
+identity tracks the authenticated principal; it writes the principal to MDC
+key `actor_id`, the key `logback-spring.xml`'s production JSON appender
+exports (alongside `request_id` / `tenant_id`). See [ADR-033](../../architecture/adrs/033-authenticated-audit-actor-provenance.md).
 
 ## What Exists vs. What Doesn't
 
@@ -131,7 +136,7 @@ security chain so audit identity tracks the authenticated principal.
 
 **Domain entities:** Requirement, RequirementRelation, TraceabilityLink, GitHubIssueSync, RequirementImport — all JPA with Envers auditing.
 
-**Services:** RequirementService (9 methods), TraceabilityService (forward and reverse artifact lookup), ImportService (StrictDoc parser + idempotent import), GitHubIssueSyncService (CLI-based GitHub sync), AnalysisService (cycle/orphan/coverage/impact/cross-wave), AgeGraphService (Apache AGE graph materialization + Cypher queries).
+**Services:** RequirementService (9 methods), TraceabilityService (forward and reverse artifact lookup), ImportService (StrictDoc parser + idempotent import), GitHubIssueSyncService (CLI-based GitHub sync), AnalysisService (cycle/orphan/coverage/impact/cross-wave; status drift belongs here as read-only analysis), AgeGraphService (Apache AGE graph materialization + Cypher queries).
 
 **API:** RequirementController (9 REST endpoints), AnalysisController (5 endpoints), ImportController, SyncController, GraphController. GlobalExceptionHandler maps domain exceptions to HTTP error envelopes.
 
@@ -139,9 +144,24 @@ security chain so audit identity tracks the authenticated principal.
 
 **Tooling:** Status state machine with JML contracts (verified by OpenJML ESC + Z3), Flyway migrations, Spotless/Error Prone/SpotBugs/Checkstyle/JaCoCo, ArchUnit architecture tests, CI pipeline (build + test + integration + verify), production Dockerfile, GHCR publishing, E2E integration tests.
 
+## Status Drift Analysis
+
+Status drift analysis is a read-only requirements-domain analysis. It flags requirements that are still `DRAFT` while independent artifacts suggest implementation or design completion has already landed. It does not create traceability links, transition requirements, or relax the `IMPLEMENTS`-only-on-`ACTIVE` rule.
+
+The analysis must build on the existing graph contracts:
+
+- Requirements are project-scoped per ADR-016; all status drift queries must resolve a single project, and every evidence signal must be derived from data owned by that project. Never compare UIDs across projects without project context, and never read project- or repo-unscoped caches (e.g. the GitHub issue/PR sync tables) from this path — a project-scoped analysis must not surface another project's (or another repo's) artifacts.
+- Evidence is link-based: an `IMPLEMENTS` traceability link on a `DRAFT` requirement (the strongest signal — `IMPLEMENTS` to an issue is allowed pre-`ACTIVE` in the GC-O007/#794 shape), a `DOCUMENTS` link to an `ACCEPTED` ADR (`ArchitectureDecisionRecord` + `TraceabilityLink` with `artifactType=ADR`, `linkType=DOCUMENTS`), a non-`IMPLEMENTS` link to a GitHub issue or pull request, or a non-`IMPLEMENTS` link to a code/test/spec/proof artifact. A `DOCUMENTS` link is evidence, not an implementation link.
+- Traceability identifiers follow ADR-011 conventions. GitHub issues and pull requests use raw decimal identifiers; ADRs use ADR UIDs; code/test/config evidence uses repo-relative identifiers. Do not add alternate encodings such as `#42`, `owner/repo#42`, `file:...`, or `adr:021`.
+- The analysis path must not shell out to `gh` or scan arbitrary filesystem paths; network and process execution belong in the GitHub sync adapter, not the analysis service.
+
+The report contract is derived evidence: each finding carries the DRAFT requirement, strongest signal type, confidence (`HIGH`, `MEDIUM`, `LOW`), and specific evidence artifacts. Sweep/report callers own the confidence threshold, defaulting to `MEDIUM` so `HIGH` and `MEDIUM` findings are shown while `LOW` remains opt-in.
+
 ### Does not exist yet
 
-- Auth flows
+- Interactive login / OIDC flows (the REST API access-control boundary exists
+  via ADR-026; browser login UX and external identity-provider integration do
+  not)
 - Redis integration (Redis is in docker-compose.yml but nothing in the app uses it)
 - Production deployment infrastructure (local Docker Compose + EC2 via CDK)
 - Multi-tenancy

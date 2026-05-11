@@ -11,12 +11,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 class GlobalExceptionHandlerTest {
 
@@ -80,6 +82,27 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().error().code()).isEqualTo("bad_request");
         assertThat(response.getBody().error().message()).isEqualTo("Missing required part 'file'");
+    }
+
+    @Test
+    void handleNoResourceFound_returnsNotFound() {
+        // Spring throws NoResourceFoundException for unmapped paths in 3.2+. Without
+        // a dedicated handler it falls through to handleGeneric and surfaces
+        // 500 internal_error (#828: muddied #821 diagnosis of the threat-model 500
+        // by hiding "this image doesn't have the threat-model controllers" behind
+        // the same envelope a real server bug would emit).
+        var ex = new NoResourceFoundException(HttpMethod.GET, "/api/v1/nonexistent");
+
+        var response = handler.handleNoResourceFound(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error().code()).isEqualTo("not_found");
+        assertThat(response.getBody().error().message()).isEqualTo("Resource not found");
+        // Resource path is not echoed in the response body — consistent with the
+        // other handlers' message style and avoids reflecting client-controlled
+        // bytes back through the error envelope.
+        assertThat(response.getBody().error().detail()).isNull();
     }
 
     @Test

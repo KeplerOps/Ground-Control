@@ -110,11 +110,54 @@ available via the user-authorized `override_cap=true` + `override_reason`
 path; the override marker stays distinguishable from regular cycle markers in
 the audit trail.
 
+The three-cycle cap is hard against agent self-authorization: the agent
+cannot run cycle 4 to "verify the fix" of cycle 3 findings. Cycle 3 findings
+must be fixed in place; if concern remains after fixing them, the agent posts
+an issue-thread comment summarizing the remaining concern and fix history and
+escalates to the user. The user may then authorize cycle 4 explicitly via
+`override_cap=true` + an `override_reason` quoting that authorization, or
+decide a different workflow move (stop, re-scope, open a fresh issue). The
+marker preserves the distinction so the audit trail records whether each
+cycle ran in-cap or under user-authorized override.
+
 The marker belongs to the same issue-thread marker family as plan, phase,
 review-cycle, and verify-cycle markers. Implementations must reuse the
 existing issue-comment read/post helpers, marker parser/evaluator pattern, and
 structured refusal result style; they must not add a local state file, git
 notes, database row, Temporal state, or driver-local counter for this cap.
+
+### Tool-layer enforcement boundary
+
+The MCP server is the enforcement boundary for workflow ordering, cycle caps,
+GitHub posting, and durable markers. Implementation work for issue #794 must
+extend the existing MCP review/phase machinery rather than introducing a
+parallel workflow state model.
+
+Reuse these existing cross-cutting patterns:
+
+- the `ensureGitRepo` and `getOwnerRepo` repository resolution path before any
+  GitHub or git side effect;
+- the issue-comment marker family and paginated issue-comment reader for
+  durable state, including marker-shaped-text escaping so reviewer output
+  cannot poison counters;
+- pure parser/evaluator helpers for marker counting and prerequisite decisions,
+  with tests covering malformed markers, wrong issue/PR ids, and cap
+  boundaries;
+- structured refusal envelopes with stable `error`, `message`, `prior_cycles`
+  or `missing`, `cap`, and `next_action` fields instead of thrown control-flow
+  exceptions for expected gate failures;
+- the host-side GitHub posting boundary, sensitive-content guardrail, and
+  partial-failure envelopes already used by `gc_codex_review`;
+- `.ground-control.yaml` resolution through `gc_get_repo_ground_control_context`
+  when workflow behavior needs repo configuration.
+
+Do not duplicate the workflow contract in skill-only prose, local files, git
+notes, in-memory counters, ad hoc JSON blobs, Temporal state, or a new database
+table for this bridge implementation. Do not create separate schemas for
+pre-push and post-push review cycles unless their persisted marker identity
+actually differs. Do not make branch name, PR number, or commit lineage part of
+the pre-push cap key; those are audit context or post-push direct-caller
+defense-in-depth context, not reset levers for the canonical Step 6.5 cap.
 
 ### Codex findings issue-thread record
 
@@ -153,6 +196,77 @@ fully noncompliant or compromised agent with shell access has many paths to
 bypass — the cap narrows the most likely accidental-bypass path (branch
 rename) but does not protect against all attacks. The user's PR merge
 remains the only synchronous human gate.
+
+### `defer` is not a valid disposition
+
+The "Decisions on findings" bullet above states the contract in one sentence:
+`defer` is not a valid decision. Issue #830 documented that agents kept
+inventing a third path anyway — "out of scope for this PR; follow-up issue to
+track it", "will be addressed in a subsequent PR", "deferred to a later
+iteration", or simply writing "deferred"/"TBD" in a closing comment without
+filing anything. Once the issue closes, the deferred item has no anchor: not
+in the requirement graph, not in any tracker, not on any backlog. It is
+silent debt. This subsection makes the prohibition explicit and names its
+mechanical enforcement.
+
+**The only valid dispositions for a reviewer finding are:**
+
+1. **`fix`** — the finding is fixed now, in the same diff. For a *class*
+   finding (one instance of a pattern that recurs), the fix is designed at
+   the category level — a structural gate, a shared helper, a parameterization,
+   a single point of repair — and applied to every instance at once, not
+   whack-a-mole to the reviewer-named site only. Fixing a `class` finding on
+   the named site alone is a process violation in the same shape as silent
+   deferral: it leaves the category un-addressed and burns a review cycle the
+   cap is not meant to absorb.
+2. **`wontfix`** — the finding is genuinely wrong, dangerous to fix in
+   context, or a false positive. Requires **explicit user authorization** on
+   the issue thread, quoted in the disposition comment.
+3. **`not-applicable`** — the finding does not actually apply (false positive
+   on this codebase, out of the diff's real scope, etc.), recorded with a
+   rationale.
+
+**Deferral language — forbidden.** "Defer this to a follow-up PR / issue /
+later iteration / subsequent commit", "will be addressed in a follow-up",
+"fixed in a subsequent PR", "handled as a follow-up issue", and — in a
+comment that closes or reports completion on the issue under implementation —
+a bare "deferred", "TBD later", or "to be done later/separately" are all
+deferral dispositions. Filing a tracking issue does **not** convert a deferral
+into a valid disposition; the contract is fix-or-escalate, not fix-or-file.
+A new issue's own body legitimately scope-bounds future work (an
+`## Out of scope` section, a "this builds on #N" note) — that is scope
+*definition*, not finding *deferral*; the distinction is by phrase, not by
+section heading.
+
+**Mechanical enforcement — two defense-in-depth layers over the same
+contract, neither replacing the other:**
+
+- **Tool-call time** — the PreToolUse hook `.claude/hooks/block-defer-language.py`
+  (installed via `scripts/bootstrap-claude-workflow.sh`'s `WORKFLOW_HOOKS`
+  allowlist, registered in `~/.claude/settings.json`'s `PreToolUse[Bash]`
+  chain) inspects `gh issue {create,edit,comment,close}` and
+  `gh pr {create,edit,comment}` body/title text — including heredoc bodies —
+  and blocks the call (exit 2) on deferral-disposition language, routing the
+  agent back to fix-or-escalate.
+- **Completion gate** — `bin/policy` (`tools/policy/checks.py`'s
+  `run_no_deferral_disposition_check`) scans the resolved PR body for the same
+  Tier-1 deferral phrases at completion-gate / CI time.
+
+Both layers share one classifier; `tools/policy/deferral_cases.json` is the
+golden-case file both test suites load, so the hook's standalone copy and the
+policy copy cannot drift without a test failing. The classifier's allowed
+contexts are encoded in those cases, not in agent prose — future tuning is
+reviewable.
+
+**Text scanning is necessary, not sufficient.** A scanner cannot prove an
+agent *silently dropped* a finding it never wrote about. That failure mode —
+"agent silence on a finding is a process violation" from the bullet above —
+is caught only by reconciling the issue-thread Codex findings record (every
+cycle's verbatim finding list) against the agent's disposition comments
+(one `fix`/`wontfix`/`not-applicable` rationale per finding). The hook and
+policy layers catch *written* deferral language; the findings-vs-decisions
+reconciliation is the existing control for *unwritten* omission and is
+unchanged by this amendment.
 
 ## Consequences
 

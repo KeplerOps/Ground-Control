@@ -13,8 +13,11 @@ import com.keplerops.groundcontrol.domain.requirements.service.AnalysisSweepServ
 import com.keplerops.groundcontrol.domain.requirements.service.CompletenessResult;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleEdge;
 import com.keplerops.groundcontrol.domain.requirements.service.CycleResult;
+import com.keplerops.groundcontrol.domain.requirements.service.StatusDriftResult;
 import com.keplerops.groundcontrol.domain.requirements.service.SweepReport;
+import com.keplerops.groundcontrol.domain.requirements.state.ConfidenceLevel;
 import com.keplerops.groundcontrol.domain.requirements.state.RelationType;
+import com.keplerops.groundcontrol.domain.requirements.state.StatusDriftSignal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +47,7 @@ class SweepControllerTest {
                 Map.of(),
                 List.of(),
                 List.of(),
+                List.of(),
                 new CompletenessResult(5, Map.of("DRAFT", 3, "ACTIVE", 2), List.of()),
                 null);
     }
@@ -57,6 +61,7 @@ class SweepControllerTest {
                         new SweepReport.RequirementSummary("GC-ORPH1", "Orphan One"),
                         new SweepReport.RequirementSummary("GC-ORPH2", "Orphan Two")),
                 Map.of(),
+                List.of(),
                 List.of(),
                 List.of(),
                 new CompletenessResult(5, Map.of("DRAFT", 3, "ACTIVE", 2), List.of()),
@@ -98,6 +103,12 @@ class SweepControllerTest {
                 List.of(new SweepReport.CrossWaveViolationSummary("GC-A", 1, "GC-B", 2, "DEPENDS_ON")),
                 List.of(new SweepReport.ConsistencyViolationSummary(
                         "GC-X", "ACTIVE", "GC-Y", "ACTIVE", "ACTIVE_CONFLICT")),
+                List.of(new StatusDriftResult.Finding(
+                        "GC-T010",
+                        "Risk Assessment Result Entity",
+                        ConfidenceLevel.HIGH,
+                        StatusDriftSignal.IMPLEMENTS_LINK_ON_DRAFT,
+                        List.of())),
                 new CompletenessResult(5, Map.of("DRAFT", 3), List.of()),
                 null);
 
@@ -115,7 +126,11 @@ class SweepControllerTest {
                 .andExpect(jsonPath("$.crossWaveViolations[0].sourceUid", is("GC-A")))
                 .andExpect(jsonPath("$.crossWaveViolations[0].sourceWave", is(1)))
                 .andExpect(jsonPath("$.consistencyViolations", hasSize(1)))
-                .andExpect(jsonPath("$.consistencyViolations[0].violationType", is("ACTIVE_CONFLICT")));
+                .andExpect(jsonPath("$.consistencyViolations[0].violationType", is("ACTIVE_CONFLICT")))
+                .andExpect(jsonPath("$.statusDrift", hasSize(1)))
+                .andExpect(jsonPath("$.statusDrift[0].uid", is("GC-T010")))
+                .andExpect(jsonPath("$.statusDrift[0].confidence", is("HIGH")))
+                .andExpect(jsonPath("$.statusDrift[0].strongestSignal", is("IMPLEMENTS_LINK_ON_DRAFT")));
     }
 
     @Test

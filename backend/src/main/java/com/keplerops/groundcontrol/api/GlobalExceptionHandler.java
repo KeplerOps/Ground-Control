@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -116,6 +117,17 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleConstraintViolation(jakarta.validation.ConstraintViolationException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ErrorResponse.of("validation_error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResourceFound(NoResourceFoundException ex) {
+        // Spring throws this for unmapped paths in 3.2+. Without an explicit handler
+        // it falls through to handleGeneric and returns 500 internal_error, which
+        // muddied #821 diagnosis (a missing-controller deployment was first read as
+        // a real server bug). The resource path is intentionally NOT echoed in the
+        // body — keep the message stable and avoid reflecting client-controlled
+        // bytes back through the error envelope.
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of("not_found", "Resource not found"));
     }
 
     @ExceptionHandler(GroundControlException.class)

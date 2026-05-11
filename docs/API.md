@@ -63,7 +63,7 @@ http://localhost:8000/api/v1/
 | POST | `/requirements/{id}/traceability` | TraceabilityLinkRequest | 201 | Create traceability link |
 | GET | `/requirements/{id}/traceability` | — | 200 | List traceability links |
 | GET | `/requirements/traceability/by-artifact` | — | 200 | Reverse lookup: find links by artifact |
-| DELETE | `/requirements/{id}/traceability/{linkId}` | — | 204 | Delete traceability link |
+| DELETE | `/requirements/{id}/traceability/{linkId}` | — | 204 / 404 | Delete traceability link. Returns 404 if `linkId` does not belong to `id`. |
 
 `GET /requirements/traceability/by-artifact` accepts query parameters:
 
@@ -77,8 +77,8 @@ http://localhost:8000/api/v1/
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
 | GET | `/requirements/{id}/history` | — | 200 | Requirement revision history |
-| GET | `/requirements/{id}/relations/{relationId}/history` | — | 200 | Relation revision history |
-| GET | `/requirements/{id}/traceability/{linkId}/history` | — | 200 | Traceability link revision history |
+| GET | `/requirements/{id}/relations/{relationId}/history` | — | 200 / 404 | Relation revision history. Returns 404 if `relationId` does not belong to `id` (the requirement is neither the source nor the target of the relation). |
+| GET | `/requirements/{id}/traceability/{linkId}/history` | — | 200 / 404 | Traceability link revision history. Returns 404 if `linkId` does not belong to `id`. |
 | GET | `/requirements/{id}/timeline` | — | 200 | Unified audit timeline |
 
 `GET /requirements/{id}/timeline` accepts query parameters:
@@ -120,6 +120,7 @@ http://localhost:8000/api/v1/
 | GET | `/analysis/work-order` | — | 200 | Topological work order |
 | GET | `/analysis/dashboard-stats` | — | 200 | Aggregate project health stats |
 | GET | `/analysis/semantic-similarity` | — | 200 | Find semantically similar requirement pairs |
+| GET | `/analysis/status-drift` | — | 200 | Flag DRAFT requirements that have implementation evidence |
 | POST | `/analysis/sweep` | — | 200 | Run analysis sweep on one project |
 | POST | `/analysis/sweep/all` | — | 200 | Run analysis sweep on all projects |
 
@@ -147,6 +148,53 @@ form it, including the relation type between each consecutive pair.
 |-----------|------|---------|-------------|
 | `project` | string | auto-resolved | Project identifier |
 | `threshold` | double | 0.85 | Minimum similarity score (0–1) |
+
+`GET /analysis/status-drift` flags `DRAFT` requirements that carry independent
+evidence of implementation or design completion (read-only — it never transitions
+requirements or creates links). Query parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `project` | string | auto-resolved | Project identifier |
+| `minimumConfidence` | enum (`HIGH` \| `MEDIUM` \| `LOW`) | `MEDIUM` | Lowest confidence band to report (default reports `HIGH` and `MEDIUM`; `LOW` is opt-in) |
+
+**StatusDriftResponse** (`GET /analysis/status-drift`):
+
+```json
+{
+  "draftRequirementsScanned": 14,
+  "minimumConfidence": "MEDIUM",
+  "findings": [
+    {
+      "uid": "GC-T010",
+      "title": "Risk Assessment Result Entity",
+      "confidence": "HIGH",
+      "strongestSignal": "IMPLEMENTS_LINK_ON_DRAFT",
+      "evidence": [
+        {
+          "signal": "IMPLEMENTS_LINK_ON_DRAFT",
+          "confidence": "HIGH",
+          "artifactType": "GITHUB_ISSUE",
+          "artifactIdentifier": "826",
+          "artifactTitle": "GC-T010: Risk Assessment Result Entity",
+          "artifactUrl": "https://github.com/KeplerOps/Ground-Control/issues/826",
+          "detail": "IMPLEMENTS link on a DRAFT requirement"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Evidence signals, strongest first: `IMPLEMENTS_LINK_ON_DRAFT` (`HIGH`);
+`ACCEPTED_ADR_DOCUMENTS_LINK`, `LINKED_GITHUB_ISSUE`, `LINKED_PULL_REQUEST`
+(`MEDIUM`); `LINKED_CODE_ARTIFACT`, `LINKED_DOC_ARTIFACT` (`LOW`). All signals are
+derived from the requirement's own project — its canonical traceability links and
+accepted ADR records — so the endpoint never reads the project-unscoped GitHub
+issue/PR sync tables or the filesystem. A finding's `confidence` is the strongest
+band across its `evidence`. Status drift is also surfaced inside
+`POST /analysis/sweep` as a new problem class (`statusDrift` array, counted in
+`totalProblems`).
 
 **SimilarityResultResponse:**
 

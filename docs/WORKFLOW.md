@@ -174,7 +174,7 @@ Pick the next unblocked requirement from the work order and implement it. Ground
 
 1. **Fetch requirement** from Ground Control
 2. **Create GitHub issue** and link it via traceability
-3. **Checkout feature branch** via `gh issue develop`
+3. **Checkout feature branch** via `gh issue develop`, then **flag the issue in-progress** — apply an `in-progress` label (created on demand if the repo lacks it) and post a pickup comment on the thread (driver, branch, timestamp) so a maintainer scanning the issue list, or another agent, can see at a glance that the issue is in flight. The label is removed when the workflow closes the issue (and intentionally stays put if a run escalates without finishing).
 4. **Plan implementation** — posted as a comment on the GitHub issue thread per ADR-029. The workflow proceeds directly to TDD without a synchronous user-approval gate; the user owns review at PR merge.
 5. **Write code, tests, docs** — clause-by-clause verification against the requirement statement. TDD is mandatory except for the narrow documentation-only carve-out documented in `skills/implement/SKILL.md` Step 4.4 (no executable behavior in the diff + every clause/criterion protected by a named structural gate; declared in the plan and re-stated on the issue thread). The completion gate re-validates the carve-out with a two-check sweep over the union of committed and uncommitted paths — both the path set and the diff hunk content must be doc-only — because a path-only check can miss executable behavior buried in a doc file, and an HEAD-only check would miss uncommitted changes still in the working tree.
 6. **Transition to ACTIVE** once implemented and verified — the API enforces `IMPLEMENTS-only-on-ACTIVE`, so transition MUST happen before the link-creation step.
@@ -242,7 +242,7 @@ Per issue #804, the `/implement` skill runs one mandatory Codex architecture pre
 
 The post-push codex review (former Step 12) was removed by issue #804: the pre-push pass catches everything codex would normally flag, and merge-commit drift is the responsibility of CI (compile/tests/integration) and SonarCloud (quality), not a duplicate codex run. The post-push tool entrypoint (`gc_codex_review` with a `pr_number`) remains as defense-in-depth for direct callers but the SKILL no longer drives it.
 
-All findings are fixed before the PR is presented for human review.
+All findings are fixed before the PR is presented for human review. "Defer" is not a valid disposition (ADR-029) and is mechanically enforced (issue #830): the `.claude/hooks/block-defer-language.py` PreToolUse hook blocks GitHub issue/PR text carrying deferral-disposition language, and `bin/policy` flags it in the PR body at completion gate. The only valid dispositions are `fix`, `wontfix` (with explicit user authorization), or `not-applicable` (with rationale); filing a tracking issue does not make a deferral valid. Codex review classifies each finding `one-off` or `class`; a `class` finding is fixed at the category level (one structural point of repair applied to every instance), not site-by-site.
 
 ### Impact Analysis
 
@@ -255,6 +255,10 @@ gc_analyze_impact(uid: "GC-R001")
 Returns all transitively affected requirements — everything upstream and downstream that could be impacted by a change to this requirement.
 
 ## Phase 5: Release & Audit
+
+### Release Notes via Changelog Fragments
+
+Per-PR release notes ship as fragments under `changelog.d/<issue>.<type>.md` (or `+<slug>.<type>.md` for issue-free entries), where `<type>` is one of `security`, `added`, `changed`, `deprecated`, `removed`, `fixed`. The convention exists so concurrent PRs never conflict on the same `CHANGELOG.md` line range, and it is enforced by `tools/policy/checks.py::run_changelog_fragment_check` plus the `verify-implementation.sh` Stop hook. Source-changing diffs MUST file a fragment (refactors under application source included); CI-only and docs-only diffs may ship without one. Direct `CHANGELOG.md` edits are reserved for release-collation commits. At release time the maintainer runs `uvx towncrier build --version <X.Y.Z> --date <YYYY-MM-DD> --yes`; towncrier collates the fragments into `CHANGELOG.md` immediately after the `<!-- towncrier release notes start -->` marker and removes the fragments it consumed. See [`changelog.d/README.md`](../changelog.d/README.md) for the full convention.
 
 ### Create a Baseline
 

@@ -26,6 +26,13 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+/**
+ * Compliance/audit-export <em>controller</em> coverage (timeline filtering, CSV export). Runs under
+ * the security-disabled {@code test} profile, where {@code X-Actor} is the legacy convenience for
+ * setting a readable audit actor (see {@code ActorFilter}). Per ADR-033 §5 this is a controller
+ * slice test and is <em>not</em> the audit-actor-provenance evidence for issue #431 — see
+ * {@link AuditActorProvenanceIntegrationTest} for the security-enabled provenance contracts.
+ */
 @AutoConfigureMockMvc
 @TestMethodOrder(OrderAnnotation.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)

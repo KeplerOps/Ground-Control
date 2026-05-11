@@ -25,6 +25,13 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+/**
+ * Audit-history <em>controller</em> coverage (history / timeline / diff endpoints). Runs under the
+ * security-disabled {@code test} profile, where {@code X-Actor} is the legacy convenience for
+ * setting a readable audit actor (see {@code ActorFilter}). Per ADR-033 §5 this is a controller
+ * slice test and is <em>not</em> the audit-actor-provenance evidence for issue #431 — see
+ * {@link AuditActorProvenanceIntegrationTest} for the security-enabled provenance contracts.
+ */
 @AutoConfigureMockMvc
 @TestMethodOrder(OrderAnnotation.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -314,6 +321,20 @@ class AuditHistoryIntegrationTest extends BaseIntegrationTest {
                         .param("offset", "100"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    @Test
+    @Order(12)
+    void relationHistory_resolvesViaTargetRequirement_returns200() throws Exception {
+        // Relation ownership is source-OR-target, consistent with GET /requirements/{id}/relations.
+        // The relation created in step 4 was AUDIT-001 -> AUDIT-003; here we look it up via the
+        // target requirement and expect the same ADD revision, not a 404.
+        mockMvc.perform(get("/api/v1/requirements/" + targetRequirementId + "/relations/" + relationId + "/history"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()", is(1)))
+                .andExpect(jsonPath("$[0].revisionType", is("ADD")))
+                .andExpect(jsonPath("$[0].snapshot.sourceId", is(requirementId.toString())))
+                .andExpect(jsonPath("$[0].snapshot.targetId", is(targetRequirementId.toString())));
     }
 
     // --- Version diff endpoint tests (builds on data from steps 1-5) ---

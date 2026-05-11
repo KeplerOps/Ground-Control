@@ -85,6 +85,9 @@ When in doubt, use L0 during pre-alpha. The bar rises at beta.
 | `domain/requirements/model/Requirement.java` | L2 | State machine + cross-field invariant (`archivedAt`/`status`) |
 | `domain/requirements/model/RequirementRelation.java` | L1 | Self-loop prevention precondition |
 | `domain/requirements/state/Status.java` | L2 | Transition table with jqwik property tests |
+| `domain/requirements/state/ConfidenceLevel.java` | L0 | Pure value enum; ordinal-ordered band with a `compareTo`-based `atLeast`/`strongest` helper, no transitions or invariants (status-drift analysis support per ADR-011 §9) |
+| `domain/requirements/state/StatusDriftSignal.java` | L0 | Pure value enum; `switch`-mapped `defaultConfidence()` accessor, no transitions or invariants (status-drift analysis support per ADR-011 §9) |
+| `domain/requirements/service/StatusDriftService.java` | L0 | Read-only derived analysis (ADR-011 §9); a service, not a state machine or security boundary — one-test-per-behavior is sufficient |
 | `domain/exception/` | L0 | Data carriers only |
 | `api/GlobalExceptionHandler` | L0 | Mapping layer, no domain logic |
 | `api/ErrorResponse` | L0 | Record (DTO) |

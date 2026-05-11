@@ -171,7 +171,7 @@ OpenJML Extended Static Checking (ESC) runs the Z3 SMT solver to formally prove 
 ### What gets L2 ESC verification
 
 ESC runs on **pure logic classes** with no String constructor parameters and no framework annotations:
-- `domain/requirements/state/` — enums, state machines, transition tables
+- `domain/requirements/state/` — enums, state machines, transition tables. This now also includes `ConfidenceLevel` and `StatusDriftSignal` (status-drift analysis support per ADR-011 §9): pure value enums — `ConfidenceLevel` has a `compareTo`-based ordering helper, `StatusDriftSignal` a `switch`-mapped `defaultConfidence()` accessor — with no transitions or invariants. They are L0 in classification but, being inside this package, are proven trivially by ESC.
 - `domain/verification/state/` — `VerificationStatus`, `AssuranceLevel` enums (simple value enums, L0)
 - Future pure domain logic classes that follow the same pattern
 

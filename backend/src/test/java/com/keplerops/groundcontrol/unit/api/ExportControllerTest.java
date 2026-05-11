@@ -123,6 +123,7 @@ class ExportControllerTest {
                 Map.of(),
                 List.of(),
                 List.of(),
+                List.of(),
                 new CompletenessResult(0, Map.of(), List.of()),
                 null);
         when(analysisSweepService.sweep(any())).thenReturn(report);
@@ -142,6 +143,7 @@ class ExportControllerTest {
                 List.of(),
                 List.of(),
                 Map.of(),
+                List.of(),
                 List.of(),
                 List.of(),
                 new CompletenessResult(0, Map.of(), List.of()),
@@ -164,6 +166,7 @@ class ExportControllerTest {
                 List.of(),
                 List.of(),
                 Map.of(),
+                List.of(),
                 List.of(),
                 List.of(),
                 new CompletenessResult(0, Map.of(), List.of()),

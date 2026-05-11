@@ -96,6 +96,283 @@ Migrating from pre-#243 deployments:
 - The `X-Actor` header is no longer a self-service identity claim when
   security is enabled; the authenticated principal name is used for audit.
 
+### Authenticated red-dragon redeploy guardrails
+
+Rolling a pre-ADR-026 deployment forward to an ADR-026 image is an
+authentication cutover, not just an image update. Before a security-enabled
+image is deployed to red-dragon, every existing consumer of
+`http://red-dragon:8000/api/v1/**` must be inventoried and configured with a
+Bearer token. This includes repo-local MCP servers, agent `.mcp.json` entries,
+GitHub Actions live-policy or pack-sync jobs, ad-hoc `curl` / `gh api` scripts,
+and any long-running agent process that inherited `GC_BASE_URL`.
+
+Use the existing ADR-026 credential model only:
+
+```env
+GC_SECURITY_ENABLED=true
+GROUNDCONTROL_SECURITY_CREDENTIALS_0_PRINCIPAL_NAME=ground-control-mcp
+GROUNDCONTROL_SECURITY_CREDENTIALS_0_TOKEN=...
+GROUNDCONTROL_SECURITY_CREDENTIALS_0_ROLE=USER
+GROUNDCONTROL_SECURITY_CREDENTIALS_1_PRINCIPAL_NAME=operator-admin
+GROUNDCONTROL_SECURITY_CREDENTIALS_1_TOKEN=...
+GROUNDCONTROL_SECURITY_CREDENTIALS_1_ROLE=ADMIN
+```
+
+The token values live only in operator-managed secrets or `/opt/gc/.env`
+(mode 600), never in git or transcripts. MCP consumers should receive the
+appropriate value as `GROUND_CONTROL_API_TOKEN`; admin-only pack-registry
+automation may continue to use `GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN`
+because the repo-local MCP client maps it onto the unified ADR-026 bearer
+scheme.
+
+`/opt/gc/docker-compose.yml` is a runtime mirror, not the source of truth.
+Any backend environment passthrough needed for ADR-026 credentials belongs
+first in `deploy/docker/docker-compose.prod.yml`; after a clean sync,
+the compose file at `/opt/gc/docker-compose.yml` should match that repo file
+byte-for-byte. Operator-local secret material remains only in `/opt/gc/.env`.
+
+The production compose file publishes the backend on `${GC_BIND_IP:-0.0.0.0}:8000:8000`.
+On red-dragon, set `GC_BIND_IP=100.98.28.66` (the host's tailnet IP) in
+`/opt/gc/.env` so docker-proxy listens only on the tailnet interface — public
+IPv4 / IPv6 attempts to reach the API never even establish a TCP connection
+to the proxy. Defense in depth on top of ADR-026 bearer auth: even if the
+backend has a future auth bypass, an attacker would need a tailnet identity
+to reach it.
+
+A second, host-firewall layer drops TCP packets that arrive on the public
+interface bound for port 8000, regardless of what docker-proxy is listening
+on. The systemd unit lives at `deploy/scripts/gc-firewall.service`; install
+it once per host:
+
+```bash
+sudo install -o root -g root -m 644 \
+  deploy/scripts/gc-firewall.service /etc/systemd/system/gc-firewall.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now gc-firewall.service
+```
+
+Verify with `sudo iptables -L INPUT -n -v | head` — rule 1 should be
+`DROP -i enp8s0 tcp dport 8000`. The unit reads the public interface name
+from the rule itself (`enp8s0` matches red-dragon); change the unit if your
+deployment uses a different public NIC. Tailnet traffic enters via
+`tailscale0` (or via `lo` when the host talks to itself by its tailnet IP)
+and is unaffected.
+
+Both layers are idempotent and stateless — re-running `up -d` or
+`systemctl restart gc-firewall` is safe.
+
+### Migrating an existing deployment to ADR-026 auth
+
+Use this playbook when rolling forward from a pre-ADR-026 image (every
+deployed image before the V055-V058 / threat-model wave) to a security-enabled
+image. The 2026-05-09 attempt failed by skipping steps 1-4: the image was
+rolled in before consumers had tokens, and every in-flight agent caller 401'd
+within seconds. Order matters; do not skip ahead.
+
+1. **Inventory every consumer of `http://red-dragon:8000/api/v1/**`.** Sweep:
+   - This repo's MCP server (`mcp/ground-control/lib.js`) and any
+     agent-side `.mcp.json` entry that points at `red-dragon`.
+   - GitHub Actions live-policy / pack-sync jobs (`policy-live`,
+     `scripts/pack-sync.sh`, `tools/ground_control/check_live_policy.mjs`,
+     `tools/ground_control/check_adr_drift.mjs`,
+     `tools/ground_control/sync_policy.mjs`,
+     `tools/packs/sync_packs.mjs`).
+   - Long-running agent processes that inherited `GC_BASE_URL` from the
+     operator's shell (each one needs a token of its own logical class —
+     consumer-classes share a single token, individual processes do not
+     each need a unique one).
+   - Ad-hoc `curl`, `gh api`, or scripted callers.
+   Every entry on the list needs a token before step 6 happens.
+
+2. **Provision tokens — one principal per logical consumer-class.** Generate
+   long random tokens (e.g. `openssl rand -hex 32`). Typical layout:
+   - slot 0: `ground-control-mcp` / `USER` — every MCP / agent caller.
+   - slot 1: `operator-admin` / `ADMIN` — the human operator's CLI.
+   - slot 2: `automation` / `ADMIN` — CI live-policy + pack-sync jobs.
+   Reserve slots 3-4 for unforeseen consumers without re-editing the compose
+   file. Tokens NEVER land in git or transcripts.
+
+3. **Distribute tokens to each consumer.** Pick one mechanism and stay
+   consistent with the existing `${SONAR_TOKEN}` precedent:
+   - Env-var inheritance via `${GROUND_CONTROL_API_TOKEN}` substitution in
+     `.mcp.json`. Operator sets `GROUND_CONTROL_API_TOKEN` in their shell
+     and `claude`/agent processes inherit it.
+   - Operator secret store (1Password, `pass`, etc.) read by each agent's
+     start-up script.
+   For GitHub Actions, both:
+   (a) store the token as a repo secret (`GROUND_CONTROL_API_TOKEN`); and
+   (b) inject it into each step that talks to Ground Control via
+       `env: GROUND_CONTROL_API_TOKEN: ${{ secrets.GROUND_CONTROL_API_TOKEN }}`
+       on the workflow step (already wired into `policy-live` in
+       `.github/workflows/ci.yml`; any new live-API workflow step must do the
+       same).
+   The pre-existing `GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN` continues to
+   work for pack-sync since `mcp/ground-control/lib.js` maps it onto the
+   unified ADR-026 bearer scheme.
+
+4. **Verify each consumer is actually sending its bearer token — not just
+   that it can reach the API.** A `200` against the pre-ADR-026 production
+   image only proves reachability; a consumer with no `Authorization` header
+   at all also returns `200` there, then immediately `401` after cutover.
+   The root `docker-compose.yml` uses `SPRING_PROFILES_ACTIVE=dev`, which
+   sets `groundcontrol.security.enabled=false` — running consumers against
+   that local stack would also produce a false green for the same reason.
+   Use one of these dry-runs instead:
+   - **Security-enabled local instance using the candidate ADR-026 image.**
+     The dry-run MUST use the candidate image (the one targeted by the
+     cutover) — running the pre-ADR image locally reproduces the
+     reachability-only false green this step is designed to prevent.
+
+     **Resolving the candidate image.** `:latest` only updates on push to
+     `main`, so post-merge-to-`dev` it is still the previous release. Use
+     `:dev` (head of unreleased work, tracks dev tip) or `:sha-<commit>`
+     (immutable) to refer to the actual candidate. Resolve a stable digest
+     from either with:
+     ```bash
+     docker pull ghcr.io/keplerops/ground-control:dev
+     docker inspect ghcr.io/keplerops/ground-control:dev \
+       --format '{{index .RepoDigests 0}}'
+     # → ghcr.io/keplerops/ground-control@sha256:<digest>
+     ```
+     Pin the dry-run AND the production `/opt/gc/.env` to that digest so
+     the image you tested is the image you deploy.
+
+     **Isolating the dry-run database.** The production compose file's
+     `db` service bind-mounts `/data/postgres/`. To keep prod's schema
+     untouched, run the dry-run with a separate compose project name and
+     swap the bind-mount for an isolated Docker named volume. Use a
+     non-default port (e.g. `18000:8000`) so it does not collide with the
+     running production backend on `:8000`. Tear down with `down -v` to
+     destroy the throwaway DB volume when finished.
+     ```bash
+     # mktemp + chmod 600 so the scratch env file is never world-readable
+     # while it carries draft credential token values.
+     dryrun_env="$(mktemp -t gc-prod-dryrun.env.XXXXXX)"
+     chmod 600 "${dryrun_env}"
+     cp deploy/docker/.env.template "${dryrun_env}"
+     # Edit ${dryrun_env} to fill GC_DATABASE_PASSWORD, POSTGRES_PASSWORD,
+     # and GROUNDCONTROL_SECURITY_CREDENTIALS_<N>_* slots with the same
+     # token values that will land in /opt/gc/.env. Set GC_IMAGE to the
+     # candidate digest you resolved above. Run with a separate compose
+     # project name (gc-dryrun) and rebind the prod port + DB volume:
+     GC_IMAGE=ghcr.io/keplerops/ground-control@sha256:<digest> \
+       docker compose -p gc-dryrun --env-file "${dryrun_env}" \
+       -f deploy/docker/docker-compose.prod.yml up -d
+     # When done:
+     docker compose -p gc-dryrun --env-file "${dryrun_env}" \
+       -f deploy/docker/docker-compose.prod.yml down -v
+     shred -u "${dryrun_env}"
+     ```
+     Point each consumer at `http://localhost:8000` and confirm each
+     returns `200` against `/api/v1/projects`. The compose file declares
+     the indexed credential slots as list-form passthroughs, so unset
+     slots are NOT injected into the container and Spring sees only the
+     populated entries. A green dry-run here proves token delivery
+     end-to-end against the same auth layer production will run after
+     cutover.
+   - **Server-side audit-log inspection.** Make each consumer issue one
+     known authenticated call against the dry-run instance, then read the
+     backend's structured logs and confirm the request appears with the
+     expected principal name (`ground-control-mcp`, `operator-admin`,
+     `automation`). The principal name comes from `ActorFilter` /
+     `ActorHolder` and is logged via the per-request MDC key `actor_id`
+     (matching `logback-spring.xml`'s production JSON appender), NOT the
+     bearer token itself. This proves token delivery without the token
+     ever leaving the server-side process boundary, so the captured
+     output is safe to keep around for review:
+     ```bash
+     docker compose -f deploy/docker/docker-compose.prod.yml \
+       --env-file "${dryrun_env}" logs --tail=200 backend | \
+       grep '"actor_id"'
+     ```
+   Do NOT capture wire-level traces (e.g. `curl --trace-ascii`,
+   `tcpdump`, agent debug stdout) for this verification: those formats
+   embed the literal `Authorization: Bearer <token>` header, and any
+   resulting file or transcript becomes a credential leak — anyone who
+   can read the saved capture can replay the token. Status-code +
+   server-side principal-name verification covers the same property
+   without that exposure.
+
+   A consumer that gets `200` against the pre-ADR-026 production but fails
+   the candidate-image dry-run is exactly the regression this step
+   prevents — its bearer header is missing or wrong, and it will 401 the
+   moment the new image starts.
+
+   **Important precedence note:** `SPRING_APPLICATION_JSON` is also
+   forwarded to the container (legacy support for the pack-registry
+   bootstrap path in `deploy/scripts/enable_pack_registry_auth.sh`). When
+   it carries a `groundcontrol.security.credentials` block, Spring
+   *replaces* the indexed env-var list rather than merging — the new env
+   vars are silently ignored. Before the cutover, confirm
+   `SPRING_APPLICATION_JSON` either does NOT include
+   `groundcontrol.security.credentials` at all, or contains the same
+   principals you provisioned via the indexed env vars. The dry-run
+   above will surface this if it bites: a consumer that authenticates
+   under indexed env vars but fails inside the dry-run container is
+   most likely losing to a stale `SPRING_APPLICATION_JSON` block.
+
+5. **`pg_dump -Fc` snapshot.** Defensive — the new image carries V055-V058
+   forward-only migrations:
+   ```bash
+   ssh red-dragon /opt/gc/backup.sh
+   # OR (if running on red-dragon directly):
+   docker exec gc-db-1 pg_dump -Fc -U gc ground_control \
+     > /data/backups/gc-pre-cutover-$(date -u +%Y%m%dT%H%M%SZ).dump
+   ```
+
+6. **Update `/opt/gc/.env` with the credential block + the candidate
+   digest.** Use the indexed `GROUNDCONTROL_SECURITY_CREDENTIALS_*` shape
+   (matches the env-var table above and `deploy/docker/.env.template`).
+   The same digest you dry-ran against in step 4 belongs in `GC_IMAGE`
+   here — pinning by digest (`ghcr.io/keplerops/ground-control@sha256:...`)
+   guarantees the cutover rolls the image you tested, not whatever has
+   moved under `:dev` since. After editing, `chmod 600`.
+
+7. **Sync `/opt/gc/docker-compose.yml` byte-for-byte from this repo's
+   `deploy/docker/docker-compose.prod.yml`.** That file is the canonical
+   source of the env-passthrough block; the runtime copy must match it
+   after sync, otherwise the next sync clobbers operator-local edits.
+   The `make policy` gate
+   (`tools/policy/checks.py::run_deploy_compose_credential_passthrough`)
+   enforces the credential keys stay present in the canonical file.
+
+8. **Roll the image.** Pick one path:
+   - **Manual (recommended for the first cutover).** From red-dragon (or
+     any tailnet host with the deploy SSH key):
+     ```bash
+     cd /opt/gc
+     docker compose --env-file .env up -d --force-recreate backend
+     # OR via the SSH forced-command target:
+     ssh gc-deploy@red-dragon
+     ```
+   - **CI auto-deploy.** Merge `dev` → `main`. The `deploy` job in
+     `.github/workflows/ci.yml` runs `/opt/gc/deploy.sh` over the
+     fabricator-managed self-hosted runner pool's tailnet bridge. Only
+     use this path AFTER steps 1-7 are confirmed; the deploy job has no
+     awareness of consumer-token state and will happily 401 every
+     consumer if you skip them.
+
+9. **Verify Flyway and the threat-model surface.** `V055`-`V058` apply on
+   first start of the new image; the `threat_model` table appears in the
+   schema:
+   ```bash
+   docker compose exec db psql -U gc -d ground_control -c \
+     "SELECT version FROM flyway_schema_history WHERE version IN ('55','56','57','58');"
+   docker compose exec db psql -U gc -d ground_control -c "\\d threat_model"
+   ```
+
+10. **Re-verify every consumer from step 1 returns `200` (or its expected
+    status, e.g. `404` for a not-found lookup) — never `401`.** Hit the
+    threat-model MCP path explicitly (`gc_list_threat_models`,
+    `gc_create_threat_model`, `gc_get_threat_model`) since that is the
+    surface this whole migration was meant to enable. A `401` from any
+    consumer at this point means the token was not delivered (back to
+    step 3) — do NOT roll back the image; rollback is reserved for
+    actual schema/data damage.
+
+If any step fails, stop and surface the failure to the operator before
+continuing — every later step assumes the earlier one succeeded.
+
 ### Makefile Targets
 
 | Target | Description |

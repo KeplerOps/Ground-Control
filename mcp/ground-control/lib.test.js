@@ -28,6 +28,9 @@ import {
   parseCodexReviewCycleMarkers,
   evaluateCodexReviewCycleCap,
   buildCodexReviewCycleMarker,
+  buildCodexReviewToolDescription,
+  buildCodexReviewOverrideCapDescription,
+  buildCodexReviewOverrideReasonDescription,
   CODEX_REVIEW_HARD_CAP,
   CODEX_REVIEW_CYCLE_MARKER_PREFIX,
   parsePhaseMarkers,
@@ -55,7 +58,72 @@ import {
   RELATION_TYPES,
   ARTIFACT_TYPES,
   LINK_TYPES,
+  toSnakeCase,
 } from "./lib.js";
+
+// ---------------------------------------------------------------------------
+// toSnakeCase (backend response normalization)
+// ---------------------------------------------------------------------------
+
+describe("toSnakeCase", () => {
+  it("maps sweep + status-drift response fields to snake_case, recursively", () => {
+    const backend = {
+      projectIdentifier: "ground-control",
+      hasProblems: true,
+      totalProblems: 1,
+      statusDrift: [
+        {
+          uid: "GC-T010",
+          title: "Risk Assessment Result Entity",
+          confidence: "HIGH",
+          strongestSignal: "IMPLEMENTS_LINK_ON_DRAFT",
+          evidence: [
+            {
+              signal: "IMPLEMENTS_LINK_ON_DRAFT",
+              confidence: "HIGH",
+              artifactType: "GITHUB_ISSUE",
+              artifactIdentifier: "826",
+              artifactTitle: "GC-T010: ...",
+              artifactUrl: "https://gh/826",
+              detail: "IMPLEMENTS link on a DRAFT requirement",
+            },
+          ],
+        },
+      ],
+    };
+    const out = toSnakeCase(backend);
+    assert.equal(out.has_problems, true);
+    assert.equal(out.total_problems, 1);
+    assert.ok(Array.isArray(out.status_drift));
+    const finding = out.status_drift[0];
+    assert.equal(finding.uid, "GC-T010");
+    assert.equal(finding.confidence, "HIGH");
+    assert.equal(finding.strongest_signal, "IMPLEMENTS_LINK_ON_DRAFT");
+    const evidence = finding.evidence[0];
+    assert.equal(evidence.signal, "IMPLEMENTS_LINK_ON_DRAFT");
+    assert.equal(evidence.artifact_type, "GITHUB_ISSUE");
+    assert.equal(evidence.artifact_identifier, "826");
+    assert.equal(evidence.artifact_url, "https://gh/826");
+    assert.equal(evidence.detail, "IMPLEMENTS link on a DRAFT requirement");
+  });
+
+  it("maps the standalone status-drift result envelope", () => {
+    const out = toSnakeCase({
+      draftRequirementsScanned: 14,
+      minimumConfidence: "MEDIUM",
+      findings: [],
+    });
+    assert.equal(out.draft_requirements_scanned, 14);
+    assert.equal(out.minimum_confidence, "MEDIUM");
+    assert.deepEqual(out.findings, []);
+  });
+
+  it("passes unknown keys through unchanged and tolerates null/scalars", () => {
+    assert.equal(toSnakeCase(null), null);
+    assert.equal(toSnakeCase(42), 42);
+    assert.deepEqual(toSnakeCase({ alreadyPlain: 1 }), { alreadyPlain: 1 });
+  });
+});
 
 // ---------------------------------------------------------------------------
 // buildUrl
@@ -1456,6 +1524,20 @@ describe("buildCodexArchitecturePreflightPrompt", () => {
     assert.ok(prompt.includes("Do not spend time re-fetching requirement details"));
     assert.ok(!prompt.includes("Do not spend time re-fetching issue details"));
   });
+
+  it("asks codex to design repo-wide against security / maintainability / extensibility / whole-repo (#830)", () => {
+    const prompt = buildCodexArchitecturePreflightPrompt({
+      requirement: null,
+      issueContext: { number: 830, title: "x" },
+    });
+    assert.ok(prompt.includes("Design-up-front, repo-wide"));
+    assert.ok(prompt.includes("Security:"));
+    assert.ok(prompt.includes("Maintainability:"));
+    assert.ok(prompt.includes("Extensibility:"));
+    assert.ok(prompt.includes("Whole-repo view:"));
+    assert.ok(prompt.includes("validate()"));
+    assert.ok(prompt.includes("which cross-cutting layers it must pass"));
+  });
 });
 
 describe("buildCodexArchitectureExecArgs", () => {
@@ -1498,6 +1580,21 @@ describe("buildCodexReviewCorePrompt", () => {
     assert.ok(prompt.includes("No triage"));
     assert.ok(prompt.includes("The caller intends to fix everything now."));
     assert.ok(prompt.includes("precise file and line reference"));
+  });
+
+  it("requires per-finding one-off/class classification with category shape + instances (#830)", () => {
+    const prompt = buildCodexReviewCorePrompt({
+      baseBranch: "dev",
+      uncommitted: true,
+      diffText: diff,
+    });
+    assert.ok(prompt.includes("one-off or one instance of a recurring CATEGORY"));
+    assert.ok(prompt.includes("`classification`"));
+    assert.ok(prompt.includes('"one-off"'));
+    assert.ok(prompt.includes('"class"'));
+    assert.ok(prompt.includes("`category`"));
+    assert.ok(prompt.includes("`shape`"));
+    assert.ok(prompt.includes("`instances`"));
   });
 
   it("tells codex not to re-derive the diff and embeds it inside delimiters", () => {
@@ -1898,8 +1995,15 @@ describe("parseCodexReviewFindingsTail", () => {
 
   it("parses a well-formed FINDINGS block and strips it from the body", () => {
     const findingsJson = JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "The handler does not validate the `name` parameter against length limits." },
-      { path: "src/bar.java", line: 88, title: "Bypass of existing helper", body: "Uses raw JdbcTemplate instead of the project's ScopedRequirementRepository." },
+      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "The handler does not validate the `name` parameter against length limits.", classification: "one-off" },
+      {
+        path: "src/bar.java",
+        line: 88,
+        title: "Bypass of existing helper",
+        body: "Uses raw JdbcTemplate instead of the project's ScopedRequirementRepository.",
+        classification: "class",
+        category: { shape: "controller method that hits the DB via raw JdbcTemplate instead of a scoped repository", instances: ["src/bar.java:88", "src/baz.java:140"] },
+      },
     ]);
     const stdout = `**Findings**\n\n- src/foo.java:42 missing validation\n- src/bar.java:88 bypass\n\n===FINDINGS===\n${findingsJson}\n===END===\n`;
     const { findings, body } = parseCodexReviewFindingsTail(stdout, repoRoot);
@@ -1909,11 +2013,57 @@ describe("parseCodexReviewFindingsTail", () => {
       line: 42,
       title: "Missing input validation",
       body: "The handler does not validate the `name` parameter against length limits.",
+      classification: "one-off",
     });
     assert.equal(findings[1].path, "src/bar.java");
+    assert.equal(findings[1].classification, "class");
+    assert.deepEqual(findings[1].category, {
+      shape: "controller method that hits the DB via raw JdbcTemplate instead of a scoped repository",
+      instances: ["src/bar.java:88", "src/baz.java:140"],
+    });
     assert.ok(!body.includes("===FINDINGS==="));
     assert.ok(!body.includes("===END==="));
     assert.ok(body.includes("**Findings**"));
+  });
+
+  it("requires a `classification` on every finding", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "y" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /classification/);
+  });
+
+  it("rejects an unknown `classification` value", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "minor" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /classification/);
+  });
+
+  it("requires `category` {shape, instances} when classification is class", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "class" },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /category/);
+  });
+
+  it("rejects an empty `category.instances` array", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "class", category: { shape: "a recurring pattern", instances: [] } },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /instances/);
+  });
+
+  it("rejects a `category` on a one-off finding", () => {
+    const findingsJson = JSON.stringify([
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "one-off", category: { shape: "x", instances: ["src/foo.java:42"] } },
+    ]);
+    const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
+    assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /one-off/);
   });
 
   it("parses an empty FINDINGS block", () => {
@@ -2028,29 +2178,44 @@ describe("parseCodexReviewFindingsTail", () => {
     assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /body/);
   });
 
-  it("throws when `body` exceeds the cap that accounts for the rendered prefix (review-cycle-3 finding)", () => {
-    // The poster prepends `[reviewerLabel] title\n\n` to the body before
-    // POSTing. Worst case prefix is `[security] ` (11) + 200-char title +
-    // \n\n (2) = 213 chars. Codex review flagged that a body of exactly
-    // 65535 chars would render to >65535 and get rejected by GitHub.
-    // Validator caps body so the rendered comment always fits.
+  it("throws when `body` exceeds the cap that reserves room for the rendered prefix + classification note (#828 cycle-3, #830 cycle-1)", () => {
+    // The poster prepends `[reviewerLabel] title\n\n` (≤213 chars) and, for
+    // class findings, a bounded classification note (≤800 chars) before the
+    // body. The validator caps body at 65535 - 213 - 800 = 64522 so the
+    // rendered comment always fits GitHub's 65535-char limit even in the
+    // class-finding path.
     const findingsJson = JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "x", body: "y".repeat(65336) },
+      { path: "src/foo.java", line: 42, title: "x", body: "y".repeat(65336), classification: "one-off" },
     ]);
     const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
     assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /body/);
   });
 
-  it("accepts a body up to the cap that leaves room for the rendered prefix", () => {
-    // The cap is 65322 chars (65535 - 213-char worst-case prefix). A body
-    // of exactly that length must validate and render to <= 65535.
-    const safeLen = 65322;
+  it("accepts a body up to the cap that leaves room for the rendered prefix + classification note", () => {
+    // 64522 = 65535 - 213 (worst-case prefix) - 800 (worst-case classification note).
+    const safeLen = 64522;
     const findingsJson = JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "x".repeat(200), body: "y".repeat(safeLen) },
+      { path: "src/foo.java", line: 42, title: "x".repeat(200), body: "y".repeat(safeLen), classification: "one-off" },
     ]);
     const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
     const { findings } = parseCodexReviewFindingsTail(stdout, repoRoot);
     assert.equal(findings[0].body.length, safeLen);
+  });
+
+  it("validates each `category.instances` entry as <path>:<line> inside the repo and requires the finding's own site", () => {
+    const mk = (instances) =>
+      `===FINDINGS===\n${JSON.stringify([
+        { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "class", category: { shape: "a recurring pattern", instances } },
+      ])}\n===END===`;
+    // Not in <path>:<line> form.
+    assert.throws(() => parseCodexReviewFindingsTail(mk(["later"]), repoRoot), /<path>:<line>|instances/);
+    // Path escapes the repo.
+    assert.throws(() => parseCodexReviewFindingsTail(mk(["../etc/passwd:1", "src/foo.java:42"]), repoRoot), /path|traversal|instances/i);
+    // Own site (src/foo.java:42) missing from the list.
+    assert.throws(() => parseCodexReviewFindingsTail(mk(["src/bar.java:7"]), repoRoot), /own site/i);
+    // Valid: own site present, deduped.
+    const { findings } = parseCodexReviewFindingsTail(mk(["src/foo.java:42", "src/foo.java:42", "src/bar.java:7"]), repoRoot);
+    assert.deepEqual(findings[0].category.instances, ["src/foo.java:42", "src/bar.java:7"]);
   });
 
   it("throws when a `path` escapes the repo via traversal", () => {
@@ -2076,8 +2241,8 @@ describe("parseCodexReviewFindingsTail", () => {
 
   it("includes the finding index in the error so codex output is debuggable", () => {
     const findingsJson = JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "x", body: "y" },
-      { path: "src/bar.java", line: 99, title: "ok", body: "" }, // bad: empty body
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "one-off" },
+      { path: "src/bar.java", line: 99, title: "ok", body: "", classification: "one-off" }, // bad: empty body
     ]);
     const stdout = `===FINDINGS===\n${findingsJson}\n===END===`;
     assert.throws(() => parseCodexReviewFindingsTail(stdout, repoRoot), /\b1\b/); // finding index 1
@@ -4081,8 +4246,8 @@ process.stdin.on("end", () => {
     // prefix and both return empty pages — that's fine, the canned response
     // works for both.
     const findingsTail = "===FINDINGS===\n" + JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "Detail A" },
-      { path: "src/bar.java", line: 88, title: "Bypasses ScopedRequirementRepository", body: "Detail B" },
+      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "Detail A", classification: "one-off" },
+      { path: "src/bar.java", line: 88, title: "Bypasses ScopedRequirementRepository", body: "Detail B", classification: "one-off" },
     ]) + "\n===END===\n";
     // Closing-issues fetch is part of the post-push gate; return one closing
     // issue (#998) that has a `plan` phase marker on its thread.
@@ -4282,7 +4447,7 @@ process.stdin.on("end", () => {
     // surface a structured error — same fail-fast posture as the pre-push
     // cycle marker.
     const findingsTail = "===FINDINGS===\n" + JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "x", body: "y" },
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "one-off" },
     ]) + "\n===END===\n";
     const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
 
@@ -4360,7 +4525,7 @@ process.stdin.on("end", () => {
     // post_failures envelope records each per-reviewer per-finding failure
     // so the calling agent sees the partial-write condition.
     const findingsTail = "===FINDINGS===\n" + JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "Detail" },
+      { path: "src/foo.java", line: 42, title: "Missing input validation", body: "Detail", classification: "one-off" },
     ]) + "\n===END===\n";
     const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
 
@@ -4435,8 +4600,8 @@ process.stdin.on("end", () => {
     // landed (parse-only failure, or all-POST failure due to head-SHA
     // fetch / network).
     const findingsTail = "===FINDINGS===\n" + JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "x", body: "y" },
-      { path: "src/bar.java", line: 99, title: "x2", body: "y2" },
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "one-off" },
+      { path: "src/bar.java", line: 99, title: "x2", body: "y2", classification: "one-off" },
     ]) + "\n===END===\n";
     const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
 
@@ -4520,7 +4685,7 @@ process.stdin.on("end", () => {
     // We exercise this on the no-PR / uncommitted=true path because
     // postResults is empty there and the placeholder branch fires.
     const findingsTail = "===FINDINGS===\n" + JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "Detail title", body: "Authoritative body content the agent must see." },
+      { path: "src/foo.java", line: 42, title: "Detail title", body: "Authoritative body content the agent must see.", classification: "one-off" },
     ]) + "\n===END===\n";
 
     const shim = makeFullShimRepo({
@@ -4674,7 +4839,7 @@ process.stdin.on("end", () => {
     // post_failures, and the response is ok=false so the agent doesn't treat
     // the run as complete.
     const findingsTail = "===FINDINGS===\n" + JSON.stringify([
-      { path: "src/foo.java", line: 42, title: "x", body: "y" },
+      { path: "src/foo.java", line: 42, title: "x", body: "y", classification: "one-off" },
     ]) + "\n===END===\n";
     const planMarker = '<!-- gc:phase phase="plan" issue="998" -->';
 
@@ -5012,5 +5177,226 @@ describe("constants", () => {
 
   it("LINK_TYPES matches Java LinkType enum", () => {
     assert.deepEqual(LINK_TYPES, ["IMPLEMENTS", "TESTS", "DOCUMENTS", "CONSTRAINS", "VERIFIES"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gc_codex_review tool description / override description builders (#794)
+//
+// The MCP tool descriptions for `gc_codex_review` are part of the public
+// protocol surface — every LLM client that lists the tool sees them. Inline
+// strings in index.js drifted past the cap bumps in #804 (post-push and
+// pre-push caps moved 2 → 3) and the pre-push key change in #800 review
+// (was (issue, branch), now issue alone per ADR-029). These builders are
+// pure functions that interpolate the live constants so the description
+// cannot drift again.
+// ---------------------------------------------------------------------------
+
+describe("buildCodexReviewToolDescription", () => {
+  it("surfaces both live cap values (collapsed when equal)", () => {
+    const desc = buildCodexReviewToolDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.ok(
+      desc.includes(`${CODEX_REVIEW_HARD_CAP} cycles per PR`),
+      `description must mention "${CODEX_REVIEW_HARD_CAP} cycles per PR"; got: ${desc}`,
+    );
+    assert.ok(
+      desc.includes(`${CODEX_REVIEW_PREPUSH_HARD_CAP} cycles per issue`),
+      `description must mention "${CODEX_REVIEW_PREPUSH_HARD_CAP} cycles per issue"; got: ${desc}`,
+    );
+  });
+
+  it("uses a mode-neutral cap heading (not 'Hard-cap-N enforcement') so divergent caps don't mislead", () => {
+    const desc = buildCodexReviewToolDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.match(desc, /Cycle-cap enforcement/i);
+    assert.ok(
+      !/\bHard-cap-\d+\s+enforcement\b/i.test(desc),
+      `must not contain a hard-cap-N enforcement phrase anywhere (start of line or inline); got: ${desc}`,
+    );
+  });
+
+  it("does not contain the stale hard-cap-2 wording", () => {
+    const desc = buildCodexReviewToolDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.ok(
+      !/hard-cap-2\b/i.test(desc),
+      `description must not contain "hard-cap-2"; got: ${desc}`,
+    );
+    assert.ok(
+      !/two cycles per PR/.test(desc),
+      `description must not say "two cycles per PR"; got: ${desc}`,
+    );
+  });
+
+  it("does not advertise the (issue, branch) pair shape (ADR-029: keyed by issue alone)", () => {
+    const desc = buildCodexReviewToolDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.ok(
+      !/\(issue,\s*branch\)\s+pair/i.test(desc),
+      `description must not advertise (issue, branch) pair keying; got: ${desc}`,
+    );
+  });
+
+  it("references both #794 and #796 so audit history points at the right MVPs", () => {
+    const desc = buildCodexReviewToolDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.ok(desc.includes("#794"), `description must reference issue #794; got: ${desc}`);
+    assert.ok(desc.includes("#796"), `description must reference issue #796; got: ${desc}`);
+  });
+
+  it("documents the override_cap=true / override_reason escape hatch", () => {
+    const desc = buildCodexReviewToolDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.ok(desc.includes("override_cap=true"), `must mention override_cap=true; got: ${desc}`);
+    assert.ok(
+      desc.includes("override_reason"),
+      `must mention override_reason; got: ${desc}`,
+    );
+  });
+
+  it("makes PR auto-detect mode-specific (post-push only, pre-push needs explicit pr_number)", () => {
+    const desc = buildCodexReviewToolDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.match(
+      desc,
+      /post-push.*auto-detects/is,
+      `must scope auto-detect to post-push reviews; got: ${desc}`,
+    );
+    assert.match(
+      desc,
+      /pre-push.*pr_number.*explicit/is,
+      `must clarify pre-push needs an explicit pr_number; got: ${desc}`,
+    );
+  });
+
+  it("interpolates whatever caps the caller passes (equal case)", () => {
+    const desc = buildCodexReviewToolDescription({ postPushCap: 7, prepushCap: 7 });
+    assert.match(desc, /hard-cap-7\b/i);
+    assert.ok(desc.includes("7 cycles per PR"), `expected "7 cycles per PR"; got: ${desc}`);
+    assert.ok(desc.includes("7 cycles per issue"), `expected "7 cycles per issue"; got: ${desc}`);
+    assert.ok(!/\b3\s+cycles\s+per\s+PR\b/.test(desc), `must not leak default 3; got: ${desc}`);
+  });
+
+  it("surfaces both cap values when post-push and pre-push diverge", () => {
+    const desc = buildCodexReviewToolDescription({ postPushCap: 5, prepushCap: 11 });
+    assert.ok(desc.includes("5 cycles per PR"), `expected "5 cycles per PR"; got: ${desc}`);
+    assert.ok(desc.includes("11 cycles per issue"), `expected "11 cycles per issue"; got: ${desc}`);
+    assert.match(desc, /post-push 5.*pre-push 11|pre-push 11.*post-push 5/is);
+  });
+});
+
+describe("buildCodexReviewOverrideCapDescription", () => {
+  it("surfaces the live cap value as a structured cap phrase (not a bare digit)", () => {
+    const desc = buildCodexReviewOverrideCapDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    if (CODEX_REVIEW_HARD_CAP === CODEX_REVIEW_PREPUSH_HARD_CAP) {
+      assert.match(
+        desc,
+        new RegExp(`hard-cap-${CODEX_REVIEW_HARD_CAP}\\b`, "i"),
+        `equal-cap form must surface "hard-cap-N"; got: ${desc}`,
+      );
+    } else {
+      assert.match(
+        desc,
+        new RegExp(
+          `post-push ${CODEX_REVIEW_HARD_CAP}\\b.*pre-push ${CODEX_REVIEW_PREPUSH_HARD_CAP}\\b|` +
+            `pre-push ${CODEX_REVIEW_PREPUSH_HARD_CAP}\\b.*post-push ${CODEX_REVIEW_HARD_CAP}\\b`,
+          "is",
+        ),
+        `divergent-cap form must surface both caps; got: ${desc}`,
+      );
+    }
+  });
+
+  it("does not contain stale hard-cap-2 wording", () => {
+    const desc = buildCodexReviewOverrideCapDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.ok(!/hard-cap-2\b/i.test(desc), `must not contain hard-cap-2; got: ${desc}`);
+  });
+
+  it("nudges the agent toward fix-and-escalate, not silent retries", () => {
+    const desc = buildCodexReviewOverrideCapDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.ok(
+      desc.includes("override_reason"),
+      `must require override_reason; got: ${desc}`,
+    );
+    assert.ok(
+      /user\b/i.test(desc),
+      `must remind that only the user can authorize overrides; got: ${desc}`,
+    );
+  });
+
+  it("collapses to hard-cap-N when caps are equal", () => {
+    const desc = buildCodexReviewOverrideCapDescription({ postPushCap: 9, prepushCap: 9 });
+    assert.match(desc, /hard-cap-9\b/i);
+    assert.ok(!/hard-cap-3\b/i.test(desc), `must not leak default 3; got: ${desc}`);
+  });
+
+  it("surfaces both caps when post-push and pre-push diverge", () => {
+    const desc = buildCodexReviewOverrideCapDescription({ postPushCap: 4, prepushCap: 6 });
+    assert.match(desc, /post-push 4.*pre-push 6|pre-push 6.*post-push 4/is);
+    assert.ok(!/hard-cap-4\b/i.test(desc), `divergent caps must not collapse; got: ${desc}`);
+    assert.ok(!/hard-cap-6\b/i.test(desc), `divergent caps must not collapse; got: ${desc}`);
+  });
+});
+
+describe("buildCodexReviewOverrideReasonDescription", () => {
+  it("requires override_reason when override_cap=true", () => {
+    const desc = buildCodexReviewOverrideReasonDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.match(desc, /Required when override_cap=true/);
+    assert.match(desc, /Stored in the marker for audit/);
+  });
+
+  it("uses a concrete next-cycle example when caps are equal", () => {
+    const desc = buildCodexReviewOverrideReasonDescription({
+      postPushCap: CODEX_REVIEW_HARD_CAP,
+      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+    });
+    assert.match(
+      desc,
+      new RegExp(`run cycle ${CODEX_REVIEW_HARD_CAP + 1}`),
+      `equal-cap example should name the first cycle past the cap; got: ${desc}`,
+    );
+  });
+
+  it("uses cap-relative wording when caps diverge so it does not lock in a single number", () => {
+    const desc = buildCodexReviewOverrideReasonDescription({ postPushCap: 4, prepushCap: 6 });
+    assert.ok(
+      /next over-cap cycle/i.test(desc),
+      `divergent-cap example must avoid a hardcoded next-cycle integer; got: ${desc}`,
+    );
+    assert.ok(!/cycle 5\b/.test(desc), `must not pin to post-push next cycle; got: ${desc}`);
+    assert.ok(!/cycle 7\b/.test(desc), `must not pin to pre-push next cycle; got: ${desc}`);
+  });
+
+  it("does not hardcode the cap value (proves it follows the constants)", () => {
+    const desc = buildCodexReviewOverrideReasonDescription({ postPushCap: 9, prepushCap: 9 });
+    assert.match(desc, /run cycle 10\b/);
+    assert.ok(!/run cycle 4\b/.test(desc), `must not leak default cap+1; got: ${desc}`);
   });
 });

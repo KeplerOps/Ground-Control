@@ -35,6 +35,14 @@ repositories {
     mavenCentral()
 }
 
+// Gradle dependency locking. Produces backend/gradle.lockfile covering every
+// resolvable configuration, which OSV-scanner consumes in CI. Subsequent
+// `gradle build` (without --write-locks) fails if the resolved graph drifts
+// from the lockfile, which keeps the scanned input honest.
+dependencyLocking {
+    lockAllConfigurations()
+}
+
 dependencies {
     // Spring Boot
     implementation("org.springframework.boot:spring-boot-starter-web")
@@ -47,8 +55,9 @@ dependencies {
     // Audit trail
     implementation("org.springframework.data:spring-data-envers")
 
-    // Database
-    runtimeOnly("org.postgresql:postgresql")
+    // Database — implementation (not runtimeOnly) because AgeGraphService binds AGE's
+    // agtype pseudotype via org.postgresql.util.PGobject at compile time.
+    implementation("org.postgresql:postgresql")
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-database-postgresql")
 

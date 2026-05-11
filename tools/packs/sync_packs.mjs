@@ -172,8 +172,12 @@ async function getRegistryEntry(baseUrl, project, packId, version) {
 
 async function getInstalledPack(baseUrl, project, packId) {
   try {
+    // ADR-026 protects every /api/v1/** path with at least authenticated
+    // access. Without `auth: true` this read 401s after the security-enabled
+    // image rolls out, breaking the install-state probe (#828 cycle 2).
     return await apiRequest(baseUrl, "GET", `/api/v1/control-packs/${encodeURIComponent(packId)}`, {
       params: { project },
+      auth: true,
     });
   } catch (error) {
     if (error.status === 404) {

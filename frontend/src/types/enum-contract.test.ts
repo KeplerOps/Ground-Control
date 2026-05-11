@@ -1,82 +1,79 @@
 /**
- * Contract tests that verify frontend enum values exactly match the backend/MCP
- * single source of truth.  Any drift between the REQUIREMENT_TYPES,
- * ARTIFACT_TYPES, or LINK_TYPES constants in api.ts and the backend Java enums
- * will cause this test suite to fail in CI.
+ * Mechanical contract test: the frontend enum constant arrays in `api.ts` must
+ * match the backend Java enums under
+ * `backend/src/main/java/com/keplerops/groundcontrol/domain/requirements/state/`,
+ * which are the single source of truth (ADR-034). This test reads the actual
+ * Java source files and parses their enum constants — it does NOT hardcode a
+ * second copy of the value lists, so it cannot "move the drift".
  *
- * Backend sources:
- *   - RequirementType: domain/requirements/state/RequirementType.java
- *   - ArtifactType:    domain/requirements/state/ArtifactType.java
- *   - LinkType:        domain/requirements/state/LinkType.java
- * MCP source:
- *   - mcp/ground-control/lib.js
+ * The authoritative CI gate is `tools/policy/checks.py::run_enum_contract_check`
+ * (run by `bin/policy` in the `policy` CI job), which also checks the `api.ts`
+ * union types and the MCP `lib.js` constants and covers union-only mirrors
+ * (SyncStatus, ChangeCategory). This test is the frontend-developer-local mirror
+ * of that contract for the enums the UI iterates as arrays.
  */
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { ARTIFACT_TYPES, LINK_TYPES, REQUIREMENT_TYPES } from "./api";
+import {
+  ARTIFACT_TYPES,
+  CHANGE_CATEGORIES,
+  LINK_TYPES,
+  PRIORITIES,
+  RELATION_TYPES,
+  REQUIREMENT_TYPES,
+  STATUSES,
+} from "./api";
 
-function sorted(values: readonly string[]): string[] {
-  return [...values].sort();
+const STATE_DIR =
+  "../../../backend/src/main/java/com/keplerops/groundcontrol/domain/requirements/state";
+
+function javaEnumConstants(enumClassName: string): string[] {
+  const path = fileURLToPath(
+    new URL(`${STATE_DIR}/${enumClassName}.java`, import.meta.url),
+  );
+  // Strip line and block comments so a commented-out constant is not counted.
+  const source = readFileSync(path, "utf-8")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/\/\/[^\n]*/g, "");
+  // Body runs from the opening `{` to the first `;` (enums with methods/fields,
+  // e.g. Status) or the closing `}` (constant-only enums); strip constructor
+  // argument groups like FOO("x").
+  const body = source
+    .match(/enum\s+\w+[^{;]*\{([\s\S]*?)(?:;|\})/)?.[1]
+    ?.replace(/\([^)]*\)/g, " ");
+  if (body === undefined) {
+    throw new Error(`No enum declaration found in ${enumClassName}.java`);
+  }
+  return body
+    .split(/[,\s]+/)
+    .map((token) => token.trim())
+    .filter((token) => /^[A-Z][A-Z0-9_]*$/.test(token));
 }
 
-describe("Enum contract: RequirementType", () => {
-  it("contains exactly the backend-supported values", () => {
-    expect(sorted(REQUIREMENT_TYPES)).toEqual(
-      sorted(["FUNCTIONAL", "NON_FUNCTIONAL", "CONSTRAINT", "INTERFACE"]),
-    );
-  });
+describe("frontend enum constants match the backend Java source of truth", () => {
+  const cases: ReadonlyArray<readonly [string, readonly string[]]> = [
+    ["Status", STATUSES],
+    ["Priority", PRIORITIES],
+    ["RequirementType", REQUIREMENT_TYPES],
+    ["RelationType", RELATION_TYPES],
+    ["ArtifactType", ARTIFACT_TYPES],
+    ["LinkType", LINK_TYPES],
+    ["ChangeCategory", CHANGE_CATEGORIES],
+  ];
 
-  it("does not contain removed/unsupported values", () => {
-    const removed = ["PERFORMANCE", "SECURITY", "DATA"];
-    for (const v of removed) {
-      expect(REQUIREMENT_TYPES).not.toContain(v);
-    }
-  });
-});
+  for (const [enumClassName, frontendConstant] of cases) {
+    it(`${enumClassName} — api.ts constant equals the Java enum constants (in order)`, () => {
+      expect([...frontendConstant]).toEqual(javaEnumConstants(enumClassName));
+    });
+  }
 
-describe("Enum contract: ArtifactType", () => {
-  it("contains exactly the backend-supported values", () => {
-    expect(sorted(ARTIFACT_TYPES)).toEqual(
-      sorted([
-        "GITHUB_ISSUE",
-        "CODE_FILE",
-        "ADR",
-        "CONFIG",
-        "POLICY",
-        "TEST",
-        "SPEC",
-        "PROOF",
-        "DOCUMENTATION",
-      ]),
-    );
-  });
-
-  it("does not contain removed/unsupported values", () => {
-    const removed = [
-      "GITHUB_PR",
-      "JIRA_ISSUE",
-      "CONFLUENCE_PAGE",
-      "TEST_CASE",
-      "DESIGN_DOC",
-      "OTHER",
-    ];
-    for (const v of removed) {
-      expect(ARTIFACT_TYPES).not.toContain(v);
-    }
-  });
-});
-
-describe("Enum contract: LinkType", () => {
-  it("contains exactly the backend-supported values", () => {
-    expect(sorted(LINK_TYPES)).toEqual(
-      sorted(["IMPLEMENTS", "TESTS", "DOCUMENTS", "CONSTRAINS", "VERIFIES"]),
-    );
-  });
-
-  it("does not contain removed/unsupported values", () => {
-    const removed = ["TRACES_TO", "DERIVED_FROM"];
-    for (const v of removed) {
-      expect(LINK_TYPES).not.toContain(v);
+  it("ArtifactType still includes the cross-workflow targets (regression for #433)", () => {
+    // The earlier partial fix dropped these from the frontend even though the
+    // backend/MCP keep them for sync, ADR, risk, and control workflows.
+    for (const value of ["PULL_REQUEST", "RISK_SCENARIO", "CONTROL"]) {
+      expect(ARTIFACT_TYPES).toContain(value);
     }
   });
 });

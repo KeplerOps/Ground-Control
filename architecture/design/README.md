@@ -17,3 +17,4 @@ For architecture decisions, see [ADRs](../adrs/).
 | [Phase 1: Requirements Management](../notes/phase1-requirements-design.md) | 1 | Data model, app structure, key patterns for the requirements management system |
 | [Phase 2: Cloud Database](../notes/phase2-cloud-database-design.md) | 2 | RDS deployment, Terraform structure, security model, developer workflow |
 | [Architecture Model Artifacts](../notes/architecture-model-artifacts.md) | 5 | Guardrails for modeling C4 diagrams, architecture tests, and fitness functions as traceable artifacts without introducing a parallel artifact domain |
+| [Security Scanner CI Preflight](../notes/security-scanner-ci-preflight.md) | CI | Guardrails for adding advisory Trivy and OSV-scanner jobs without duplicating policy, security, or runtime abstractions |

@@ -14,6 +14,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class SweepExportExcelService {
 
+    private static final String COL_UID = "UID";
+    private static final String COL_TITLE = "Title";
+
     public byte[] toExcel(SweepReport report) {
         try (var workbook = new XSSFWorkbook()) {
             var headerStyle = createHeaderStyle(workbook);
@@ -23,6 +26,7 @@ public class SweepExportExcelService {
             writeOrphansSheet(workbook, headerStyle, report.orphans());
             writeCoverageGapsSheet(workbook, headerStyle, report.coverageGaps());
             writeViolationsSheet(workbook, headerStyle, report);
+            writeStatusDriftSheet(workbook, headerStyle, report.statusDrift());
             writeCompletenessSheet(workbook, headerStyle, report.completeness());
             writeQualityGatesSheet(workbook, headerStyle, report);
 
@@ -71,7 +75,7 @@ public class SweepExportExcelService {
     private void writeOrphansSheet(
             XSSFWorkbook workbook, CellStyle headerStyle, List<SweepReport.RequirementSummary> orphans) {
         Sheet sheet = workbook.createSheet("Orphans");
-        writeHeader(sheet, headerStyle, "UID", "Title");
+        writeHeader(sheet, headerStyle, COL_UID, COL_TITLE);
 
         int rowNum = 1;
         for (var orphan : orphans) {
@@ -87,7 +91,7 @@ public class SweepExportExcelService {
             CellStyle headerStyle,
             Map<String, List<SweepReport.RequirementSummary>> coverageGaps) {
         Sheet sheet = workbook.createSheet("Coverage Gaps");
-        writeHeader(sheet, headerStyle, "Link Type", "UID", "Title");
+        writeHeader(sheet, headerStyle, "Link Type", COL_UID, COL_TITLE);
 
         int rowNum = 1;
         for (var entry : coverageGaps.entrySet()) {
@@ -126,6 +130,44 @@ public class SweepExportExcelService {
             row.createCell(5).setCellValue("");
         }
         autoSize(sheet, 6);
+    }
+
+    private void writeStatusDriftSheet(
+            XSSFWorkbook workbook, CellStyle headerStyle, List<StatusDriftResult.Finding> statusDrift) {
+        Sheet sheet = workbook.createSheet("Status Drift");
+        writeHeader(
+                sheet,
+                headerStyle,
+                COL_UID,
+                COL_TITLE,
+                "Confidence",
+                "Strongest Signal",
+                "Evidence Signal",
+                "Evidence Confidence",
+                "Artifact Type",
+                "Artifact Identifier",
+                "Artifact Title",
+                "Artifact URL",
+                "Detail");
+
+        int rowNum = 1;
+        for (var finding : statusDrift) {
+            for (var ev : finding.evidence()) {
+                Row row = sheet.createRow(rowNum++);
+                row.createCell(0).setCellValue(nullSafe(finding.uid()));
+                row.createCell(1).setCellValue(nullSafe(finding.title()));
+                row.createCell(2).setCellValue(finding.confidence().name());
+                row.createCell(3).setCellValue(finding.strongestSignal().name());
+                row.createCell(4).setCellValue(ev.signal().name());
+                row.createCell(5).setCellValue(ev.confidence().name());
+                row.createCell(6).setCellValue(nullSafe(ev.artifactType()));
+                row.createCell(7).setCellValue(nullSafe(ev.artifactIdentifier()));
+                row.createCell(8).setCellValue(nullSafe(ev.artifactTitle()));
+                row.createCell(9).setCellValue(nullSafe(ev.artifactUrl()));
+                row.createCell(10).setCellValue(nullSafe(ev.detail()));
+            }
+        }
+        autoSize(sheet, 11);
     }
 
     private void writeCompletenessSheet(XSSFWorkbook workbook, CellStyle headerStyle, CompletenessResult completeness) {
