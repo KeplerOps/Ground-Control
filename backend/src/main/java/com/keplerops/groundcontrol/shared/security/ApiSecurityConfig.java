@@ -5,32 +5,39 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
-import org.springframework.security.web.util.matcher.RegexRequestMatcher;
+import org.springframework.security.web.session.DisableEncodeUrlFilter;
 
 /**
- * Wires the API access control filter chain.
+ * Wires the bearer/API access control filter chain (ADR-026 + ADR-037).
  *
- * <p>When {@code groundcontrol.security.enabled=true}, the chain runs IP allowlist → bearer token
- * authn → Spring Security authorization, with the path matrix set up so {@code /api/v1/admin/**}
- * and the privileged subpaths require {@code ROLE_ADMIN}, the rest of {@code /api/v1/**} requires
- * authentication, and only health/info actuator probes are anonymous.
+ * <p>This chain is scoped to requests carrying {@code Authorization: Bearer …} only, via
+ * {@link BearerRequestMatcher}. Browser navigation, SPA XHRs authenticated by the
+ * {@code GC_SESSION} cookie, and form-login traffic fall through to {@link BrowserSecurityConfig}
+ * (ADR-037 §1, §2). Splitting the chains on the bearer scheme is the simplest stable
+ * discriminator and keeps machine traffic stateless and CSRF-exempt as ADR-026 specified.
+ *
+ * <p>When {@code groundcontrol.security.enabled=true}, the chain runs IP allowlist → bearer
+ * token authn → Spring Security authorization, with the path matrix set up so {@code
+ * /api/v1/admin/**} and the privileged subpaths require {@code ROLE_ADMIN}, the rest of {@code
+ * /api/v1/**} requires authentication, and only health/info actuator probes are anonymous.
  *
  * <p>When disabled, the chain still owns request mapping but every path is permitAll — the same
- * Spring Security framework object stays in charge so behavior never silently degrades.
+ * Spring Security framework object stays in charge so behavior never silently degrades. The SPA
+ * static-asset and route allowlist that used to live here has moved to {@link
+ * BrowserSecurityConfig}, because the API chain now only sees bearer traffic and bearer callers
+ * have no reason to fetch SPA HTML.
  */
 @Configuration
 @EnableWebSecurity
 @EnableConfigurationProperties(SecurityProperties.class)
 public class ApiSecurityConfig {
-
-    private static final String ROLE_ADMIN = "ADMIN";
 
     @Bean
     public BearerTokenAuthFilter bearerTokenAuthFilter(SecurityProperties properties) {
@@ -77,6 +84,7 @@ public class ApiSecurityConfig {
     }
 
     @Bean
+    @Order(1)
     public SecurityFilterChain apiSecurityFilterChain(
             HttpSecurity http,
             SecurityProperties properties,
@@ -85,14 +93,20 @@ public class ApiSecurityConfig {
             ApiAuthenticationEntryPoint authenticationEntryPoint,
             ApiAccessDeniedHandler accessDeniedHandler)
             throws Exception {
-        // CSRF is disabled by design: this is a stateless REST API authenticated by
-        // Authorization: Bearer <token>. There are no session cookies, no form-login
-        // flow, and no logout endpoint — the three things a CSRF attack relies on to
-        // ride a user's authenticated session. Bearer tokens are explicit per request,
-        // so a malicious cross-origin page cannot trigger an authenticated call from a
-        // signed-in browser. ADR-026 documents this; do not re-enable CSRF without
-        // simultaneously moving to cookie-based sessions and re-evaluating the model.
-        http.csrf(csrf -> csrf.disable())
+        // Scope this chain to bearer-only traffic. Spring Security picks the first matching
+        // chain (declaration / @Order), so every non-bearer request — browser navigation, SPA
+        // XHRs with a session cookie, logins, logouts — falls through to the browser chain
+        // configured in BrowserSecurityConfig. ADR-037 §2: the discriminator is the
+        // Authorization scheme, not the path or content type.
+        http.securityMatcher(new BearerRequestMatcher())
+                // CSRF is disabled by design: this is a stateless REST API authenticated by
+                // Authorization: Bearer <token>. There are no session cookies, no form-login
+                // flow, and no logout endpoint — the three things a CSRF attack relies on to
+                // ride a user's authenticated session. Bearer tokens are explicit per request,
+                // so a malicious cross-origin page cannot trigger an authenticated call from a
+                // signed-in browser. ADR-026 documents this; do not re-enable CSRF without
+                // simultaneously moving to cookie-based sessions and re-evaluating the model.
+                .csrf(csrf -> csrf.disable())
                 // Use Spring Security's CORS support so the registered MVC CorsConfigurationSource
                 // is honored on preflight requests. With cors.disable() preflight OPTIONS calls hit
                 // the security chain before MVC and would be rejected for protected routes.
@@ -102,7 +116,11 @@ public class ApiSecurityConfig {
                 .logout(logout -> logout.disable())
                 .anonymous(anon -> anon.disable())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .addFilterBefore(ipAllowlistFilter, AuthorizationFilter.class)
+                // IpAllowlistFilter must sit ahead of every Spring Security filter so the
+                // network gate fires before BearerTokenAuthFilter (which could otherwise
+                // accept a token from a non-allowlisted source). Place it before
+                // DisableEncodeUrlFilter (the canonical first filter) on this chain too.
+                .addFilterBefore(ipAllowlistFilter, DisableEncodeUrlFilter.class)
                 .addFilterBefore(bearerTokenAuthFilter, AuthorizationFilter.class)
                 .exceptionHandling(ex ->
                         ex.authenticationEntryPoint(authenticationEntryPoint).accessDeniedHandler(accessDeniedHandler));
@@ -113,66 +131,11 @@ public class ApiSecurityConfig {
         }
 
         http.authorizeHttpRequests(auth -> {
-            auth.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info")
-                    .permitAll()
-                    .requestMatchers("/error")
-                    .permitAll();
-            if (properties.isOpenapiPublic()) {
-                auth.requestMatchers(
-                                "/api/openapi.json",
-                                "/api/docs/**",
-                                "/v3/api-docs/**",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html")
-                        .permitAll();
-            } else {
-                auth.requestMatchers(
-                                "/api/openapi.json",
-                                "/api/docs/**",
-                                "/v3/api-docs/**",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html")
-                        .authenticated();
-            }
-            auth.requestMatchers("/api/v1/admin/**")
-                    .hasRole(ROLE_ADMIN)
-                    .requestMatchers("/api/v1/embeddings/**")
-                    .hasRole(ROLE_ADMIN)
-                    .requestMatchers("/api/v1/analysis/sweep/**")
-                    .hasRole(ROLE_ADMIN)
-                    .requestMatchers("/api/v1/pack-registry/**")
-                    .hasRole(ROLE_ADMIN)
-                    .requestMatchers("/api/v1/trust-policies/**")
-                    .hasRole(ROLE_ADMIN)
-                    .requestMatchers("/api/v1/pack-install-records/**")
-                    .hasRole(ROLE_ADMIN)
-                    .requestMatchers("/api/v1/**")
-                    .authenticated()
-                    .requestMatchers("/actuator/**")
-                    .denyAll()
-                    // SPA static assets and client-side routes are anonymous so the React
-                    // shell loads (the API calls it then makes still require a token, returning
-                    // 401 to drive the login UI). Permit only known static asset paths and a
-                    // strict GET regex that mirrors SpaController's pattern (no dot in any
-                    // segment, first segment not /api or /actuator). Anything outside that
-                    // narrow allowlist is denyAll, so a future controller mounted outside the
-                    // documented matrix is fail-closed.
-                    .requestMatchers(
-                            HttpMethod.GET,
-                            "/",
-                            "/index.html",
-                            "/favicon.ico",
-                            "/favicon.svg",
-                            "/manifest.json",
-                            "/robots.txt",
-                            "/assets/**",
-                            "/static/**")
-                    .permitAll()
-                    .requestMatchers(RegexRequestMatcher.regexMatcher(
-                            HttpMethod.GET, "^/(?!api/|api$|actuator/|actuator$)[^.]+$"))
-                    .permitAll()
-                    .anyRequest()
-                    .denyAll();
+            ApiPathMatrix.applySharedRules(auth, properties);
+            // No SPA static-asset / route allowlist on this chain. Bearer callers never
+            // fetch /index.html or SPA routes; the browser chain owns that surface
+            // (BrowserSecurityConfig). Anything outside the shared matrix is fail-closed.
+            auth.anyRequest().denyAll();
         });
 
         return http.build();

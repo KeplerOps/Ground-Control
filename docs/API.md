@@ -920,6 +920,23 @@ curl -X POST "http://localhost:8000/api/v1/pack-registry/import?project=ground-c
 | GET | `/pack-install-records` | — | 200 | List install records (optional `packId` filter) |
 | GET | `/pack-install-records/{id}` | — | 200 | Get install record |
 
+### Admin Users (ADR-037)
+
+Browser-session lifecycle for the JDBC user store. Gated by `ROLE_ADMIN` on the
+same path matrix as the rest of `/api/v1/admin/**`. Bearer agents that hold an
+`ADMIN`-role token may call these endpoints too; the typical caller is the SPA
+admin page operating under the signed-in operator's session.
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| GET | `/admin/users` | — | 200 | List users (`username`, `role`, `enabled`) |
+| POST | `/admin/users` | `CreateUserRequest` | 201, 409, 422 | Create user. `409 user_exists` on duplicate username; `422 validation_error` for bad username / short password. |
+| PATCH | `/admin/users/{username}/role` | `{"role":"USER"\|"ADMIN"}` | 200, 404, 409, 422 | Change role. `409 last_admin` refuses demoting the last enabled admin. |
+| PATCH | `/admin/users/{username}/enabled` | `{"enabled":bool}` | 200, 404, 409, 422 | Enable / disable. `409 last_admin` refuses disabling the last enabled admin. |
+| DELETE | `/admin/users/{username}` | — | 204, 404, 409 | Delete user. `409 last_admin` refuses deleting the last enabled admin. |
+
+`CreateUserRequest`: `{"username":"<lowercase, 2-64 chars, matches /^[a-z][a-z0-9._-]{1,63}$/>", "password":"<12-200 chars>", "role":"USER"\|"ADMIN"}`. Passwords are BCrypt-hashed server-side; the JSON never echoes the password back. First-admin bootstrap is out of band — see `DEPLOYMENT.md`'s Web UI login section.
+
 For control packs, use `/pack-registry/import` or `/pack-registry` to persist the
 pack definition first, then call one of these routes with the `packId` and optional
 version constraint.

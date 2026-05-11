@@ -16,9 +16,7 @@ import type {
 } from "@/types/api";
 import { CONTROL_FUNCTIONS, PACK_REGISTRY_IMPORT_FORMATS } from "@/types/api";
 import { Database, Download, GitBranch, Settings, Upload } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-
-const PACK_REGISTRY_TOKEN_KEY = "gc.packRegistryAdminToken";
+import { useRef, useState } from "react";
 
 export function Admin() {
   const { activeProject } = useProjectContext();
@@ -63,33 +61,11 @@ function PackRegistryImport() {
   const [sourceUrl, setSourceUrl] = useState("");
   const [defaultControlFunction, setDefaultControlFunction] =
     useState<ControlFunction>("PREVENTIVE");
-  const [adminToken, setAdminToken] = useState(
-    () => sessionStorage.getItem(PACK_REGISTRY_TOKEN_KEY) ?? "",
-  );
-  const [rememberToken, setRememberToken] = useState(
-    () => sessionStorage.getItem(PACK_REGISTRY_TOKEN_KEY) !== null,
-  );
-
-  useEffect(() => {
-    if (!rememberToken || !adminToken) {
-      sessionStorage.removeItem(PACK_REGISTRY_TOKEN_KEY);
-      return;
-    }
-    sessionStorage.setItem(PACK_REGISTRY_TOKEN_KEY, adminToken);
-  }, [adminToken, rememberToken]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const file = fileRef.current?.files?.[0];
     if (!file) return;
-    if (!adminToken.trim()) {
-      toast({
-        title: "Admin token required",
-        description: "Pack registry import needs the configured admin token.",
-        variant: "error",
-      });
-      return;
-    }
 
     setLoading(true);
     setResult(null);
@@ -110,15 +86,14 @@ function PackRegistryImport() {
         new Blob([JSON.stringify(options)], { type: "application/json" }),
       );
 
+      // ADR-037: authorize via the browser session cookie + CSRF, not a bearer
+      // token in sessionStorage. The user must already be signed in as ROLE_ADMIN
+      // for /api/v1/pack-registry/** to accept the call; apiUpload echoes the
+      // XSRF-TOKEN cookie via X-XSRF-TOKEN automatically.
       const data = await apiUpload<PackRegistryEntryResponse>(
         "/pack-registry/import",
         formData,
-        {
-          params: { project: activeProject?.identifier },
-          headers: {
-            Authorization: `Bearer ${adminToken.trim()}`,
-          },
-        },
+        { params: { project: activeProject?.identifier } },
       );
       setResult(data);
       toast({ title: "Pack imported", variant: "success" });
@@ -143,24 +118,10 @@ function PackRegistryImport() {
         it directly in the pack registry for the active project.
       </p>
       <form onSubmit={handleSubmit} className="space-y-3">
-        <FormField label="Registry Admin Token">
-          <input
-            className={inputClass}
-            type="password"
-            value={adminToken}
-            onChange={(e) => setAdminToken(e.target.value)}
-            placeholder="Bearer token value"
-            required
-          />
-        </FormField>
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={rememberToken}
-            onChange={(e) => setRememberToken(e.target.checked)}
-          />
-          Remember token for this browser session
-        </label>
+        <p className="text-xs text-muted-foreground">
+          Authorized via your signed-in session — no bearer token field. You
+          must be signed in as an admin for this form to succeed.
+        </p>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label="Source File (.json)">
             <input

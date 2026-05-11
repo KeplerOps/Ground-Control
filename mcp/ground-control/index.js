@@ -138,6 +138,9 @@ import {
   deleteTrustPolicy,
   installPackFromRegistry, upgradePackFromRegistry, listPackInstallRecords,
   getPackInstallRecord,
+  // createAdminUser is intentionally NOT imported — passwords must not flow
+  // through MCP tool-call payloads (ADR-037, codex security finding).
+  listAdminUsers, updateAdminUserRole, updateAdminUserEnabled, deleteAdminUser,
   // ---- enums ----
   STATUSES, REQUIREMENT_TYPES, PRIORITIES, RELATION_TYPES,
   ARTIFACT_TYPES, LINK_TYPES, CHANGE_CATEGORIES, CONFIDENCE_LEVELS,
@@ -1618,6 +1621,62 @@ if (ADMIN_TOOLS_ENABLED) {
           default: return err(new Error(`Unknown action: ${args.action}`));
         }
       } catch (e) { return err(e); }
+    },
+  );
+
+  // ADR-037 admin-user lifecycle. Registered alongside gc_admin so an
+  // ADMIN-role bearer token can drive user management programmatically.
+  // Humans manage users via the curl/session flow documented in
+  // DEPLOYMENT.md — this PR does not ship a SPA user-management page.
+  //
+  // **`create_user` is intentionally NOT exposed via MCP.** Passing a new
+  // account password as a JSON-RPC tool argument means the password lands in
+  // agent transcripts, client logs, debug output, and any observability trace
+  // that captures tool-call payloads. Create users via the DEPLOYMENT.md
+  // curl flow where the password stays in a mode-600 file. The actions
+  // surfaced here mutate state but never accept password material;
+  // createAdminUser is exported from lib.js for callers that have an
+  // out-of-band secret channel, not for agents.
+  const USER_ADMIN_ACTIONS = [
+    "list_users", "update_role", "update_enabled", "delete_user",
+  ];
+  server.tool(
+    "gc_user_admin",
+    `Admin user lifecycle (ADR-037): list / change-role / enable-disable / delete. ` +
+      `Registered only when GC_MCP_ADMIN=1; backend enforces ROLE_ADMIN. ` +
+      `User CREATION is intentionally not exposed here — see DEPLOYMENT.md. ` +
+      `Actions: ${USER_ADMIN_ACTIONS.join(", ")}.`,
+    {
+      action: z.enum(USER_ADMIN_ACTIONS),
+      username: z.string().optional(),
+      role: z.enum(["USER", "ADMIN"]).optional(),
+      enabled: z.boolean().optional(),
+    },
+    async (args) => {
+      try {
+        switch (args.action) {
+          case "list_users":
+            return ok(JSON.stringify(await listAdminUsers(), null, 2));
+          case "update_role":
+            reqArg(args, "username", "update_role");
+            reqArg(args, "role", "update_role");
+            return ok(JSON.stringify(await updateAdminUserRole(args.username, args.role), null, 2));
+          case "update_enabled":
+            reqArg(args, "username", "update_enabled");
+            if (typeof args.enabled !== "boolean") {
+              return err(new Error("update_enabled requires boolean 'enabled'"));
+            }
+            return ok(JSON.stringify(await updateAdminUserEnabled(args.username, args.enabled), null, 2));
+          case "delete_user":
+            reqArg(args, "username", "delete_user");
+            await deleteAdminUser(args.username);
+            return ok(`Deleted user '${args.username}'`);
+          default:
+            return err(new Error(`Unknown action: ${args.action}`));
+        }
+      } catch (e) {
+        return err(e);
+      }
     },
   );
 }

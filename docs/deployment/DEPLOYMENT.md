@@ -96,6 +96,127 @@ Migrating from pre-#243 deployments:
 - The `X-Actor` header is no longer a self-service identity claim when
   security is enabled; the authenticated principal name is used for audit.
 
+### Web UI login (ADR-037)
+
+A second filter chain ships alongside the bearer chain for browser users
+(see ADR-037). Both modes populate the same `SecurityContext` principal +
+`ROLE_USER` / `ROLE_ADMIN` authorities, so the path matrix above applies
+to either authentication mode.
+
+Session cookie hardening is **hardcoded** in `application.yml`; there are no
+deploy-time env knobs for these values. Changing them requires an ADR + security
+review, not an `.env` flag.
+
+| Property | Value |
+|---|---|
+| `server.servlet.session.cookie.name` | `GC_SESSION` |
+| `server.servlet.session.cookie.http-only` | `true` |
+| `server.servlet.session.cookie.secure` | `true` (`false` in dev/test profiles only) |
+| `server.servlet.session.cookie.same-site` | `strict` |
+| `server.servlet.session.timeout` | `60m` |
+
+CSRF protection is on for the browser chain (Spring's
+`CookieCsrfTokenRepository` with `HttpOnly=false`, so the SPA's
+`fetch` wrapper can read the `XSRF-TOKEN` cookie and echo it via the
+`X-XSRF-TOKEN` header). The bearer chain remains CSRF-disabled —
+agents do not need to send a CSRF token.
+
+#### First-admin bootstrap
+
+A fresh install has zero users in the JDBC store, so the first admin
+must be created out-of-band. Run the bootstrap on the deployment host:
+
+**Preferred — mode-600 password file** (works headless, no secret in any
+command line):
+
+```bash
+install -m 600 /dev/null /run/gc/admin-password
+read -rs -p 'Admin password: ' adminpw && printf '%s' "$adminpw" > /run/gc/admin-password && unset adminpw
+./gradlew bootRun --args="--create-admin --username=admin --password-file=/run/gc/admin-password"
+shred -u /run/gc/admin-password  # or rm; the runner has finished reading
+```
+
+The runner refuses any file that is group/others-readable OR
+group/others-writable on a POSIX filesystem, so the `chmod 600` (via
+`install -m 600`) is mandatory, not advisory.
+
+**TTY prompt** (interactive operator at a console — the password is
+read with echo off and never lands on a command line):
+
+```bash
+./gradlew bootRun --args="--create-admin --username=admin"
+# Prompts: "Admin password: "
+```
+
+**Env-var path** is only safe when the value is supplied out-of-band by
+a secret manager (systemd `LoadCredential=`, AWS / GCP Secret Manager,
+HashiCorp Vault agent, Kubernetes mounted secret env). **Do not** put
+the value inline on the command line — that leaks through shell
+history, terminal recorders, and CI logs the same way `--password=...`
+would. For ad-hoc operator runs prefer the file or TTY paths above.
+
+The runner is idempotent — running it a second time with the same
+username logs a "user already present" message and exits 0.
+
+> **Do not** pass the password via `--password=...` argv. The bootstrap
+> runner refuses that path and exits non-zero. Argv-supplied secrets
+> leak through shell history, `/proc/<pid>/cmdline`, process listings,
+> CI logs, and agent transcripts. ADR-037 §5 documents the rationale.
+
+Subsequent admins are created via the session/CSRF curl flow below.
+Ground Control's SPA shell does not include a user-management page in
+this iteration — the REST endpoints under `/api/v1/admin/users` are the
+single supported surface. The bearer chain refuses non-`Bearer`
+schemes, so HTTP Basic against `/api/v1/**` is not an option; a
+session login is required.
+
+```bash
+# 0. Restrict cookie/jar visibility before any session is written. umask 077
+#    ensures the jar created by curl below is mode 600, and the explicit chmod
+#    handles the rare case where umask was overridden by a parent shell setting.
+umask 077
+jar="$(mktemp /tmp/gc-jar.XXXXXX)"
+chmod 600 "$jar"
+trap 'rm -f "$jar"' EXIT
+
+# 1. Pick up the CSRF cookie.
+curl -sS -c "$jar" "$BASE/login" -o /dev/null
+
+# 2. Submit the form login. `--data-urlencode "name@/path"` (no `=` sign)
+#    reads the field value from the file; the URL-encoded body keeps the
+#    password out of argv and out of the request URL.
+csrf="$(awk '$6=="XSRF-TOKEN"{print $7}' "$jar")"
+curl -sS -b "$jar" -c "$jar" \
+  --data-urlencode "username=admin" \
+  --data-urlencode "password@/run/gc/admin-password" \
+  --data-urlencode "_csrf=$csrf" \
+  -o /dev/null -X POST "$BASE/login"
+
+# 3. Create the user with the session cookie + CSRF header. The JSON body
+#    comes from a mode-600 file so the new account's password also stays
+#    out of argv / shell history / CI logs.
+csrf="$(awk '$6=="XSRF-TOKEN"{print $7}' "$jar")"
+curl -sS -b "$jar" -X POST "$BASE/api/v1/admin/users" \
+  -H 'Content-Type: application/json' \
+  -H "X-XSRF-TOKEN: $csrf" \
+  --data @/run/gc/new-user.json
+```
+
+The cookie jar carries `GC_SESSION` (live until logout / timeout) and
+`XSRF-TOKEN`; both are sensitive. The `trap` cleans the jar on exit, and
+`umask 077` + explicit `chmod 600` guarantee a local unprivileged user
+cannot snapshot the session before it expires. `--data-urlencode
+"password@/path"` is curl's file-read form (no `=` between field name
+and `@`); `--data-urlencode "password=@/path"` would submit the literal
+string `@/path` as the password. The same flow drives the MCP
+`gc_user_admin` actions (list / update_role / update_enabled /
+delete_user); MCP intentionally does not accept passwords as tool
+arguments, so user creation always goes through this curl path.
+
+The last enabled admin cannot be demoted, disabled, or deleted — the
+service returns `409 last_admin` and the operation is refused. Provision
+a second admin before retiring the first.
+
 ### Authenticated red-dragon redeploy guardrails
 
 Rolling a pre-ADR-026 deployment forward to an ADR-026 image is an

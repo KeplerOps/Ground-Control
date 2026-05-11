@@ -53,5 +53,6 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | [034](034-api-enum-contract-single-source.md) | API Enum Contract Single Source of Truth | Accepted |
 | [035](035-mcp-tool-catalog-curation.md) | MCP Tool Catalog Curation | Accepted |
 | [036](036-per-step-routing-tool-surfaces-telemetry.md) | Per-Step Model Routing, Durable-Record Tool Surfaces, and Step Telemetry (amends ADR-021) | Accepted |
+| [037](037-browser-session-access-control.md) | Browser Session Access Control | Accepted |
 
 Prior ADRs from the old project frame are archived in `archive/architecture/adrs/`.
