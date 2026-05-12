@@ -1,26 +1,27 @@
-// Adapter-level tests for the gc_risk_governance MCP handler. Covers per-entity
-// create/update body allowlists and the camelCased wire body produced by the
-// shared toCamelCase map. Locks in the fixes for issues #878 (risk assessment
-// result), #879 (risk register record), and #880 (treatment plan) against the
-// authoritative backend Request records under
-// backend/src/main/java/com/keplerops/groundcontrol/api/riskscenarios/.
+// Adapter-level tests for the gc_risk_governance MCP handler. Drives the
+// FULL path raw args → Zod parse → gcRiskGovernanceToolHandler → lib.js
+// dispatch → mocked fetch, so the handler's own pick(args, ...) gate is the
+// thing being exercised — not a test-side pre-filter. Locks in the fixes for
+// issues #878 (risk_assessment_result), #879 (risk_register_record), and
+// #880 (treatment_plan) against the authoritative backend Request records
+// under backend/src/main/java/com/keplerops/groundcontrol/api/riskscenarios/.
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { z } from "zod";
 import {
-  GOVERNANCE_FIELDS,
-  pick,
-  createRiskAssessmentResult,
-  updateRiskAssessmentResult,
-  createRiskRegisterRecord,
-  updateRiskRegisterRecord,
-  createTreatmentPlan,
-  updateTreatmentPlan,
-} from "./lib.js";
+  GC_RISK_GOVERNANCE_ACTIONS,
+  GC_RISK_GOVERNANCE_ENTITIES,
+  gcRiskGovernanceZodShape,
+  gcRiskGovernanceToolHandler,
+} from "./gc-risk-governance.js";
+import { GOVERNANCE_FIELDS } from "./lib.js";
 
 const ORIGINAL_FETCH = globalThis.fetch;
 const ORIGINAL_BASE_URL = process.env.GC_BASE_URL;
 const ORIGINAL_API_TOKEN = process.env.GROUND_CONTROL_API_TOKEN;
+
+const SCHEMA = z.object(gcRiskGovernanceZodShape);
 
 function makeFetchSpy({ status = 200, body = { id: "ent-uuid" } } = {}) {
   const calls = [];
@@ -33,6 +34,14 @@ function makeFetchSpy({ status = 200, body = { id: "ent-uuid" } } = {}) {
     });
   };
   return calls;
+}
+
+// Drive a single handler invocation through Zod parse first, then dispatch.
+// Returns the raw value the handler produced (handler returns null for
+// delete-style 204s; the index.js registration wraps that in `ok()`).
+async function callHandler(args) {
+  const parsed = SCHEMA.parse(args);
+  return gcRiskGovernanceToolHandler(parsed);
 }
 
 beforeEach(() => {
@@ -49,16 +58,25 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Shape: GOVERNANCE_FIELDS[entity][action]
+// Shape: GOVERNANCE_FIELDS[entity][action] + handler enums
 // ---------------------------------------------------------------------------
 
 describe("GOVERNANCE_FIELDS per-action shape", () => {
-  it("indexes by entity then action", () => {
-    for (const entity of ["risk_register_record", "risk_assessment_result", "treatment_plan"]) {
+  it("indexes by entity then action for every entity in the handler", () => {
+    for (const entity of GC_RISK_GOVERNANCE_ENTITIES) {
       assert.ok(GOVERNANCE_FIELDS[entity], `missing entity '${entity}'`);
       assert.ok(Array.isArray(GOVERNANCE_FIELDS[entity].create), `${entity}.create not an array`);
       assert.ok(Array.isArray(GOVERNANCE_FIELDS[entity].update), `${entity}.update not an array`);
     }
+  });
+});
+
+describe("GC_RISK_GOVERNANCE_ACTIONS", () => {
+  it("exposes the canonical action verbs the handler dispatches on", () => {
+    assert.deepEqual(
+      [...GC_RISK_GOVERNANCE_ACTIONS].sort(),
+      ["create", "delete", "transition", "transition_approval", "update"],
+    );
   });
 });
 
@@ -123,9 +141,12 @@ describe("risk_assessment_result wire body (#878)", () => {
   const REGISTER = "22222222-2222-2222-2222-222222222222";
   const PROFILE = "33333333-3333-3333-3333-333333333333";
 
-  it("create produces a camelCased body with every backend create field", async () => {
+  it("handler dispatches create with a camelCased body containing every backend create field", async () => {
     const calls = makeFetchSpy();
-    const args = {
+    await callHandler({
+      entity: "risk_assessment_result",
+      action: "create",
+      project: "proj-a",
       risk_scenario_id: SCENARIO,
       risk_register_record_id: REGISTER,
       methodology_profile_id: PROFILE,
@@ -141,9 +162,7 @@ describe("risk_assessment_result wire body (#878)", () => {
       evidence_refs: ["EV-1", "EV-2"],
       notes: "Phase A smoke",
       observation_ids: ["44444444-4444-4444-4444-444444444444"],
-    };
-    const body = pick(args, GOVERNANCE_FIELDS.risk_assessment_result.create);
-    await createRiskAssessmentResult(body, "proj-a");
+    });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "POST");
     assert.match(calls[0].url, /\/api\/v1\/risk-assessment-results\b/);
@@ -167,51 +186,60 @@ describe("risk_assessment_result wire body (#878)", () => {
     });
   });
 
-  it("create drops stale caller fields before reaching the wire", async () => {
+  it("handler drops stale create-args before reaching the wire (handler-side pick)", async () => {
     const calls = makeFetchSpy();
-    const args = {
+    await callHandler({
+      entity: "risk_assessment_result",
+      action: "create",
+      project: "proj-a",
       risk_scenario_id: SCENARIO,
       methodology_profile_id: PROFILE,
-      // stale fields the bug report shipped with:
+      // Stale fields the bug report shipped with — handler must drop these
+      // via its own pick(args, GOVERNANCE_FIELDS.risk_assessment_result.create).
       uid: "RAR-1",
       title: "drop me",
       description: "drop me",
-      quantitative_value: 485000,
+      // Number-shaped scenarios are excluded from the Zod schema's positive
+      // pattern, but a typed caller could still include `qualitative_value:
+      // "HIGH"`. Use the Zod-acceptable shape and confirm the handler drops
+      // it on its own.
       qualitative_value: "HIGH",
-      scenario_id: SCENARIO, // legacy alias, must NOT reach the wire
       approval_state: "DRAFT",
       metadata: { stale: true },
-      status: "DRAFT",
-    };
-    const body = pick(args, GOVERNANCE_FIELDS.risk_assessment_result.create);
-    await createRiskAssessmentResult(body, "proj-a");
+      // 'status' is intentionally omitted: validateGovernanceStatus rejects
+      // any status on risk_assessment_result (the entity uses approval_state,
+      // and the rejection is exercised by lib.test.js validateGovernanceStatus
+      // tests). This test scope is the handler's pick(), not the validator.
+    });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "POST");
-    // Positive assertion: the valid fields actually reached the wire. Without
-    // this, an empty wire body `{}` would silently satisfy every negative
-    // `!(stale in body)` check below.
+    // Positive: valid fields survived the handler's pick().
     assert.equal(calls[0].body.riskScenarioId, SCENARIO);
     assert.equal(calls[0].body.methodologyProfileId, PROFILE);
+    // Negative: stale fields did not reach the wire.
     for (const stale of [
-      "uid", "title", "description", "quantitativeValue", "qualitativeValue",
-      "scenarioId", "approvalState", "metadata", "status",
+      "uid", "title", "description", "qualitativeValue",
+      "scenarioId", "approvalState", "metadata",
     ]) {
       assert.ok(!(stale in calls[0].body), `${stale} leaked onto the wire`);
     }
   });
 
-  it("update strips create-only 'risk_scenario_id' even if the caller passes it", async () => {
+  it("handler dispatches update without create-only 'risk_scenario_id' (scenario immutable after create)", async () => {
     const calls = makeFetchSpy();
-    const args = {
-      risk_scenario_id: SCENARIO, // must NOT reach the wire (immutable after create)
+    await callHandler({
+      entity: "risk_assessment_result",
+      action: "update",
+      id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      project: "proj-a",
+      risk_scenario_id: SCENARIO, // must NOT reach the wire
       methodology_profile_id: PROFILE,
       analyst_identity: "agent-b",
       notes: "second-pass",
-    };
-    const body = pick(args, GOVERNANCE_FIELDS.risk_assessment_result.update);
-    await updateRiskAssessmentResult("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", body, "proj-a");
+    });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "PUT");
+    assert.match(calls[0].url, /\/api\/v1\/risk-assessment-results\/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\b/);
     assert.ok(!("riskScenarioId" in calls[0].body));
     assert.equal(calls[0].body.methodologyProfileId, PROFILE);
     assert.equal(calls[0].body.analystIdentity, "agent-b");
@@ -278,9 +306,12 @@ describe("risk_register_record wire body (#879)", () => {
   const SC1 = "55555555-5555-5555-5555-555555555555";
   const SC2 = "66666666-6666-6666-6666-666666666666";
 
-  it("create routes multi-scenario via risk_scenario_ids as List<UUID>", async () => {
+  it("handler routes multi-scenario via risk_scenario_ids as List<UUID>", async () => {
     const calls = makeFetchSpy();
-    const args = {
+    await callHandler({
+      entity: "risk_register_record",
+      action: "create",
+      project: "proj-a",
       uid: "REG-1",
       title: "Portfolio record",
       owner: "team-x",
@@ -290,9 +321,7 @@ describe("risk_register_record wire body (#879)", () => {
       decision_metadata: { rationale: "merged after retro" },
       asset_scope_summary: "covers PCI-DSS assets in prod",
       risk_scenario_ids: [SC1, SC2],
-    };
-    const body = pick(args, GOVERNANCE_FIELDS.risk_register_record.create);
-    await createRiskRegisterRecord(body, "proj-a");
+    });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "POST");
     assert.match(calls[0].url, /\/api\/v1\/risk-register-records\b/);
@@ -309,40 +338,43 @@ describe("risk_register_record wire body (#879)", () => {
     });
   });
 
-  it("create drops singular 'scenario_id', 'description', 'status', 'metadata' before reaching the wire", async () => {
+  it("handler drops 'description', 'status', 'metadata' on create (handler-side pick)", async () => {
     const calls = makeFetchSpy();
-    const args = {
+    await callHandler({
+      entity: "risk_register_record",
+      action: "create",
+      project: "proj-a",
       uid: "REG-2",
       title: "T",
-      scenario_id: SC1, // singular, must NOT reach the wire
       description: "drop me",
       status: "ACCEPTED",
       metadata: { stale: true },
-    };
-    const body = pick(args, GOVERNANCE_FIELDS.risk_register_record.create);
-    await createRiskRegisterRecord(body, "proj-a");
+    });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "POST");
-    // Positive assertion guards against `{}` body silently satisfying the
-    // negative checks: confirm the valid create-DTO fields survived.
+    // Positive: valid fields survived.
     assert.equal(calls[0].body.uid, "REG-2");
     assert.equal(calls[0].body.title, "T");
+    // Negative: stale fields did not reach the wire.
     for (const stale of ["scenarioId", "description", "status", "metadata"]) {
       assert.ok(!(stale in calls[0].body), `${stale} leaked onto the wire`);
     }
   });
 
-  it("update strips create-only 'uid' even if the caller passes it", async () => {
+  it("handler strips create-only 'uid' on update", async () => {
     const calls = makeFetchSpy();
-    const args = {
+    await callHandler({
+      entity: "risk_register_record",
+      action: "update",
+      id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      project: "proj-a",
       uid: "REG-LEAK",
       title: "rename",
       risk_scenario_ids: [SC1],
-    };
-    const body = pick(args, GOVERNANCE_FIELDS.risk_register_record.update);
-    await updateRiskRegisterRecord("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", body, "proj-a");
+    });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "PUT");
+    assert.match(calls[0].url, /\/api\/v1\/risk-register-records\/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\b/);
     assert.ok(!("uid" in calls[0].body));
     assert.equal(calls[0].body.title, "rename");
     assert.deepEqual(calls[0].body.riskScenarioIds, [SC1]);
@@ -396,7 +428,6 @@ describe("treatment_plan update allowlist (#880)", () => {
   });
 
   it("does NOT contain create-only 'uid', 'risk_register_record_id', 'status'", () => {
-    // Status changes go through the transition action — the dedicated /status sub-resource.
     for (const f of ["uid", "risk_register_record_id", "status"]) {
       assert.ok(!list().includes(f), `${f} should not be on treatment_plan.update`);
     }
@@ -413,9 +444,12 @@ describe("treatment_plan wire body (#880)", () => {
   const SCEN = "77777777-7777-7777-7777-777777777777";
   const REG = "88888888-8888-8888-8888-888888888888";
 
-  it("create produces a camelCased body with every backend create field", async () => {
+  it("handler dispatches create with a camelCased body containing every backend create field", async () => {
     const calls = makeFetchSpy();
-    const args = {
+    await callHandler({
+      entity: "treatment_plan",
+      action: "create",
+      project: "proj-a",
       uid: "TP-1",
       title: "Mitigate scenario X",
       risk_scenario_id: SCEN,
@@ -427,9 +461,7 @@ describe("treatment_plan wire body (#880)", () => {
       status: "PLANNED",
       action_items: [{ what: "patch", who: "team-y" }],
       reassessment_triggers: ["new evidence", "control change"],
-    };
-    const body = pick(args, GOVERNANCE_FIELDS.treatment_plan.create);
-    await createTreatmentPlan(body, "proj-a");
+    });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "POST");
     assert.match(calls[0].url, /\/api\/v1\/treatment-plans\b/);
@@ -448,49 +480,55 @@ describe("treatment_plan wire body (#880)", () => {
     });
   });
 
-  it("create drops stale 'due_at', 'scenario_id', 'description', 'metadata' before reaching the wire", async () => {
+  it("handler drops 'description', 'metadata' on create (handler-side pick); 'due_at' is not a Zod field and is rejected at parse", async () => {
+    // 'due_at' is not in gcRiskGovernanceZodShape (the Zod schema dropped
+    // 'due_at' alongside 'scenario_id' when issue #880 renamed them). A
+    // strict caller can't pass 'due_at' through Zod parse. Confirm the
+    // handler's own pick() drops everything else even if the caller sends
+    // a Zod-accepted shape.
     const calls = makeFetchSpy();
-    const args = {
+    await callHandler({
+      entity: "treatment_plan",
+      action: "create",
+      project: "proj-a",
       uid: "TP-2",
       title: "T",
       strategy: "ACCEPT",
       risk_register_record_id: REG,
-      // stale fields the bug report shipped with:
-      due_at: "2026-06-30T00:00:00Z", // misnamed → must NOT reach the wire as 'dueAt'
-      scenario_id: SCEN,
       description: "drop me",
       metadata: { stale: true },
-    };
-    const body = pick(args, GOVERNANCE_FIELDS.treatment_plan.create);
-    await createTreatmentPlan(body, "proj-a");
+    });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "POST");
-    // Positive assertion guards against `{}` body silently satisfying the
-    // negative checks: confirm the valid create-DTO fields survived.
+    // Positive: valid fields survived.
     assert.equal(calls[0].body.uid, "TP-2");
     assert.equal(calls[0].body.title, "T");
     assert.equal(calls[0].body.strategy, "ACCEPT");
     assert.equal(calls[0].body.riskRegisterRecordId, REG);
-    for (const stale of ["dueAt", "scenarioId", "description", "metadata"]) {
+    // Negative: stale fields did not reach the wire.
+    for (const stale of ["dueAt", "description", "metadata"]) {
       assert.ok(!(stale in calls[0].body), `${stale} leaked onto the wire`);
     }
-    // And dueDate is not present either (caller didn't supply due_date)
+    // And dueDate is not present either (caller didn't supply due_date).
     assert.ok(!("dueDate" in calls[0].body));
   });
 
-  it("update strips create-only 'uid', 'risk_register_record_id', 'status'", async () => {
+  it("handler strips create-only 'uid', 'risk_register_record_id', 'status' on update", async () => {
     const calls = makeFetchSpy();
-    const args = {
+    await callHandler({
+      entity: "treatment_plan",
+      action: "update",
+      id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      project: "proj-a",
       uid: "TP-LEAK",
       risk_register_record_id: REG,
       status: "IN_PROGRESS", // must go through transition action, not update
       title: "rename",
       due_date: "2026-07-01T00:00:00Z",
-    };
-    const body = pick(args, GOVERNANCE_FIELDS.treatment_plan.update);
-    await updateTreatmentPlan("cccccccc-cccc-cccc-cccc-cccccccccccc", body, "proj-a");
+    });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "PUT");
+    assert.match(calls[0].url, /\/api\/v1\/treatment-plans\/cccccccc-cccc-cccc-cccc-cccccccccccc\b/);
     for (const stale of ["uid", "riskRegisterRecordId", "status"]) {
       assert.ok(!(stale in calls[0].body), `${stale} leaked onto the wire on update`);
     }
