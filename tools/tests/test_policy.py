@@ -1351,8 +1351,15 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
 
     # --- anti-contract negation patterns -----------------------------------
 
-    def test_check_flags_skip_decision_record_negation(self):
-        anti = (
+    # Each case pins one anti-pattern shape. The fixture is the failing
+    # Step 13 prose; `expected_code_substring` is asserted to appear in the
+    # detail of a `step13-anti-contract-prose` violation, so a regression in
+    # any single pattern surfaces with the pattern name in the failure
+    # message rather than a generic "anti-contract" miss.
+    _ANTI_CONTRACT_FIXTURES: tuple[tuple[str, str, str], ...] = (
+        (
+            "skip-decision-record",
+            "skip-decision-record",
             "### Step 13: Test Quality Review\n"
             "\n"
             "1. Invoke the `review-tests` skill.\n"
@@ -1362,15 +1369,11 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "3. Note: drivers may skip the decision record on clean cycles\n"
             "   to save a network round-trip.\n"
             "\n"
-            "### Step 14: Next\n"
-        )
-        violations = run_step13_decision_record_contract(text=anti)
-        self.assertTrue(violations)
-        codes = {v.code for v in violations}
-        self.assertIn("step13-anti-contract-prose", codes)
-
-    def test_check_flags_do_not_post_negation(self):
-        anti = (
+            "### Step 14: Next\n",
+        ),
+        (
+            "do-not-call-post-record",
+            "do-not-call-post-record",
             "### Step 13: Test Quality Review\n"
             "\n"
             "1. Invoke the `review-tests` skill. Do not call\n"
@@ -1379,15 +1382,11 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "2. `reviewer: \"test-quality\"`, `findings: []`, advance to\n"
             "   Step 14 after `ok: true`.\n"
             "\n"
-            "### Step 14: Next\n"
-        )
-        violations = run_step13_decision_record_contract(text=anti)
-        self.assertTrue(violations)
-        codes = {v.code for v in violations}
-        self.assertIn("step13-anti-contract-prose", codes)
-
-    def test_check_flags_do_not_proceed_negation(self):
-        anti = (
+            "### Step 14: Next\n",
+        ),
+        (
+            "do-not-proceed-step14",
+            "do-not-proceed-step14",
             "### Step 13: Test Quality Review\n"
             "\n"
             "1. Invoke the `review-tests` skill.\n"
@@ -1396,18 +1395,11 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "   wait for the user to acknowledge the clean cycle.\n"
             "3. Advance after the user confirms with `ok: true`.\n"
             "\n"
-            "### Step 14: Next\n"
-        )
-        violations = run_step13_decision_record_contract(text=anti)
-        self.assertTrue(violations)
-        codes = {v.code for v in violations}
-        self.assertIn("step13-anti-contract-prose", codes)
-
-    def test_check_flags_findings_empty_not_enough_negation(self):
-        # An anti-contract subtype: the section explicitly says the clean
-        # cycle is NOT the advance signal. Same regression in different
-        # wording.
-        anti = (
+            "### Step 14: Next\n",
+        ),
+        (
+            "findings-empty-not-enough",
+            "findings-empty-not-enough",
             "### Step 13: Test Quality Review\n"
             "\n"
             "1. Invoke the `review-tests` skill.\n"
@@ -1416,25 +1408,48 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "   require manual user sign-off before Step 14.\n"
             "3. Advance after `ok: true` AND user sign-off.\n"
             "\n"
-            "### Step 14: Next\n"
-        )
-        violations = run_step13_decision_record_contract(text=anti)
-        self.assertTrue(violations)
-        codes = {v.code for v in violations}
-        self.assertIn("step13-anti-contract-prose", codes)
+            "### Step 14: Next\n",
+        ),
+    )
 
-    def test_check_passes_when_full_contract_present(self):
-        # Sanity: the upgraded fixture (with the ok:true precondition)
-        # passes cleanly under the strengthened predicate.
-        violations = run_step13_decision_record_contract(text=self._CONTRACT_PROSE)
-        self.assertEqual(violations, [])
+    def test_check_flags_anti_contract_patterns(self):
+        for label, expected_code, fixture in self._ANTI_CONTRACT_FIXTURES:
+            with self.subTest(pattern=label):
+                violations = run_step13_decision_record_contract(text=fixture)
+                self.assertTrue(
+                    violations,
+                    f"{label}: must surface an anti-contract violation",
+                )
+                codes = {v.code for v in violations}
+                self.assertIn(
+                    "step13-anti-contract-prose",
+                    codes,
+                    f"{label}: missing step13-anti-contract-prose code",
+                )
+                # The violation's details name the specific pattern that
+                # matched, so a regression in pattern N is named in the
+                # failure message rather than collapsed into a generic
+                # "anti-contract" miss.
+                detail_text = "\n".join(
+                    "\n".join(v.details)
+                    for v in violations
+                    if v.code == "step13-anti-contract-prose"
+                )
+                self.assertIn(
+                    expected_code,
+                    detail_text,
+                    f"{label}: violation detail must name the matched pattern code",
+                )
 
     # --- allowed-negative fixtures: negated anti-patterns are OK -----------
 
-    def test_check_accepts_negated_skip_phrasing(self):
-        # "do not skip the decision record" is the CORRECT guardrail
-        # prose; it must not be flagged as anti-contract.
-        allowed = (
+    # The check must distinguish the bad imperative ("Skip the decision
+    # record") from the correct guardrail ("Do not skip the decision
+    # record"). Each fixture below carries the full contract plus a
+    # negated anti-pattern; none should surface any violations.
+    _ALLOWED_NEGATIVE_FIXTURES: tuple[tuple[str, str], ...] = (
+        (
+            "do-not-skip",
             "### Step 13: Test Quality Review\n"
             "\n"
             "1. Invoke the `review-tests` skill.\n"
@@ -1444,20 +1459,10 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "3. Advance to Step 14 after `ok: true`. Proceed to Step 14\n"
             "   in the same turn, no acknowledgment.\n"
             "\n"
-            "### Step 14: Next\n"
-        )
-        violations = run_step13_decision_record_contract(text=allowed)
-        self.assertEqual(
-            violations,
-            [],
-            "negated anti-pattern (`do not skip ...`) must not false-positive",
-        )
-
-    def test_check_accepts_negated_do_not_advance_after_ok_false(self):
-        # The CORRECT contract says "on ok:false, do not advance to Step 14".
-        # The anti-pattern regex must distinguish this from "do not advance
-        # to Step 14 [until user signoff]".
-        allowed = (
+            "### Step 14: Next\n",
+        ),
+        (
+            "on-ok-false-do-not-advance",
             "### Step 13: Test Quality Review\n"
             "\n"
             "1. Invoke the `review-tests` skill.\n"
@@ -1467,20 +1472,10 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "   underlying tooling issue and retry the post. Proceed only\n"
             "   after `ok: true`.\n"
             "\n"
-            "### Step 14: Next\n"
-        )
-        violations = run_step13_decision_record_contract(text=allowed)
-        self.assertEqual(
-            violations,
-            [],
-            "negated anti-pattern (`on ok:false, do not advance ...`) must not "
-            "false-positive — this is the correct success-precondition prose",
-        )
-
-    def test_check_accepts_must_never_skip_phrasing(self):
-        # "must never skip ... decision record" is another form of the
-        # guardrail; same allowed-negative shape.
-        allowed = (
+            "### Step 14: Next\n",
+        ),
+        (
+            "must-never-skip",
             "### Step 13: Test Quality Review\n"
             "\n"
             "1. Invoke the `review-tests` skill.\n"
@@ -1490,14 +1485,20 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "3. Advance to Step 14 after `ok: true`. Proceed to Step 14\n"
             "   in the same turn.\n"
             "\n"
-            "### Step 14: Next\n"
-        )
-        violations = run_step13_decision_record_contract(text=allowed)
-        self.assertEqual(
-            violations,
-            [],
-            "negated anti-pattern (`must never skip ...`) must not false-positive",
-        )
+            "### Step 14: Next\n",
+        ),
+    )
+
+    def test_check_accepts_negated_anti_patterns(self):
+        for label, fixture in self._ALLOWED_NEGATIVE_FIXTURES:
+            with self.subTest(negator=label):
+                violations = run_step13_decision_record_contract(text=fixture)
+                self.assertEqual(
+                    violations,
+                    [],
+                    f"{label}: negated anti-pattern must not false-positive — "
+                    "this is correct guardrail prose",
+                )
 
     def test_real_skill_passes_contract(self):
         # The repo's SKILL.md MUST satisfy the contract (this is the
