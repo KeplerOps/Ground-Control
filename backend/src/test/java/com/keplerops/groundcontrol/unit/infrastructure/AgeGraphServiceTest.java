@@ -111,9 +111,11 @@ class AgeGraphServiceTest {
 
         @Test
         void getVisualization_appliesFilterBeforeCapInFallback() {
-            // AGE-disabled fallback: contributors return the full project projection in memory;
-            // the adapter must apply the entityTypes filter BEFORE the cap predicate so a tight
-            // filter on a large project produces a small projection that passes the cap.
+            /*
+             * AGE-disabled fallback: contributors return the full project projection in memory;
+             * the adapter must apply the entityTypes filter BEFORE the cap predicate so a tight
+             * filter on a large project produces a small projection that passes the cap.
+             */
             var requirement = new GraphNode(
                     "REQUIREMENT:req-1", "req-1", GraphEntityType.REQUIREMENT, "p", "U-REQ", "REQ", Map.of());
             var asset = new GraphNode(
@@ -162,8 +164,9 @@ class AgeGraphServiceTest {
             }
             when(graphProjectionRegistryService.buildProjectionForProject(PROJECT_ID))
                     .thenReturn(new GraphProjection(nodes, List.of()));
+            var emptyFilter = java.util.Set.<GraphEntityType>of();
 
-            assertThatThrownBy(() -> service.getVisualization(PROJECT_ID, java.util.Set.of()))
+            assertThatThrownBy(() -> service.getVisualization(PROJECT_ID, emptyFilter))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("projection node count");
         }
@@ -376,20 +379,23 @@ class AgeGraphServiceTest {
 
             String nodeSql = sqlCaptor.getAllValues().get(0);
             String edgeSql = sqlCaptor.getAllValues().get(1);
-            // Cypher shape: filter is expressed as a parameter-bound IN clause; the LIMIT is the
-            // canonical MAX_PROJECTION_* + 1 cap.
-            assertThat(nodeSql).contains("WHERE n.entity_type IN $entity_types");
+            /*
+             * Cypher shape: filter is expressed as a parameter-bound IN clause; the LIMIT is the
+             * canonical MAX_PROJECTION_* + 1 cap. Caller-supplied entityType names must NOT be
+             * inlined into the SQL text — they reach AGE through the bound agtype params payload.
+             */
             assertThat(nodeSql)
+                    .contains("WHERE n.entity_type IN $entity_types")
                     .contains("LIMIT "
-                            + (com.keplerops.groundcontrol.domain.graph.GraphTraversalLimits.MAX_PROJECTION_NODES + 1));
-            assertThat(edgeSql).contains("WHERE s.entity_type IN $entity_types AND t.entity_type IN $entity_types");
+                            + (com.keplerops.groundcontrol.domain.graph.GraphTraversalLimits.MAX_PROJECTION_NODES + 1))
+                    .doesNotContain("REQUIREMENT")
+                    .doesNotContain("OPERATIONAL_ASSET");
             assertThat(edgeSql)
+                    .contains("WHERE s.entity_type IN $entity_types AND t.entity_type IN $entity_types")
                     .contains("LIMIT "
-                            + (com.keplerops.groundcontrol.domain.graph.GraphTraversalLimits.MAX_PROJECTION_EDGES + 1));
-            // Caller-supplied entityType names must NOT be inlined into the SQL text — they reach
-            // AGE through the bound agtype params payload only.
-            assertThat(nodeSql).doesNotContain("REQUIREMENT").doesNotContain("OPERATIONAL_ASSET");
-            assertThat(edgeSql).doesNotContain("REQUIREMENT").doesNotContain("OPERATIONAL_ASSET");
+                            + (com.keplerops.groundcontrol.domain.graph.GraphTraversalLimits.MAX_PROJECTION_EDGES + 1))
+                    .doesNotContain("REQUIREMENT")
+                    .doesNotContain("OPERATIONAL_ASSET");
             String nodeParams = capturedAgtypeParam(pssCaptor.getAllValues().get(0));
             String edgeParams = capturedAgtypeParam(pssCaptor.getAllValues().get(1));
             assertThat(nodeParams).contains("REQUIREMENT").contains("OPERATIONAL_ASSET");
@@ -439,8 +445,9 @@ class AgeGraphServiceTest {
                     })
                     .when(jdbcTemplate)
                     .query(anyString(), any(PreparedStatementSetter.class), any(RowCallbackHandler.class));
+            var emptyFilter = java.util.Set.<GraphEntityType>of();
 
-            assertThatThrownBy(() -> enabledService.getVisualization(PROJECT_ID, java.util.Set.of()))
+            assertThatThrownBy(() -> enabledService.getVisualization(PROJECT_ID, emptyFilter))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("projection node count");
         }

@@ -44,12 +44,12 @@ class MixedGraphServiceTest {
         // filtered set rather than the full project. Return only the REQUIREMENT node here so the
         // assertion verifies the service round-trips the client's filtered response unchanged.
         var requirement = node("REQUIREMENT:req-1", GraphEntityType.REQUIREMENT, "REQ-1");
-        when(mixedGraphClient.getVisualization(eq(projectId), eq(java.util.Set.of(GraphEntityType.REQUIREMENT))))
+        when(mixedGraphClient.getVisualization(projectId, java.util.Set.of(GraphEntityType.REQUIREMENT)))
                 .thenReturn(new GraphProjection(List.of(requirement), List.of()));
 
         var filtered = mixedGraphService.getVisualization(projectId, List.of("REQUIREMENT"));
 
-        assertThat(filtered.nodes()).containsExactly(requirement);
+        assertThat(filtered.nodes()).containsExactly(requirement).hasSize(1);
         assertThat(filtered.edges()).isEmpty();
     }
 
@@ -119,44 +119,48 @@ class MixedGraphServiceTest {
         // only nodes that match the filter. The service then can't find the asset target and 404s.
         var requirement = node("REQUIREMENT:req-1", GraphEntityType.REQUIREMENT, "REQ-1");
         var asset = node("OPERATIONAL_ASSET:asset-1", GraphEntityType.OPERATIONAL_ASSET, "ASSET-1");
-        when(mixedGraphClient.getVisualization(eq(projectId), eq(java.util.Set.of(GraphEntityType.REQUIREMENT))))
+        when(mixedGraphClient.getVisualization(projectId, java.util.Set.of(GraphEntityType.REQUIREMENT)))
                 .thenReturn(new GraphProjection(List.of(requirement), List.of()));
+        String requirementId = requirement.id();
+        String assetId = asset.id();
+        List<String> filter = List.of("REQUIREMENT");
 
-        assertThatThrownBy(() ->
-                        mixedGraphService.findPaths(projectId, requirement.id(), asset.id(), 2, List.of("REQUIREMENT")))
+        assertThatThrownBy(() -> mixedGraphService.findPaths(projectId, requirementId, assetId, 2, filter))
                 .isInstanceOf(NotFoundException.class)
-                .hasMessageContaining(asset.id());
+                .hasMessageContaining(assetId);
     }
 
     // --- Bound enforcement (ADR-032: service-level defense in depth) ---
 
+    private static final List<String> SINGLE_ROOT = List.of("root");
+
     @Test
     void extractSubgraphRejectsDepthAboveMax() {
-        assertThatThrownBy(() -> mixedGraphService.extractSubgraph(
-                        projectId, List.of("root"), GraphTraversalLimits.MAX_DEPTH + 1, null))
+        int overCap = GraphTraversalLimits.MAX_DEPTH + 1;
+        assertThatThrownBy(() -> mixedGraphService.extractSubgraph(projectId, SINGLE_ROOT, overCap, null))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("depth");
     }
 
     @Test
     void extractSubgraphRejectsDepthBelowOne() {
-        assertThatThrownBy(() -> mixedGraphService.extractSubgraph(projectId, List.of("root"), 0, null))
+        assertThatThrownBy(() -> mixedGraphService.extractSubgraph(projectId, SINGLE_ROOT, 0, null))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("depth");
     }
 
     @Test
     void traverseRejectsDepthAboveMax() {
-        assertThatThrownBy(() -> mixedGraphService.traverse(
-                        projectId, List.of("root"), GraphTraversalLimits.MAX_DEPTH + 1, null))
+        int overCap = GraphTraversalLimits.MAX_DEPTH + 1;
+        assertThatThrownBy(() -> mixedGraphService.traverse(projectId, SINGLE_ROOT, overCap, null))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("depth");
     }
 
     @Test
     void findPathsRejectsDepthAboveMax() {
-        assertThatThrownBy(() ->
-                        mixedGraphService.findPaths(projectId, "src", "tgt", GraphTraversalLimits.MAX_DEPTH + 1, null))
+        int overCap = GraphTraversalLimits.MAX_DEPTH + 1;
+        assertThatThrownBy(() -> mixedGraphService.findPaths(projectId, "src", "tgt", overCap, null))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("depth");
     }
@@ -182,7 +186,8 @@ class MixedGraphServiceTest {
     @Test
     void traverseRejectsEmptyRootNodes() {
         // @NotEmpty on the DTO covers HTTP, but the service must also refuse direct calls.
-        assertThatThrownBy(() -> mixedGraphService.traverse(projectId, List.of(), 1, null))
+        List<String> empty = List.of();
+        assertThatThrownBy(() -> mixedGraphService.traverse(projectId, empty, 1, null))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("rootNodeIds");
     }
@@ -190,22 +195,23 @@ class MixedGraphServiceTest {
     @Test
     void extractSubgraphRejectsOversizeEntityTypesFilter() {
         List<String> filter = Collections.nCopies(GraphTraversalLimits.MAX_ENTITY_TYPE_FILTER + 1, "REQUIREMENT");
-        assertThatThrownBy(() -> mixedGraphService.extractSubgraph(projectId, List.of("root"), 1, filter))
+        assertThatThrownBy(() -> mixedGraphService.extractSubgraph(projectId, SINGLE_ROOT, 1, filter))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("entityTypes");
     }
 
     @Test
     void extractSubgraphRejectsUnknownEntityType() {
-        assertThatThrownBy(() ->
-                        mixedGraphService.extractSubgraph(projectId, List.of("root"), 1, List.of("NOT_AN_ENTITY_TYPE")))
+        List<String> filter = List.of("NOT_AN_ENTITY_TYPE");
+        assertThatThrownBy(() -> mixedGraphService.extractSubgraph(projectId, SINGLE_ROOT, 1, filter))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("entityType");
     }
 
     @Test
     void getVisualizationRejectsUnknownEntityType() {
-        assertThatThrownBy(() -> mixedGraphService.getVisualization(projectId, List.of("NOT_AN_ENTITY_TYPE")))
+        List<String> filter = List.of("NOT_AN_ENTITY_TYPE");
+        assertThatThrownBy(() -> mixedGraphService.getVisualization(projectId, filter))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("entityType");
     }
@@ -232,7 +238,8 @@ class MixedGraphServiceTest {
     @Test
     void parseEntityTypesRejectsBlankValue() {
         // Codex review cycle 1 finding #3: a blank entry must not silently degrade to "no filter".
-        assertThatThrownBy(() -> mixedGraphService.extractSubgraph(projectId, List.of("root"), 1, List.of(" ")))
+        List<String> blank = List.of(" ");
+        assertThatThrownBy(() -> mixedGraphService.extractSubgraph(projectId, SINGLE_ROOT, 1, blank))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("blank");
     }
@@ -247,8 +254,9 @@ class MixedGraphServiceTest {
             nodes.add(node("REQUIREMENT:req-" + i, GraphEntityType.REQUIREMENT, "REQ-" + i));
         }
         when(mixedGraphClient.getVisualization(eq(projectId), any())).thenReturn(new GraphProjection(nodes, List.of()));
+        List<String> noFilter = null;
 
-        assertThatThrownBy(() -> mixedGraphService.getVisualization(projectId, null))
+        assertThatThrownBy(() -> mixedGraphService.getVisualization(projectId, noFilter))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("projection");
     }

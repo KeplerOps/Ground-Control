@@ -48,9 +48,10 @@ public class MixedGraphService {
 
     public GraphProjection traverse(
             UUID projectId, List<String> rootNodeIds, int maxDepth, List<String> entityTypeNames) {
-        validateDepth(maxDepth);
-        validateRootNodeIds(rootNodeIds);
-        return neighborhoodProjection(projectId, rootNodeIds, maxDepth, entityTypeNames);
+        // Same operational shape as extractSubgraph today; the public surface is intentionally
+        // distinct because the two endpoints document different intents (subgraph slice vs.
+        // adjacency traversal) and may diverge later (e.g., directional vs. undirected expansion).
+        return extractSubgraph(projectId, rootNodeIds, maxDepth, entityTypeNames);
     }
 
     public List<GraphPathResult> findPaths(
@@ -80,9 +81,11 @@ public class MixedGraphService {
             var current = path.getLast();
             int edgeCount = path.size() - 1;
             if (current.equals(targetNodeId)) {
-                // Enqueue rule below prevents over-cap paths from ever being added, so an
-                // over-cap path can only reach this branch if the source itself equals the target;
-                // either way edgeCount <= maxDepth, satisfying the maxDepth contract.
+                /*
+                 * Enqueue rule below prevents over-cap paths from ever being added, so an
+                 * over-cap path can only reach this branch if the source itself equals the target;
+                 * either way edgeCount is bounded by maxDepth, satisfying the maxDepth contract.
+                 */
                 List<String> edgeTypes = new ArrayList<>();
                 for (int i = 0; i < path.size() - 1; i++) {
                     var edge = edgeLookup.get(undirectedKey(path.get(i), path.get(i + 1)));
