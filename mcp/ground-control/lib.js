@@ -8463,3 +8463,45 @@ export async function updateAdminUserEnabled(username, enabled) {
 export async function deleteAdminUser(username) {
   await request("DELETE", `/api/v1/admin/users/${encodeURIComponent(username)}`);
 }
+
+// ---------------------------------------------------------------------------
+// gc_risk_governance: per-entity status validation
+// ---------------------------------------------------------------------------
+//
+// `status` carries a different enum vocabulary for each entity in
+// gc_risk_governance. A flat union over the four enums would accept
+// `entity=treatment_plan status=ACCEPTED` because ACCEPTED happens to be a
+// valid risk_register_record status — issue #881's "discriminated by entity"
+// recommendation. risk_assessment_result has no `status` (it uses
+// `approval_state`), so it is intentionally absent from the map.
+
+export const GOVERNANCE_STATUS_ENUMS = {
+  methodology_profile: METHODOLOGY_PROFILE_STATUSES,
+  risk_register_record: RISK_REGISTER_STATUSES,
+  treatment_plan: TREATMENT_PLAN_STATUSES,
+  verification_result: VERIFICATION_STATUSES,
+};
+
+/**
+ * Validate a gc_risk_governance `status` argument against the per-entity
+ * vocabulary. Throws on mismatch with a message naming the entity and the
+ * valid values. No-op when `status` is omitted (the field is optional on
+ * create/update for entities that carry it; only the `transition` action
+ * requires it, and that is enforced separately via reqArg).
+ *
+ * Exported (not inlined into the index.js handler) so it can be unit-tested
+ * without spinning up the MCP server registration.
+ */
+export function validateGovernanceStatus(entity, status) {
+  if (status === undefined || status === null || status === "") return;
+  const allowed = GOVERNANCE_STATUS_ENUMS[entity];
+  if (!allowed) {
+    throw new Error(`'status' is not valid for entity='${entity}'`);
+  }
+  if (!allowed.includes(status)) {
+    throw new Error(
+      `'status'='${status}' is not valid for entity='${entity}'. ` +
+        `Valid values: ${allowed.join(", ")}`,
+    );
+  }
+}

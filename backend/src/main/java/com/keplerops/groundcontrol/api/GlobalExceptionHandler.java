@@ -1,5 +1,7 @@
 package com.keplerops.groundcontrol.api;
 
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.keplerops.groundcontrol.domain.exception.AuthenticationException;
 import com.keplerops.groundcontrol.domain.exception.AuthorizationException;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
@@ -7,8 +9,11 @@ import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.GroundControlException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.shared.web.ErrorResponse;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -83,8 +88,50 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleHttpMessageNotReadable(HttpMessageNotReadableException ex) {
+        var invalidEnum = findInvalidEnumFormat(ex);
+        if (invalidEnum != null) {
+            return handleInvalidEnumFormat(invalidEnum);
+        }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ErrorResponse.of(BAD_REQUEST, "Malformed request body"));
+    }
+
+    private InvalidFormatException findInvalidEnumFormat(Throwable ex) {
+        var current = ex;
+        while (current != null) {
+            if (current instanceof InvalidFormatException invalidFormat
+                    && invalidFormat.getTargetType() != null
+                    && invalidFormat.getTargetType().isEnum()) {
+                return invalidFormat;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private ResponseEntity<ErrorResponse> handleInvalidEnumFormat(InvalidFormatException ex) {
+        var field = extractFieldName(ex);
+        // Use Enum.name() rather than Object.toString() so an enum that overrides
+        // toString() for display purposes does not surface a non-bindable label
+        // in the validValues hint the caller is told to use.
+        var validValues = Arrays.stream(ex.getTargetType().getEnumConstants())
+                .map(c -> ((Enum<?>) c).name())
+                .toList();
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("field", field);
+        detail.put("validValues", validValues);
+
+        var message = "Invalid value for field '" + field + "'. Valid values: " + String.join(", ", validValues);
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(ErrorResponse.of("validation_error", message, detail));
+    }
+
+    private String extractFieldName(InvalidFormatException ex) {
+        return ex.getPath().stream()
+                .map(JsonMappingException.Reference::getFieldName)
+                .filter(Objects::nonNull)
+                .reduce((a, b) -> b)
+                .orElse("request");
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)

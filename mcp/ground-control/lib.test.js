@@ -91,6 +91,8 @@ import {
   LINK_TYPES,
   toSnakeCase,
   toCamelCase,
+  validateGovernanceStatus,
+  GOVERNANCE_STATUS_ENUMS,
 } from "./lib.js";
 
 // ---------------------------------------------------------------------------
@@ -7232,5 +7234,66 @@ describe("TEST_QUALITY_REVIEW_FINDINGS_SCHEMA", () => {
     assert.ok(item.required.includes("location"));
     assert.ok(item.required.includes("problem"));
     assert.ok(item.required.includes("fix"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateGovernanceStatus (gc_risk_governance per-entity status check)
+// ---------------------------------------------------------------------------
+
+describe("validateGovernanceStatus", () => {
+  it("is a no-op when status is omitted", () => {
+    // create/update actions may legitimately omit status; only the
+    // transition action requires it (enforced separately by reqArg).
+    assert.doesNotThrow(() => validateGovernanceStatus("treatment_plan", undefined));
+    assert.doesNotThrow(() => validateGovernanceStatus("treatment_plan", null));
+    assert.doesNotThrow(() => validateGovernanceStatus("treatment_plan", ""));
+  });
+
+  it("accepts a status that is valid for the given entity", () => {
+    assert.doesNotThrow(() => validateGovernanceStatus("methodology_profile", "ACTIVE"));
+    assert.doesNotThrow(() => validateGovernanceStatus("risk_register_record", "ACCEPTED"));
+    assert.doesNotThrow(() => validateGovernanceStatus("treatment_plan", "PLANNED"));
+    assert.doesNotThrow(() => validateGovernanceStatus("verification_result", "PROVEN"));
+  });
+
+  it("rejects a status that is valid for another entity but not this one", () => {
+    // The exact scenario issue #881 wants caught at MCP: ACCEPTED is a real
+    // risk_register_record status, but invalid for treatment_plan. The flat
+    // z.union the original PR shipped would have passed this through to the
+    // backend; the per-entity check rejects it locally.
+    assert.throws(
+      () => validateGovernanceStatus("treatment_plan", "ACCEPTED"),
+      (e) =>
+        /'status'='ACCEPTED' is not valid for entity='treatment_plan'/.test(e.message) &&
+        /Valid values: PLANNED, IN_PROGRESS, BLOCKED, COMPLETED, CANCELED/.test(e.message),
+    );
+  });
+
+  it("rejects a completely unknown status string with the valid-values hint", () => {
+    assert.throws(
+      () => validateGovernanceStatus("treatment_plan", "PROPOSED"),
+      (e) =>
+        /'status'='PROPOSED' is not valid for entity='treatment_plan'/.test(e.message) &&
+        /Valid values: /.test(e.message),
+    );
+  });
+
+  it("rejects status on an entity that has no status field", () => {
+    // risk_assessment_result uses approval_state, not status. Any status
+    // value on that entity is structurally wrong and must be rejected.
+    assert.throws(
+      () => validateGovernanceStatus("risk_assessment_result", "DRAFT"),
+      (e) => /'status' is not valid for entity='risk_assessment_result'/.test(e.message),
+    );
+  });
+
+  it("GOVERNANCE_STATUS_ENUMS keys cover every status-bearing entity", () => {
+    // Lock in the entity set so a new gc_risk_governance entity with its own
+    // status vocabulary cannot silently inherit the "no status" rejection.
+    assert.deepEqual(
+      Object.keys(GOVERNANCE_STATUS_ENUMS).sort(),
+      ["methodology_profile", "risk_register_record", "treatment_plan", "verification_result"],
+    );
   });
 });

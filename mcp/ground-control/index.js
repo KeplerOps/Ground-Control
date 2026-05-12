@@ -162,6 +162,7 @@ import {
   TRUST_OUTCOMES, INSTALL_OUTCOMES,
   TRUST_POLICY_FIELDS, TRUST_POLICY_RULE_OPERATORS,
   pick, reqArg,
+  validateGovernanceStatus,
 } from "./lib.js";
 import {
   executeGcQuery,
@@ -1446,6 +1447,11 @@ server.tool(
     action: z.enum(RISK_GOVERNANCE_ACTIONS),
     id: z.string().uuid().optional(),
     project: z.string().optional(),
+    // Status vocabulary is per-entity; the handler validates it against
+    // GOVERNANCE_STATUS_ENUMS[args.entity] before any backend call. The Zod
+    // shape accepts any string here — a discriminated check at the schema
+    // level would require restructuring this tool into five entity-specific
+    // tools, which ADR-035 already rejected.
     status: z.string().optional(),
     approval_state: z.enum(RISK_ASSESSMENT_APPROVAL_STATUSES).optional(),
     // Shared entity fields. Per-entity allowlist (GOVERNANCE_FIELDS) gates which
@@ -1472,6 +1478,11 @@ server.tool(
   },
   async (args) => {
     try {
+      // Per-entity status discriminated check (issue #881). status uses a
+      // different enum per entity; reject before the backend is touched so
+      // the wrong-status-for-entity case surfaces at the MCP boundary with
+      // the actual valid values rather than a backend 422.
+      validateGovernanceStatus(args.entity, args.status);
       const data = pick(args, GOVERNANCE_FIELDS[args.entity] ?? []);
       switch (args.entity) {
         case "methodology_profile": {
