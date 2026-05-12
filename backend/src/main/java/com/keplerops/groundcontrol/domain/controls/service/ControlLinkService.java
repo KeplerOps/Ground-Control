@@ -5,6 +5,7 @@ import com.keplerops.groundcontrol.domain.controls.repository.ControlLinkReposit
 import com.keplerops.groundcontrol.domain.controls.state.ControlLinkTargetType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.graph.service.GraphTargetResolverService;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -20,33 +21,39 @@ public class ControlLinkService {
 
     private final ControlLinkRepository controlLinkRepository;
     private final ControlService controlService;
+    private final GraphTargetResolverService graphTargetResolverService;
 
-    public ControlLinkService(ControlLinkRepository controlLinkRepository, ControlService controlService) {
+    public ControlLinkService(
+            ControlLinkRepository controlLinkRepository,
+            ControlService controlService,
+            GraphTargetResolverService graphTargetResolverService) {
         this.controlLinkRepository = controlLinkRepository;
         this.controlService = controlService;
+        this.graphTargetResolverService = graphTargetResolverService;
     }
 
     public ControlLink create(UUID projectId, UUID controlId, CreateControlLinkCommand command) {
         var control = controlService.getById(projectId, controlId);
 
-        if (command.targetEntityId() != null
-                && controlLinkRepository.existsByControlIdAndTargetTypeAndTargetEntityIdAndLinkType(
-                        controlId, command.targetType(), command.targetEntityId(), command.linkType())) {
-            throw new ConflictException("Duplicate control link");
-        }
-        if (command.targetEntityId() == null
-                && command.targetIdentifier() != null
-                && controlLinkRepository.existsByControlIdAndTargetTypeAndTargetIdentifierAndLinkType(
-                        controlId, command.targetType(), command.targetIdentifier(), command.linkType())) {
+        // Validate the target before persisting: internal target types require a
+        // project-scoped targetEntityId that resolves to an existing entity;
+        // external target types require a nonblank targetIdentifier. Without
+        // this gate ControlLinkService.create() previously persisted whatever
+        // the caller supplied — including cross-project entity IDs.
+        var target = graphTargetResolverService.validateControlTarget(
+                projectId, command.targetType(), command.targetEntityId(), command.targetIdentifier());
+
+        boolean exists = target.internal()
+                ? controlLinkRepository.existsByControlIdAndTargetTypeAndTargetEntityIdAndLinkType(
+                        controlId, command.targetType(), target.targetEntityId(), command.linkType())
+                : controlLinkRepository.existsByControlIdAndTargetTypeAndTargetIdentifierAndLinkType(
+                        controlId, command.targetType(), target.targetIdentifier(), command.linkType());
+        if (exists) {
             throw new ConflictException("Duplicate control link");
         }
 
         var link = new ControlLink(
-                control,
-                command.targetType(),
-                command.targetEntityId(),
-                command.targetIdentifier(),
-                command.linkType());
+                control, command.targetType(), target.targetEntityId(), target.targetIdentifier(), command.linkType());
         if (command.targetUrl() != null) {
             link.setTargetUrl(command.targetUrl());
         }
@@ -55,9 +62,10 @@ public class ControlLinkService {
         }
         link = controlLinkRepository.save(link);
         log.info(
-                "control_link_created: control={} targetType={} linkType={}",
+                "control_link_created: control={} targetType={} target={} linkType={}",
                 control.getUid(),
                 command.targetType(),
+                target.internal() ? target.targetEntityId() : target.targetIdentifier(),
                 command.linkType());
         return link;
     }

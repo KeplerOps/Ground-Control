@@ -16,7 +16,9 @@ import com.keplerops.groundcontrol.domain.controls.state.ControlFunction;
 import com.keplerops.groundcontrol.domain.controls.state.ControlLinkTargetType;
 import com.keplerops.groundcontrol.domain.controls.state.ControlLinkType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.graph.service.GraphTargetResolverService;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import java.util.List;
 import java.util.Optional;
@@ -37,6 +39,9 @@ class ControlLinkServiceTest {
 
     @Mock
     private ControlService controlService;
+
+    @Mock
+    private GraphTargetResolverService graphTargetResolverService;
 
     @InjectMocks
     private ControlLinkService controlLinkService;
@@ -61,23 +66,98 @@ class ControlLinkServiceTest {
         @Test
         void createsLinkWithExternalIdentifier() {
             when(controlService.getById(projectId, controlId)).thenReturn(control);
+            when(graphTargetResolverService.validateControlTarget(
+                            projectId, ControlLinkTargetType.EXTERNAL, null, "EXT-001"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(null, "EXT-001", false));
             when(controlLinkRepository.existsByControlIdAndTargetTypeAndTargetIdentifierAndLinkType(
-                            controlId, ControlLinkTargetType.ASSET, "ASSET-001", ControlLinkType.PROTECTS))
+                            controlId, ControlLinkTargetType.EXTERNAL, "EXT-001", ControlLinkType.ASSOCIATED))
                     .thenReturn(false);
             when(controlLinkRepository.save(any(ControlLink.class))).thenAnswer(inv -> inv.getArgument(0));
 
             var command = new com.keplerops.groundcontrol.domain.controls.service.CreateControlLinkCommand(
-                    ControlLinkTargetType.ASSET, null, "ASSET-001", ControlLinkType.PROTECTS, null, null);
+                    ControlLinkTargetType.EXTERNAL, null, "EXT-001", ControlLinkType.ASSOCIATED, null, null);
+            var result = controlLinkService.create(projectId, controlId, command);
+
+            assertThat(result.getTargetType()).isEqualTo(ControlLinkTargetType.EXTERNAL);
+            assertThat(result.getTargetIdentifier()).isEqualTo("EXT-001");
+            assertThat(result.getLinkType()).isEqualTo(ControlLinkType.ASSOCIATED);
+        }
+
+        @Test
+        void createsLinkWithInternalEntityId() {
+            var assetId = UUID.randomUUID();
+            when(controlService.getById(projectId, controlId)).thenReturn(control);
+            when(graphTargetResolverService.validateControlTarget(
+                            projectId, ControlLinkTargetType.ASSET, assetId, null))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(assetId, null, true));
+            when(controlLinkRepository.existsByControlIdAndTargetTypeAndTargetEntityIdAndLinkType(
+                            controlId, ControlLinkTargetType.ASSET, assetId, ControlLinkType.PROTECTS))
+                    .thenReturn(false);
+            when(controlLinkRepository.save(any(ControlLink.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new com.keplerops.groundcontrol.domain.controls.service.CreateControlLinkCommand(
+                    ControlLinkTargetType.ASSET, assetId, null, ControlLinkType.PROTECTS, null, null);
             var result = controlLinkService.create(projectId, controlId, command);
 
             assertThat(result.getTargetType()).isEqualTo(ControlLinkTargetType.ASSET);
-            assertThat(result.getTargetIdentifier()).isEqualTo("ASSET-001");
+            assertThat(result.getTargetEntityId()).isEqualTo(assetId);
+            assertThat(result.getTargetIdentifier()).isNull();
             assertThat(result.getLinkType()).isEqualTo(ControlLinkType.PROTECTS);
+        }
+
+        @Test
+        void rejectsCrossProjectInternalTarget() {
+            // Issue #875: ControlLinkService used to persist targetEntityId
+            // without validating project scope. GraphTargetResolverService now
+            // does the existence/project check; a target from another project
+            // surfaces as DomainValidationException with "not found".
+            var foreignAssetId = UUID.randomUUID();
+            when(controlService.getById(projectId, controlId)).thenReturn(control);
+            when(graphTargetResolverService.validateControlTarget(
+                            projectId, ControlLinkTargetType.ASSET, foreignAssetId, null))
+                    .thenThrow(new DomainValidationException("Asset target not found in the requested project"));
+
+            var command = new com.keplerops.groundcontrol.domain.controls.service.CreateControlLinkCommand(
+                    ControlLinkTargetType.ASSET, foreignAssetId, null, ControlLinkType.PROTECTS, null, null);
+            assertThatThrownBy(() -> controlLinkService.create(projectId, controlId, command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("not found in the requested project");
+        }
+
+        @Test
+        void rejectsInternalTargetWithMissingEntityId() {
+            when(controlService.getById(projectId, controlId)).thenReturn(control);
+            when(graphTargetResolverService.validateControlTarget(
+                            projectId, ControlLinkTargetType.REQUIREMENT, null, null))
+                    .thenThrow(new DomainValidationException("Requirement links require targetEntityId"));
+
+            var command = new com.keplerops.groundcontrol.domain.controls.service.CreateControlLinkCommand(
+                    ControlLinkTargetType.REQUIREMENT, null, null, ControlLinkType.MITIGATES, null, null);
+            assertThatThrownBy(() -> controlLinkService.create(projectId, controlId, command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("require targetEntityId");
+        }
+
+        @Test
+        void rejectsExternalTargetWithBlankIdentifier() {
+            when(controlService.getById(projectId, controlId)).thenReturn(control);
+            when(graphTargetResolverService.validateControlTarget(
+                            projectId, ControlLinkTargetType.EXTERNAL, null, null))
+                    .thenThrow(new DomainValidationException("External or unmodeled links require targetIdentifier"));
+
+            var command = new com.keplerops.groundcontrol.domain.controls.service.CreateControlLinkCommand(
+                    ControlLinkTargetType.EXTERNAL, null, null, ControlLinkType.ASSOCIATED, null, null);
+            assertThatThrownBy(() -> controlLinkService.create(projectId, controlId, command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("require targetIdentifier");
         }
 
         @Test
         void throwsOnDuplicateLink() {
             when(controlService.getById(projectId, controlId)).thenReturn(control);
+            when(graphTargetResolverService.validateControlTarget(
+                            projectId, ControlLinkTargetType.EXTERNAL, null, "ext-1"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(null, "ext-1", false));
             when(controlLinkRepository.existsByControlIdAndTargetTypeAndTargetIdentifierAndLinkType(
                             controlId, ControlLinkTargetType.EXTERNAL, "ext-1", ControlLinkType.ASSOCIATED))
                     .thenReturn(true);

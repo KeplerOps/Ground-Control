@@ -82,6 +82,7 @@ import {
   ARTIFACT_TYPES,
   LINK_TYPES,
   toSnakeCase,
+  toCamelCase,
 } from "./lib.js";
 
 // ---------------------------------------------------------------------------
@@ -145,6 +146,49 @@ describe("toSnakeCase", () => {
     assert.equal(toSnakeCase(null), null);
     assert.equal(toSnakeCase(42), 42);
     assert.deepEqual(toSnakeCase({ alreadyPlain: 1 }), { alreadyPlain: 1 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// toCamelCase — request body normalization (issue #875)
+//
+// Pure-function shape tests for the snake_case → camelCase rewrite that runs
+// on every outbound request body. Adapter-level coverage of the
+// gc_threat_model handler (Zod schema, action dispatch, body allowlists) lives
+// in gc-threat-model.test.js.
+// ---------------------------------------------------------------------------
+
+describe("toCamelCase", () => {
+  it("renders a threat_model create body to the backend camelCase shape", () => {
+    const out = toCamelCase({
+      uid: "TM-1",
+      title: "Title",
+      threat_source: "Source",
+      threat_event: "Event",
+      effect: "Effect",
+      stride_category: "TAMPERING",
+      narrative: "Note",
+    });
+    assert.deepEqual(out, {
+      uid: "TM-1",
+      title: "Title",
+      threatSource: "Source",
+      threatEvent: "Event",
+      effect: "Effect",
+      stride: "TAMPERING",
+      narrative: "Note",
+    });
+  });
+
+  it("rewrites the threat-model update clearStride / clearNarrative flags", () => {
+    const out = toCamelCase({ clear_stride: true, clear_narrative: false });
+    assert.deepEqual(out, { clearStride: true, clearNarrative: false });
+  });
+
+  it("passes unknown keys through unchanged and tolerates null/scalars", () => {
+    assert.equal(toCamelCase(null), null);
+    assert.equal(toCamelCase(42), 42);
+    assert.deepEqual(toCamelCase({ already_camel: 1 }), { already_camel: 1 });
   });
 });
 

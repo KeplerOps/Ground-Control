@@ -4,6 +4,7 @@ import com.keplerops.groundcontrol.domain.assets.repository.ObservationRepositor
 import com.keplerops.groundcontrol.domain.assets.repository.OperationalAssetRepository;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.controls.repository.ControlRepository;
+import com.keplerops.groundcontrol.domain.controls.state.ControlLinkTargetType;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.riskscenarios.repository.MethodologyProfileRepository;
@@ -151,6 +152,54 @@ public class GraphTargetResolverService {
                     threatModelRepository.existsByIdAndProjectId(targetEntityId, projectId),
                     "Threat model");
             case VULNERABILITY, FINDING, EVIDENCE, AUDIT_RECORD, EXTERNAL -> externalTarget(targetIdentifier);
+        };
+    }
+
+    public ValidatedTarget validateControlTarget(
+            UUID projectId, ControlLinkTargetType targetType, UUID targetEntityId, String targetIdentifier) {
+        return switch (targetType) {
+            case ASSET -> internalTarget(
+                    targetEntityId, assetRepository.existsByIdAndProjectId(targetEntityId, projectId), "Asset");
+            case REQUIREMENT -> internalTarget(
+                    targetEntityId,
+                    requirementRepository.existsByIdAndProjectId(targetEntityId, projectId),
+                    "Requirement");
+            case RISK_SCENARIO -> internalTarget(
+                    targetEntityId,
+                    riskScenarioRepository.existsByIdAndProjectId(targetEntityId, projectId),
+                    "Risk scenario");
+            case RISK_REGISTER_RECORD -> internalTarget(
+                    targetEntityId,
+                    riskRegisterRecordRepository
+                            .findByIdAndProjectIdWithScenarios(targetEntityId, projectId)
+                            .isPresent(),
+                    "Risk register record");
+            case RISK_ASSESSMENT_RESULT -> internalTarget(
+                    targetEntityId,
+                    riskAssessmentResultRepository
+                            .findByIdAndProjectIdWithObservations(targetEntityId, projectId)
+                            .isPresent(),
+                    "Risk assessment result");
+            case TREATMENT_PLAN -> internalTarget(
+                    targetEntityId,
+                    treatmentPlanRepository
+                            .findByIdAndProjectId(targetEntityId, projectId)
+                            .isPresent(),
+                    "Treatment plan");
+            case METHODOLOGY_PROFILE -> internalTarget(
+                    targetEntityId,
+                    methodologyProfileRepository
+                            .findByIdAndProjectId(targetEntityId, projectId)
+                            .isPresent(),
+                    "Methodology profile");
+            case OBSERVATION -> internalTarget(
+                    targetEntityId,
+                    observationRepository
+                            .findByIdWithAssetAndProjectId(targetEntityId, projectId)
+                            .isPresent(),
+                    "Observation");
+            case EVIDENCE, FINDING, CODE, CONFIGURATION, OPERATIONAL_ARTIFACT, EXTERNAL -> externalTarget(
+                    targetIdentifier);
         };
     }
 
