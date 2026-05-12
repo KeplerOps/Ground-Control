@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { execFile as execFileCb } from "node:child_process";
@@ -866,13 +866,165 @@ export async function getWorkOrder(project) {
   return request("GET", "/api/v1/analysis/work-order", { params: { project } });
 }
 
-function readOperatorSuppliedFile(filePath) {
-  if (!filePath || !isAbsolute(filePath)) {
-    throw new Error("file_path must be an absolute path");
+// Strict containment predicate. Both arguments MUST already be canonical
+// realpaths — call `realpathSync` on each side before invoking this. Returns
+// true iff `canonicalPath` is strictly inside `canonicalRoot` (rejects the
+// root itself, `..` escapes, and absolute relative results from cross-volume
+// or sibling paths).
+//
+// Shared between the upload boundary (`readApprovedUploadFile`) and the
+// repo-config boundary (`assertRealpathInRepo`) so future fixes to symlink
+// containment, root semantics, or test coverage apply to both surfaces.
+function isPathStrictlyInside(canonicalRoot, canonicalPath) {
+  const rel = relative(canonicalRoot, canonicalPath);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+// Validate one entry in an upload-resolver `allowedExtensions` list. Returns
+// the lowercased extension or throws a stable, field-scoped error.
+function normalizeAllowedExtension(rawExt, field) {
+  if (typeof rawExt !== "string" || rawExt.length === 0) {
+    throw new Error(`${field}: every allowed extension must be a non-empty string`);
+  }
+  if (rawExt.indexOf("/") !== -1 || rawExt.indexOf("\\") !== -1 || rawExt.indexOf("\0") !== -1) {
+    throw new Error(`${field}: extension must not contain path separators or NUL`);
+  }
+  if (rawExt[0] !== ".") {
+    throw new Error(`${field}: extension must start with '.' (got '${rawExt}')`);
+  }
+  if (rawExt.length < 2) {
+    throw new Error(`${field}: extension must include characters after '.'`);
+  }
+  return rawExt.toLowerCase();
+}
+
+// Validate an operator-supplied upload path and read its bytes.
+//
+// Closes #246: prompt-injected or misused MCP tool calls could otherwise
+// trigger `readFileSync()` on arbitrary local paths (SSH keys, env files,
+// shell history) and POST the bytes to a backend instance.
+//
+// Validation order is intentional: cheap lexical checks fail before any
+// syscall touches `rawPath`. The leaf-symlink check happens before
+// `realpathSync` so a malicious symlink can never be silently followed.
+// Containment is checked against the canonical realpath of `workspaceRoot`,
+// and `readFileSync` reads the canonical path so the bytes match the path
+// the validator approved.
+export function readApprovedUploadFile(
+  rawPath,
+  { workspaceRoot, allowedExtensions, fieldName } = {},
+) {
+  const field = fieldName || "file_path";
+  if (typeof workspaceRoot !== "string" || workspaceRoot.length === 0) {
+    throw new Error(`${field}: workspaceRoot must be a non-empty string`);
+  }
+  if (!Array.isArray(allowedExtensions) || allowedExtensions.length === 0) {
+    throw new Error(`${field}: at least one allowed extension is required`);
+  }
+  // Validate each entry up front so a misconfigured caller (e.g.
+  // `allowedExtensions: [""]` or `["json"]`) fails closed before any
+  // filesystem check could match more than the caller intended.
+  const normalizedExtensions = allowedExtensions.map((ext) => normalizeAllowedExtension(ext, field));
+
+  if (typeof rawPath !== "string" || rawPath.length === 0) {
+    throw new Error(`${field}: must be a non-empty string`);
+  }
+  if (rawPath.indexOf("\0") !== -1) {
+    throw new Error(`${field}: must not contain NUL bytes`);
+  }
+  if (!isAbsolute(rawPath)) {
+    throw new Error(`${field}: must be an absolute path`);
   }
 
-  // eslint-disable-next-line security/detect-non-literal-fs-filename -- file_path is validated operator input
-  return readFileSync(filePath);
+  const lowerName = basename(rawPath).toLowerCase();
+  const extOk = normalizedExtensions.some((ext) => lowerName.endsWith(ext));
+  if (!extOk) {
+    throw new Error(
+      `${field}: must have one of these extensions: ${normalizedExtensions.join(", ")}`,
+    );
+  }
+
+  // lstat first: rejects when the leaf itself is a symlink, before realpath
+  // would silently follow it. Also surfaces ENOENT as a stable validation
+  // error rather than leaking through readFileSync.
+  let leafStat;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- rawPath is validated operator input being inspected pre-read
+    leafStat = lstatSync(rawPath);
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      throw new Error(`${field}: file does not exist`);
+    }
+    throw new Error(`${field}: cannot stat path (${err && err.code ? err.code : "unknown"})`);
+  }
+  if (leafStat.isSymbolicLink()) {
+    throw new Error(`${field}: must not be a symlink`);
+  }
+
+  // Realpath the workspace root and the target so ancestor symlinks resolve
+  // before the containment check. A workspace path that itself is a symlink
+  // resolves to its real location; the target's canonical path must lie
+  // strictly inside that real workspace.
+  let canonicalRoot;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- workspaceRoot canonicalized for containment check
+    canonicalRoot = realpathSync(workspaceRoot);
+  } catch (err) {
+    throw new Error(
+      `${field}: workspaceRoot could not be canonicalized (${err && err.code ? err.code : "unknown"})`,
+    );
+  }
+  let canonicalPath;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- rawPath validated above; realpath needed for containment check
+    canonicalPath = realpathSync(rawPath);
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      throw new Error(`${field}: file does not exist`);
+    }
+    throw new Error(
+      `${field}: could not be canonicalized (${err && err.code ? err.code : "unknown"})`,
+    );
+  }
+  if (!isPathStrictlyInside(canonicalRoot, canonicalPath)) {
+    throw new Error(`${field}: must be contained inside the workspace root`);
+  }
+
+  // stat after containment: must be a regular file. This rejects
+  // directories, FIFOs, devices, and sockets — file kinds whose read
+  // semantics surprise upload callers and can block or hang the MCP.
+  let finalStat;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- canonicalPath is the validator-approved path
+    finalStat = statSync(canonicalPath);
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      throw new Error(`${field}: file does not exist`);
+    }
+    throw new Error(
+      `${field}: cannot stat resolved path (${err && err.code ? err.code : "unknown"})`,
+    );
+  }
+  if (!finalStat.isFile()) {
+    throw new Error(`${field}: must be a regular file`);
+  }
+
+  let bytes;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- canonicalPath is the validator-approved path
+    bytes = readFileSync(canonicalPath);
+  } catch (err) {
+    if (err && err.code === "EACCES") {
+      throw new Error(`${field}: permission denied`);
+    }
+    if (err && err.code === "ENOENT") {
+      throw new Error(`${field}: file does not exist`);
+    }
+    throw new Error(
+      `${field}: cannot read file (${err && err.code ? err.code : "unknown"})`,
+    );
+  }
+  return { absPath: canonicalPath, basename: basename(rawPath), bytes };
 }
 
 function readAbsoluteTextFile(filePath) {
@@ -884,19 +1036,55 @@ function readAbsoluteTextFile(filePath) {
   return readFileSync(filePath, "utf8");
 }
 
+// Resolve the approved upload workspace root: the Git top-level discovered
+// from the MCP launch cwd. We intentionally do NOT fall back to `process.cwd()`
+// directly — when the MCP is launched from `$HOME`, `/`, or any non-repo
+// directory, that fallback would silently approve every matching file under
+// that tree as an upload source. Failing loudly forces the caller to launch
+// the MCP from inside a real repository (the same trust model every other
+// repo-scoped MCP tool uses via `ensureGitRepo`).
+export async function resolveUploadWorkspaceRoot() {
+  const cwd = process.cwd();
+  let stdout;
+  try {
+    ({ stdout } = await execFile("git", ["-C", cwd, "rev-parse", "--show-toplevel"]));
+  } catch (error) {
+    throw new Error(
+      `upload workspace root could not be resolved: launch the MCP from inside a Git repository (${formatCommandFailure("git", error)})`,
+    );
+  }
+  const root = stdout.trim();
+  if (!root) {
+    throw new Error(
+      "upload workspace root could not be resolved: launch the MCP from inside a Git repository",
+    );
+  }
+  return root;
+}
+
 export async function importStrictdoc(filePath, project) {
-  const content = readOperatorSuppliedFile(filePath);
+  const workspaceRoot = await resolveUploadWorkspaceRoot();
+  const { bytes, basename: name } = readApprovedUploadFile(filePath, {
+    workspaceRoot,
+    allowedExtensions: [".sdoc"],
+    fieldName: "file_path",
+  });
   const form = new FormData();
-  form.append("file", new Blob([content]), basename(filePath));
+  form.append("file", new Blob([bytes]), name);
   const params = {};
   if (project) params.project = project;
   return request("POST", "/api/v1/admin/import/strictdoc", { formData: form, params });
 }
 
 export async function importReqif(filePath, project) {
-  const content = readOperatorSuppliedFile(filePath);
+  const workspaceRoot = await resolveUploadWorkspaceRoot();
+  const { bytes, basename: name } = readApprovedUploadFile(filePath, {
+    workspaceRoot,
+    allowedExtensions: [".reqif"],
+    fieldName: "file_path",
+  });
   const form = new FormData();
-  form.append("file", new Blob([content]), basename(filePath));
+  form.append("file", new Blob([bytes]), name);
   const params = {};
   if (project) params.project = project;
   return request("POST", "/api/v1/admin/import/reqif", { formData: form, params });
@@ -1272,8 +1460,7 @@ function assertRealpathInRepo(repoRootReal, targetAbs, fieldName) {
   // cannot re-introduce symlink escapes because it does not yet exist.
   const tail = relative(cursor, targetAbs);
   const effective = tail === "" ? canonical : resolvePath(canonical, tail);
-  const relToRoot = relative(repoRootReal, effective);
-  if (relToRoot === "" || relToRoot.startsWith("..") || isAbsolute(relToRoot)) {
+  if (!isPathStrictlyInside(repoRootReal, effective)) {
     return {
       ok: false,
       error: `${fieldName} resolves outside the repository root via a symlink (canonical path '${effective}')`,
@@ -7190,9 +7377,14 @@ export async function registerPackRegistryEntry(data, project) {
 }
 
 export async function importPackRegistryEntry(filePath, data, project) {
-  const content = readOperatorSuppliedFile(filePath);
+  const workspaceRoot = await resolveUploadWorkspaceRoot();
+  const { bytes, basename: name } = readApprovedUploadFile(filePath, {
+    workspaceRoot,
+    allowedExtensions: [".json"],
+    fieldName: "file_path",
+  });
   const form = new FormData();
-  form.append("file", new Blob([content]), basename(filePath));
+  form.append("file", new Blob([bytes]), name);
   if (data && Object.keys(data).length > 0) {
     form.append(
       "options",
