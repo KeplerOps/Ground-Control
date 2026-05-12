@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.api;
 
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.keplerops.groundcontrol.domain.exception.AuthenticationException;
 import com.keplerops.groundcontrol.domain.exception.AuthorizationException;
@@ -124,7 +125,7 @@ public class GlobalExceptionHandler {
 
     private String extractFieldName(InvalidFormatException ex) {
         return ex.getPath().stream()
-                .map(reference -> reference.getFieldName())
+                .map(JsonMappingException.Reference::getFieldName)
                 .filter(Objects::nonNull)
                 .reduce((ignored, fieldName) -> fieldName)
                 .orElse("request");
