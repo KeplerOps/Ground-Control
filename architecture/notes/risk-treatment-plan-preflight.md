@@ -58,6 +58,14 @@ link surfaces.
 - JSON text columns: `actionItems` and `reassessmentTriggers` use
   `JacksonTextCollectionConverters`. Do not add feature-local `ObjectMapper`
   parsing or a second JSON schema system.
+- MCP adapter shape: `gc_risk_governance` in
+  `mcp/ground-control/index.js`, the per-entity `GOVERNANCE_FIELDS`
+  allowlist, the flat Zod shape, `pick`, `reqArg`, `toCamelCase`,
+  `addAuthorizationHeader`, `RequestError`, and `validateGovernanceStatus` in
+  `mcp/ground-control/lib.js`. The MCP contract for
+  `entity=treatment_plan` must mirror the backend treatment-plan create/update
+  DTO fields for this aggregate, not generic CRUD fields from adjacent
+  governance entities.
 - Graph: treatment-plan nodes and `TREATS` edges belong in
   `RiskGraphProjectionContributor`, using `GraphEntityType` and `GraphIds`.
   Asset/control/scope edges should flow through the existing link projection
@@ -94,10 +102,48 @@ link surfaces.
   exposure. A future external-ticket or workflow integration must use
   `@ConfigurationProperties` with startup validation and keep secrets out of
   argv, logs, and error envelopes.
+- MCP transport: Ground Control MCP write tools must continue to send requests
+  through `request()`, which applies canonical snake_case to camelCase
+  translation, `X-Actor: mcp-server`, backend error-envelope preservation, and
+  bearer-token selection from `GROUND_CONTROL_API_TOKEN` /
+  `GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN`. Do not add treatment-plan-specific
+  HTTP clients, caller-supplied headers, caller-supplied tokens, or ad hoc URL
+  construction.
 - Tests and policy: controller changes need `@WebMvcTest`; semantic rules need
   service tests; graph/link behavior needs resolver and projection tests;
   schema changes need migration smoke coverage. `make policy` remains the
   completion guardrail.
+
+## MCP Contract Guardrails
+
+Issue #880 is an MCP adapter contract-alignment fix, not a backend model
+change. The backend `TreatmentPlanRequest` already names the authoritative
+create fields: `uid`, `title`, `riskRegisterRecordId`, `riskScenarioId`,
+`strategy`, `owner`, `rationale`, `dueDate`, `status`, `actionItems`, and
+`reassessmentTriggers`. `UpdateTreatmentPlanRequest` accepts the mutable subset:
+`title`, `riskScenarioId`, `strategy`, `owner`, `rationale`, `dueDate`,
+`actionItems`, and `reassessmentTriggers`.
+
+The MCP public surface should expose those fields in snake_case and rely on the
+existing `toCamelCase` map to produce the backend DTO. Prefer
+`risk_scenario_id` over a special-case `scenario_id` alias for treatment plans:
+the explicit name matches the backend association, avoids conflating
+scenario-owned fields with treatment-owned fields, and reuses the existing
+`risk_scenario_id -> riskScenarioId` mapping. Use `due_date`, not `due_at`,
+because the shared mapper already defines `due_date -> dueDate`.
+
+Drop `description` and `metadata` from treatment-plan create/update unless the
+backend DTO first grows those fields. Treatment-plan rationale is a first-class
+field, not a generic description, and action payloads belong in `action_items`,
+not an untyped metadata escape hatch. Keep `status` on create only if the
+backend create DTO continues to accept it; status changes after creation must
+stay on the existing transition action and `/status` backend sub-resource.
+
+Adapter tests should lock the same regression class covered for the adjacent
+MCP governance fixes: Zod admits every intended public field, the per-entity
+allowlist excludes fields the backend does not accept, create/update send the
+expected camelCase body, and transition sends only `{status}` to the status
+endpoint.
 
 ## Extensibility
 
@@ -115,6 +161,12 @@ methodology-specific trigger. The target-resolution seam belongs in
 `GraphTargetResolverService` and graph projections so API, MCP, and future
 analysis/sweep surfaces can reuse the same project-scoped validation.
 
+For MCP field evolution, the extension seam is the consolidated
+`gc_risk_governance` entity field registry plus the shared
+snake_case/camelCase mapping. Adding the next treatment-plan DTO field should
+require one schema/allowlist/mapping update and serialized-body tests, not a new
+tool, a parallel DTO translator, or entity-specific request plumbing.
+
 ## Gotchas And Anti-Patterns
 
 - Do not treat a treatment plan as satisfying asset scope or control mitigation
@@ -129,6 +181,13 @@ analysis/sweep surfaces can reuse the same project-scoped validation.
   `TreatmentPlanStatus` lifecycle.
 - Do not introduce endpoint-local exception mapping, security checks, JSON
   parsing, or logging conventions.
+- Do not keep `due_at` on the MCP treatment-plan path; it bypasses the existing
+  mapper and leaves backend `dueDate` null.
+- Do not accept `description` as a treatment-plan alias; use `rationale`.
+- Do not route `action_items`, `reassessment_triggers`, `rationale`, or
+  `due_date` through `metadata`; the backend has first-class fields.
+- Do not add a blanket `scenario_id` mapping if the backend association is
+  `riskScenarioId`; prefer explicit `risk_scenario_id`.
 - Do not transition GC-T004 to ACTIVE unless each clause is evidenced against
   the canonical artifacts, including asset/control linkage and reassessment
   trigger behavior.
@@ -138,6 +197,8 @@ analysis/sweep surfaces can reuse the same project-scoped validation.
 - Implementing GC-T004 gaps as part of verification issue #825.
 - Designing a generic workflow engine, ticketing integration, or background
   scheduler.
+- Changing backend treatment-plan DTOs, persistence, graph projection, or status
+  transition semantics just to compensate for an MCP adapter naming drift.
 - Replacing existing asset, control, scenario, risk-register, assessment, or
   traceability aggregates.
 - Defining first-class control effectiveness assessment behavior; that belongs

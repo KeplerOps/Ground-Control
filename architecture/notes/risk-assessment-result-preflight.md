@@ -59,6 +59,13 @@ row unless the caller is explicitly editing that same result.
 - Audit and persistence: audited entities extend `BaseEntity`, use Envers,
   Flyway migrations, audit-table parity, project scope, indexes for primary
   read paths, and `AuditRetentionJob` updates when new audit tables are added.
+- MCP adapter shape: `gc_risk_governance` in
+  `mcp/ground-control/index.js`, the per-entity `GOVERNANCE_FIELDS`
+  allowlist, `pick`, `toCamelCase`, `addAuthorizationHeader`, `RequestError`,
+  and `validateGovernanceStatus` in `mcp/ground-control/lib.js`. The MCP
+  contract for `entity=risk_assessment_result` must mirror the backend
+  create/update DTO fields for this aggregate, not the generic register-record
+  or scenario fields.
 
 ## Cross-Cutting Layers
 
@@ -97,10 +104,44 @@ row unless the caller is explicitly editing that same result.
   calls, or CLI argv. Any future calculation or validation adapter that does
   must use `@ConfigurationProperties` with startup validation and keep secrets
   out of process argv, logs, and error envelopes.
+- MCP transport: Ground Control MCP write tools must continue to send requests
+  through `request()`, which applies the canonical snake_case to camelCase
+  translation, `X-Actor: mcp-server`, backend error-envelope preservation, and
+  bearer-token selection from `GROUND_CONTROL_API_TOKEN` /
+  `GROUND_CONTROL_PACK_REGISTRY_ADMIN_TOKEN`. Do not add per-tool HTTP clients,
+  caller-supplied headers, caller-supplied tokens, or ad hoc URL construction
+  for assessment results.
 - Tests and policy: controller changes need `@WebMvcTest`; semantic rules need
   service tests; approval-state rules need state-machine tests; graph/evidence
   behavior needs projection and resolver coverage; schema changes need migration
   smoke coverage. `make policy` remains the repo-native completion guardrail.
+
+## MCP Contract Guardrails
+
+Issue #878 is a contract-alignment fix at the MCP boundary. The backend
+`RiskAssessmentResultRequest` already names the authoritative create fields:
+`riskScenarioId`, `riskRegisterRecordId`, `methodologyProfileId`,
+`analystIdentity`, `assumptions`, `inputFactors`, `observationDate`,
+`assessmentAt`, `timeHorizon`, `confidence`, `uncertaintyMetadata`,
+`computedOutputs`, `evidenceRefs`, `notes`, and `observationIds`.
+
+The MCP surface should expose those fields in snake_case and rely on the
+existing `toCamelCase` map to produce the backend DTO. Prefer
+`risk_scenario_id` over adding a special-case `scenario_id` alias for assessment
+results: the explicit name matches the backend association, avoids conflating
+scenario-owned fields with assessment-owned fields, and reuses the existing
+`risk_scenario_id -> riskScenarioId` mapping. `scenario_id` may remain valid for
+entities whose backend DTOs actually own `scenarioId`, such as register records
+or treatment plans; do not force a repo-wide rename that would change those
+contracts without a separate compatibility decision.
+
+Drop `uid`, `title`, `description`, `quantitative_value`, and
+`qualitative_value` from the assessment-result allowlist and schema unless the
+backend DTO first grows those fields. They currently describe scenario,
+register-record, or score-summary concepts, not the durable methodology result.
+Unknown user fields should continue to be rejected by Zod or omitted by the
+per-entity allowlist before dispatch; they must not be tunneled through
+`metadata` to compensate for a mismatched typed contract.
 
 ## Extensibility
 
@@ -109,6 +150,12 @@ The primary extension seam is methodology-result validation keyed by
 If schema validation becomes in scope, keep it profile-driven so adding another
 methodology or version requires changing profile data and tests, not adding
 controller branches or new result columns.
+
+For MCP field evolution, the extension seam is the per-entity field registry
+plus the shared snake_case/camelCase mapping. Adding the next assessment-result
+field should require one allowlist/schema/mapping update and tests for the
+serialized backend body, not a new tool, a parallel DTO translator, or
+entity-specific request logic.
 
 The second extension seam is evidence identity: modeled observations should stay
 as project-scoped `Observation` links, while unmodeled external evidence stays
@@ -129,6 +176,15 @@ paths instead of adding assessment-only evidence tables.
   or `RiskScenario` fields.
 - Do not invent a duplicate JSON schema dialect, exception hierarchy, audit
   writer, auth guard, logging channel, graph materializer, or workflow engine.
+- Do not keep generic `uid` / `title` / `description` / qualitative or
+  quantitative score fields on the MCP assessment-result create/update path
+  unless the backend assessment-result DTO accepts them.
+- Do not route typed assessment fields through `metadata`; the backend has
+  first-class fields for methodology inputs, outputs, evidence, timing,
+  assumptions, and analyst identity.
+- Do not add a `scenario_id` mapping as a blanket workaround if the entity's
+  real backend association is `riskScenarioId`; prefer the explicit
+  `risk_scenario_id` field for assessment results.
 - Do not mark schema-validation behavior as satisfied merely because
   `MethodologyProfile.inputSchema` and `outputSchema` are persisted.
 - Do not let `analystIdentity` spoof or override the authenticated audit actor.

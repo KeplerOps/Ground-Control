@@ -164,6 +164,7 @@ import {
   TRUST_POLICY_FIELDS, TRUST_POLICY_RULE_OPERATORS,
   pick, reqArg,
   validateGovernanceStatus,
+  GOVERNANCE_FIELDS,
 } from "./lib.js";
 import {
   executeGcQuery,
@@ -184,6 +185,11 @@ import {
   gcRiskScenarioToolHandler,
   GC_RISK_SCENARIO_DESCRIPTION,
 } from "./gc-risk-scenario.js";
+import {
+  gcRiskGovernanceZodShape,
+  gcRiskGovernanceToolHandler,
+  GC_RISK_GOVERNANCE_DESCRIPTION,
+} from "./gc-risk-governance.js";
 import {
   linkCreateOptionalSharedZodFields,
   performLinkCreate,
@@ -1442,114 +1448,19 @@ server.tool(
   },
 );
 
-const RISK_GOVERNANCE_ENTITIES = [
-  "methodology_profile", "risk_register_record", "risk_assessment_result",
-  "treatment_plan", "verification_result",
-];
-const RISK_GOVERNANCE_ACTIONS = ["create", "update", "delete", "transition", "transition_approval"];
-
-// Per-entity field allowlists for gc_risk_governance create/update DTOs.
-const GOVERNANCE_FIELDS = {
-  methodology_profile: ["name", "description", "family", "status", "metadata"],
-  risk_register_record: ["uid", "title", "description", "scenario_id", "owner", "status", "review_cadence", "next_review_at", "metadata"],
-  risk_assessment_result: ["uid", "title", "description", "scenario_id", "approval_state", "quantitative_value", "qualitative_value", "metadata"],
-  treatment_plan: ["uid", "title", "description", "scenario_id", "risk_register_record_id", "status", "strategy", "owner", "due_at", "metadata"],
-  verification_result: ["uid", "title", "description", "outcome", "status", "assurance_level", "verified_at", "metadata"],
-};
-
+// gc_risk_governance: methodology profile / risk register record / risk
+// assessment result / treatment plan / verification result. Handler logic
+// (Zod shape, per-entity per-action allowlist dispatch via lib.js
+// GOVERNANCE_FIELDS, backend dispatch) lives in gc-risk-governance.js so the
+// adapter is testable in isolation; index.js just registers it.
 server.tool(
   "gc_risk_governance",
-  `Methodology profiles, risk register records, risk assessments, treatment plans, verification results. ` +
-    `Entity: ${RISK_GOVERNANCE_ENTITIES.join(", ")}. Actions: ${RISK_GOVERNANCE_ACTIONS.join(", ")}. ` +
-    `Reads (list, get) route through gc_query. Entity-specific fields are validated against the per-entity allowlist; unknown fields are dropped (NOT forwarded to the backend).`,
-  {
-    entity: z.enum(RISK_GOVERNANCE_ENTITIES),
-    action: z.enum(RISK_GOVERNANCE_ACTIONS),
-    id: z.string().uuid().optional(),
-    project: z.string().optional(),
-    // Status vocabulary is per-entity; the handler validates it against
-    // GOVERNANCE_STATUS_ENUMS[args.entity] before any backend call. The Zod
-    // shape accepts any string here — a discriminated check at the schema
-    // level would require restructuring this tool into five entity-specific
-    // tools, which ADR-035 already rejected.
-    status: z.string().optional(),
-    approval_state: z.enum(RISK_ASSESSMENT_APPROVAL_STATUSES).optional(),
-    // Shared entity fields. Per-entity allowlist (GOVERNANCE_FIELDS) gates which
-    // ones reach the backend on create/update, so unrelated MCP control fields
-    // (action, entity, id, project) don't leak into the DTO.
-    uid: z.string().optional(),
-    name: z.string().optional(),
-    title: z.string().optional(),
-    description: z.string().optional(),
-    family: z.enum(METHODOLOGY_FAMILIES).optional(),
-    scenario_id: z.string().uuid().optional(),
-    risk_register_record_id: z.string().uuid().optional(),
-    owner: z.string().optional(),
-    review_cadence: z.string().optional(),
-    next_review_at: z.string().optional(),
-    quantitative_value: z.number().optional(),
-    qualitative_value: z.string().optional(),
-    strategy: z.enum(TREATMENT_STRATEGIES).optional(),
-    due_at: z.string().optional(),
-    outcome: z.string().optional(),
-    assurance_level: z.enum(ASSURANCE_LEVELS).optional(),
-    verified_at: z.string().optional(),
-    metadata: z.record(z.any()).optional(),
-  },
+  GC_RISK_GOVERNANCE_DESCRIPTION,
+  gcRiskGovernanceZodShape,
   async (args) => {
     try {
-      // Per-entity status discriminated check (issue #881). status uses a
-      // different enum per entity; reject before the backend is touched so
-      // the wrong-status-for-entity case surfaces at the MCP boundary with
-      // the actual valid values rather than a backend 422.
-      validateGovernanceStatus(args.entity, args.status);
-      const data = pick(args, GOVERNANCE_FIELDS[args.entity] ?? []);
-      switch (args.entity) {
-        case "methodology_profile": {
-          switch (args.action) {
-            case "create": return ok(JSON.stringify(await createMethodologyProfile(data, args.project), null, 2));
-            case "update": reqArg(args, "id", "update"); return ok(JSON.stringify(await updateMethodologyProfile(args.id, data, args.project), null, 2));
-            case "delete": reqArg(args, "id", "delete"); await deleteMethodologyProfile(args.id, args.project); return ok("Deleted");
-            default: return err(new Error(`Action '${args.action}' not valid for methodology_profile`));
-          }
-        }
-        case "risk_register_record": {
-          switch (args.action) {
-            case "create": return ok(JSON.stringify(await createRiskRegisterRecord(data, args.project), null, 2));
-            case "update": reqArg(args, "id", "update"); return ok(JSON.stringify(await updateRiskRegisterRecord(args.id, data, args.project), null, 2));
-            case "delete": reqArg(args, "id", "delete"); await deleteRiskRegisterRecord(args.id, args.project); return ok("Deleted");
-            case "transition": reqArg(args, "id", "transition"); reqArg(args, "status", "transition"); return ok(JSON.stringify(await transitionRiskRegisterRecordStatus(args.id, args.status, args.project), null, 2));
-            default: return err(new Error(`Action '${args.action}' not valid for risk_register_record`));
-          }
-        }
-        case "risk_assessment_result": {
-          switch (args.action) {
-            case "create": return ok(JSON.stringify(await createRiskAssessmentResult(data, args.project), null, 2));
-            case "update": reqArg(args, "id", "update"); return ok(JSON.stringify(await updateRiskAssessmentResult(args.id, data, args.project), null, 2));
-            case "delete": reqArg(args, "id", "delete"); await deleteRiskAssessmentResult(args.id, args.project); return ok("Deleted");
-            case "transition_approval": reqArg(args, "id", "transition_approval"); reqArg(args, "approval_state", "transition_approval"); return ok(JSON.stringify(await transitionRiskAssessmentApprovalState(args.id, args.approval_state, args.project), null, 2));
-            default: return err(new Error(`Action '${args.action}' not valid for risk_assessment_result`));
-          }
-        }
-        case "treatment_plan": {
-          switch (args.action) {
-            case "create": return ok(JSON.stringify(await createTreatmentPlan(data, args.project), null, 2));
-            case "update": reqArg(args, "id", "update"); return ok(JSON.stringify(await updateTreatmentPlan(args.id, data, args.project), null, 2));
-            case "delete": reqArg(args, "id", "delete"); await deleteTreatmentPlan(args.id, args.project); return ok("Deleted");
-            case "transition": reqArg(args, "id", "transition"); reqArg(args, "status", "transition"); return ok(JSON.stringify(await transitionTreatmentPlanStatus(args.id, args.status, args.project), null, 2));
-            default: return err(new Error(`Action '${args.action}' not valid for treatment_plan`));
-          }
-        }
-        case "verification_result": {
-          switch (args.action) {
-            case "create": return ok(JSON.stringify(await createVerificationResult(data, args.project), null, 2));
-            case "update": reqArg(args, "id", "update"); return ok(JSON.stringify(await updateVerificationResult(args.id, data, args.project), null, 2));
-            case "delete": reqArg(args, "id", "delete"); await deleteVerificationResult(args.id, args.project); return ok("Deleted");
-            default: return err(new Error(`Action '${args.action}' not valid for verification_result`));
-          }
-        }
-        default: return err(new Error(`Unknown entity: ${args.entity}`));
-      }
+      const result = await gcRiskGovernanceToolHandler(args);
+      return ok(result === null ? "Deleted" : JSON.stringify(result, null, 2));
     } catch (e) { return err(e); }
   },
 );
