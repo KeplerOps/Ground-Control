@@ -250,14 +250,26 @@ const server = new McpServer({ name: "ground-control", version: "1.0.0" });
 // WORKFLOW PRIMITIVES — kept by name; /implement and /ship skills call these.
 // ============================================================================
 
-server.tool(
+// `gc_query` is the only tool in this file registered with a constructed
+// `z.object(...).strict()` (rather than a raw shape) so the SDK preserves
+// the strict-rejection contract. The deprecated `server.tool(name, desc,
+// schema, cb)` overload routes a constructed Zod object into the
+// `annotations` slot instead of `inputSchema`, which makes the SDK call
+// the handler with its `extra` object (containing `signal`) in the args
+// position — issue #874's root cause. `server.registerTool` takes
+// `inputSchema` explicitly, so the strict schema actually gates the call
+// and `signal` stays in `extra` where it belongs.
+server.registerTool(
   "gc_query",
-  `Read-only ad-hoc GET against the Ground Control REST API (ADR-035). Use this when no curated tool covers the read you need. ` +
-    `Path must be a relative '/api/v1/...' string under one of the allowlisted prefixes: ${GC_QUERY_PATH_ALLOWLIST.join(", ")}. ` +
-    `Admin prefixes (${GC_QUERY_PATH_DENYLIST.join(", ")}) are rejected. ` +
-    `GET only; pass query params via the structured 'params' object (flat, primitive values only). ` +
-    `Body cap: ${GC_QUERY_BODY_BYTE_CAP} bytes; timeout: ${GC_QUERY_TIMEOUT_MS}ms.`,
-  gcQuerySchema,
+  {
+    description:
+      `Read-only ad-hoc GET against the Ground Control REST API (ADR-035). Use this when no curated tool covers the read you need. ` +
+      `Path must be a relative '/api/v1/...' string under one of the allowlisted prefixes: ${GC_QUERY_PATH_ALLOWLIST.join(", ")}. ` +
+      `Admin prefixes (${GC_QUERY_PATH_DENYLIST.join(", ")}) are rejected. ` +
+      `GET only; pass query params via the structured 'params' object (flat, primitive values only). ` +
+      `Body cap: ${GC_QUERY_BODY_BYTE_CAP} bytes; timeout: ${GC_QUERY_TIMEOUT_MS}ms.`,
+    inputSchema: gcQuerySchema,
+  },
   async (args) => {
     try { return ok(JSON.stringify(await gcQueryToolHandler(args), null, 2)); }
     catch (e) { return err(e); }

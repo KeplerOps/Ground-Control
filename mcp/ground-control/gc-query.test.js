@@ -13,11 +13,16 @@ import {
   GC_QUERY_TIMEOUT_MS,
   GC_QUERY_PATH_ALLOWLIST,
   GC_QUERY_PATH_DENYLIST,
+  GC_QUERY_SDK_INJECTED_KEYS,
+  stripSdkInjectedKeys,
   validateGcQueryPath,
   validateGcQueryParams,
   truncateBody,
 } from "./gc-query.js";
 import { RequestError } from "./lib.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -358,6 +363,205 @@ describe("gcQueryToolHandler", () => {
       );
     }),
   );
+
+  // Some MCP clients/transports pipe an AbortController `signal` into the
+  // tool-handler `args` object on every call (rather than only into the SDK's
+  // `extra`). That is runtime plumbing, not a user-supplied argument, so the
+  // handler must consume/ignore it at the adapter boundary BEFORE the public
+  // allowlist runs (ADR-035 "Public argument boundary"; preflight note
+  // architecture/notes/mcp-tool-catalog-surface-preflight.md "MCP runtime
+  // plumbing"). It must NOT broaden into a generic passthrough — every other
+  // unknown key still has to fail with invalid_query_args.
+  it(
+    "accepts an SDK-injected 'signal' arg silently (alongside path)",
+    withBaseUrl("http://localhost:8000", async () => {
+      let capturedUrl;
+      let capturedOptions;
+      const fetchImpl = async (url, options) => {
+        capturedUrl = url;
+        capturedOptions = options;
+        return fakeResponse({ body: '{"ok":true}' });
+      };
+      const ac = new AbortController();
+      const out = await gcQueryToolHandler(
+        { path: "/api/v1/requirements", signal: ac.signal },
+        { fetchImpl },
+      );
+      assert.equal(out.status, 200);
+      assert.equal(out.body, '{"ok":true}');
+      // The inbound SDK signal must NOT be reflected anywhere in the outbound
+      // request: not in the URL, not in the headers. (The outbound AbortSignal
+      // on the fetch options is the executor's own 30s-timeout signal, not
+      // the SDK-injected one — they must not be conflated.)
+      assert.ok(!capturedUrl.includes("signal"));
+      assert.equal(Object.prototype.hasOwnProperty.call(capturedOptions.headers, "signal"), false);
+      assert.notStrictEqual(capturedOptions.signal, ac.signal);
+    }),
+  );
+
+  it(
+    "accepts an SDK-injected 'signal' arg alongside path + params and forwards only path/params downstream",
+    withBaseUrl("http://localhost:8000", async () => {
+      let capturedUrl;
+      const fetchImpl = async (url) => {
+        capturedUrl = url;
+        return fakeResponse({ body: "{}" });
+      };
+      const ac = new AbortController();
+      await gcQueryToolHandler(
+        {
+          path: "/api/v1/requirements",
+          params: { status: "ACTIVE" },
+          signal: ac.signal,
+        },
+        { fetchImpl },
+      );
+      assert.equal(capturedUrl, "http://localhost:8000/api/v1/requirements?status=ACTIVE");
+    }),
+  );
+
+  it(
+    "still rejects 'headers' after the SDK-signal strip (regression: strip must not relax other rejections)",
+    withBaseUrl("http://localhost:8000", async () => {
+      const ac = new AbortController();
+      await assert.rejects(
+        () =>
+          gcQueryToolHandler(
+            {
+              path: "/api/v1/requirements",
+              headers: { Authorization: "Bearer evil" },
+              signal: ac.signal,
+            },
+            { fetchImpl: async () => fakeResponse({ body: "{}" }) },
+          ),
+        (err) => err instanceof RequestError && err.code === "invalid_query_args",
+      );
+    }),
+  );
+
+  it(
+    "still rejects 'method' after the SDK-signal strip (regression)",
+    withBaseUrl("http://localhost:8000", async () => {
+      const ac = new AbortController();
+      await assert.rejects(
+        () =>
+          gcQueryToolHandler(
+            {
+              path: "/api/v1/requirements",
+              method: "DELETE",
+              signal: ac.signal,
+            },
+            { fetchImpl: async () => fakeResponse({ body: "{}" }) },
+          ),
+        (err) => err instanceof RequestError && err.code === "invalid_query_args",
+      );
+    }),
+  );
+});
+
+describe("stripSdkInjectedKeys", () => {
+  it("exposes a deliberately tiny runtime-key set (currently just 'signal')", () => {
+    // This test exists so growing the runtime-key set is a deliberate change.
+    // Adding a key requires updating this assertion (and the ADR-035
+    // "Public argument boundary" prose).
+    assert.deepEqual([...GC_QUERY_SDK_INJECTED_KEYS].sort(), ["signal"]);
+  });
+
+  it("returns a shallow copy without the documented runtime keys when the value shape matches", () => {
+    const ac = new AbortController();
+    const input = { path: "/api/v1/requirements", signal: ac.signal, params: { a: 1 } };
+    const out = stripSdkInjectedKeys(input);
+    assert.deepEqual(Object.keys(out).sort(), ["params", "path"]);
+    assert.notStrictEqual(out, input, "must return a new object, not mutate input");
+    assert.ok("signal" in input, "must not mutate input");
+  });
+
+  it("is a no-op on undefined / null / empty", () => {
+    assert.deepEqual(stripSdkInjectedKeys(undefined), {});
+    assert.deepEqual(stripSdkInjectedKeys(null), {});
+    assert.deepEqual(stripSdkInjectedKeys({}), {});
+  });
+
+  it("does not drop other unknown keys (only the documented runtime set)", () => {
+    // 'headers' and 'method' are caller-facing unknowns; they survive the
+    // strip and are rejected later by the handler allowlist. Stripping them
+    // here would mask the rejection.
+    const out = stripSdkInjectedKeys({
+      path: "/api/v1/x",
+      headers: { x: 1 },
+      method: "DELETE",
+    });
+    assert.deepEqual(Object.keys(out).sort(), ["headers", "method", "path"]);
+  });
+
+  it("does NOT drop a 'signal' key whose value is not an AbortSignal (preserves the public contract)", () => {
+    // A caller-supplied plain object under the name `signal` would otherwise
+    // bypass the public-argument allowlist silently. The shape predicate is
+    // what keeps the handler's defense in depth intact for arbitrary user
+    // input — the name alone is not enough.
+    for (const bogus of [
+      { aborted: false }, // looks like a stub but missing addEventListener
+      "not a signal",
+      42,
+      true,
+      null,
+    ]) {
+      const out = stripSdkInjectedKeys({ path: "/api/v1/x", signal: bogus });
+      assert.deepEqual(
+        Object.keys(out).sort(),
+        ["path", "signal"],
+        `bogus signal value ${JSON.stringify(bogus)} must survive the strip`,
+      );
+    }
+  });
+
+  it("accepts a cross-realm AbortSignal-shaped object via the duck-type fallback", () => {
+    // The duck-type fallback exists so an AbortSignal coming from a worker
+    // or a different module realm (where `instanceof AbortSignal` fails)
+    // still matches. The contract is: same surface as the built-in
+    // AbortSignal (boolean `aborted`, `addEventListener`,
+    // `removeEventListener`).
+    const fakeSignal = {
+      aborted: false,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+    const out = stripSdkInjectedKeys({ path: "/api/v1/x", signal: fakeSignal });
+    assert.deepEqual(Object.keys(out), ["path"]);
+  });
+});
+
+describe("gcQueryToolHandler still rejects non-AbortSignal 'signal' values", () => {
+  // Regression for the cycle-1 codex finding on #874: the SDK-signal strip
+  // must not weaken the public-argument allowlist for non-runtime values
+  // under the same key name.
+  it(
+    "rejects a plain-object 'signal' (not an AbortSignal) with invalid_query_args",
+    withBaseUrl("http://localhost:8000", async () => {
+      await assert.rejects(
+        () =>
+          gcQueryToolHandler(
+            { path: "/api/v1/requirements", signal: { aborted: false } },
+            { fetchImpl: async () => fakeResponse({ body: "{}" }) },
+          ),
+        (err) => err instanceof RequestError && err.code === "invalid_query_args",
+      );
+    }),
+  );
+
+  it(
+    "rejects a string 'signal' with invalid_query_args",
+    withBaseUrl("http://localhost:8000", async () => {
+      await assert.rejects(
+        () =>
+          gcQueryToolHandler(
+            { path: "/api/v1/requirements", signal: "not-a-signal" },
+            { fetchImpl: async () => fakeResponse({ body: "{}" }) },
+          ),
+        (err) => err instanceof RequestError && err.code === "invalid_query_args",
+      );
+    }),
+  );
 });
 
 describe("gcQuerySchema (Zod-level strict rejection)", () => {
@@ -526,6 +730,134 @@ describe("truncateBody", () => {
     assert.equal(out.truncated, true);
     assert.equal(out.original_byte_length, Buffer.byteLength(body, "utf8"));
   });
+});
+
+describe("gc_query MCP registration (issue #874 end-to-end wiring)", () => {
+  // The cycle-1 codex fix only touched the handler. Cycle 2 found that the
+  // root cause is upstream: `server.tool(name, desc, gcQuerySchema, cb)`
+  // routes a constructed `.strict()` ZodObject into the `annotations` slot
+  // (not `inputSchema`), so the SDK calls the registered callback with its
+  // `extra` object (which carries `signal`) in the args position. This
+  // suite exercises the real `McpServer` + `Client` + `InMemoryTransport`
+  // wiring so a future regression of the registration shape fails here,
+  // not in production.
+  async function registeredServerCallingItself({ handler }) {
+    const server = new McpServer({ name: "gc-query-registration-test", version: "1.0.0" });
+    server.registerTool(
+      "gc_query",
+      { description: "test wiring", inputSchema: gcQuerySchema },
+      handler,
+    );
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    return { server, client };
+  }
+
+  it(
+    "tools/list reports gcQuerySchema as the inputSchema (not as annotations)",
+    withBaseUrl("http://localhost:8000", async () => {
+      const { client } = await registeredServerCallingItself({
+        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      });
+      try {
+        const list = await client.listTools();
+        const tool = list.tools.find((t) => t.name === "gc_query");
+        assert.ok(tool, "gc_query must be present in tools/list");
+        // The strict schema must surface as a proper JSON Schema with the
+        // documented properties + additionalProperties: false; an empty
+        // `{type: "object"}` would mean the SDK treated the schema as
+        // annotations (the issue #874 failure mode).
+        assert.equal(tool.inputSchema.type, "object");
+        assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["params", "path"]);
+        assert.equal(tool.inputSchema.additionalProperties, false);
+        assert.deepEqual(tool.inputSchema.required, ["path"]);
+      } finally {
+        await client.close();
+      }
+    }),
+  );
+
+  it(
+    "tools/call with {path} succeeds and the handler receives args without an SDK-injected signal",
+    withBaseUrl("http://localhost:8000", async () => {
+      let capturedArgs;
+      const { client } = await registeredServerCallingItself({
+        handler: async (args) => {
+          capturedArgs = args;
+          return { content: [{ type: "text", text: JSON.stringify(args) }] };
+        },
+      });
+      try {
+        const out = await client.callTool({
+          name: "gc_query",
+          arguments: { path: "/api/v1/requirements" },
+        });
+        assert.equal(out.isError, undefined);
+        assert.deepEqual(Object.keys(capturedArgs).sort(), ["path"]);
+        assert.equal(
+          Object.prototype.hasOwnProperty.call(capturedArgs, "signal"),
+          false,
+          "the SDK-injected AbortSignal must remain in `extra`, never in `args`",
+        );
+      } finally {
+        await client.close();
+      }
+    }),
+  );
+
+  it(
+    "tools/call rejects an extra key from the client (schema-level enforcement)",
+    withBaseUrl("http://localhost:8000", async () => {
+      const { client } = await registeredServerCallingItself({
+        handler: async () => ({ content: [{ type: "text", text: "should not run" }] }),
+      });
+      try {
+        // The MCP client surfaces validation errors as McpError; either it
+        // throws or the SDK returns isError. Either is acceptable — what
+        // matters is that an unknown key from the client is REJECTED, not
+        // silently dropped.
+        let rejected = false;
+        try {
+          const out = await client.callTool({
+            name: "gc_query",
+            arguments: { path: "/api/v1/requirements", headers: { Authorization: "Bearer evil" } },
+          });
+          if (out.isError) rejected = true;
+        } catch {
+          rejected = true;
+        }
+        assert.equal(rejected, true, "unknown caller key must be rejected by schema or transport");
+      } finally {
+        await client.close();
+      }
+    }),
+  );
+
+  it(
+    "tools/call with {path, params} routes both to the handler unchanged",
+    withBaseUrl("http://localhost:8000", async () => {
+      let capturedArgs;
+      const { client } = await registeredServerCallingItself({
+        handler: async (args) => {
+          capturedArgs = args;
+          return { content: [{ type: "text", text: "ok" }] };
+        },
+      });
+      try {
+        await client.callTool({
+          name: "gc_query",
+          arguments: { path: "/api/v1/requirements", params: { status: "ACTIVE" } },
+        });
+        assert.deepEqual(capturedArgs, {
+          path: "/api/v1/requirements",
+          params: { status: "ACTIVE" },
+        });
+      } finally {
+        await client.close();
+      }
+    }),
+  );
 });
 
 describe("gc_query allowlist docs match the implemented constant", () => {

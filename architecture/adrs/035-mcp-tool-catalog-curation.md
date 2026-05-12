@@ -190,10 +190,16 @@ the body and canceling the reader once the cap is reached — the request
 does NOT buffer unbounded data before truncating. The cap covers the full
 request lifetime, not just header arrival.
 
-**Strict Zod schema.** `gc_query` is registered with a strict ZodObject so
-the MCP SDK's input validation rejects unknown keys (`headers`, `method`,
-etc.) at the protocol layer before the handler runs. The handler
-additionally enforces the same key allowlist as defense in depth.
+**Public argument boundary.** `gc_query`'s public contract is exactly
+`path` plus optional `params`; `headers`, `method`, `body`, caller-supplied
+tokens, and any other user-facing expansion remain rejected. Transport or SDK
+control fields injected outside the caller's JSON payload, such as an
+AbortController `signal`, are not part of that public contract and must be
+normalized away before the public-argument allowlist decides whether an
+unknown key is user supplied. This is the seam between MCP runtime plumbing
+and Ground Control's adapter contract: accepting a known internal control
+field must not become `.passthrough()` business logic for arbitrary keys, and
+unknown user keys must still fail with `invalid_query_args`.
 
 **Error semantics.** Validation errors are wrapped as `RequestError` with
 `status: 0` and codes `invalid_query_path`, `invalid_query_params`,
@@ -249,6 +255,12 @@ errors.
   the README documents this.
 - **Body truncation hides material data.** 1 MiB is ample for typical
   lookups; large exports use the dedicated `gc_admin` export actions.
+- **Runtime metadata drift.** MCP SDKs may add non-user control fields to
+  handler argument objects. The adapter must maintain a deliberately tiny
+  transport-metadata normalization seam instead of relaxing the public
+  contract for all unknown keys. Regression tests should cover both sides:
+  known internal metadata is ignored, while `headers` and `method` remain
+  rejected.
 
 ## Alternatives considered
 
