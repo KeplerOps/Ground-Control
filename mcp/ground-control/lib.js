@@ -328,6 +328,42 @@ export const THREAT_MODEL_LINK_TYPES = [
   "DOCUMENTED_IN",
   "ASSOCIATED",
 ];
+// Body field allowlists for gc_threat_model — see gc-threat-model.js.
+
+// ---------------------------------------------------------------------------
+// MCP adapter helpers — pick / reqArg
+// ---------------------------------------------------------------------------
+// Moved out of index.js so the extracted per-tool modules (gc-query.js,
+// gc-threat-model.js, link-create.js, future extractions) can share the same
+// implementation without re-implementing or coupling to the module that runs
+// the MCP server.
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a backend DTO body by picking ONLY the listed snake_case fields from
+ * the MCP args object. MCP control fields (action, kind, mode, subsystem,
+ * entity, id, project, paging filters, etc.) MUST NOT leak into request
+ * bodies, so every tool registration enumerates its body allowlist explicitly.
+ */
+export function pick(args, keys) {
+  const out = {};
+  for (const k of keys) {
+    if (args[k] !== undefined) out[k] = args[k];
+  }
+  return out;
+}
+
+/**
+ * Require a field on the MCP args object before dispatching. Throws with a
+ * stable, action-scoped message used by every consolidated tool handler.
+ */
+export function reqArg(args, key, action) {
+  const v = args[key];
+  if (v === undefined || v === null || v === "") {
+    throw new Error(`'${key}' is required for action='${action}'`);
+  }
+  return v;
+}
 
 // ---------------------------------------------------------------------------
 // Field name mapping (snake_case MCP <-> camelCase API)
@@ -442,6 +478,10 @@ const TO_CAMEL = {
   observation_id: "observationId",
   threat_source: "threatSource",
   threat_event: "threatEvent",
+  // Backend ThreatModelRequest uses `stride` (typed StrideCategory) on the wire;
+  // the MCP surface keeps `stride_category` for clarity. Mapping is needed to
+  // bridge the rename; without it Jackson silently dropped the field (issue #875).
+  stride_category: "stride",
   clear_stride: "clearStride",
   clear_narrative: "clearNarrative",
   affected_object: "affectedObject",
@@ -520,7 +560,7 @@ const TO_CAMEL = {
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
 
-function toCamelCase(obj) {
+export function toCamelCase(obj) {
   if (obj === null || obj === undefined || typeof obj !== "object") return obj;
   if (Array.isArray(obj)) return obj.map(toCamelCase);
   const out = {};

@@ -160,6 +160,7 @@ import {
   PACK_TYPES, PACK_IMPORT_FORMATS, CATALOG_STATUSES,
   TRUST_OUTCOMES, INSTALL_OUTCOMES,
   TRUST_POLICY_FIELDS, TRUST_POLICY_RULE_OPERATORS,
+  pick, reqArg,
 } from "./lib.js";
 import {
   executeGcQuery,
@@ -170,6 +171,15 @@ import {
   GC_QUERY_PATH_ALLOWLIST,
   GC_QUERY_PATH_DENYLIST,
 } from "./gc-query.js";
+import {
+  gcThreatModelZodShape,
+  gcThreatModelToolHandler,
+  GC_THREAT_MODEL_DESCRIPTION,
+} from "./gc-threat-model.js";
+import {
+  linkCreateOptionalSharedZodFields,
+  performLinkCreate,
+} from "./link-create.js";
 
 // Load .env from cwd before any auth header is composed.
 function loadDotenvFromCwd() {
@@ -213,27 +223,9 @@ function err(e) {
   return { content: [{ type: "text", text }], isError: true };
 }
 
-function reqArg(args, key, action) {
-  const v = args[key];
-  if (v === undefined || v === null || v === "") {
-    throw new Error(`'${key}' is required for action='${action}'`);
-  }
-  return v;
-}
-
-/**
- * Build the backend DTO for create/update actions by picking ONLY the listed
- * entity fields from the MCP args. This is the adapter boundary — MCP control
- * fields (action, kind, mode, subsystem, entity, id, project, paging filters,
- * etc.) must NOT leak into request bodies.
- */
-function pick(args, keys) {
-  const out = {};
-  for (const k of keys) {
-    if (args[k] !== undefined) out[k] = args[k];
-  }
-  return out;
-}
+// pick / reqArg moved to lib.js so the extracted per-tool modules
+// (gc-query.js, gc-threat-model.js, link-create.js) share the same helpers
+// without coupling to this module (which boots the MCP server at import).
 
 // Admin gating: gc_admin and gc_pack expose ROLE_ADMIN-only write/mutating
 // operations. They register only when GC_MCP_ADMIN is set, so a default MCP
@@ -1137,6 +1129,8 @@ const ASSET_ACTIONS = [
 server.tool(
   "gc_asset",
   `Operational asset operations incl. relations, links, external IDs. Actions: ${ASSET_ACTIONS.join(", ")}. ` +
+    `link_create requires target_type + link_type; pass target_entity_id for internal target types ` +
+    `or target_identifier for external types. target_url / target_title are optional. ` +
     `Reads (list, get, get_by_uid, find_by_external_id, links, external_ids) route through gc_query.`,
   {
     action: z.enum(ASSET_ACTIONS),
@@ -1155,8 +1149,8 @@ server.tool(
     // links
     asset_id: z.string().uuid().optional(),
     target_type: z.enum(ASSET_LINK_TARGET_TYPES).optional(),
-    target_identifier: z.string().optional(),
     link_type: z.enum(ASSET_LINK_TYPES).optional(),
+    ...linkCreateOptionalSharedZodFields,
     link_id: z.string().uuid().optional(),
     // external IDs
     namespace: z.string().optional(),
@@ -1169,7 +1163,6 @@ server.tool(
     try {
       const ASSET_FIELDS = ["name", "description", "asset_type", "parent_id"];
       const RELATION_FIELDS = ["source_id", "target_id", "relation_type"];
-      const LINK_FIELDS = ["target_type", "target_identifier", "link_type"];
       const EXT_ID_FIELDS = ["namespace", "external_id"];
       switch (args.action) {
         case "create": {
@@ -1210,9 +1203,12 @@ server.tool(
           return ok(JSON.stringify(await extractAssetSubgraph({ roots: args.roots, maxDepth: args.max_depth }, args.project), null, 2));
         }
         case "link_create": {
-          // lib.js: createAssetLink(assetId, data, project)
-          reqArg(args, "asset_id", "link_create"); reqArg(args, "target_type", "link_create"); reqArg(args, "target_identifier", "link_create"); reqArg(args, "link_type", "link_create");
-          return ok(JSON.stringify(await createAssetLink(args.asset_id, pick(args, LINK_FIELDS), args.project), null, 2));
+          // lib.js: createAssetLink(assetId, data, project). Body shape +
+          // target_type/link_type preconditions live in link-create.js so
+          // every consolidated link_create surface stays in sync with the
+          // backend link DTO (target_entity_id, target_identifier, target_url,
+          // target_title are all forwarded).
+          return ok(JSON.stringify(await performLinkCreate(args, "asset_id", createAssetLink), null, 2));
         }
         case "link_delete": {
           // lib.js: deleteAssetLink(assetId, linkId, project)
@@ -1296,6 +1292,8 @@ const RISK_SCENARIO_ACTIONS = ["create", "update", "delete", "transition", "requ
 server.tool(
   "gc_risk_scenario",
   `Risk scenarios + their links. Actions: ${RISK_SCENARIO_ACTIONS.join(", ")}. ` +
+    `link_create requires target_type + link_type; pass target_entity_id for internal target types ` +
+    `or target_identifier for external types. target_url / target_title are optional. ` +
     `Reads (list, get, links_list) route through gc_query.`,
   {
     action: z.enum(RISK_SCENARIO_ACTIONS),
@@ -1310,14 +1308,13 @@ server.tool(
     // links
     scenario_id: z.string().uuid().optional(),
     target_type: z.enum(RISK_SCENARIO_LINK_TARGET_TYPES).optional(),
-    target_identifier: z.string().optional(),
     link_type: z.enum(RISK_SCENARIO_LINK_TYPES).optional(),
+    ...linkCreateOptionalSharedZodFields,
     link_id: z.string().uuid().optional(),
   },
   async (args) => {
     try {
       const ENTITY_FIELDS = ["uid", "title", "description", "status", "methodology_profile_id", "metadata"];
-      const LINK_FIELDS = ["target_type", "target_identifier", "link_type"];
       switch (args.action) {
         case "create": {
           reqArg(args, "title", "create");
@@ -1341,9 +1338,9 @@ server.tool(
           return ok(JSON.stringify(await getRiskScenarioRequirements(args.id, args.project), null, 2));
         }
         case "link_create": {
-          // lib.js: createRiskScenarioLink takes (scenarioId, data, project) per consistency with asset patterns; verify by spot-check
-          reqArg(args, "scenario_id", "link_create"); reqArg(args, "target_type", "link_create"); reqArg(args, "target_identifier", "link_create"); reqArg(args, "link_type", "link_create");
-          return ok(JSON.stringify(await createRiskScenarioLink(args.scenario_id, pick(args, LINK_FIELDS), args.project), null, 2));
+          // lib.js: createRiskScenarioLink(scenarioId, data, project). Body
+          // shape + target_type/link_type preconditions live in link-create.js.
+          return ok(JSON.stringify(await performLinkCreate(args, "scenario_id", createRiskScenarioLink), null, 2));
         }
         case "link_delete": {
           reqArg(args, "scenario_id", "link_delete"); reqArg(args, "link_id", "link_delete");
@@ -1356,62 +1353,14 @@ server.tool(
   },
 );
 
-const THREAT_MODEL_ACTIONS = ["create", "update", "delete", "transition", "link_create", "link_delete"];
-
 server.tool(
   "gc_threat_model",
-  `Threat models + their links. Actions: ${THREAT_MODEL_ACTIONS.join(", ")}. ` +
-    `Reads (list, get, links_list) route through gc_query.`,
-  {
-    action: z.enum(THREAT_MODEL_ACTIONS),
-    id: z.string().uuid().optional(),
-    uid: z.string().optional(),
-    project: z.string().optional(),
-    title: z.string().optional(),
-    description: z.string().optional(),
-    status: z.enum(THREAT_MODEL_STATUSES).optional(),
-    stride_category: z.enum(STRIDE_CATEGORIES).optional(),
-    metadata: z.record(z.any()).optional(),
-    // links
-    threat_model_id: z.string().uuid().optional(),
-    target_type: z.enum(THREAT_MODEL_LINK_TARGET_TYPES).optional(),
-    target_identifier: z.string().optional(),
-    link_type: z.enum(THREAT_MODEL_LINK_TYPES).optional(),
-    link_id: z.string().uuid().optional(),
-  },
+  GC_THREAT_MODEL_DESCRIPTION,
+  gcThreatModelZodShape,
   async (args) => {
     try {
-      const ENTITY_FIELDS = ["uid", "title", "description", "status", "stride_category", "metadata"];
-      const LINK_FIELDS = ["target_type", "target_identifier", "link_type"];
-      switch (args.action) {
-        case "create": {
-          reqArg(args, "title", "create");
-          return ok(JSON.stringify(await createThreatModel(pick(args, ENTITY_FIELDS), args.project), null, 2));
-        }
-        case "update": {
-          reqArg(args, "id", "update");
-          return ok(JSON.stringify(await updateThreatModel(args.id, pick(args, ENTITY_FIELDS), args.project), null, 2));
-        }
-        case "delete": {
-          reqArg(args, "id", "delete");
-          await deleteThreatModel(args.id, args.project);
-          return ok("Deleted");
-        }
-        case "transition": {
-          reqArg(args, "id", "transition"); reqArg(args, "status", "transition");
-          return ok(JSON.stringify(await transitionThreatModelStatus(args.id, args.status, args.project), null, 2));
-        }
-        case "link_create": {
-          reqArg(args, "threat_model_id", "link_create"); reqArg(args, "target_type", "link_create"); reqArg(args, "target_identifier", "link_create"); reqArg(args, "link_type", "link_create");
-          return ok(JSON.stringify(await createThreatModelLink(args.threat_model_id, pick(args, LINK_FIELDS), args.project), null, 2));
-        }
-        case "link_delete": {
-          reqArg(args, "threat_model_id", "link_delete"); reqArg(args, "link_id", "link_delete");
-          await deleteThreatModelLink(args.threat_model_id, args.link_id, args.project);
-          return ok("Deleted");
-        }
-        default: return err(new Error(`Unknown action: ${args.action}`));
-      }
+      const result = await gcThreatModelToolHandler(args);
+      return result === null ? ok("Deleted") : ok(JSON.stringify(result, null, 2));
     } catch (e) { return err(e); }
   },
 );
@@ -1421,6 +1370,8 @@ const CONTROL_ACTIONS = ["create", "update", "delete", "transition", "link_creat
 server.tool(
   "gc_control",
   `Controls + their links. Actions: ${CONTROL_ACTIONS.join(", ")}. ` +
+    `link_create requires target_type + link_type; pass target_entity_id for internal target types ` +
+    `or target_identifier for external types. target_url / target_title are optional. ` +
     `Reads (list, get, links_list) route through gc_query.`,
   {
     action: z.enum(CONTROL_ACTIONS),
@@ -1435,14 +1386,13 @@ server.tool(
     // links
     control_id: z.string().uuid().optional(),
     target_type: z.enum(CONTROL_LINK_TARGET_TYPES).optional(),
-    target_identifier: z.string().optional(),
     link_type: z.enum(CONTROL_LINK_TYPES).optional(),
+    ...linkCreateOptionalSharedZodFields,
     link_id: z.string().uuid().optional(),
   },
   async (args) => {
     try {
       const ENTITY_FIELDS = ["uid", "title", "description", "status", "control_function", "metadata"];
-      const LINK_FIELDS = ["target_type", "target_identifier", "link_type"];
       switch (args.action) {
         case "create": {
           reqArg(args, "title", "create");
@@ -1462,8 +1412,9 @@ server.tool(
           return ok(JSON.stringify(await transitionControlStatus(args.id, args.status, args.project), null, 2));
         }
         case "link_create": {
-          reqArg(args, "control_id", "link_create"); reqArg(args, "target_type", "link_create"); reqArg(args, "target_identifier", "link_create"); reqArg(args, "link_type", "link_create");
-          return ok(JSON.stringify(await createControlLink(args.control_id, pick(args, LINK_FIELDS), args.project), null, 2));
+          // lib.js: createControlLink(controlId, data, project). Body shape +
+          // target_type/link_type preconditions live in link-create.js.
+          return ok(JSON.stringify(await performLinkCreate(args, "control_id", createControlLink), null, 2));
         }
         case "link_delete": {
           reqArg(args, "control_id", "link_delete"); reqArg(args, "link_id", "link_delete");
