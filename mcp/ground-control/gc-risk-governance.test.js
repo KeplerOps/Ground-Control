@@ -186,6 +186,12 @@ describe("risk_assessment_result wire body (#878)", () => {
     const body = pick(args, GOVERNANCE_FIELDS.risk_assessment_result.create);
     await createRiskAssessmentResult(body, "proj-a");
     assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "POST");
+    // Positive assertion: the valid fields actually reached the wire. Without
+    // this, an empty wire body `{}` would silently satisfy every negative
+    // `!(stale in body)` check below.
+    assert.equal(calls[0].body.riskScenarioId, SCENARIO);
+    assert.equal(calls[0].body.methodologyProfileId, PROFILE);
     for (const stale of [
       "uid", "title", "description", "quantitativeValue", "qualitativeValue",
       "scenarioId", "approvalState", "metadata", "status",
@@ -288,6 +294,7 @@ describe("risk_register_record wire body (#879)", () => {
     const body = pick(args, GOVERNANCE_FIELDS.risk_register_record.create);
     await createRiskRegisterRecord(body, "proj-a");
     assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "POST");
     assert.match(calls[0].url, /\/api\/v1\/risk-register-records\b/);
     assert.deepEqual(calls[0].body, {
       uid: "REG-1",
@@ -315,6 +322,11 @@ describe("risk_register_record wire body (#879)", () => {
     const body = pick(args, GOVERNANCE_FIELDS.risk_register_record.create);
     await createRiskRegisterRecord(body, "proj-a");
     assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "POST");
+    // Positive assertion guards against `{}` body silently satisfying the
+    // negative checks: confirm the valid create-DTO fields survived.
+    assert.equal(calls[0].body.uid, "REG-2");
+    assert.equal(calls[0].body.title, "T");
     for (const stale of ["scenarioId", "description", "status", "metadata"]) {
       assert.ok(!(stale in calls[0].body), `${stale} leaked onto the wire`);
     }
@@ -419,6 +431,7 @@ describe("treatment_plan wire body (#880)", () => {
     const body = pick(args, GOVERNANCE_FIELDS.treatment_plan.create);
     await createTreatmentPlan(body, "proj-a");
     assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "POST");
     assert.match(calls[0].url, /\/api\/v1\/treatment-plans\b/);
     assert.deepEqual(calls[0].body, {
       uid: "TP-1",
@@ -451,6 +464,13 @@ describe("treatment_plan wire body (#880)", () => {
     const body = pick(args, GOVERNANCE_FIELDS.treatment_plan.create);
     await createTreatmentPlan(body, "proj-a");
     assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "POST");
+    // Positive assertion guards against `{}` body silently satisfying the
+    // negative checks: confirm the valid create-DTO fields survived.
+    assert.equal(calls[0].body.uid, "TP-2");
+    assert.equal(calls[0].body.title, "T");
+    assert.equal(calls[0].body.strategy, "ACCEPT");
+    assert.equal(calls[0].body.riskRegisterRecordId, REG);
     for (const stale of ["dueAt", "scenarioId", "description", "metadata"]) {
       assert.ok(!(stale in calls[0].body), `${stale} leaked onto the wire`);
     }
