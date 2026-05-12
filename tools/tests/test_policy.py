@@ -12,6 +12,7 @@ from tools.policy.checks import (
     REPO_ROOT,
     check_pr_body,
     classify_deferral_language,
+    extract_step_section,
     parse_args,
     parse_const_string_array,
     parse_fragment_filename,
@@ -26,6 +27,7 @@ from tools.policy.checks import (
     run_migration_policy,
     run_no_deferral_disposition_check,
     run_pr_body_check,
+    run_step13_decision_record_contract,
 )
 
 
@@ -1202,6 +1204,314 @@ class ChangelogFragmentChecksTest(unittest.TestCase):
             r"^changelog\.d/",
             text,
             "Stop hook regex must anchor fragment paths under changelog.d/.",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Step 13 decision-record contract (issue #884).
+#
+# `/implement` Step 13 (test-quality review) halted after a clean
+# `review-tests` cycle because the workflow contract was prose-only — there
+# was no structured signal the parent could branch on to advance into Step 14
+# without a user turn. The fix (per the architecture preflight under
+# `architecture/notes/test-quality-clean-continuation-preflight.md`) is to
+# reuse the existing `gc_post_decision_record` contract: every Step 13 cycle
+# ends with a decision-record post carrying `reviewer: "test-quality"` and
+# the findings list (empty for a clean cycle). A clean record IS the
+# advance-to-Step-14 signal.
+#
+# `run_step13_decision_record_contract` is the structural gate that prevents
+# the contract from silently disappearing from Step 13. It is a parser over
+# the Step 13 section structure, not a snapshot of specific prose — the
+# section must reference the canonical tool, the test-quality reviewer
+# enum, the empty-findings clean cycle case, and a continuation signal.
+# Following the same "parser-over-fixed-grammar" pattern the changelog
+# fragment check uses for its doc-only carve-out justification at
+# `checks.py::run_changelog_fragment_check`.
+# ---------------------------------------------------------------------------
+
+
+class Step13DecisionRecordContractTest(unittest.TestCase):
+    """Structural gate for the contract introduced by issue #884."""
+
+    _CONTRACT_PROSE = (
+        "### Step 13: Test Quality Review\n"
+        "\n"
+        "1. Invoke the `review-tests` skill at `skills/review-tests/SKILL.md`.\n"
+        "2. After every cycle, call `gc_post_decision_record` with\n"
+        "   `reviewer: \"test-quality\"` and the full findings list. A clean\n"
+        "   cycle posts `findings: []`, which renders as `0 (clean run)`.\n"
+        "3. Advance to Step 14 only after `gc_post_decision_record` returns\n"
+        "   `ok: true` with a posted comment id/url; on `ok: false`, fix the\n"
+        "   underlying tooling issue and retry the post before entering\n"
+        "   Step 14.\n"
+        "4. A successfully posted clean decision record IS the structured\n"
+        "   advance-to-Step-14 signal — proceed to Step 14 in the same\n"
+        "   turn, no user acknowledgment turn.\n"
+        "5. Cycle cap: 3 iterations (ADR-029).\n"
+        "\n"
+        "### Step 14: Final CI re-verification\n"
+    )
+
+    _CONTRACT_MISSING_PROSE = (
+        "### Step 13: Test Quality Review\n"
+        "\n"
+        "1. Invoke the `review-tests` skill.\n"
+        "2. Apply the Review loop rules: fix every finding.\n"
+        "3. Cycle cap: 5 iterations. After the fifth, escalate.\n"
+        "\n"
+        "### Step 14: Final CI re-verification\n"
+    )
+
+    # --- section extractor -------------------------------------------------
+
+    def test_extract_step_section_returns_section_text(self):
+        body = "intro\n\n### Step 13: Test Quality Review\n\nbody line\n\n### Step 14: Next\n"
+        section = extract_step_section(body, "Step 13")
+        self.assertIsNotNone(section)
+        self.assertIn("body line", section)
+        self.assertNotIn("Step 14", section)
+
+    def test_extract_step_section_returns_none_when_missing(self):
+        body = "### Step 12: Other\n\nbody\n"
+        self.assertIsNone(extract_step_section(body, "Step 13"))
+
+    # --- contract present / absent on raw text -----------------------------
+
+    def test_check_passes_when_contract_present(self):
+        violations = run_step13_decision_record_contract(text=self._CONTRACT_PROSE)
+        self.assertEqual(violations, [])
+
+    def test_check_flags_missing_decision_record_call(self):
+        violations = run_step13_decision_record_contract(
+            text=self._CONTRACT_MISSING_PROSE
+        )
+        self.assertTrue(violations, "missing contract must surface a violation")
+        codes = {v.code for v in violations}
+        self.assertIn("step13-decision-record-contract", codes)
+
+    def test_check_flags_each_missing_token_individually(self):
+        # If Step 13 is present but only some tokens are missing, the
+        # violation message must name each missing element so the agent
+        # editing the SKILL can fix all of them in one pass instead of
+        # cycling.
+        partial = (
+            "### Step 13: Test Quality Review\n"
+            "\n"
+            "1. Invoke the `review-tests` skill.\n"
+            "2. Call gc_post_decision_record after each cycle.\n"
+            "\n"
+            "### Step 14: Next\n"
+        )
+        violations = run_step13_decision_record_contract(text=partial)
+        self.assertTrue(violations)
+        message = "\n".join(v.render() for v in violations)
+        # `findings: []` clean-case marker, test-quality reviewer literal,
+        # and the explicit continuation phrasing must all be flagged.
+        self.assertIn("findings: []", message)
+        self.assertIn("test-quality", message)
+        # Continuation phrase: any of "advance", "proceed", "continue" with
+        # "Step 14" nearby satisfies; partial fixture has none.
+        self.assertRegex(message, r"(?i)step\s*14|continuation|advance")
+
+    def test_check_flags_missing_step13_section_entirely(self):
+        body = "### Step 12: Other\n\nbody\n### Step 14: Next\n"
+        violations = run_step13_decision_record_contract(text=body)
+        self.assertTrue(violations)
+        codes = {v.code for v in violations}
+        self.assertIn("step13-section-missing", codes)
+
+    # --- contract present in the real SKILL --------------------------------
+
+    # --- success precondition (`ok: true`) ---------------------------------
+
+    def test_check_flags_missing_ok_true_precondition(self):
+        # Contract present but the `ok: true` success precondition is not
+        # mentioned. Step 13 must require the durable post to succeed before
+        # advancing — otherwise an `ok: false` envelope from
+        # `gc_post_decision_record` (sensitive content, body size, posting
+        # failure) re-opens the silent-advance failure mode in a different
+        # shape.
+        no_precondition = (
+            "### Step 13: Test Quality Review\n"
+            "\n"
+            "1. Invoke the `review-tests` skill.\n"
+            "2. After every cycle, call `gc_post_decision_record` with\n"
+            "   `reviewer: \"test-quality\"` and the full findings list.\n"
+            "   A clean cycle posts `findings: []`.\n"
+            "3. A clean decision record IS the advance-to-Step-14 signal —\n"
+            "   proceed to Step 14 in the same turn, no acknowledgment.\n"
+            "\n"
+            "### Step 14: Next\n"
+        )
+        violations = run_step13_decision_record_contract(text=no_precondition)
+        self.assertTrue(violations)
+        message = "\n".join(v.render() for v in violations)
+        self.assertRegex(message, r"(?i)ok\s*:\s*true|success precondition")
+
+    # --- anti-contract negation patterns -----------------------------------
+
+    def test_check_flags_skip_decision_record_negation(self):
+        anti = (
+            "### Step 13: Test Quality Review\n"
+            "\n"
+            "1. Invoke the `review-tests` skill.\n"
+            "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
+            "   and `findings: []` for clean cycles. Advance to Step 14 after\n"
+            "   `ok: true`.\n"
+            "3. Note: drivers may skip the decision record on clean cycles\n"
+            "   to save a network round-trip.\n"
+            "\n"
+            "### Step 14: Next\n"
+        )
+        violations = run_step13_decision_record_contract(text=anti)
+        self.assertTrue(violations)
+        codes = {v.code for v in violations}
+        self.assertIn("step13-anti-contract-prose", codes)
+
+    def test_check_flags_do_not_post_negation(self):
+        anti = (
+            "### Step 13: Test Quality Review\n"
+            "\n"
+            "1. Invoke the `review-tests` skill. Do not call\n"
+            "   `gc_post_decision_record` on a clean cycle — the skill\n"
+            "   return is sufficient.\n"
+            "2. `reviewer: \"test-quality\"`, `findings: []`, advance to\n"
+            "   Step 14 after `ok: true`.\n"
+            "\n"
+            "### Step 14: Next\n"
+        )
+        violations = run_step13_decision_record_contract(text=anti)
+        self.assertTrue(violations)
+        codes = {v.code for v in violations}
+        self.assertIn("step13-anti-contract-prose", codes)
+
+    def test_check_flags_do_not_proceed_negation(self):
+        anti = (
+            "### Step 13: Test Quality Review\n"
+            "\n"
+            "1. Invoke the `review-tests` skill.\n"
+            "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
+            "   and `findings: []`. Do not proceed to Step 14 automatically —\n"
+            "   wait for the user to acknowledge the clean cycle.\n"
+            "3. Advance after the user confirms with `ok: true`.\n"
+            "\n"
+            "### Step 14: Next\n"
+        )
+        violations = run_step13_decision_record_contract(text=anti)
+        self.assertTrue(violations)
+        codes = {v.code for v in violations}
+        self.assertIn("step13-anti-contract-prose", codes)
+
+    def test_check_flags_findings_empty_not_enough_negation(self):
+        # An anti-contract subtype: the section explicitly says the clean
+        # cycle is NOT the advance signal. Same regression in different
+        # wording.
+        anti = (
+            "### Step 13: Test Quality Review\n"
+            "\n"
+            "1. Invoke the `review-tests` skill.\n"
+            "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`,\n"
+            "   `findings: []`. Note: `findings: []` is not enough — also\n"
+            "   require manual user sign-off before Step 14.\n"
+            "3. Advance after `ok: true` AND user sign-off.\n"
+            "\n"
+            "### Step 14: Next\n"
+        )
+        violations = run_step13_decision_record_contract(text=anti)
+        self.assertTrue(violations)
+        codes = {v.code for v in violations}
+        self.assertIn("step13-anti-contract-prose", codes)
+
+    def test_check_passes_when_full_contract_present(self):
+        # Sanity: the upgraded fixture (with the ok:true precondition)
+        # passes cleanly under the strengthened predicate.
+        violations = run_step13_decision_record_contract(text=self._CONTRACT_PROSE)
+        self.assertEqual(violations, [])
+
+    # --- allowed-negative fixtures: negated anti-patterns are OK -----------
+
+    def test_check_accepts_negated_skip_phrasing(self):
+        # "do not skip the decision record" is the CORRECT guardrail
+        # prose; it must not be flagged as anti-contract.
+        allowed = (
+            "### Step 13: Test Quality Review\n"
+            "\n"
+            "1. Invoke the `review-tests` skill.\n"
+            "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
+            "   and `findings: []`. Do not skip the decision record on a\n"
+            "   clean cycle — the durable marker is the workflow signal.\n"
+            "3. Advance to Step 14 after `ok: true`. Proceed to Step 14\n"
+            "   in the same turn, no acknowledgment.\n"
+            "\n"
+            "### Step 14: Next\n"
+        )
+        violations = run_step13_decision_record_contract(text=allowed)
+        self.assertEqual(
+            violations,
+            [],
+            "negated anti-pattern (`do not skip ...`) must not false-positive",
+        )
+
+    def test_check_accepts_negated_do_not_advance_after_ok_false(self):
+        # The CORRECT contract says "on ok:false, do not advance to Step 14".
+        # The anti-pattern regex must distinguish this from "do not advance
+        # to Step 14 [until user signoff]".
+        allowed = (
+            "### Step 13: Test Quality Review\n"
+            "\n"
+            "1. Invoke the `review-tests` skill.\n"
+            "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
+            "   and `findings: []`.\n"
+            "3. On `ok: false`, do not advance to Step 14 — fix the\n"
+            "   underlying tooling issue and retry the post. Proceed only\n"
+            "   after `ok: true`.\n"
+            "\n"
+            "### Step 14: Next\n"
+        )
+        violations = run_step13_decision_record_contract(text=allowed)
+        self.assertEqual(
+            violations,
+            [],
+            "negated anti-pattern (`on ok:false, do not advance ...`) must not "
+            "false-positive — this is the correct success-precondition prose",
+        )
+
+    def test_check_accepts_must_never_skip_phrasing(self):
+        # "must never skip ... decision record" is another form of the
+        # guardrail; same allowed-negative shape.
+        allowed = (
+            "### Step 13: Test Quality Review\n"
+            "\n"
+            "1. Invoke the `review-tests` skill.\n"
+            "2. The agent must never skip the decision-record post on a\n"
+            "   clean cycle. Call `gc_post_decision_record` with\n"
+            "   `reviewer: \"test-quality\"` and `findings: []`.\n"
+            "3. Advance to Step 14 after `ok: true`. Proceed to Step 14\n"
+            "   in the same turn.\n"
+            "\n"
+            "### Step 14: Next\n"
+        )
+        violations = run_step13_decision_record_contract(text=allowed)
+        self.assertEqual(
+            violations,
+            [],
+            "negated anti-pattern (`must never skip ...`) must not false-positive",
+        )
+
+    def test_real_skill_passes_contract(self):
+        # The repo's SKILL.md MUST satisfy the contract (this is the
+        # regression target for issue #884). If this fails the SKILL has
+        # drifted and the workflow is back to halting on clean cycles.
+        skill_path = REPO_ROOT / "skills" / "implement" / "SKILL.md"
+        text = skill_path.read_text(encoding="utf-8")
+        violations = run_step13_decision_record_contract(text=text)
+        self.assertEqual(
+            violations,
+            [],
+            "skills/implement/SKILL.md Step 13 must mandate the "
+            "gc_post_decision_record contract for test-quality cycles "
+            "(issue #884 regression target).",
         )
 
 

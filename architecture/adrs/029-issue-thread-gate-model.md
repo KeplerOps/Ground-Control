@@ -159,6 +159,44 @@ actually differs. Do not make branch name, PR number, or commit lineage part of
 the pre-push cap key; those are audit context or post-push direct-caller
 defense-in-depth context, not reset levers for the canonical Step 6.5 cap.
 
+### Test-quality review uses the same decision-record contract
+
+Step 13 (test-quality review via the `review-tests` skill) records every
+cycle on the issue thread using the same `gc_post_decision_record` surface
+as Step 6.5's codex review, with `reviewer: "test-quality"` and the
+findings list. A clean cycle posts `findings: []`, which renders as
+`**Findings:** 0 (clean run)`. The successfully posted record is the
+structured durable signal that the cycle is complete and the workflow
+advances — and "successfully posted" is dispositive: the parent advances
+into Step 14 only after `gc_post_decision_record` returns `ok: true` with
+a posted comment id/url. On `ok: false`, the parent follows the returned
+`error` / `next_action` envelope (sensitive-content rejection, body-size
+cap, `gh` posting failure, network), fixes the underlying issue, and
+retries the post — it does NOT enter Step 14 with the durable marker
+missing. Treating the attempted call as the signal would re-open the
+#884 silent-advance failure mode in a different shape. There is no
+separate marker family for test-quality cycles, and there is no human
+acknowledgment turn between Step 13 and Step 14: the parent `/implement`
+workflow consumes the successful clean record and proceeds in the same
+turn. Issue #884 was the original regression — when the SKILL prose
+treated the `review-tests` skill's human-readable "no issues found" line
+as the only signal, the parent agent stopped at the skill-return boundary
+instead of advancing. The skill's prose line remains for transcript
+readability; the decision-record marker on the issue thread is the
+workflow contract.
+
+The cycle cap for test-quality is 3 per issue, aligned with the codex
+review cap above. It is an **agent-honored / workflow-discipline cap**,
+not a server-side refusal — unlike `gc_codex_review`, the test-quality
+flow has no MCP review entry point, and `gc_post_decision_record` does
+not refuse cycle 4 for `reviewer: "test-quality"` (no prior-marker count
+field, no override_cap parameter, no override_reason auditing). The agent
+must stop after cycle 3 and escalate to the user; past cycle 3 is an
+architectural-escalation point — the user authorizes a further cycle
+explicitly or restructures the change. The parent owns Step 14
+progression; the child `review-tests` skill reports the review outcome
+and returns control without advancing phases.
+
 ### Codex findings issue-thread record
 
 After every successful `gc_codex_review` cycle, the MCP server must post a

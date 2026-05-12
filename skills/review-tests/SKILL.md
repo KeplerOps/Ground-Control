@@ -72,6 +72,6 @@ Fix: <specific fix, not vague advice>
 
 ## After Review
 
-Fix every finding — both `CRITICAL` and `WARNING`. The implement workflow's contract is "fix every finding before PR is ready"; deferral is not a valid decision. If a fix is genuinely out of scope (e.g., it would require touching 5+ files outside the current feature scope), STOP and consult the user; do not silently mark it deferred.
+This skill is **pure review output**. Report findings in the documented format above and return control to the parent. Do NOT fix findings, do NOT commit, do NOT push, do NOT consult the user about scope. The parent `/implement` workflow owns the full Review-loop rules: it constructs the `gc_post_decision_record(reviewer: "test-quality", findings: [...])` payload from the findings returned here, records `fix` / `wontfix` / `not-applicable` dispositions, applies the structural fix for `class` findings, commits and pushes, re-invokes this skill, and advances into Step 14 only after a clean cycle's decision-record post returns `ok: true`. Returning fix-applied or partial-fix state to the parent would let the durable `gc_post_decision_record` payload be reconstructed *after* fixing, losing the per-cycle findings-and-decisions trail that ADR-029 requires.
 
-If the tests are solid: report "Test quality review: no issues found" and proceed.
+If the tests are solid: report "Test quality review: no issues found" and return control. The human-readable line is a transcript convenience; the durable workflow signal is the parent's `gc_post_decision_record` call with `findings: []`, and only after that call returns `ok: true` does the parent advance into Step 14. This skill does not advance Step 14; the parent owns phase progression (issue #884).
