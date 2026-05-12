@@ -46,8 +46,85 @@ Repo-local Ground Control project context comes from a `.ground-control.yaml` fi
 Recommended `.ground-control.yaml` convention:
 
 ```yaml
+schema_version: 1
 project: aces-sdl
+github_repo: owner/repo
+
+workflow:
+  test_command: make test
+  completion_command: make check
+  lint_command: make lint
+  format_command: make format
+  base_branch: dev
+
+sonarcloud:
+  project_key: Owner_Project
+  organization: owner
+
+rules:
+  plan_rules: .gc/plan-rules.md
+
+knowledge:
+  dir: docs/knowledge
+  schema: docs/knowledge/SCHEMA.md
+  inbox: docs/knowledge/inbox
+
+docs:
+  adr_dir: architecture/adrs/
+  architecture_overview: docs/architecture/ARCHITECTURE.md
+  coding_standards: docs/CODING_STANDARDS.md
+  workflow_reference: docs/DEVELOPMENT_WORKFLOW.md
+  knowledge_base: docs/knowledge/
+
+example_paths:
+  source: src/
+  test: tests/
+
+requirements:
+  uid_examples:
+    - GC-X001
+    - OBS-042
+
+cross_cutting_concerns:
+  description: |
+    Logger: <project logging convention>
+    Validation: <schema / validation convention>
+    Errors: <error envelope / handler>
+    Tests: <fixture and test-slice patterns>
+
+routing:
+  enabled: false
+  default_provider: claude
+  default_fallback: parent
+  stages:
+    implementation:
+      tier: medium
+      provider: claude
+      model: claude-sonnet-4-6
+      agent: subagent
+      fallback: parent
+
+telemetry:
+  enabled: false
 ```
+
+Config contract:
+
+- `schema_version` is required and currently must be `1`.
+- `project` is required and must be a lowercase identifier using letters, numbers, and hyphens.
+- Unknown top-level keys are rejected. Current top-level keys are `schema_version`, `project`, `github_repo`, `workflow`, `sonarcloud`, `rules`, `knowledge`, `docs`, `example_paths`, `requirements`, `cross_cutting_concerns`, `routing`, and `telemetry`.
+- `workflow.*` values are optional non-empty strings. `workflow.base_branch` must be a safe Git ref name using `[A-Za-z0-9._/-]`.
+- `sonarcloud` is optional, but when present it must include non-empty `project_key` and `organization`.
+- `rules.plan_rules` is optional and points to the repo-relative plan-rules file whose content is inlined into `gc_get_repo_ground_control_context`.
+- `knowledge.dir` is required when `knowledge` is present. `knowledge.schema` and `knowledge.inbox` are optional overrides; by default they resolve under `knowledge.dir`.
+- `docs.*` and `example_paths.*` are optional repo-relative paths. Docs paths are containment-checked so a config file cannot point an agent outside the repository.
+- `requirements.uid_examples` is optional and must be a list of non-empty strings.
+- `cross_cutting_concerns.description` is optional free text shown to agents during planning.
+- `routing.enabled` defaults to `false`. When enabled, omitted `/implement` stages use built-in defaults; `routing.stages.<stage>` overrides a specific stage/purpose route.
+- Routing stages use lowercase stage keys matching `[a-z][a-z0-9_-]*`. Route fields are `tier`, `provider`, `model`, `agent`, and `fallback`.
+- Routing `tier` is one of `low`, `medium`, or `high`; `provider` currently supports `claude`; `agent` is one of `parent`, `subagent`, or `cli`; `fallback` is one of `parent`, `error`, or `skip`.
+- Claude model values in executable routing config must be canonical CLI ids such as `claude-haiku-4-5`, `claude-sonnet-4-6`, or `claude-opus-4-7`; display aliases like `sonnet-4.6` are rejected.
+- `telemetry.enabled` defaults to `false`. `gc_log_step_telemetry` refuses to write telemetry unless this is explicitly true.
 
 `AGENTS.md` should still carry a brief `Ground Control Context` section that points agents at `.ground-control.yaml` and `.gc/`, so repo newcomers know where the workflow config lives.
 
