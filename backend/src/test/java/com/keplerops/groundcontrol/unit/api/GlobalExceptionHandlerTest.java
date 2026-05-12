@@ -1,8 +1,10 @@
 package com.keplerops.groundcontrol.unit.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.keplerops.groundcontrol.api.GlobalExceptionHandler;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
@@ -39,9 +41,10 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    void handleHttpMessageNotReadable_returnsValidationErrorForInvalidEnumValue() throws Exception {
+    void handleHttpMessageNotReadable_returnsValidationErrorForInvalidEnumValue() {
         var mapper = new ObjectMapper();
-        var cause = assertThrowsInvalidFormat(
+        var cause = assertThrows(
+                InvalidFormatException.class,
                 () -> mapper.readValue("{\"status\":\"PROPOSED\"}", TreatmentPlanStatusRequest.class));
         var ex = new HttpMessageNotReadableException("bad enum", cause);
 
@@ -55,6 +58,25 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody().error().detail().get("validValues"))
                 .asList()
                 .contains("PLANNED", "IN_PROGRESS", "BLOCKED", "COMPLETED", "CANCELED");
+    }
+
+    @Test
+    void handleHttpMessageNotReadable_returnsLeafFieldNameForNestedInvalidEnumValue() {
+        // The Jackson path on a nested enum failure carries every level (outer.inner);
+        // the leaf field name is what the caller needs to act on. Confirms that
+        // extractFieldName's reduce-to-last yields the leaf, not "request" or "outer".
+        var mapper = new ObjectMapper();
+        var cause = assertThrows(
+                InvalidFormatException.class,
+                () -> mapper.readValue(
+                        "{\"outer\":{\"status\":\"PROPOSED\"}}", NestedTreatmentPlanStatusRequest.class));
+        var ex = new HttpMessageNotReadableException("bad nested enum", cause);
+
+        var response = handler.handleHttpMessageNotReadable(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error().detail()).containsEntry("field", "status");
     }
 
     @Test
@@ -210,22 +232,7 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody().error().detail()).containsEntry("field", "title");
     }
 
-    private static com.fasterxml.jackson.databind.exc.InvalidFormatException assertThrowsInvalidFormat(
-            ThrowingRunnable runnable) {
-        try {
-            runnable.run();
-        } catch (com.fasterxml.jackson.databind.exc.InvalidFormatException ex) {
-            return ex;
-        } catch (Exception ex) {
-            throw new AssertionError("Expected InvalidFormatException", ex);
-        }
-        throw new AssertionError("Expected InvalidFormatException");
-    }
-
     private record TreatmentPlanStatusRequest(TreatmentPlanStatus status) {}
 
-    @FunctionalInterface
-    private interface ThrowingRunnable {
-        void run() throws Exception;
-    }
+    private record NestedTreatmentPlanStatusRequest(TreatmentPlanStatusRequest outer) {}
 }

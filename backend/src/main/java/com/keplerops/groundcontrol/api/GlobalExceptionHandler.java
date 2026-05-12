@@ -111,8 +111,11 @@ public class GlobalExceptionHandler {
 
     private ResponseEntity<ErrorResponse> handleInvalidEnumFormat(InvalidFormatException ex) {
         var field = extractFieldName(ex);
+        // Use Enum.name() rather than Object.toString() so an enum that overrides
+        // toString() for display purposes does not surface a non-bindable label
+        // in the validValues hint the caller is told to use.
         var validValues = Arrays.stream(ex.getTargetType().getEnumConstants())
-                .map(Object::toString)
+                .map(c -> ((Enum<?>) c).name())
                 .toList();
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("field", field);
@@ -127,7 +130,7 @@ public class GlobalExceptionHandler {
         return ex.getPath().stream()
                 .map(JsonMappingException.Reference::getFieldName)
                 .filter(Objects::nonNull)
-                .reduce((ignored, fieldName) -> fieldName)
+                .reduce((a, b) -> b)
                 .orElse("request");
     }
 
