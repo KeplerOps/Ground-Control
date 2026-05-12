@@ -77,6 +77,29 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
     }
 
     @Test
+    void getVisualization_filtersByEntityTypeAgainstRealAge() {
+        // Round-trip the entityTypes filter through real AGE 1.6 to confirm the
+        // `WHERE n.entity_type IN $entity_types` clause and the agtype-bound list parameter
+        // actually filter at the database layer (not just in unit tests with a mock JdbcTemplate).
+        // Materializes a project with both REQUIREMENT and RISK_SCENARIO nodes, then filters to
+        // REQUIREMENT only and asserts the RISK_SCENARIO node was rejected by AGE itself.
+        requirementRepository.save(new Requirement(testProject, "AGE-FILT-A", "Filter A", "stmt"));
+        graphClient.materializeGraph();
+
+        var filtered = mixedGraphClient.getVisualization(
+                testProject.getId(),
+                java.util.Set.of(com.keplerops.groundcontrol.domain.graph.model.GraphEntityType.REQUIREMENT));
+
+        // Every node in the filtered projection must have entityType == REQUIREMENT.
+        assertThat(filtered.nodes())
+                .as("AGE-side filter must exclude all non-REQUIREMENT entity types")
+                .allMatch(n ->
+                        n.entityType() == com.keplerops.groundcontrol.domain.graph.model.GraphEntityType.REQUIREMENT);
+        // AGE-FILT-A is REQUIREMENT — must be present after filtering.
+        assertThat(filtered.nodes()).anyMatch(n -> "AGE-FILT-A".equals(n.uid()));
+    }
+
+    @Test
     void materializeAndFindPaths() {
         var a = requirementRepository.save(new Requirement(testProject, "AGE-A", "A", "A statement"));
         var b = requirementRepository.save(new Requirement(testProject, "AGE-B", "B", "B statement"));
@@ -114,7 +137,7 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
         assertThat(afterCount).isEqualTo(beforeCount + 1);
 
         // The materialized graph round-trips the malicious values verbatim as property data.
-        var projection = mixedGraphClient.getVisualization(testProject.getId());
+        var projection = mixedGraphClient.getVisualization(testProject.getId(), java.util.Set.of());
         var matched = projection.nodes().stream()
                 .filter(n -> "AGE-EVIL".equals(n.uid()))
                 .findFirst();
@@ -181,7 +204,7 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
 
         graphClient.materializeGraph();
 
-        var projection = mixedGraphClient.getVisualization(testProject.getId());
+        var projection = mixedGraphClient.getVisualization(testProject.getId(), java.util.Set.of());
         var matchedEdge = projection.edges().stream()
                 .filter(e -> "DEPENDS_ON".equals(e.edgeType()))
                 .findFirst();
@@ -205,7 +228,7 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
 
         graphClient.materializeGraph();
 
-        var projection = mixedGraphClient.getVisualization(testProject.getId());
+        var projection = mixedGraphClient.getVisualization(testProject.getId(), java.util.Set.of());
         var matched = projection.nodes().stream()
                 .filter(n -> "AGE-TAG".equals(n.uid()))
                 .findFirst();

@@ -32,6 +32,13 @@ match that contract.
 Validation at controllers or DTOs remains useful for request quality, but it is defense in depth. It must not be the
 only injection mitigation, because materialization also consumes persisted requirement data and projection contributors.
 
+Graph traversal cost is part of the same boundary. Any API or domain service that accepts a caller-controlled graph
+depth, root set, entity-type filter, or path query must validate bounded inputs before invoking a graph client, and the
+AGE adapter must keep its own defensive caps before constructing variable-length Cypher patterns. Path queries must not
+use unbounded `[*]` expansions; they need an explicit maximum depth and an in-Cypher result limit so AGE does not
+materialize an unbounded path set before Java truncates the response. Limits should live behind the existing graph
+service/client contracts and domain validation envelope, not in endpoint-specific ad hoc checks.
+
 ## Consequences
 
 ### Positive
@@ -41,6 +48,8 @@ only injection mitigation, because materialization also consumes persisted requi
 - Preserves the existing `GraphProjection`, `GraphNode`, `GraphEdge`, and `GraphEntityType` model rather than creating a
   parallel AGE-specific graph schema.
 - Keeps API error handling aligned with the existing `GlobalExceptionHandler` and domain exception hierarchy.
+- Keeps graph DoS protections attached to the graph contracts themselves, so browser/session callers, bearer callers,
+  MCP/tool callers, and future graph-analysis endpoints inherit the same bounded traversal behavior.
 
 ### Negative
 
@@ -55,3 +64,7 @@ only injection mitigation, because materialization also consumes persisted requi
   contributors; the adapter must validate before execution as well.
 - Broadening the requirement UID grammar as part of this fix can create product and import compatibility changes that
   are separate from the injection repair.
+- Capping only HTTP request DTOs is insufficient: internal callers can still reach the graph service/client ports, and
+  AGE cannot parameterize variable-length path bounds, so adapter-side depth checks remain mandatory.
+- Applying `LIMIT` outside `ag_catalog.cypher(...)` does not bound AGE path expansion. The limit must be inside the
+  Cypher text for path enumeration queries.

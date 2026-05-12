@@ -1,6 +1,8 @@
 package com.keplerops.groundcontrol.domain.graph.service;
 
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.graph.GraphTraversalLimits;
 import com.keplerops.groundcontrol.domain.graph.model.GraphEdge;
 import com.keplerops.groundcontrol.domain.graph.model.GraphEntityType;
 import com.keplerops.groundcontrol.domain.graph.model.GraphNode;
@@ -31,23 +33,33 @@ public class MixedGraphService {
     }
 
     public GraphProjection getVisualization(UUID projectId, List<String> entityTypeNames) {
-        return filterProjection(mixedGraphClient.getVisualization(projectId), parseEntityTypes(entityTypeNames));
+        Set<GraphEntityType> entityTypes = parseEntityTypes(entityTypeNames);
+        // Client applies the filter and the projection cap; service-side enforceProjectionCap is
+        // defence-in-depth in case a future client returns more than the contract permits.
+        return enforceProjectionCap(mixedGraphClient.getVisualization(projectId, entityTypes));
     }
 
     public GraphProjection extractSubgraph(
             UUID projectId, List<String> rootNodeIds, int maxDepth, List<String> entityTypeNames) {
+        validateDepth(maxDepth);
+        validateRootNodeIds(rootNodeIds);
         return neighborhoodProjection(projectId, rootNodeIds, maxDepth, entityTypeNames);
     }
 
     public GraphProjection traverse(
             UUID projectId, List<String> rootNodeIds, int maxDepth, List<String> entityTypeNames) {
+        validateDepth(maxDepth);
+        validateRootNodeIds(rootNodeIds);
         return neighborhoodProjection(projectId, rootNodeIds, maxDepth, entityTypeNames);
     }
 
     public List<GraphPathResult> findPaths(
             UUID projectId, String sourceNodeId, String targetNodeId, int maxDepth, List<String> entityTypeNames) {
-        var projection =
-                filterProjection(mixedGraphClient.getVisualization(projectId), parseEntityTypes(entityTypeNames));
+        validateDepth(maxDepth);
+        validateNodeIdentifier(sourceNodeId, "sourceNodeId");
+        validateNodeIdentifier(targetNodeId, "targetNodeId");
+        Set<GraphEntityType> entityTypes = parseEntityTypes(entityTypeNames);
+        var projection = enforceProjectionCap(mixedGraphClient.getVisualization(projectId, entityTypes));
         var nodesById = projection.nodes().stream().collect(Collectors.toMap(GraphNode::id, node -> node));
         if (!nodesById.containsKey(sourceNodeId)) {
             throw new NotFoundException("Graph node not found: " + sourceNodeId);
@@ -66,7 +78,11 @@ public class MixedGraphService {
         while (!queue.isEmpty()) {
             var path = queue.removeFirst();
             var current = path.getLast();
+            int edgeCount = path.size() - 1;
             if (current.equals(targetNodeId)) {
+                // Enqueue rule below prevents over-cap paths from ever being added, so an
+                // over-cap path can only reach this branch if the source itself equals the target;
+                // either way edgeCount <= maxDepth, satisfying the maxDepth contract.
                 List<String> edgeTypes = new ArrayList<>();
                 for (int i = 0; i < path.size() - 1; i++) {
                     var edge = edgeLookup.get(undirectedKey(path.get(i), path.get(i + 1)));
@@ -74,7 +90,9 @@ public class MixedGraphService {
                 }
                 return List.of(new GraphPathResult(path, edgeTypes));
             }
-            if (path.size() > maxDepth + 1) {
+            // Stop expanding as soon as the current path already has maxDepth edges — extending
+            // it would produce a path with more edges than the caller asked for.
+            if (edgeCount >= maxDepth) {
                 continue;
             }
             for (String neighbor : adjacency.getOrDefault(current, Set.of())) {
@@ -90,8 +108,8 @@ public class MixedGraphService {
 
     private GraphProjection neighborhoodProjection(
             UUID projectId, List<String> rootNodeIds, int maxDepth, List<String> entityTypeNames) {
-        var projection =
-                filterProjection(mixedGraphClient.getVisualization(projectId), parseEntityTypes(entityTypeNames));
+        Set<GraphEntityType> entityTypes = parseEntityTypes(entityTypeNames);
+        var projection = enforceProjectionCap(mixedGraphClient.getVisualization(projectId, entityTypes));
         var nodesById = projection.nodes().stream().collect(Collectors.toMap(GraphNode::id, node -> node));
         for (String rootNodeId : rootNodeIds) {
             if (!nodesById.containsKey(rootNodeId)) {
@@ -128,29 +146,92 @@ public class MixedGraphService {
         return new GraphProjection(nodes, edges);
     }
 
-    private GraphProjection filterProjection(GraphProjection projection, Set<GraphEntityType> entityTypes) {
-        if (entityTypes.isEmpty()) {
-            return projection;
-        }
-        var nodes = projection.nodes().stream()
-                .filter(node -> entityTypes.contains(node.entityType()))
-                .toList();
-        var visibleNodeIds = nodes.stream().map(GraphNode::id).collect(Collectors.toSet());
-        var edges = projection.edges().stream()
-                .filter(edge -> visibleNodeIds.contains(edge.sourceId()) && visibleNodeIds.contains(edge.targetId()))
-                .toList();
-        return new GraphProjection(nodes, edges);
-    }
-
     private Set<GraphEntityType> parseEntityTypes(List<String> entityTypeNames) {
         if (entityTypeNames == null || entityTypeNames.isEmpty()) {
             return Set.of();
         }
-        return entityTypeNames.stream()
-                .map(String::trim)
-                .filter(value -> !value.isEmpty())
-                .map(GraphEntityType::valueOf)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (entityTypeNames.size() > GraphTraversalLimits.MAX_ENTITY_TYPE_FILTER) {
+            throw new DomainValidationException("entityTypes size " + entityTypeNames.size() + " exceeds maximum "
+                    + GraphTraversalLimits.MAX_ENTITY_TYPE_FILTER);
+        }
+        Set<GraphEntityType> parsed = new LinkedHashSet<>();
+        for (String raw : entityTypeNames) {
+            if (raw == null) {
+                throw new DomainValidationException("entityTypes contains a null value");
+            }
+            String trimmed = raw.trim();
+            if (trimmed.isEmpty()) {
+                // Symmetric with the DTO @NotBlank constraint: an internal caller passing a blank
+                // entity-type value must not silently fall through to "no filter" — that would be
+                // the validation-bypass surface this service-level check exists to close.
+                throw new DomainValidationException("entityTypes contains a blank value");
+            }
+            if (trimmed.length() > GraphTraversalLimits.MAX_NODE_IDENTIFIER_LENGTH) {
+                throw new DomainValidationException(
+                        "entityTypes value exceeds maximum length " + GraphTraversalLimits.MAX_NODE_IDENTIFIER_LENGTH);
+            }
+            try {
+                parsed.add(GraphEntityType.valueOf(trimmed));
+            } catch (IllegalArgumentException ex) {
+                // Map AGE-native IllegalArgumentException to a stable validation envelope; otherwise
+                // the request would fall through GlobalExceptionHandler.handleGeneric as a 500 and
+                // leak the enum class name in logs.
+                throw new DomainValidationException("Unknown entityType: " + trimmed);
+            }
+        }
+        return parsed;
+    }
+
+    private static void validateDepth(int maxDepth) {
+        if (maxDepth < 1 || maxDepth > GraphTraversalLimits.MAX_DEPTH) {
+            throw new DomainValidationException("Invalid graph traversal depth: " + maxDepth + " (must be 1.."
+                    + GraphTraversalLimits.MAX_DEPTH + ")");
+        }
+    }
+
+    private static void validateNodeIdentifier(String value, String fieldName) {
+        if (value == null || value.isBlank()) {
+            throw new DomainValidationException(fieldName + " must not be blank");
+        }
+        if (value.length() > GraphTraversalLimits.MAX_NODE_IDENTIFIER_LENGTH) {
+            throw new DomainValidationException(
+                    fieldName + " exceeds maximum length " + GraphTraversalLimits.MAX_NODE_IDENTIFIER_LENGTH);
+        }
+    }
+
+    private static void validateRootNodeIds(List<String> rootNodeIds) {
+        if (rootNodeIds == null || rootNodeIds.isEmpty()) {
+            throw new DomainValidationException("rootNodeIds must not be empty");
+        }
+        if (rootNodeIds.size() > GraphTraversalLimits.MAX_ROOT_NODES) {
+            throw new DomainValidationException("rootNodeIds size " + rootNodeIds.size() + " exceeds maximum "
+                    + GraphTraversalLimits.MAX_ROOT_NODES);
+        }
+        for (String id : rootNodeIds) {
+            if (id == null || id.isBlank()) {
+                throw new DomainValidationException("rootNodeIds contains a blank value");
+            }
+            if (id.length() > GraphTraversalLimits.MAX_NODE_IDENTIFIER_LENGTH) {
+                throw new DomainValidationException(
+                        "rootNodeIds value exceeds maximum length " + GraphTraversalLimits.MAX_NODE_IDENTIFIER_LENGTH);
+            }
+        }
+    }
+
+    private static GraphProjection enforceProjectionCap(GraphProjection projection) {
+        if (projection.nodes().size() > GraphTraversalLimits.MAX_PROJECTION_NODES) {
+            throw new DomainValidationException(
+                    "projection node count " + projection.nodes().size()
+                            + " exceeds maximum " + GraphTraversalLimits.MAX_PROJECTION_NODES
+                            + "; apply an entityTypes filter to narrow the result");
+        }
+        if (projection.edges().size() > GraphTraversalLimits.MAX_PROJECTION_EDGES) {
+            throw new DomainValidationException(
+                    "projection edge count " + projection.edges().size()
+                            + " exceeds maximum " + GraphTraversalLimits.MAX_PROJECTION_EDGES
+                            + "; apply an entityTypes filter to narrow the result");
+        }
+        return projection;
     }
 
     private Map<String, Set<String>> buildAdjacency(List<GraphEdge> edges) {
