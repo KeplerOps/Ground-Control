@@ -3949,16 +3949,27 @@ process.exit(2);
     try {
       await withShimPath(shim.binDir, async () => {
         let result;
-        let threw = false;
+        let thrown;
         try {
           result = await runCodexReview({
             repoPath: shim.repoDir,
             uncommitted: true,
           });
-        } catch {
-          threw = true;
+        } catch (err) {
+          thrown = err;
         }
-        if (!threw) {
+        // The cap-refusal short-circuit must NOT have fired, regardless of
+        // whether the function went on to throw (downstream tooling failure
+        // in this hermetic shim) or returned an envelope. Both paths must
+        // assert something — leaving the throw branch un-asserted would let
+        // any future regression in the cap evaluator pass silently.
+        if (thrown !== undefined) {
+          assert.doesNotMatch(
+            String(thrown && thrown.message ? thrown.message : thrown),
+            /codex_review_prepush_cap_reached/,
+            "cap-refusal short-circuit must not surface as a thrown error on cycle 1",
+          );
+        } else {
           assert.notEqual(result.error, "codex_review_prepush_cap_reached");
         }
       });
