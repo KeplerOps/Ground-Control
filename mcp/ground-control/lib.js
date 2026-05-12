@@ -79,6 +79,16 @@ export function buildSuggestedGroundControlYaml(project = "your-project-id") {
     "#     Validation: <project's validation approach>",
     "#     Errors: <error envelope / handler>",
     "#     Tests: <fixture / test-slice patterns>",
+    "# routing:",
+    "#   enabled: false",
+    "#   # Optional stage/purpose overrides. Omitted stages use the",
+    "#   # built-in /implement defaults when routing is enabled.",
+    "#   # stages:",
+    "#   #   implementation:",
+    "#   #     tier: medium",
+    "#   #     model: claude-sonnet-4-6",
+    "# telemetry:",
+    "#   enabled: false",
     "",
   ].join("\n");
 }
@@ -1523,12 +1533,12 @@ function normalizeCrossCuttingConcernsConfig(raw) {
 
 function normalizeRoutingConfig(raw) {
   if (raw == null) {
-    return { ok: true, value: { enabled: false } };
+    return { ok: true, value: { enabled: false, default_provider: "claude", default_fallback: "parent", stages: {} } };
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     return { ok: false, errors: ["routing must be a mapping, not a list or scalar"] };
   }
-  const allowed = ["enabled"];
+  const allowed = ["enabled", "default_provider", "default_fallback", "stages"];
   const errors = [];
   for (const key of Object.keys(raw)) {
     if (!allowed.includes(key)) {
@@ -1543,8 +1553,80 @@ function normalizeRoutingConfig(raw) {
       enabled = raw.enabled;
     }
   }
+  let defaultProvider = "claude";
+  if (raw.default_provider != null) {
+    if (!ROUTING_PROVIDERS.includes(raw.default_provider)) {
+      errors.push(`routing.default_provider must be one of: ${ROUTING_PROVIDERS.join(", ")}`);
+    } else {
+      defaultProvider = raw.default_provider;
+    }
+  }
+  let defaultFallback = "parent";
+  if (raw.default_fallback != null) {
+    if (!ROUTING_FALLBACKS.includes(raw.default_fallback)) {
+      errors.push(`routing.default_fallback must be one of: ${ROUTING_FALLBACKS.join(", ")}`);
+    } else {
+      defaultFallback = raw.default_fallback;
+    }
+  }
+  const stages = {};
+  if (raw.stages != null) {
+    if (typeof raw.stages !== "object" || Array.isArray(raw.stages)) {
+      errors.push("routing.stages must be a mapping from stage name to route config");
+    } else {
+      for (const [stage, route] of Object.entries(raw.stages)) {
+        const normalized = normalizeRoutingStageConfig(stage, route, { defaultProvider, defaultFallback });
+        if (!normalized.ok) {
+          errors.push(...normalized.errors);
+        } else {
+          stages[stage] = normalized.value;
+        }
+      }
+    }
+  }
   if (errors.length) return { ok: false, errors };
-  return { ok: true, value: { enabled } };
+  return { ok: true, value: { enabled, default_provider: defaultProvider, default_fallback: defaultFallback, stages } };
+}
+
+function normalizeRoutingStageConfig(stage, raw, { defaultProvider, defaultFallback }) {
+  const prefix = `routing.stages.${stage}`;
+  const errors = [];
+  if (!ROUTING_STAGE_NAME_RE.test(stage)) {
+    errors.push(`${prefix} key must match ${ROUTING_STAGE_NAME_RE}`);
+  }
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, errors: [...errors, `${prefix} must be a mapping`] };
+  }
+  const allowed = ["tier", "provider", "model", "agent", "fallback"];
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) {
+      errors.push(`${prefix} has unknown key '${key}'`);
+    }
+  }
+  const tier = raw.tier;
+  if (!ROUTING_TIERS.includes(tier)) {
+    errors.push(`${prefix}.tier must be one of: ${ROUTING_TIERS.join(", ")}`);
+  }
+  const provider = raw.provider ?? defaultProvider;
+  if (!ROUTING_PROVIDERS.includes(provider)) {
+    errors.push(`${prefix}.provider must be one of: ${ROUTING_PROVIDERS.join(", ")}`);
+  }
+  const fallback = raw.fallback ?? defaultFallback;
+  if (!ROUTING_FALLBACKS.includes(fallback)) {
+    errors.push(`${prefix}.fallback must be one of: ${ROUTING_FALLBACKS.join(", ")}`);
+  }
+  const agent = raw.agent ?? (tier === "high" ? "parent" : "subagent");
+  if (!ROUTING_AGENTS.includes(agent)) {
+    errors.push(`${prefix}.agent must be one of: ${ROUTING_AGENTS.join(", ")}`);
+  }
+  const model = raw.model ?? CLAUDE_MODEL_BY_TIER[tier];
+  if (provider === "claude" && typeof model === "string" && !/^claude-(haiku|sonnet|opus)-[0-9]+-[0-9]+$/.test(model)) {
+    errors.push(`${prefix}.model must be a canonical Claude model id like claude-sonnet-4-6`);
+  } else if (typeof model !== "string" || model.trim() === "") {
+    errors.push(`${prefix}.model must be a non-empty string`);
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, value: { tier, provider, model, agent, fallback } };
 }
 
 function normalizeTelemetryConfig(raw) {
@@ -1859,6 +1941,80 @@ export async function getRepoGroundControlContext(repoPath) {
     routing: parseResult.value.routing,
     telemetry: parseResult.value.telemetry,
     errors: [],
+  };
+}
+
+export function resolveWorkflowRouteFromConfig({ routing, stage, tier = null }) {
+  if (typeof stage !== "string" || stage.trim() === "") {
+    return { ok: false, error: "routing_stage_invalid", message: "stage must be a non-empty string" };
+  }
+  const normalizedStage = stage.trim();
+  if (!ROUTING_STAGE_NAME_RE.test(normalizedStage)) {
+    return {
+      ok: false,
+      error: "routing_stage_invalid",
+      message: `stage must match ${ROUTING_STAGE_NAME_RE}`,
+      stage: normalizedStage,
+    };
+  }
+  if (routing == null || routing.enabled !== true) {
+    return {
+      ok: true,
+      enabled: false,
+      stage: normalizedStage,
+      outcome: "disabled",
+      message: "routing.enabled is false (or absent) in .ground-control.yaml",
+    };
+  }
+  const configured = routing.stages?.[normalizedStage];
+  const defaultStage = DEFAULT_IMPLEMENT_ROUTING_STAGES[normalizedStage];
+  const resolvedTier = configured?.tier ?? tier ?? defaultStage?.tier ?? null;
+  if (!ROUTING_TIERS.includes(resolvedTier)) {
+    return {
+      ok: false,
+      error: "routing_stage_unconfigured",
+      message: `No route is configured for stage '${normalizedStage}' and no valid tier was supplied`,
+      stage: normalizedStage,
+    };
+  }
+  const provider = configured?.provider ?? routing.default_provider ?? "claude";
+  const fallback = configured?.fallback ?? defaultStage?.fallback ?? routing.default_fallback ?? "parent";
+  const agent = configured?.agent ?? defaultStage?.agent ?? (resolvedTier === "high" ? "parent" : "subagent");
+  const model = configured?.model ?? CLAUDE_MODEL_BY_TIER[resolvedTier];
+  return {
+    ok: true,
+    enabled: true,
+    stage: normalizedStage,
+    tier: resolvedTier,
+    provider,
+    agent,
+    model,
+    fallback,
+    source: configured ? "config" : (defaultStage ? "default" : "tier"),
+  };
+}
+
+export async function runResolveWorkflowRoute({ repoPath, stage, tier = null }) {
+  let context;
+  try {
+    context = await getRepoGroundControlContext(repoPath);
+  } catch (error) {
+    return { ok: false, error: "routing_context_error", message: error.message };
+  }
+  if (context.status !== "ok") {
+    return {
+      ok: false,
+      error: "routing_context_invalid",
+      message: (context.errors || []).join("; ") || context.status,
+      status: context.status,
+    };
+  }
+  const route = resolveWorkflowRouteFromConfig({ routing: context.routing, stage, tier });
+  return {
+    ...route,
+    repo_path: context.repo_path,
+    config_path: context.config_path,
+    project: context.project,
   };
 }
 
@@ -4151,8 +4307,8 @@ export const TEST_QUALITY_REVIEW_FINDINGS_SCHEMA = {
 };
 
 // Default model for the test-quality review engine. Per user direction
-// (#884 follow-up): Sonnet 4.6 is the right balance — strong enough to
-// catch false-assurance tests, cheap enough to run on every PR.
+// (#884 follow-up): claude-sonnet-4-6 is the right balance — strong enough
+// to catch false-assurance tests, cheap enough to run on every PR.
 export const TEST_QUALITY_REVIEW_DEFAULT_MODEL = "claude-sonnet-4-6";
 
 // Hard timeout for a single review call. Claude with file-reading tools
@@ -8254,6 +8410,38 @@ export async function runRenderPrBody(input) {
 export const TELEMETRY_SCHEMA_VERSION = "gc.implement.telemetry/v1";
 export const TELEMETRY_TIERS = Object.freeze(["low", "medium", "high"]);
 export const TELEMETRY_OUTCOMES = Object.freeze(["ok", "error", "skipped"]);
+export const ROUTING_TIERS = TELEMETRY_TIERS;
+export const ROUTING_PROVIDERS = Object.freeze(["claude"]);
+export const ROUTING_AGENTS = Object.freeze(["parent", "subagent", "cli"]);
+export const ROUTING_FALLBACKS = Object.freeze(["parent", "error", "skip"]);
+export const ROUTING_STAGE_NAME_RE = /^[a-z][a-z0-9_-]*$/;
+export const CLAUDE_MODEL_BY_TIER = Object.freeze({
+  low: "claude-haiku-4-5",
+  medium: "claude-sonnet-4-6",
+  high: "claude-opus-4-7",
+});
+export const DEFAULT_IMPLEMENT_ROUTING_STAGES = Object.freeze({
+  issue_branch_resolution: { tier: "low" },
+  read_issue_context: { tier: "low" },
+  architecture_preflight: { tier: "low" },
+  codebase_assessment: { tier: "medium" },
+  planning: { tier: "high", agent: "parent", fallback: "error" },
+  implementation: { tier: "medium" },
+  clause_mapping: { tier: "medium" },
+  precommit: { tier: "low" },
+  completion_gate: { tier: "low" },
+  review_cycle_1_consume: { tier: "high", agent: "parent", fallback: "error" },
+  review_fix_application: { tier: "medium" },
+  git_publish: { tier: "low" },
+  pr_body: { tier: "low" },
+  ci_monitor: { tier: "low" },
+  sonarcloud: { tier: "low" },
+  test_quality_review: { tier: "medium" },
+  final_ci_verify: { tier: "low" },
+  transition_reconcile: { tier: "medium" },
+  close_issue: { tier: "low" },
+  final_report: { tier: "low" },
+});
 const TELEMETRY_SANITIZE_BRANCH_RE = /[^A-Za-z0-9._-]/g;
 const TELEMETRY_BRANCH_MAX_LEN = 60;
 

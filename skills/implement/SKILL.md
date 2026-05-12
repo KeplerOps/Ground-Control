@@ -27,13 +27,13 @@ Per ADR-036, every step below carries a **capability tier** (`low`, `medium`, `h
 - `medium` — bounded reading + applying a designed decision; structured drafting; per-iteration TDD; clause mapping.
 - `high` — architectural reasoning, novel-fork interpretation, first-cycle review consume.
 
-**Claude Code mapping** (the canonical concrete map; other drivers maintain their own):
+**Claude mapping** (canonical model ids used by executable config):
 
 | Tier | Claude Code model |
 |------|-------------------|
-| `low` | `haiku-4.5` |
-| `medium` | `sonnet-4.6` |
-| `high` | `opus-4.7` (the parent — no subagent spawn) |
+| `low` | `claude-haiku-4-5` |
+| `medium` | `claude-sonnet-4-6` |
+| `high` | `claude-opus-4-7` (the parent — no subagent spawn) |
 
 **Routing matrix** (per step; the per-step prose below repeats the tier for the routed step):
 
@@ -60,7 +60,15 @@ Per ADR-036, every step below carries a **capability tier** (`low`, `medium`, `h
 | 18 — close issue | `low` | one gh call |
 | 19 — final report (tool-rendered) | `low` | tool does the rendering |
 
-**Mechanism** (Claude Code): for any routed step whose tier is `low` or `medium`, the parent agent spawns an `Agent` subagent with the corresponding model and delegates the step's actual work to it. Subagent returns a structured result; parent integrates and proceeds. `high`-tier steps stay on the parent. The decision-record / final-report / PR-body comments are no longer agent free-prose — they are produced by deterministic MCP tools (`gc_post_decision_record`, `gc_post_final_report`, `gc_render_pr_body`), so the routed-step prose is reduced to "collect structured input + call the tool".
+**Resolver stage names** are stable config keys rather than prose labels:
+`issue_branch_resolution`, `read_issue_context`, `architecture_preflight`,
+`codebase_assessment`, `planning`, `implementation`, `clause_mapping`,
+`precommit`, `completion_gate`, `review_cycle_1_consume`,
+`review_fix_application`, `git_publish`, `pr_body`, `ci_monitor`,
+`sonarcloud`, `test_quality_review`, `final_ci_verify`,
+`transition_reconcile`, `close_issue`, and `final_report`.
+
+**Mechanism** (Claude Code): before any routed step, resolve the stage/purpose through `gc_resolve_workflow_route` using the stage names above. The resolver reads `.ground-control.yaml` and returns the concrete provider, agent, model, tier, and fallback policy. For routes whose agent is `subagent`, the parent spawns an `Agent` subagent with the returned model and delegates the step's actual work to it. For routes whose agent is `parent`, the parent runs the step and records that route. If the resolver returns disabled or unavailable, follow the returned fallback policy; do not silently claim routing happened. The decision-record / final-report / PR-body comments are no longer agent free-prose — they are produced by deterministic MCP tools (`gc_post_decision_record`, `gc_post_final_report`, `gc_render_pr_body`), so the routed-step prose is reduced to "collect structured input + call the tool".
 
 **Mechanism** (Codex and other drivers): no equivalent of `Agent`-with-model today. Codex drivers ignore the tier annotation and run every step on the session model. The architecture is forward-compatible — a future Codex-side router consumes the same step-id + tier contract without changing this SKILL.
 

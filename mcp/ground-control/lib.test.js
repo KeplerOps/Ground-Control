@@ -35,6 +35,10 @@ import {
   buildSuggestedGroundControlYaml,
   parseGroundControlYaml,
   getRepoGroundControlContext,
+  resolveWorkflowRouteFromConfig,
+  runResolveWorkflowRoute,
+  CLAUDE_MODEL_BY_TIER,
+  DEFAULT_IMPLEMENT_ROUTING_STAGES,
   buildCodexArchitecturePreflightPrompt,
   buildCodexArchitectureExecArgs,
   buildCodexReviewCorePrompt,
@@ -6827,7 +6831,12 @@ describe("parseGroundControlYaml routing/telemetry knobs", () => {
   it("defaults routing.enabled and telemetry.enabled to false when omitted", () => {
     const r = parseGroundControlYaml("schema_version: 1\nproject: gc\n");
     assert.equal(r.ok, true);
-    assert.deepEqual(r.value.routing, { enabled: false });
+    assert.deepEqual(r.value.routing, {
+      enabled: false,
+      default_provider: "claude",
+      default_fallback: "parent",
+      stages: {},
+    });
     assert.deepEqual(r.value.telemetry, { enabled: false });
   });
 
@@ -6843,7 +6852,35 @@ describe("parseGroundControlYaml routing/telemetry knobs", () => {
     ].join("\n"));
     assert.equal(r.ok, true);
     assert.equal(r.value.routing.enabled, true);
+    assert.equal(r.value.routing.default_provider, "claude");
+    assert.equal(r.value.routing.default_fallback, "parent");
+    assert.deepEqual(r.value.routing.stages, {});
     assert.equal(r.value.telemetry.enabled, true);
+  });
+
+  it("accepts stage routing with canonical Claude model ids", () => {
+    const r = parseGroundControlYaml([
+      "schema_version: 1",
+      "project: gc",
+      "routing:",
+      "  enabled: true",
+      "  default_fallback: error",
+      "  stages:",
+      "    implementation:",
+      "      tier: medium",
+      "      model: claude-sonnet-4-6",
+      "      agent: cli",
+      "      fallback: parent",
+      "",
+    ].join("\n"));
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.value.routing.stages.implementation, {
+      tier: "medium",
+      provider: "claude",
+      model: "claude-sonnet-4-6",
+      agent: "cli",
+      fallback: "parent",
+    });
   });
 
   it("rejects unknown subkeys under routing/telemetry", () => {
@@ -6880,6 +6917,133 @@ describe("parseGroundControlYaml routing/telemetry knobs", () => {
     ].join("\n"));
     assert.equal(r.ok, false);
     assert.ok(r.errors.some((e) => /routing\.enabled must be a boolean/.test(e)));
+  });
+
+  it("rejects non-canonical Claude model aliases in executable routing config", () => {
+    const r = parseGroundControlYaml([
+      "schema_version: 1",
+      "project: gc",
+      "routing:",
+      "  enabled: true",
+      "  stages:",
+      "    implementation:",
+      "      tier: medium",
+      "      model: sonnet-4.6",
+      "",
+    ].join("\n"));
+    assert.equal(r.ok, false);
+    assert.ok(r.errors.some((e) => /canonical Claude model id/.test(e)));
+  });
+
+  it("rejects malformed stage names and route fields", () => {
+    const r = parseGroundControlYaml([
+      "schema_version: 1",
+      "project: gc",
+      "routing:",
+      "  enabled: true",
+      "  default_provider: anthropic",
+      "  stages:",
+      "    Implementation:",
+      "      tier: fast",
+      "      agent: worker",
+      "      fallback: silent",
+      "",
+    ].join("\n"));
+    assert.equal(r.ok, false);
+    assert.ok(r.errors.some((e) => /routing\.default_provider/.test(e)));
+    assert.ok(r.errors.some((e) => /routing\.stages\.Implementation key/.test(e)));
+    assert.ok(r.errors.some((e) => /routing\.stages\.Implementation\.tier/.test(e)));
+    assert.ok(r.errors.some((e) => /routing\.stages\.Implementation\.agent/.test(e)));
+    assert.ok(r.errors.some((e) => /routing\.stages\.Implementation\.fallback/.test(e)));
+  });
+});
+
+describe("resolveWorkflowRouteFromConfig", () => {
+  it("reports disabled routing without inventing a model", () => {
+    const r = resolveWorkflowRouteFromConfig({
+      routing: { enabled: false, default_provider: "claude", default_fallback: "parent", stages: {} },
+      stage: "implementation",
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.enabled, false);
+    assert.equal(r.outcome, "disabled");
+  });
+
+  it("resolves default implement stages to canonical Claude model ids", () => {
+    const routing = { enabled: true, default_provider: "claude", default_fallback: "parent", stages: {} };
+    const r = resolveWorkflowRouteFromConfig({ routing, stage: "implementation" });
+    assert.equal(r.ok, true);
+    assert.equal(r.enabled, true);
+    assert.equal(r.source, "default");
+    assert.equal(r.tier, DEFAULT_IMPLEMENT_ROUTING_STAGES.implementation.tier);
+    assert.equal(r.model, CLAUDE_MODEL_BY_TIER.medium);
+    assert.equal(r.agent, "subagent");
+  });
+
+  it("lets config override a default stage route", () => {
+    const routing = {
+      enabled: true,
+      default_provider: "claude",
+      default_fallback: "parent",
+      stages: {
+        implementation: {
+          tier: "low",
+          provider: "claude",
+          model: "claude-haiku-4-5",
+          agent: "cli",
+          fallback: "error",
+        },
+      },
+    };
+    const r = resolveWorkflowRouteFromConfig({ routing, stage: "implementation" });
+    assert.equal(r.ok, true);
+    assert.equal(r.source, "config");
+    assert.equal(r.tier, "low");
+    assert.equal(r.model, "claude-haiku-4-5");
+    assert.equal(r.agent, "cli");
+    assert.equal(r.fallback, "error");
+  });
+
+  it("returns a structured unavailable response for unknown stages without a tier", () => {
+    const routing = { enabled: true, default_provider: "claude", default_fallback: "parent", stages: {} };
+    const r = resolveWorkflowRouteFromConfig({ routing, stage: "novel_stage" });
+    assert.equal(r.ok, false);
+    assert.equal(r.error, "routing_stage_unconfigured");
+  });
+
+  it("can resolve an ad hoc stage when the caller supplies a tier", () => {
+    const routing = { enabled: true, default_provider: "claude", default_fallback: "parent", stages: {} };
+    const r = resolveWorkflowRouteFromConfig({ routing, stage: "one_off_review", tier: "medium" });
+    assert.equal(r.ok, true);
+    assert.equal(r.source, "tier");
+    assert.equal(r.model, "claude-sonnet-4-6");
+  });
+});
+
+describe("runResolveWorkflowRoute", () => {
+  it("reads .ground-control.yaml and resolves configured stage routing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gc-routing-test-"));
+    try {
+      execFileSync("git", ["init"], { cwd: dir, stdio: "ignore" });
+      writeFileSync(join(dir, ".ground-control.yaml"), [
+        "schema_version: 1",
+        "project: gc",
+        "routing:",
+        "  enabled: true",
+        "  stages:",
+        "    implementation:",
+        "      tier: medium",
+        "      model: claude-sonnet-4-6",
+        "",
+      ].join("\n"));
+      const r = await runResolveWorkflowRoute({ repoPath: dir, stage: "implementation" });
+      assert.equal(r.ok, true);
+      assert.equal(r.enabled, true);
+      assert.equal(r.model, "claude-sonnet-4-6");
+      assert.equal(r.source, "config");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

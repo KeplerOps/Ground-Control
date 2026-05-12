@@ -46,8 +46,85 @@ Repo-local Ground Control project context comes from a `.ground-control.yaml` fi
 Recommended `.ground-control.yaml` convention:
 
 ```yaml
+schema_version: 1
 project: aces-sdl
+github_repo: owner/repo
+
+workflow:
+  test_command: make test
+  completion_command: make check
+  lint_command: make lint
+  format_command: make format
+  base_branch: dev
+
+sonarcloud:
+  project_key: Owner_Project
+  organization: owner
+
+rules:
+  plan_rules: .gc/plan-rules.md
+
+knowledge:
+  dir: docs/knowledge
+  schema: docs/knowledge/SCHEMA.md
+  inbox: docs/knowledge/inbox
+
+docs:
+  adr_dir: architecture/adrs/
+  architecture_overview: docs/architecture/ARCHITECTURE.md
+  coding_standards: docs/CODING_STANDARDS.md
+  workflow_reference: docs/DEVELOPMENT_WORKFLOW.md
+  knowledge_base: docs/knowledge/
+
+example_paths:
+  source: src/
+  test: tests/
+
+requirements:
+  uid_examples:
+    - GC-X001
+    - OBS-042
+
+cross_cutting_concerns:
+  description: |
+    Logger: <project logging convention>
+    Validation: <schema / validation convention>
+    Errors: <error envelope / handler>
+    Tests: <fixture and test-slice patterns>
+
+routing:
+  enabled: false
+  default_provider: claude
+  default_fallback: parent
+  stages:
+    implementation:
+      tier: medium
+      provider: claude
+      model: claude-sonnet-4-6
+      agent: subagent
+      fallback: parent
+
+telemetry:
+  enabled: false
 ```
+
+Config contract:
+
+- `schema_version` is required and currently must be `1`.
+- `project` is required and must be a lowercase identifier using letters, numbers, and hyphens.
+- Unknown top-level keys are rejected. Current top-level keys are `schema_version`, `project`, `github_repo`, `workflow`, `sonarcloud`, `rules`, `knowledge`, `docs`, `example_paths`, `requirements`, `cross_cutting_concerns`, `routing`, and `telemetry`.
+- `workflow.*` values are optional non-empty strings. `workflow.base_branch` must be a safe Git ref name using `[A-Za-z0-9._/-]`.
+- `sonarcloud` is optional, but when present it must include non-empty `project_key` and `organization`.
+- `rules.plan_rules` is optional and points to the repo-relative plan-rules file whose content is inlined into `gc_get_repo_ground_control_context`.
+- `knowledge.dir` is required when `knowledge` is present. `knowledge.schema` and `knowledge.inbox` are optional overrides; by default they resolve under `knowledge.dir`.
+- `docs.*` and `example_paths.*` are optional repo-relative paths. Docs paths are containment-checked so a config file cannot point an agent outside the repository.
+- `requirements.uid_examples` is optional and must be a list of non-empty strings.
+- `cross_cutting_concerns.description` is optional free text shown to agents during planning.
+- `routing.enabled` defaults to `false`. When enabled, omitted `/implement` stages use built-in defaults; `routing.stages.<stage>` overrides a specific stage/purpose route.
+- Routing stages use lowercase stage keys matching `[a-z][a-z0-9_-]*`. Route fields are `tier`, `provider`, `model`, `agent`, and `fallback`.
+- Routing `tier` is one of `low`, `medium`, or `high`; `provider` currently supports `claude`; `agent` is one of `parent`, `subagent`, or `cli`; `fallback` is one of `parent`, `error`, or `skip`.
+- Claude model values in executable routing config must be canonical CLI ids such as `claude-haiku-4-5`, `claude-sonnet-4-6`, or `claude-opus-4-7`; display aliases like `sonnet-4.6` are rejected.
+- `telemetry.enabled` defaults to `false`. `gc_log_step_telemetry` refuses to write telemetry unless this is explicitly true.
 
 `AGENTS.md` should still carry a brief `Ground Control Context` section that points agents at `.ground-control.yaml` and `.gc/`, so repo newcomers know where the workflow config lives.
 
@@ -162,7 +239,7 @@ Per ADR-036 the `/implement` skill carries three cost-side optimizations layered
 
 | Optimization | What it changes | Opt-in knob |
 |--------------|-----------------|-------------|
-| Per-step routing | Each step carries a provider-neutral tier (`low`, `medium`, `high`); routed steps spawn an `Agent` subagent at the corresponding concrete model (Claude Code: `haiku-4.5` / `sonnet-4.6` / parent-tier `opus-4.7`). Codex drivers ignore the tier today. | `.ground-control.yaml` → `routing.enabled` (default `false`) |
+| Per-step routing | Each step carries a provider-neutral tier (`low`, `medium`, `high`); `gc_resolve_workflow_route` resolves the stage/purpose from `.ground-control.yaml` to a concrete provider, agent, canonical model id, and fallback policy. Claude Code routes subagent stages to canonical model ids such as `claude-haiku-4-5` and `claude-sonnet-4-6`; parent-only high-tier stages use `claude-opus-4-7`. Codex drivers ignore delegation today unless they explicitly call the resolver and external runner. | `.ground-control.yaml` → `routing.enabled` (default `false`) plus optional `routing.stages.<stage>` overrides |
 | Durable-record MCP tools | `gc_post_decision_record` (Step 6.5 cycle decisions), `gc_post_final_report` (Step 19 summary), `gc_render_pr_body` (Step 9 PR body) replace agent free-prose with deterministic structured-input renderers. All three filter sensitive content, post under a structured marker family, and reject `decision: "defer"` server-side. | Always available; SKILL calls them unconditionally once the tools are present |
 | Per-step telemetry | `gc_log_step_telemetry` writes one JSONL line per routed step to `.gc/telemetry/<issue>-<sanitized-branch>.jsonl` (gitignored, repo-relative, containment-validated). Operational measurement only — never workflow state. The tool refuses with `telemetry_disabled` when the opt-in knob is off; the agent prose is not the gate. Summarizer reports wall time + token counts (when present) per step and per model; dollar-cost translation is future work. Target: `make implement-cost-summary`. | `.ground-control.yaml` → `telemetry.enabled` (default `false`) |
 
@@ -179,7 +256,7 @@ One mandatory pre-implementation architecture pass, then a single pre-push codex
 | Trivy (advisory) | Container image vulnerabilities, Dockerfile/IaC misconfigurations, in-image secrets | CI job; SARIF artifact `trivy-sarif` on the workflow run page; non-blocking |
 | OSV-scanner (advisory) | CVEs in Java/Gradle dependencies (read from `backend/gradle.lockfile`) | CI job; SARIF artifact `osv-scanner-sarif` on the workflow run page; non-blocking |
 | Codex review (pre-push, Step 6.5) | Fitness for purpose, architectural soundness, maintainability, extensibility, security, established patterns, consistency with the larger codebase. Codex returns structured findings; the MCP server posts a verbatim findings record to the resolved issue thread from the host side; the coding agent fixes locally and re-runs the review. There is no PR yet at Step 6.5, so no inline PR comments are written by the SKILL — inline anchored comments only happen if a direct caller invokes `gc_codex_review` post-push (with a `pr_number`), which the SKILL no longer drives (issue #804). | `gc_codex_review` (`uncommitted=true`); MCP posts the issue-thread findings record |
-| `gc_test_quality_review` (Step 13) | Assertion-free tests, mock-only assertions, integration-as-unit, tests that can't detect regressions | `gc_test_quality_review` MCP tool (shells out to `claude --print` with Sonnet 4.6 by default; full mechanism in `architecture/notes/test-quality-review-engine.md`) |
+| `gc_test_quality_review` (Step 13) | Assertion-free tests, mock-only assertions, integration-as-unit, tests that can't detect regressions | `gc_test_quality_review` MCP tool (shells out to `claude --print --model claude-sonnet-4-6` by default; full mechanism in `architecture/notes/test-quality-review-engine.md`) |
 
 All preflight/review stages operate under the same rule: **fix everything, defer nothing.** Review-loop cap (per #804): 3 cycles per reviewer; per-finding `gc_codex_verify_finding` cap stays at 2. If a fourth cycle would be needed, the skill escalates to the user with the full finding history.
 
