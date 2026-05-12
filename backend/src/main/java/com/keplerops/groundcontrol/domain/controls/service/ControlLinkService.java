@@ -35,11 +35,9 @@ public class ControlLinkService {
     public ControlLink create(UUID projectId, UUID controlId, CreateControlLinkCommand command) {
         var control = controlService.getById(projectId, controlId);
 
-        // Validate the target before persisting: internal target types require a
-        // project-scoped targetEntityId that resolves to an existing entity;
-        // external target types require a nonblank targetIdentifier. Without
-        // this gate ControlLinkService.create() previously persisted whatever
-        // the caller supplied — including cross-project entity IDs.
+        // Project-scoped target validation closes the cross-project gap the create path
+        // had before PR #875 (a caller could otherwise persist a link to an entity in
+        // another tenant's project). The resolver owns the internal-vs-external dispatch.
         var target = graphTargetResolverService.validateControlTarget(
                 projectId, command.targetType(), command.targetEntityId(), command.targetIdentifier());
 
