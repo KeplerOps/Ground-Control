@@ -197,6 +197,18 @@ explicitly or restructures the change. The parent owns Step 14
 progression; the child `review-tests` skill reports the review outcome
 and returns control without advancing phases.
 
+The whole point of the test-quality review is to **fix** the tests, not
+to file a status report on them. When `review-tests` returns findings,
+the parent `/implement` workflow MUST fix every finding in the same agent
+turn (classify, apply the fix, self-verify, commit/push, post the
+decision record with `fix` / `wontfix` / `not-applicable` dispositions,
+re-invoke) without stopping or echoing the findings back to the user.
+Surfacing findings back to the user as a status report is the failure
+mode that resurfaced after the original #884 fix shipped and is
+explicitly forbidden by the parent's Step 13 contract. The child skill's
+"return control" prose means yield the agent turn back to the parent —
+not stop the workflow.
+
 ### Codex findings issue-thread record
 
 After every successful `gc_codex_review` cycle, the MCP server must post a

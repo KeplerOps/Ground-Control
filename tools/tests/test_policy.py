@@ -1237,18 +1237,28 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
     _CONTRACT_PROSE = (
         "### Step 13: Test Quality Review\n"
         "\n"
+        "The whole point of the review is to fix the tests. When the\n"
+        "skill returns findings, fix them in the same turn — do not stop,\n"
+        "do not echo the findings to the user as if reporting completed\n"
+        "work.\n"
+        "\n"
         "1. Invoke the `review-tests` skill at `skills/review-tests/SKILL.md`.\n"
-        "2. After every cycle, call `gc_post_decision_record` with\n"
-        "   `reviewer: \"test-quality\"` and the full findings list. A clean\n"
-        "   cycle posts `findings: []`, which renders as `0 (clean run)`.\n"
-        "3. Advance to Step 14 only after `gc_post_decision_record` returns\n"
-        "   `ok: true` with a posted comment id/url; on `ok: false`, fix the\n"
-        "   underlying tooling issue and retry the post before entering\n"
-        "   Step 14.\n"
-        "4. A successfully posted clean decision record IS the structured\n"
+        "2. Case A — findings returned. The parent MUST fix the findings\n"
+        "   in the same turn. Do not stop. Apply the named fix, commit\n"
+        "   and push, call `gc_post_decision_record` with\n"
+        "   `reviewer: \"test-quality\"` and the findings list, confirm\n"
+        "   `ok: true`, and re-invoke `review-tests`.\n"
+        "3. Case B — zero findings. Call `gc_post_decision_record` with\n"
+        "   `reviewer: \"test-quality\"` and `findings: []` (renders as\n"
+        "   `0 (clean run)`).\n"
+        "4. Advance to Step 14 only after `gc_post_decision_record`\n"
+        "   returns `ok: true` with a posted comment id/url; on\n"
+        "   `ok: false`, fix the underlying tooling issue and retry the\n"
+        "   post before entering Step 14.\n"
+        "5. A successfully posted clean decision record IS the structured\n"
         "   advance-to-Step-14 signal — proceed to Step 14 in the same\n"
         "   turn, no user acknowledgment turn.\n"
-        "5. Cycle cap: 3 iterations (ADR-029).\n"
+        "6. Cycle cap: 3 iterations (ADR-029).\n"
         "\n"
         "### Step 14: Final CI re-verification\n"
     )
@@ -1349,6 +1359,43 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
         message = "\n".join(v.render() for v in violations)
         self.assertRegex(message, r"(?i)ok\s*:\s*true|success precondition")
 
+    # --- findings-fix-in-same-turn directive -------------------------------
+
+    def test_check_flags_missing_fix_findings_in_same_turn_directive(self):
+        # Contract is otherwise present (records record, reviewer, clean
+        # case, ok:true precondition, continuation) but the Case A
+        # findings-fix-in-same-turn instruction is missing. That is the
+        # exact failure mode the user reported after #884's first fix
+        # shipped: when review-tests returns findings, the parent echoes
+        # them to the user and stops instead of fixing them in the same
+        # turn.
+        no_fix_directive = (
+            "### Step 13: Test Quality Review\n"
+            "\n"
+            "1. Invoke the `review-tests` skill.\n"
+            "2. After every cycle, call `gc_post_decision_record` with\n"
+            "   `reviewer: \"test-quality\"` and the full findings list.\n"
+            "   A clean cycle posts `findings: []`.\n"
+            "3. Advance to Step 14 only after `gc_post_decision_record`\n"
+            "   returns `ok: true`. Proceed to Step 14 in the same turn.\n"
+            "\n"
+            "### Step 14: Next\n"
+        )
+        violations = run_step13_decision_record_contract(text=no_fix_directive)
+        self.assertTrue(violations)
+        message = "\n".join(v.render() for v in violations)
+        self.assertRegex(
+            message,
+            r"(?i)fix[^.]*finding|same\s+turn|do\s+not\s+stop",
+            "violation must name the missing findings-fix-in-same-turn directive",
+        )
+
+    def test_check_passes_when_fix_directive_present(self):
+        # The new _CONTRACT_PROSE includes the directive; baseline must
+        # pass under the strengthened predicate.
+        violations = run_step13_decision_record_contract(text=self._CONTRACT_PROSE)
+        self.assertEqual(violations, [])
+
     # --- anti-contract negation patterns -----------------------------------
 
     # Each case pins one anti-pattern shape. The fixture is the failing
@@ -1410,6 +1457,40 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "\n"
             "### Step 14: Next\n",
         ),
+        # The user-observed failure mode: parent echoes findings back to
+        # the user as a status report and stops, instead of fixing them in
+        # the same turn. The whole point of the review is to fix the tests.
+        # Both fixtures pin the same anti-pattern code (the regex covers
+        # multiple verb shapes); the labels differ so a regression in
+        # one variant names the variant in the failure message.
+        (
+            "echo-them-to-user",  # pronoun case ("echo them to the user")
+            "findings-routed-to-user",
+            "### Step 13: Test Quality Review\n"
+            "\n"
+            "1. Invoke the `review-tests` skill.\n"
+            "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
+            "   and `findings: []` for clean cycles. Fix findings in the\n"
+            "   same turn after `ok: true`. Proceed to Step 14.\n"
+            "3. When findings are returned, echo them to the user as a\n"
+            "   review report and wait for the user's go-ahead.\n"
+            "\n"
+            "### Step 14: Next\n",
+        ),
+        (
+            "return-findings-to-user",  # literal noun case
+            "findings-routed-to-user",
+            "### Step 13: Test Quality Review\n"
+            "\n"
+            "1. Invoke the `review-tests` skill.\n"
+            "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
+            "   and `findings: []`. Fix findings in the same turn. Advance\n"
+            "   to Step 14 after `ok: true`.\n"
+            "3. If findings are returned, return findings to the user and\n"
+            "   stop the workflow for human review.\n"
+            "\n"
+            "### Step 14: Next\n",
+        ),
     )
 
     def test_check_flags_anti_contract_patterns(self):
@@ -1456,6 +1537,7 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
             "   and `findings: []`. Do not skip the decision record on a\n"
             "   clean cycle — the durable marker is the workflow signal.\n"
+            "   Fix findings in the same turn; do not stop.\n"
             "3. Advance to Step 14 after `ok: true`. Proceed to Step 14\n"
             "   in the same turn, no acknowledgment.\n"
             "\n"
@@ -1467,7 +1549,8 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "\n"
             "1. Invoke the `review-tests` skill.\n"
             "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
-            "   and `findings: []`.\n"
+            "   and `findings: []`. Fix findings in the same turn; do not\n"
+            "   stop.\n"
             "3. On `ok: false`, do not advance to Step 14 — fix the\n"
             "   underlying tooling issue and retry the post. Proceed only\n"
             "   after `ok: true`.\n"
@@ -1481,7 +1564,8 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "1. Invoke the `review-tests` skill.\n"
             "2. The agent must never skip the decision-record post on a\n"
             "   clean cycle. Call `gc_post_decision_record` with\n"
-            "   `reviewer: \"test-quality\"` and `findings: []`.\n"
+            "   `reviewer: \"test-quality\"` and `findings: []`. Fix\n"
+            "   findings in the same turn; do not stop.\n"
             "3. Advance to Step 14 after `ok: true`. Proceed to Step 14\n"
             "   in the same turn.\n"
             "\n"

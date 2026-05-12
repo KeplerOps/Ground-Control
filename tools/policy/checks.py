@@ -1311,6 +1311,25 @@ def run_step13_decision_record_contract(
             r"[^.]{0,120}?(?:acknowledg|sign[-\s]?off|approval|confirm)"
             r"[^.]{0,120}?(?:clean|step\s*14)",
         ),
+        (
+            "findings-routed-to-user",
+            # The exact failure mode the user reported after #884 v1
+            # shipped: parent treats returned findings as a status report
+            # to the user instead of work to fix in the same turn.
+            # Patterns: "echo / report / return / hand findings to the
+            # user" (literal) and "echo them to the user" (pronoun).
+            # The verb is paired with a "to/back to/for ... user/human"
+            # phrase to distinguish it from the legitimate
+            # "return control to the parent" prose. The pronouns "them"
+            # / "it" are accepted because the noun "findings" often sits
+            # in the preceding clause ("when findings are returned, echo
+            # them to the user"). The whole point of the review is to
+            # fix the tests; surfacing findings to the user defeats that
+            # contract.
+            r"(?is)\b(?:echo|report|return|hand|surface|present|forward)\b"
+            r"[^.]{0,120}?\b(?:findings|them|it)\b"
+            r"[^.]{0,80}?\b(?:to|back\s+to|for)\s+(?:the\s+)?(?:user|human)\b",
+        ),
     )
     # Negation guard: scan the ~60 chars immediately preceding each match
     # for any of the negator phrases listed above. Cap at 60 because real
@@ -1397,6 +1416,44 @@ def run_step13_decision_record_contract(
             "after `gc_post_decision_record` returns `ok: true`; on `ok: false` "
             "fix the underlying tooling issue and retry — do not enter Step 14 "
             "with the durable marker missing)"
+        )
+    # Findings-fix-in-same-turn directive. The whole point of the
+    # test-quality review is to fix the tests, not to file a status
+    # report on them. After #884 v1 shipped, the regression reappeared
+    # in a different shape: when `review-tests` returns findings, the
+    # parent agent echoes them back to the user and stops, instead of
+    # fixing them in the same agent turn. This required clause pairs an
+    # action verb ("fix" / "address" / "resolve") against `findings`
+    # with a "same turn" / "do not stop" continuity marker so the
+    # contract is unambiguous: findings are work, not a status report.
+    has_fix_same_turn_directive = bool(
+        re.search(
+            r"(?is)\b(?:fix|address|resolve)\b"
+            r"[^.]{0,200}?\bfinding[s]?\b"
+            r"[^.]{0,200}?\b(?:in\s+the\s+same\s+(?:turn|agent\s+turn)"
+            r"|same\s+(?:agent\s+)?turn"
+            r"|do\s+not\s+stop"
+            r"|without\s+stopping)\b",
+            section,
+        )
+    ) or bool(
+        re.search(
+            r"(?is)\b(?:in\s+the\s+same\s+(?:turn|agent\s+turn)"
+            r"|same\s+(?:agent\s+)?turn"
+            r"|do\s+not\s+stop"
+            r"|without\s+stopping)\b"
+            r"[^.]{0,200}?\b(?:fix|address|resolve)\b"
+            r"[^.]{0,200}?\bfinding[s]?\b",
+            section,
+        )
+    )
+    if not has_fix_same_turn_directive:
+        missing.append(
+            "findings-fix-in-same-turn directive (when `review-tests` returns "
+            "findings, the parent MUST fix them in the same agent turn — do "
+            "not stop, do not echo the findings to the user as a status "
+            "report; the whole point of the review is to fix the tests, "
+            "issue #884 follow-up)"
         )
 
     if missing:

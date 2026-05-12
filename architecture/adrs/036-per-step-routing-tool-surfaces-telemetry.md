@@ -120,8 +120,13 @@ after the call returns `ok: true`**; on `ok: false` the parent follows the
 returned `error` / `next_action`, fixes the underlying tooling issue, and
 retries the post rather than entering Step 14 without the durable marker.
 With that success precondition met, the parent never needs an
-acknowledgment turn between Step 13 and Step 14 (issue #884); Step 19
-calls `gc_post_final_report`.
+acknowledgment turn between Step 13 and Step 14 (issue #884). When the
+review returns findings the parent fixes them in the same agent turn
+(Case A action sequence: classify, fix, self-verify, commit/push, post
+decision record with dispositions, re-invoke); echoing the findings back
+to the user as a status report is the failure mode that resurfaced after
+#884 v1 and is explicitly forbidden by Step 13. Step 19 calls
+`gc_post_final_report`.
 
 ### Telemetry contract
 
