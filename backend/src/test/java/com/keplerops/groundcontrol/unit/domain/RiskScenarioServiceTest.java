@@ -171,12 +171,12 @@ class RiskScenarioServiceTest {
         @Test
         void rejectsBlankTitle() {
             var rs = makeScenario();
-            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
-                    .thenReturn(Optional.of(rs));
+            var rsId = rs.getId();
+            when(riskScenarioRepository.findByIdAndProjectId(rsId, projectId)).thenReturn(Optional.of(rs));
 
             var command = new UpdateRiskScenarioCommand("   ", null, null, null, null, null, null);
 
-            assertThatThrownBy(() -> riskScenarioService.update(projectId, rs.getId(), command))
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rsId, command))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("title");
         }
@@ -184,12 +184,12 @@ class RiskScenarioServiceTest {
         @Test
         void rejectsBlankThreatSource() {
             var rs = makeScenario();
-            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
-                    .thenReturn(Optional.of(rs));
+            var rsId = rs.getId();
+            when(riskScenarioRepository.findByIdAndProjectId(rsId, projectId)).thenReturn(Optional.of(rs));
 
             var command = new UpdateRiskScenarioCommand(null, "", null, null, null, null, null);
 
-            assertThatThrownBy(() -> riskScenarioService.update(projectId, rs.getId(), command))
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rsId, command))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("threatSource");
         }
@@ -197,12 +197,12 @@ class RiskScenarioServiceTest {
         @Test
         void rejectsBlankThreatEvent() {
             var rs = makeScenario();
-            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
-                    .thenReturn(Optional.of(rs));
+            var rsId = rs.getId();
+            when(riskScenarioRepository.findByIdAndProjectId(rsId, projectId)).thenReturn(Optional.of(rs));
 
             var command = new UpdateRiskScenarioCommand(null, null, " ", null, null, null, null);
 
-            assertThatThrownBy(() -> riskScenarioService.update(projectId, rs.getId(), command))
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rsId, command))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("threatEvent");
         }
@@ -210,12 +210,12 @@ class RiskScenarioServiceTest {
         @Test
         void rejectsBlankAffectedObject() {
             var rs = makeScenario();
-            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
-                    .thenReturn(Optional.of(rs));
+            var rsId = rs.getId();
+            when(riskScenarioRepository.findByIdAndProjectId(rsId, projectId)).thenReturn(Optional.of(rs));
 
             var command = new UpdateRiskScenarioCommand(null, null, null, "", null, null, null);
 
-            assertThatThrownBy(() -> riskScenarioService.update(projectId, rs.getId(), command))
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rsId, command))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("affectedObject");
         }
@@ -223,12 +223,12 @@ class RiskScenarioServiceTest {
         @Test
         void rejectsBlankConsequence() {
             var rs = makeScenario();
-            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
-                    .thenReturn(Optional.of(rs));
+            var rsId = rs.getId();
+            when(riskScenarioRepository.findByIdAndProjectId(rsId, projectId)).thenReturn(Optional.of(rs));
 
             var command = new UpdateRiskScenarioCommand(null, null, null, null, null, "", null);
 
-            assertThatThrownBy(() -> riskScenarioService.update(projectId, rs.getId(), command))
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rsId, command))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("consequence");
         }
@@ -236,12 +236,12 @@ class RiskScenarioServiceTest {
         @Test
         void rejectsBlankTimeHorizon() {
             var rs = makeScenario();
-            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
-                    .thenReturn(Optional.of(rs));
+            var rsId = rs.getId();
+            when(riskScenarioRepository.findByIdAndProjectId(rsId, projectId)).thenReturn(Optional.of(rs));
 
             var command = new UpdateRiskScenarioCommand(null, null, null, null, null, null, "   ");
 
-            assertThatThrownBy(() -> riskScenarioService.update(projectId, rs.getId(), command))
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rsId, command))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("timeHorizon");
         }
