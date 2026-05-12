@@ -509,7 +509,7 @@ Codex review now runs as a single pre-push pass at Step 6.5; the remaining revie
 4. **Fix every finding, pre-existing or not.** The zero-deferral rule applies: there is no `defer` decision — not "out of scope for this PR", not "follow-up issue to track it", not "addressed in a subsequent PR", not "deferred to a later iteration", not "TBD later" in a closing comment. Filing a tracking issue does **not** convert a deferral into a valid disposition. The PreToolUse hook (`.claude/hooks/block-defer-language.py`) and `bin/policy` enforce this mechanically; the contract is fix-or-escalate. If you think a finding is dangerous to fix, unwise in context, or a false positive, STOP, post your reasoning as an issue comment with `decision: <fix|wontfix|not-applicable>` and rationale, and ask the user. Wait for their answer; do not push commits while the question is open. `wontfix` requires explicit user approval; `not-applicable` is for findings that don't actually apply (false positive on this codebase, finding outside the diff's scope, etc.).
 5. **Record decisions on the issue thread.** Per ADR-029 + ADR-036, after every cycle the agent calls **`gc_post_decision_record`** with the cycle number, reviewer, and the full `findings[]` list. Each finding entry carries: `id`, `title`, `classification` (`one-off` or `class`), `decision` (`fix` / `wontfix` / `not-applicable`), `rationale`, optional `location` / `comment_url` / `instances` (required when classification is `class`), and **`user_authorization`** — required when `decision: "wontfix"`. The `user_authorization` value is either a URL to the user's authorizing comment on the issue thread OR a verbatim quote with the issue/comment id; the runner refuses a wontfix without it (`decision_record_input_invalid` envelope). The tool renders the canonical decision-record Markdown, filters sensitive content, posts to the issue thread under a `gc:decision-record` marker, and rejects `decision: "defer"` server-side. Do NOT `gh issue comment` decision records directly — the tool is now the only canonical surface. A `class` finding's `rationale` says how the category was closed, not just that the named site was patched. Agent silence on a finding is a process violation; text scanning catches *written* deferral language, but the issue-thread findings-vs-decisions reconciliation is what catches *silent* omission.
 6. **Self-verify the fix locally before re-invoking the review.** Re-run the relevant test suite, the completion gate (`cfg.workflow.completion_command`), and `make policy` after every fix. Local verification proves the fix does the agent's intended thing — but the reviewer's re-read is what catches what the agent didn't intend, including defects in the fix code itself.
-7. **Re-invoke the SAME review after fixing.** The loop continues until the reviewer reports zero findings, OR the hard cap (3 cycles per issue, per ADR-029) refuses the next invocation. The reason multiple cycles exist is bounded review depth — each pass surfaces one or two classes of defect that the prior pass couldn't reach. Cycles are NOT for "fix verification" (that's the agent's own loop); they are for finding new classes of defect in the *current* state of the diff. A cycle that surfaces zero findings is the completion signal; a cap-refused cycle 4 is the escalation signal.
+7. **Re-invoke the SAME review after fixing.** The loop continues until the reviewer reports zero findings AND the cycle's `gc_post_decision_record` returns `ok: true`, OR the hard cap (3 cycles per issue, per ADR-029) refuses the next invocation. The reason multiple cycles exist is bounded review depth — each pass surfaces one or two classes of defect that the prior pass couldn't reach. Cycles are NOT for "fix verification" (that's the agent's own loop); they are for finding new classes of defect in the *current* state of the diff. The completion signal is **a cycle that surfaces zero findings whose decision-record post returns `ok: true`** — raw zero-findings prose alone is not the signal (issue #884). A cap-refused cycle 4 is the escalation signal.
 
 For every cycle, after applying fixes the agent must update the tree the reviewer sees BEFORE re-running:
 
@@ -529,13 +529,55 @@ Format every fix commit (Step 13 only) as `Fix review findings (<reviewer>, cycl
 
 ### Step 13: Test Quality Review
 
-1. Invoke the `review-tests` skill at `skills/review-tests/SKILL.md`. Claude Code drivers call it via the `Skill` tool with `skill="review-tests"`. Codex drivers invoke it via `~/.codex/prompts/review-tests.md` (installed by `bin/install-skills.sh`). The same canonical content drives both — no driver-specific divergence.
-2. Apply the **Review loop rules**: fix every finding, pre-existing or not, including "warning" level. Re-invoke after each fix cycle.
-3. **Cycle cap: 5 iterations.** After the fifth, escalate to the user.
+Call the `gc_test_quality_review` MCP tool with `repo_path`, `issue_number`, and `base_branch: "{cfg.workflow.base_branch|default dev}"`. The tool runs the review (shells out to `claude` CLI with the canonical rubric, parses structured JSON output, posts the durable findings record + cycle marker to the issue thread), then returns an envelope of the same shape `gc_codex_review` returns. The agent reads the envelope's `next_action` field as a directive — it is not free-prose findings to summarize.
+
+**This step replaces the prior `Skill("review-tests")` invocation (per issue #884 v2).** The Skill-tool boundary returned prose-formatted findings that the autoregressive parent agent kept echoing back to the user instead of fixing in-turn. The MCP tool returns a structured envelope; the `next_action` field is a directive, not a status report. See ADR-029 § "Test-quality review uses the same decision-record contract" and the architecture note at `architecture/notes/test-quality-clean-continuation-preflight.md`.
+
+The tool envelope is:
+```
+{
+  ok: true,
+  cycle: <N>, cap: 3,
+  finding_count: <int>, findings: [<each finding: severity, location, problem, why_it_matters, fix>],
+  next_action: "fix_findings_and_reinvoke"
+            | "post_clean_decision_record_and_advance_to_step_14"
+            | "fix_findings_then_summarize_and_escalate"   // last in-cap cycle
+            | "post_summary_and_escalate_to_user"          // cap-refused cycle 4
+  findings_comment_url: "<URL>",
+  changed_test_files: [...],
+  override?: bool, override_reason?: str
+}
+```
+
+**Dispatch on `next_action`. Both branches stay in the same agent turn.**
+
+**`fix_findings_and_reinvoke` (findings present, within cap)** — fix every finding in the same agent turn. Do not stop. Do not echo findings to the user. The findings are work, not a status report.
+1. Classify each finding (`one-off` or `class`). For a `class` finding, design one structural fix and apply to every instance per the Review loop rules above.
+2. Apply the fix to the diff.
+3. Self-verify locally: `cfg.workflow.completion_command`, `make policy`, the relevant test suite.
+4. Stage, commit (`Fix review findings (test-quality, cycle <N>)`), and push.
+5. Call `gc_post_decision_record` with `cycle: <N>`, `reviewer: "test-quality"`, `findings: [<each finding with fix / wontfix / not-applicable disposition>]`. Confirm the post returned `ok: true`.
+6. Re-invoke `gc_test_quality_review` (cycle `<N+1>`).
+
+Splitting any of those into a separate user turn re-opens the #884 silent-handoff failure mode in a different shape.
+
+**`post_clean_decision_record_and_advance_to_step_14` (zero findings)**:
+1. Call `gc_post_decision_record` with `cycle: <N>`, `reviewer: "test-quality"`, `findings: []`. Confirm `ok: true`. On `ok: false`, do NOT enter Step 14: follow the returned `error` / `next_action` envelope, fix the underlying tooling issue, and retry.
+2. Proceed to Step 14 in the same agent turn — no user acknowledgment turn between Step 13 and Step 14.
+
+**`fix_findings_then_summarize_and_escalate` (last in-cap cycle, findings present)** — same as `fix_findings_and_reinvoke` for steps 1–5, but instead of re-invoking, post an issue-thread summary of remaining concerns and escalate to the user. Past cycle 3 the user authorizes a further cycle via `override_cap=true` + `override_reason="<authorization quote>"`, or restructures the change.
+
+**`post_summary_and_escalate_to_user` (cap refused)** — the tool refused because cycle 4 was attempted without authorization. Post a summary of findings + fix history to the issue thread and ask the user.
+
+**Cycle cap: 3 iterations per issue, server-side.** Unlike the pre-#884-v2 implementation, this cap is enforced by `gc_test_quality_review` itself (counts `gc:test-quality-review-cycle` markers on the issue thread, refuses cycle 4 unless `override_cap=true` with a non-empty `override_reason`). The marker family is disjoint from the codex pre-push markers; the two counters never cross-count.
+
+**Authentication.** The MCP tool's exec wrapper strips `ANTHROPIC_API_KEY` from the subprocess env so `claude --print` uses the host's OAuth session (the env-var path may have a separate / empty billing balance; OAuth is the canonical user-driven auth). The host must be logged in to claude. See `docs/DEVELOPMENT_WORKFLOW.md` § "Test-quality review engine" for the full mechanism, model selection, and configuration knobs.
 
 ### Step 14: Final CI re-verification
 
-After Step 13 (test quality review) has reported zero findings (or you have user-approved exceptions documented as decision comments on the issue):
+Step 14 begins only after Step 13's most recent cycle has both (a) reported zero findings (or carries user-approved exceptions documented as decision comments) AND (b) successfully posted its `gc_post_decision_record(reviewer: "test-quality", findings: [...])` with `ok: true`. The successful decision-record post is the durable advance signal — without it, the workflow is still in Step 13's responsibility and must not enter Step 14 (issue #884).
+
+With that precondition satisfied:
 
 1. Verify the branch is pushed with the latest fix commits.
 2. Re-run Step 10 (CI Monitor) to confirm CI is still green.

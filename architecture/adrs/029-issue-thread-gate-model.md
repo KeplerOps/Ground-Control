@@ -159,6 +159,71 @@ actually differs. Do not make branch name, PR number, or commit lineage part of
 the pre-push cap key; those are audit context or post-push direct-caller
 defense-in-depth context, not reset levers for the canonical Step 6.5 cap.
 
+### Test-quality review uses the same decision-record contract
+
+Step 13 (test-quality review via the `gc_test_quality_review` MCP tool)
+records every cycle on the issue thread using the same
+`gc_post_decision_record` surface as Step 6.5's codex review, with
+`reviewer: "test-quality"` and the findings list.
+
+The reviewer was originally a Skill (`review-tests`) but issue #884 v2
+moved it to an MCP tool to fix a behavioral regression: the Skill-tool
+boundary produced prose-formatted findings, and the autoregressive
+parent agent kept echoing them back to the user as a status report
+instead of fixing them in the same turn. The SKILL.md "do not echo,
+fix in same turn" prose could not override the tool-boundary bias.
+The `gc_test_quality_review` MCP tool returns a structured envelope
+with a `next_action` field — the parent reads it as a directive, not
+as text to summarize. See
+`architecture/notes/test-quality-review-engine.md` for the full
+mechanism (claude CLI exec wrapper, OAuth vs `ANTHROPIC_API_KEY`
+auth, cycle cap markers, findings record, failure modes). A clean cycle posts `findings: []`, which renders as
+`**Findings:** 0 (clean run)`. The successfully posted record is the
+structured durable signal that the cycle is complete and the workflow
+advances — and "successfully posted" is dispositive: the parent advances
+into Step 14 only after `gc_post_decision_record` returns `ok: true` with
+a posted comment id/url. On `ok: false`, the parent follows the returned
+`error` / `next_action` envelope (sensitive-content rejection, body-size
+cap, `gh` posting failure, network), fixes the underlying issue, and
+retries the post — it does NOT enter Step 14 with the durable marker
+missing. Treating the attempted call as the signal would re-open the
+#884 silent-advance failure mode in a different shape. There is no
+separate marker family for test-quality cycles, and there is no human
+acknowledgment turn between Step 13 and Step 14: the parent `/implement`
+workflow consumes the successful clean record and proceeds in the same
+turn. Issue #884 was the original regression — when the SKILL prose
+treated the `review-tests` skill's human-readable "no issues found" line
+as the only signal, the parent agent stopped at the skill-return boundary
+instead of advancing. The skill's prose line remains for transcript
+readability; the decision-record marker on the issue thread is the
+workflow contract.
+
+The cycle cap for test-quality is 3 per issue, aligned with the codex
+review cap. Per #884 v2 the cap is **server-side**: the MCP tool
+`gc_test_quality_review` counts `gc:test-quality-review-cycle` markers
+on the issue thread and refuses cycle 4 unless `override_cap=true` with
+a non-empty `override_reason`. The marker family is disjoint from
+`gc:codex-prepush-cycle` and `gc:decision-record`; the three counters
+never cross-count. Branch is recorded for audit context only — a
+branch rename on the same issue does NOT reset the counter.
+
+The whole point of the test-quality review is to **fix** the tests, not
+to file a status report on them. The MCP tool returns a structured
+envelope with `findings[]` and `next_action`; the parent /implement
+agent reads `next_action` as a directive. On
+`next_action: "fix_findings_and_reinvoke"` the parent fixes every
+finding in the same agent turn (classify, apply the fix, self-verify,
+commit/push, post the decision record with `fix` / `wontfix` /
+`not-applicable` dispositions, re-invoke). On
+`next_action: "post_clean_decision_record_and_advance_to_step_14"` the
+parent posts the clean `gc_post_decision_record(findings: [])`,
+confirms `ok: true`, and proceeds to Step 14 in the same turn. The
+parent does NOT echo findings back to the user — the v1 prose-only
+attempt to forbid that behavior failed because the Skill-tool
+boundary's autoregressive bias overrode the SKILL.md rule; the v2 MCP
+tool boundary closes that bias by returning structured `next_action`
+rather than prose findings.
+
 ### Codex findings issue-thread record
 
 After every successful `gc_codex_review` cycle, the MCP server must post a

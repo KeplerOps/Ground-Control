@@ -73,7 +73,7 @@ flowchart TB
   S10[10 · Create PR to dev]
   S11[11 · CI monitor]
   S12[12 · SonarCloud sweep]
-  S13[13 · /review-tests]
+  S13[13 · gc_test_quality_review]
   S14[14 · Final CI re-verify]
   S15[15 · Transition in-scope requirements DRAFT → ACTIVE]
   S16[16 · Reconcile traceability against diff]
@@ -122,7 +122,33 @@ flowchart TB
 - **Step 6** is TDD (red → green → refactor per clause). Steps 7–8 are the local quality gate. A narrow documentation-only carve-out is documented in `skills/implement/SKILL.md` Step 4.4 for diffs that contain no executable behavior and whose claims are protected by an existing structural gate (policy check, schema validator, lint rule, verifier script). The carve-out must be declared in the plan and re-stated as an issue comment naming the gate; substring/snapshot tests written only to satisfy TDD wording are explicitly disallowed. The completion gate re-validates the carve-out with a two-check sweep over the union of committed, staged, unstaged, and untracked paths (Step 6 runs before stage-and-commit, so working-tree state is part of the diff): every path must be in the documentation set AND every diff hunk's content must be free of executable behavior — a path check alone isn't enough, because a doc file can still carry executable behavior.
 - **Step 8.5 (= SKILL Step 6.5)** is the single Codex review pass per issue #804 — `gc_codex_review` with `uncommitted=true` runs locally against the staged + unstaged diff and posts a verbatim findings record to the resolved issue thread for each cycle (durable per ADR-029). Hard-cap is 3 cycles **per issue** (the cycle counter is anchored to the GitHub issue thread; the current branch is recorded in the marker for audit context but is NOT part of the cap key, so a branch rename on the same issue cannot reset the counter — see ADR-029). After a cycle's findings are surfaced, the agent fixes locally, re-stages, and re-invokes — no commit/push between cycles. The post-push codex review (former Step 12 in earlier numbering) was removed by issue #804 — merge-commit drift is the responsibility of CI (compile/tests/integration) and SonarCloud (quality).
 - **Steps 9–12** commit, push, open the PR, and block on CI + SonarCloud before any reviewer looks at the code.
-- **Steps 13–14** are the post-push review phase: `/review-tests` catches false-assurance tests, then one final CI pass closes out.
+- **Steps 13–14** are the post-push review phase: `gc_test_quality_review` catches false-assurance tests, then one final CI pass closes out. Per #884 v2 the test-quality reviewer is an **MCP tool** (`gc_test_quality_review`), not a Skill. It shells out to `claude --print` with the canonical rubric, parses structured JSON findings, posts the durable record + cycle marker to the issue thread, and returns a `{findings, cycle, cap, next_action, ...}` envelope. The parent /implement agent reads `next_action` as a directive (`fix_findings_and_reinvoke` / `post_clean_decision_record_and_advance_to_step_14` / `fix_findings_then_summarize_and_escalate` / `post_summary_and_escalate_to_user`) — not as prose to summarize back to the user. The v1 Skill-tool boundary returned prose findings; the parent's autoregressive "I just got a result, present it" bias kept defeating the SKILL.md "do not echo" rule. The v2 MCP-tool boundary closes that bias structurally. Cycle cap is **3 per issue, server-side**: the MCP tool counts `gc:test-quality-review-cycle` markers and refuses cycle 4 unless `override_cap=true` with `override_reason`. See `architecture/notes/test-quality-review-engine.md` for the full mechanism (engine, auth, failure modes).
+
+#### Test-quality review engine
+
+`gc_test_quality_review` shells out to the host's `claude` CLI:
+
+```
+claude --print
+       --model claude-sonnet-4-6
+       --output-format json
+       --json-schema <findings schema>
+       --add-dir <repo>
+       --permission-mode bypassPermissions
+       --allowedTools "Read Glob Grep"
+```
+
+with the prompt on stdin and `ANTHROPIC_API_KEY` **stripped from the subprocess env**. The strip is intentional: when the env var is set, `claude` uses it preferentially over the host's OAuth session; the env-var-anchored account is often empty (set up but never funded) while the OAuth account is what the user actually uses. Stripping forces OAuth — the canonical user-driven auth path that also powers the parent /implement run.
+
+**Operator quickstart:**
+1. Run `claude login` on the host once (credentials persist in `~/.claude`).
+2. `/implement <issue>` invokes Step 13 automatically; no separate action needed.
+
+**Model override:** pass `model` in the MCP call (`claude-haiku-4-5`, `claude-opus-4-7`, etc.). The /implement SKILL uses the default `claude-sonnet-4-6`.
+
+**Separate billing account:** if the env-var path is preferred, remove the env-var strip in `runSingleClaudeTestQualityReview` (lib.js) and ensure `ANTHROPIC_API_KEY` has credits. The default strip path keeps OAuth as the canonical auth.
+
+The legacy `Skill("review-tests")` path was removed in #884 v2. Existing host installs at `~/.claude/skills/review-tests/` and `~/.codex/prompts/review-tests.md` are orphaned and can be deleted manually; `bin/install-skills.sh` no longer installs them.
 - **Step 15 transitions each in-scope requirement to `ACTIVE`.** This MUST happen BEFORE Step 16's traceability reconciliation: the Ground Control API enforces `IMPLEMENTS-only-on-ACTIVE`, so reconciling first against a still-DRAFT requirement silently fails. Forward-looking requirements (the diff documents/references but does not deliver) stay DRAFT and use `DOCUMENTS` links instead in Step 16.
 - **Step 16 is traceability reconciliation, not link creation.** It walks every added/modified/renamed/deleted file in the diff, finds existing IMPLEMENTS/TESTS links pointing at each, and updates/deletes/creates links so the Ground Control graph matches reality after the change. Runs with zero in-scope requirements still reconcile, because a bug fix may have touched files linked to other requirements whose links are now stale. Deleting the sole implementation of a requirement is escalated to the user rather than silently removing the link. When the diff *finalizes* a requirement (e.g., an ADR clarification or changelog fragment that ships the requirement) but the structural implementation lives in pre-existing files shipped under a sibling requirement, Step 16 backfills IMPLEMENTS links onto those pre-existing artifacts of record. The backfill is bounded by the requirement's concrete subject matter — not a whole-repo scan.
 - **Step 17** re-verifies Ground Control state matches reality after Steps 15–16. These three steps run LAST, after every reviewer has signed off, so Ground Control never runs ahead of code that hasn't passed review. Zero in-scope requirements → Step 15 is a no-op; Step 16 still reconciles; Step 17 still audits.
@@ -153,7 +179,7 @@ One mandatory pre-implementation architecture pass, then a single pre-push codex
 | Trivy (advisory) | Container image vulnerabilities, Dockerfile/IaC misconfigurations, in-image secrets | CI job; SARIF artifact `trivy-sarif` on the workflow run page; non-blocking |
 | OSV-scanner (advisory) | CVEs in Java/Gradle dependencies (read from `backend/gradle.lockfile`) | CI job; SARIF artifact `osv-scanner-sarif` on the workflow run page; non-blocking |
 | Codex review (pre-push, Step 6.5) | Fitness for purpose, architectural soundness, maintainability, extensibility, security, established patterns, consistency with the larger codebase. Codex returns structured findings; the MCP server posts a verbatim findings record to the resolved issue thread from the host side; the coding agent fixes locally and re-runs the review. There is no PR yet at Step 6.5, so no inline PR comments are written by the SKILL — inline anchored comments only happen if a direct caller invokes `gc_codex_review` post-push (with a `pr_number`), which the SKILL no longer drives (issue #804). | `gc_codex_review` (`uncommitted=true`); MCP posts the issue-thread findings record |
-| `/review-tests` | Assertion-free tests, mock-only assertions, integration-as-unit, tests that can't detect regressions | `Skill("review-tests")` |
+| `gc_test_quality_review` (Step 13) | Assertion-free tests, mock-only assertions, integration-as-unit, tests that can't detect regressions | `gc_test_quality_review` MCP tool (shells out to `claude --print` with Sonnet 4.6 by default; full mechanism in `architecture/notes/test-quality-review-engine.md`) |
 
 All preflight/review stages operate under the same rule: **fix everything, defer nothing.** Review-loop cap (per #804): 3 cycles per reviewer; per-finding `gc_codex_verify_finding` cap stays at 2. If a fourth cycle would be needed, the skill escalates to the user with the full finding history.
 
@@ -189,7 +215,7 @@ Universal checks (all repos):
 Project-specific checks (`.claude/hooks/verify-extra.sh`, sourced if present):
 - shared repo-native policy script (`bin/policy`) over the changed-file set
 
-The hook no longer enforces `/review` and `/security-review` — those were removed from the `/implement` skill in favor of `gc_codex_review` + `/review-tests`. The `/implement` skill itself is the enforcement point for review coverage; the hook only guards the changelog signal + repo policy.
+The hook no longer enforces `/review` and `/security-review` — those were removed from the `/implement` skill in favor of `gc_codex_review` + `gc_test_quality_review`. The `/implement` skill itself is the enforcement point for review coverage; the hook only guards the changelog signal + repo policy.
 
 #### Skill Call Logging — `log-skill-call.sh`
 PostToolUse hook on `Skill` — writes JSONL to `/tmp/claude-skill-log/<PID>.jsonl` (per-session, not per-branch). The Stop hook previously read this log to verify `/review` and `/security-review` were actually invoked; it's still wired up for forward compat in case we reintroduce skill-based checks. Stale logs (>24h) are auto-pruned.
@@ -216,7 +242,7 @@ In both cases this repo is the source of truth: edit the `SKILL.md`, commit, and
 | Skill | Repo root | Purpose |
 |-------|-----------|---------|
 | `/implement <issue-number \| uid>` | `skills/` | Full end-to-end: plan through PR-ready |
-| `/review-tests` | `skills/` | Test-quality review — catches false-assurance tests |
+| `gc_test_quality_review` | `mcp/ground-control/` | Test-quality review — MCP tool (per #884 v2; replaces the prior `/review-tests` Skill) |
 | `/ship` | `.claude/skills/` | Ship an already-committed branch (CI, reviews, fix, report) |
 | `/stage` | `.claude/skills/` | Stage files + pre-commit loop |
 | `/gh-workflow-monitor` | `.claude/skills/` | Monitor GitHub Actions workflow runs |
@@ -230,7 +256,7 @@ Repo-local scripts live under `scripts/` (bash) and `bin/` (Python). The ones yo
 | Command | Purpose |
 |---------|---------|
 | `scripts/bootstrap-claude-workflow.sh` | Wire the Claude-Code-only surfaces from `~/.claude/`: the `.claude/skills/<name>/` skills (symlinked — edit takes effect live) and the `WORKFLOW_HOOKS` allowlist under `.claude/hooks/` (**copied** as real files so runtime does not depend on which branch this repo is checked out to). Idempotent; safe to re-run. Pass `--dry-run` to preview, `--force` to clobber non-matching host content. The hook allowlist is explicit, so generic host-local hooks (e.g. `block-break-system-packages.sh`) are left alone. Re-run after editing a hook file in the repo to push the new version into `~/.claude/hooks/`. Does **not** touch the `skills/<name>/` agent-neutral skills — that's `bin/install-skills.sh`'s job. |
-| `bin/install-skills.sh` | Install the agent-neutral `skills/<name>/` skills (`/implement`, `/review-tests`) into `~/.claude/skills/<name>`, `~/.codex/skills/<name>`, and `~/.codex/prompts/<name>.md` (legacy alias). Symlinks by default (`--copy` to hard-copy, `--dry-run` to preview, `--no-codex` to skip the Codex targets, `--force` to overwrite divergent host content). Idempotent; refuses to clobber unmanaged host targets without `--force`. |
+| `bin/install-skills.sh` | Install the agent-neutral `skills/<name>/` skills (currently just `/implement`; the prior `/review-tests` was removed in #884 v2 in favor of the `gc_test_quality_review` MCP tool) into `~/.claude/skills/<name>`, `~/.codex/skills/<name>`, and `~/.codex/prompts/<name>.md` (legacy alias). Symlinks by default (`--copy` to hard-copy, `--dry-run` to preview, `--no-codex` to skip the Codex targets, `--force` to overwrite divergent host content). Idempotent; refuses to clobber unmanaged host targets without `--force`. |
 | `scripts/pack-sync.sh` | Trigger the `pack-registry-sync` GitHub workflow against this repo. |
 | `bin/policy` | Run the repo-native policy guardrails (ADR sync, controller/MCP/docs parity, migration policy, PR-body checks). Invoked by `make policy`, pre-commit, and CI. |
 | `bin/adr-guard` | ADR-specific policy checks run standalone. |
@@ -250,7 +276,7 @@ bin/install-skills.sh                  # skills/* (agent-neutral) into ~/.claude
 - `.claude/skills/*/` — every skill directory gets a matching `~/.claude/skills/<name>` **symlink**. Editing a skill in the repo takes effect immediately in the next session.
 - `.claude/hooks/` — only the hooks listed in the script's `WORKFLOW_HOOKS` allowlist (`git-merge-guard.py`, `block-defer-language.py`, `log-skill-call.sh`, `verify-implementation.sh`) are installed as **real file copies** at `~/.claude/hooks/<name>`. Editing a hook in the repo requires re-running this script to push the new version out. Repo-scoped hooks (`protect_files.sh`, `verify-extra.sh`) stay where they are because they're wired via `$CLAUDE_PROJECT_DIR` in `.claude/settings.json`, not via `~/.claude/`.
 
-`bin/install-skills.sh` symlinks each `skills/<name>/` directory (the agent-neutral skills shared with Codex — `/implement`, `/review-tests`) into `~/.claude/skills/<name>`, `~/.codex/skills/<name>`, and `~/.codex/prompts/<name>.md`. Pass `--no-codex` if Codex isn't on the host.
+`bin/install-skills.sh` symlinks each `skills/<name>/` directory (currently `/implement`; the prior `/review-tests` was removed in #884 v2 — see `architecture/notes/test-quality-review-engine.md`) into `~/.claude/skills/<name>`, `~/.codex/skills/<name>`, and `~/.codex/prompts/<name>.md`. Pass `--no-codex` if Codex isn't on the host.
 
 If a pre-existing host file or directory has local changes that are NOT in the repo, the script refuses to clobber it and exits non-zero — re-run with `--force` only after you've confirmed the repo copy is the version you want. Already-correct entries are left alone.
 

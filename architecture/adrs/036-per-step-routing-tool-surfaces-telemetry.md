@@ -112,8 +112,19 @@ path; no new GitHub client, no new marker family beyond the two listed above.
 
 The SKILL stops `gh issue comment`-ing decision records and final reports
 once these tools land. Step 9 calls `gc_render_pr_body` and uses the returned
-body; Step 6.5 calls `gc_post_decision_record` for every cycle; Step 19 calls
-`gc_post_final_report`.
+body; Step 6.5 calls `gc_post_decision_record` for every cycle; **Step 13
+calls `gc_test_quality_review`** (per #884 v2 — the prior `Skill("review-tests")`
+boundary returned prose findings that the autoregressive parent agent
+kept echoing back to the user instead of fixing in-turn, defeating the
+SKILL.md prose rule; the MCP tool returns a structured envelope with
+`next_action` that the agent reads as a directive). After Step 13's
+cycle the parent calls `gc_post_decision_record` with the
+`fix`/`wontfix`/`not-applicable` dispositions (cycle counter, durable
+record); a clean cycle is the structured advance-to-Step-14 signal once
+that post returns `ok: true`. See
+`architecture/notes/test-quality-review-engine.md` for the full MCP
+tool mechanism (claude CLI exec, `ANTHROPIC_API_KEY` strip / OAuth,
+cycle markers, failure modes). Step 19 calls `gc_post_final_report`.
 
 ### Telemetry contract
 
