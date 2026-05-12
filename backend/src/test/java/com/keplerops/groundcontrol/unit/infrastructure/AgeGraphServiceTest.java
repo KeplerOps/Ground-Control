@@ -111,11 +111,6 @@ class AgeGraphServiceTest {
 
         @Test
         void getVisualization_appliesFilterBeforeCapInFallback() {
-            /*
-             * AGE-disabled fallback: contributors return the full project projection in memory;
-             * the adapter must apply the entityTypes filter BEFORE the cap predicate so a tight
-             * filter on a large project produces a small projection that passes the cap.
-             */
             var requirement = new GraphNode(
                     "REQUIREMENT:req-1", "req-1", GraphEntityType.REQUIREMENT, "p", "U-REQ", "REQ", Map.of());
             var asset = new GraphNode(
