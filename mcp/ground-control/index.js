@@ -163,6 +163,7 @@ import {
   TRUST_POLICY_FIELDS, TRUST_POLICY_RULE_OPERATORS,
   pick, reqArg,
   validateGovernanceStatus,
+  GOVERNANCE_FIELDS,
 } from "./lib.js";
 import {
   executeGcQuery,
@@ -1428,20 +1429,21 @@ const RISK_GOVERNANCE_ENTITIES = [
 ];
 const RISK_GOVERNANCE_ACTIONS = ["create", "update", "delete", "transition", "transition_approval"];
 
-// Per-entity field allowlists for gc_risk_governance create/update DTOs.
-const GOVERNANCE_FIELDS = {
-  methodology_profile: ["name", "description", "family", "status", "metadata"],
-  risk_register_record: ["uid", "title", "description", "scenario_id", "owner", "status", "review_cadence", "next_review_at", "metadata"],
-  risk_assessment_result: ["uid", "title", "description", "scenario_id", "approval_state", "quantitative_value", "qualitative_value", "metadata"],
-  treatment_plan: ["uid", "title", "description", "scenario_id", "risk_register_record_id", "status", "strategy", "owner", "due_at", "metadata"],
-  verification_result: ["uid", "title", "description", "outcome", "status", "assurance_level", "verified_at", "metadata"],
-};
+// Per-entity, per-action body allowlist for gc_risk_governance create/update
+// DTOs lives in lib.js (GOVERNANCE_FIELDS). It mirrors the backend Request
+// records under api/riskscenarios/. Issues #878/#879/#880.
 
 server.tool(
   "gc_risk_governance",
   `Methodology profiles, risk register records, risk assessments, treatment plans, verification results. ` +
     `Entity: ${RISK_GOVERNANCE_ENTITIES.join(", ")}. Actions: ${RISK_GOVERNANCE_ACTIONS.join(", ")}. ` +
-    `Reads (list, get) route through gc_query. Entity-specific fields are validated against the per-entity allowlist; unknown fields are dropped (NOT forwarded to the backend).`,
+    `Reads (list, get) route through gc_query. ` +
+    `Per-entity create fields (snake_case; round-trip to backend camelCase): ` +
+    `risk_register_record={uid,title,owner,review_cadence,next_review_at,category_tags,decision_metadata,asset_scope_summary,risk_scenario_ids}; ` +
+    `risk_assessment_result={risk_scenario_id,risk_register_record_id,methodology_profile_id,analyst_identity,assumptions,input_factors,observation_date,assessment_at,time_horizon,confidence,uncertainty_metadata,computed_outputs,evidence_refs,notes,observation_ids}; ` +
+    `treatment_plan={uid,title,risk_scenario_id,risk_register_record_id,strategy,owner,rationale,due_date,status,action_items,reassessment_triggers}. ` +
+    `Update DTOs drop create-only foreign keys (uid; risk_register_record_id for treatment_plan; risk_scenario_id for risk_assessment_result) and status fields whose changes go through the transition action. ` +
+    `Unknown fields are dropped — never tunneled through metadata.`,
   {
     entity: z.enum(RISK_GOVERNANCE_ENTITIES),
     action: z.enum(RISK_GOVERNANCE_ACTIONS),
@@ -1462,15 +1464,33 @@ server.tool(
     title: z.string().optional(),
     description: z.string().optional(),
     family: z.enum(METHODOLOGY_FAMILIES).optional(),
-    scenario_id: z.string().uuid().optional(),
+    risk_scenario_id: z.string().uuid().optional(),
+    risk_scenario_ids: z.array(z.string().uuid()).optional(),
     risk_register_record_id: z.string().uuid().optional(),
+    methodology_profile_id: z.string().uuid().optional(),
     owner: z.string().optional(),
     review_cadence: z.string().optional(),
     next_review_at: z.string().optional(),
-    quantitative_value: z.number().optional(),
-    qualitative_value: z.string().optional(),
+    category_tags: z.array(z.string()).optional(),
+    decision_metadata: z.record(z.any()).optional(),
+    asset_scope_summary: z.string().optional(),
+    analyst_identity: z.string().optional(),
+    assumptions: z.string().optional(),
+    input_factors: z.record(z.any()).optional(),
+    observation_date: z.string().optional(),
+    assessment_at: z.string().optional(),
+    time_horizon: z.string().optional(),
+    confidence: z.string().optional(),
+    uncertainty_metadata: z.record(z.any()).optional(),
+    computed_outputs: z.record(z.any()).optional(),
+    evidence_refs: z.array(z.string()).optional(),
+    notes: z.string().optional(),
+    observation_ids: z.array(z.string().uuid()).optional(),
     strategy: z.enum(TREATMENT_STRATEGIES).optional(),
-    due_at: z.string().optional(),
+    rationale: z.string().optional(),
+    due_date: z.string().optional(),
+    action_items: z.array(z.record(z.any())).optional(),
+    reassessment_triggers: z.array(z.string()).optional(),
     outcome: z.string().optional(),
     assurance_level: z.enum(ASSURANCE_LEVELS).optional(),
     verified_at: z.string().optional(),
@@ -1483,7 +1503,12 @@ server.tool(
       // the wrong-status-for-entity case surfaces at the MCP boundary with
       // the actual valid values rather than a backend 422.
       validateGovernanceStatus(args.entity, args.status);
-      const data = pick(args, GOVERNANCE_FIELDS[args.entity] ?? []);
+      // Per-action allowlist: create and update DTOs differ across entities
+      // (Update DTOs drop uid, create-only foreign keys, and status). Status
+      // changes flow through the dedicated transition/transition_approval
+      // actions, never through the create/update body. Issues #878/#879/#880.
+      const fieldsForAction = GOVERNANCE_FIELDS[args.entity]?.[args.action] ?? [];
+      const data = pick(args, fieldsForAction);
       switch (args.entity) {
         case "methodology_profile": {
           switch (args.action) {

@@ -8482,6 +8482,70 @@ export const GOVERNANCE_STATUS_ENUMS = {
   verification_result: VERIFICATION_STATUSES,
 };
 
+// gc_risk_governance per-entity, per-action body allowlist. Mirrors the
+// backend Request records under
+// backend/src/main/java/com/keplerops/groundcontrol/api/riskscenarios/.
+// Create and update DTOs differ — Update DTOs drop create-only foreign keys
+// (uid, riskRegisterRecordId for treatment plans, riskScenarioId for
+// assessment results) and exclude status fields whose changes go through a
+// dedicated transition endpoint. Snake_case field names round-trip through
+// the shared TO_CAMEL map in this file. Issues #878/#879/#880.
+export const GOVERNANCE_FIELDS = {
+  methodology_profile: {
+    create: ["name", "description", "family", "status", "metadata"],
+    update: ["name", "description", "family", "status", "metadata"],
+  },
+  risk_register_record: {
+    create: [
+      "uid", "title", "owner", "review_cadence", "next_review_at",
+      "category_tags", "decision_metadata", "asset_scope_summary",
+      "risk_scenario_ids",
+    ],
+    update: [
+      "title", "owner", "review_cadence", "next_review_at",
+      "category_tags", "decision_metadata", "asset_scope_summary",
+      "risk_scenario_ids",
+    ],
+  },
+  risk_assessment_result: {
+    create: [
+      "risk_scenario_id", "risk_register_record_id", "methodology_profile_id",
+      "analyst_identity", "assumptions", "input_factors",
+      "observation_date", "assessment_at", "time_horizon", "confidence",
+      "uncertainty_metadata", "computed_outputs",
+      "evidence_refs", "notes", "observation_ids",
+    ],
+    update: [
+      "risk_register_record_id", "methodology_profile_id",
+      "analyst_identity", "assumptions", "input_factors",
+      "observation_date", "assessment_at", "time_horizon", "confidence",
+      "uncertainty_metadata", "computed_outputs",
+      "evidence_refs", "notes", "observation_ids",
+    ],
+  },
+  treatment_plan: {
+    create: [
+      "uid", "title", "risk_scenario_id", "risk_register_record_id",
+      "strategy", "owner", "rationale", "due_date", "status",
+      "action_items", "reassessment_triggers",
+    ],
+    update: [
+      "title", "risk_scenario_id", "strategy", "owner",
+      "rationale", "due_date", "action_items", "reassessment_triggers",
+    ],
+  },
+  verification_result: {
+    create: [
+      "uid", "title", "description", "outcome", "status",
+      "assurance_level", "verified_at", "metadata",
+    ],
+    update: [
+      "title", "description", "outcome", "status",
+      "assurance_level", "verified_at", "metadata",
+    ],
+  },
+};
+
 /**
  * Validate a gc_risk_governance `status` argument against the per-entity
  * vocabulary. Throws on mismatch with a message naming the entity and the
