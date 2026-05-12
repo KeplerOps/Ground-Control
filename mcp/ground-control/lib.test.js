@@ -7317,11 +7317,11 @@ describe("readApprovedUploadFile", () => {
     try {
       assert.throws(
         () => readApprovedUploadFile(null, { workspaceRoot: ws, allowedExtensions: [".sdoc"], fieldName: "file_path" }),
-        /file_path/,
+        /file_path: must be a non-empty string/,
       );
       assert.throws(
         () => readApprovedUploadFile(123, { workspaceRoot: ws, allowedExtensions: [".sdoc"], fieldName: "file_path" }),
-        /file_path/,
+        /file_path: must be a non-empty string/,
       );
     } finally {
       rmSync(ws, { recursive: true, force: true });
@@ -7333,7 +7333,7 @@ describe("readApprovedUploadFile", () => {
     try {
       assert.throws(
         () => readApprovedUploadFile("", { workspaceRoot: ws, allowedExtensions: [".sdoc"], fieldName: "file_path" }),
-        /file_path/,
+        /file_path: must be a non-empty string/,
       );
     } finally {
       rmSync(ws, { recursive: true, force: true });
@@ -7386,7 +7386,7 @@ describe("readApprovedUploadFile", () => {
       writeFileSync(target, "x");
       assert.throws(
         () => readApprovedUploadFile(target, { workspaceRoot: ws, allowedExtensions: [], fieldName: "file_path" }),
-        /extension/i,
+        /file_path: at least one allowed extension is required/,
       );
     } finally {
       rmSync(ws, { recursive: true, force: true });
@@ -7398,7 +7398,7 @@ describe("readApprovedUploadFile", () => {
     try {
       assert.throws(
         () => readApprovedUploadFile(join(ws, "missing.sdoc"), { workspaceRoot: ws, allowedExtensions: [".sdoc"], fieldName: "file_path" }),
-        /file_path/,
+        /file_path: file does not exist/,
       );
     } finally {
       rmSync(ws, { recursive: true, force: true });
@@ -7414,7 +7414,7 @@ describe("readApprovedUploadFile", () => {
       symlinkSync(real, link);
       assert.throws(
         () => readApprovedUploadFile(link, { workspaceRoot: ws, allowedExtensions: [".sdoc"], fieldName: "file_path" }),
-        /symlink/i,
+        /file_path: must not be a symlink/,
       );
     } finally {
       rmSync(ws, { recursive: true, force: true });
@@ -7431,7 +7431,7 @@ describe("readApprovedUploadFile", () => {
       symlinkSync(outside, linkDir);
       assert.throws(
         () => readApprovedUploadFile(join(linkDir, "secret.sdoc"), { workspaceRoot: ws, allowedExtensions: [".sdoc"], fieldName: "file_path" }),
-        /outside|workspace|contain/i,
+        /file_path: must be contained inside the workspace root/,
       );
     } finally {
       rmSync(ws, { recursive: true, force: true });
@@ -7447,7 +7447,7 @@ describe("readApprovedUploadFile", () => {
       writeFileSync(outsideFile, "no");
       assert.throws(
         () => readApprovedUploadFile(outsideFile, { workspaceRoot: ws, allowedExtensions: [".sdoc"], fieldName: "file_path" }),
-        /outside|workspace|contain/i,
+        /file_path: must be contained inside the workspace root/,
       );
     } finally {
       rmSync(ws, { recursive: true, force: true });
@@ -7462,7 +7462,7 @@ describe("readApprovedUploadFile", () => {
       mkdirSync(dirPath);
       assert.throws(
         () => readApprovedUploadFile(dirPath, { workspaceRoot: ws, allowedExtensions: [".sdoc"], fieldName: "file_path" }),
-        /regular|directory/i,
+        /file_path: must be a regular file/,
       );
     } finally {
       rmSync(ws, { recursive: true, force: true });
@@ -7570,11 +7570,11 @@ describe("readApprovedUploadFile", () => {
   it("rejects when workspaceRoot is missing or non-string", () => {
     assert.throws(
       () => readApprovedUploadFile("/tmp/x.sdoc", { allowedExtensions: [".sdoc"], fieldName: "file_path" }),
-      /workspaceRoot/,
+      /file_path: workspaceRoot must be a non-empty string/,
     );
     assert.throws(
       () => readApprovedUploadFile("/tmp/x.sdoc", { workspaceRoot: 123, allowedExtensions: [".sdoc"], fieldName: "file_path" }),
-      /workspaceRoot/,
+      /file_path: workspaceRoot must be a non-empty string/,
     );
   });
 });
