@@ -73,6 +73,7 @@ import {
   runTestQualityReview, TEST_QUALITY_REVIEW_HARD_CAP,
   runPostImplementationPlan,
   runPostDecisionRecord, runPostFinalReport, runRenderPrBody, runLogStepTelemetry,
+  runResolveWorkflowRoute,
   DECISION_RECORD_REVIEWERS, DECISION_RECORD_DECISIONS, DECISION_RECORD_CLASSIFICATIONS,
   PR_BODY_CHANGE_CLASSES, PR_REQUIREMENT_RE, EXACT_REQUIREMENT_UID_RE,
   TELEMETRY_TIERS, TELEMETRY_OUTCOMES,
@@ -678,6 +679,25 @@ server.tool(
         outputTokens: output_tokens ?? null,
         outcome,
         ts: ts ?? null,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_resolve_workflow_route",
+  "Resolve the configured /implement route for a workflow stage or purpose. Returns the provider, agent, canonical model id, tier, fallback policy, and source, or a structured disabled/unavailable response. This is the executable routing contract; callers use it before delegated stages instead of relying on skill prose.",
+  {
+    repo_path: z.string(),
+    stage: z.string().min(1),
+    tier: z.enum(TELEMETRY_TIERS).optional(),
+  },
+  async ({ repo_path, stage, tier }) => {
+    try {
+      return ok(JSON.stringify(await runResolveWorkflowRoute({
+        repoPath: repo_path,
+        stage,
+        tier: tier ?? null,
       }), null, 2));
     } catch (e) { return err(e); }
   },

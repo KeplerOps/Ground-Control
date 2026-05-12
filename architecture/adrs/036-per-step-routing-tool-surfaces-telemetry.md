@@ -58,9 +58,9 @@ The `/implement` SKILL declares a stable **workflow step id** plus a
 
 | Tier | Intended capability | Claude Code mapping |
 |------|---------------------|---------------------|
-| `low` | Mechanical action, polling, gh wrapping, file reads | `haiku-4.5` |
-| `medium` | Bounded reading + applying a designed decision; structured drafting | `sonnet-4.6` |
-| `high` | Architectural reasoning, novel-fork interpretation, first-cycle review consume | `opus-4.7` (the parent) |
+| `low` | Mechanical action, polling, gh wrapping, file reads | `claude-haiku-4-5` |
+| `medium` | Bounded reading + applying a designed decision; structured drafting | `claude-sonnet-4-6` |
+| `high` | Architectural reasoning, novel-fork interpretation, first-cycle review consume | `claude-opus-4-7` (the parent) |
 
 Drivers map tier to a concrete model. Claude Code drivers spawn an `Agent`
 subagent with the corresponding model for routed steps. Codex drivers have no
@@ -69,11 +69,14 @@ on the session model. The architecture is forward-compatible — a future
 Codex-side router consumes the same step-id+tier contract without further ADR
 work.
 
-Routing is opt-in per repo via `.ground-control.yaml`'s new `routing.enabled`
+Routing is opt-in per repo via `.ground-control.yaml`'s `routing.enabled`
 knob (default `false`). Existing repos see no behavior change until they flip
-the knob. The matrix itself lives in `skills/implement/SKILL.md` so the
-provider-neutral contract is in one place; the Claude Code concrete mapping
-lives in the same file as the canonical reference for that driver.
+the knob. The executable routing contract is stage/purpose based: callers ask
+`gc_resolve_workflow_route` for a stage such as `implementation`,
+`test_quality_review`, or `final_report`, and the tool returns the configured
+provider, agent, canonical model id, tier, and fallback policy. The skill keeps
+the step matrix legible, but the resolver is the boundary that prevents silent
+fallback from being mistaken for routed execution.
 
 The routing seam is calibrated so subagent context-establishment overhead does
 not exceed the savings. Very short steps (sub-second polling, single-call

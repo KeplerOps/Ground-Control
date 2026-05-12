@@ -36,11 +36,78 @@ cross_cutting_concerns:
     Tests: @WebMvcTest controllers (with @AutoConfigureMockMvc(addFilters=false) for slice tests), @SpringBootTest integration tests under @Tag("integration"), ArchUnit architecture tests, jqwik property tests
     HTTP: Spring's RestClient/WebClient as needed; standard Jackson ObjectMapper
     Config: @ConfigurationProperties POJOs registered via @ConfigurationPropertiesScan on GroundControlApplication
-# Per ADR-036 — opt in to /implement cost reduction. Routing routes per-step
-# delegation to lower tiers (haiku/sonnet); telemetry appends one JSONL line
-# per routed step under .gc/telemetry/ (gitignored). Both are operational and
-# can be flipped off without changing the gate contract.
+# Per ADR-036 — opt in to /implement cost reduction. Routing resolves
+# stage/purpose names to concrete agent/model choices; telemetry appends one
+# JSONL line per routed step under .gc/telemetry/ (gitignored). Both are
+# operational and can be flipped off without changing the gate contract.
 routing:
   enabled: true
+  default_provider: claude
+  default_fallback: parent
+  stages:
+    issue_branch_resolution:
+      tier: low
+      model: claude-haiku-4-5
+    read_issue_context:
+      tier: low
+      model: claude-haiku-4-5
+    architecture_preflight:
+      tier: low
+      model: claude-haiku-4-5
+    codebase_assessment:
+      tier: medium
+      model: claude-sonnet-4-6
+    planning:
+      tier: high
+      model: claude-opus-4-7
+      agent: parent
+      fallback: error
+    implementation:
+      tier: medium
+      model: claude-sonnet-4-6
+    clause_mapping:
+      tier: medium
+      model: claude-sonnet-4-6
+    precommit:
+      tier: low
+      model: claude-haiku-4-5
+    completion_gate:
+      tier: low
+      model: claude-haiku-4-5
+    review_cycle_1_consume:
+      tier: high
+      model: claude-opus-4-7
+      agent: parent
+      fallback: error
+    review_fix_application:
+      tier: medium
+      model: claude-sonnet-4-6
+    git_publish:
+      tier: low
+      model: claude-haiku-4-5
+    pr_body:
+      tier: low
+      model: claude-haiku-4-5
+    ci_monitor:
+      tier: low
+      model: claude-haiku-4-5
+    sonarcloud:
+      tier: low
+      model: claude-haiku-4-5
+    test_quality_review:
+      tier: medium
+      model: claude-sonnet-4-6
+    final_ci_verify:
+      tier: low
+      model: claude-haiku-4-5
+    transition_reconcile:
+      tier: medium
+      model: claude-sonnet-4-6
+    close_issue:
+      tier: low
+      model: claude-haiku-4-5
+    final_report:
+      tier: low
+      model: claude-haiku-4-5
 telemetry:
   enabled: true
