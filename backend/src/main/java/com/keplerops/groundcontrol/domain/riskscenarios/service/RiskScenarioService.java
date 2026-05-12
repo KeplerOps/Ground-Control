@@ -2,6 +2,7 @@ package com.keplerops.groundcontrol.domain.riskscenarios.service;
 
 import com.keplerops.groundcontrol.domain.audit.ActorHolder;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
@@ -71,6 +72,16 @@ public class RiskScenarioService {
     public RiskScenario update(UUID projectId, UUID id, UpdateRiskScenarioCommand command) {
         var scenario = findByIdOrThrow(projectId, id);
 
+        // Required-on-create fields must reject blank strings when present, or a
+        // partial update could corrupt records the create path would refuse.
+        // Mirrors ThreatModelService.update (issue #876).
+        rejectBlankIfPresent("title", command.title());
+        rejectBlankIfPresent("threatSource", command.threatSource());
+        rejectBlankIfPresent("threatEvent", command.threatEvent());
+        rejectBlankIfPresent("affectedObject", command.affectedObject());
+        rejectBlankIfPresent("consequence", command.consequence());
+        rejectBlankIfPresent("timeHorizon", command.timeHorizon());
+
         if (command.title() != null) {
             scenario.setTitle(command.title());
         }
@@ -96,6 +107,15 @@ public class RiskScenarioService {
         var saved = riskScenarioRepository.save(scenario);
         log.info("risk_scenario_updated: id={} uid={}", saved.getId(), saved.getUid());
         return saved;
+    }
+
+    private static void rejectBlankIfPresent(String fieldName, String value) {
+        if (value != null && value.isBlank()) {
+            throw new DomainValidationException(
+                    fieldName + " must not be blank when provided",
+                    "validation_error",
+                    java.util.Map.of("field", fieldName));
+        }
     }
 
     @Deprecated(forRemoval = false)

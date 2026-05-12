@@ -161,6 +161,106 @@ class RiskScenarioServiceTest {
             assertThatThrownBy(() -> riskScenarioService.update(projectId, id, command))
                     .isInstanceOf(NotFoundException.class);
         }
+
+        // Issue #876 (codex review cycle 1, class finding): partial update must not
+        // overwrite create-required fields with blank strings. RiskScenarioRequest
+        // marks title / threatSource / threatEvent / affectedObject / consequence /
+        // timeHorizon as @NotBlank; the update path must enforce the same contract
+        // when a value is supplied. Mirrors the rejectBlankIfPresent pattern in
+        // ThreatModelService.update.
+        @Test
+        void rejectsBlankTitle() {
+            var rs = makeScenario();
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
+
+            var command = new UpdateRiskScenarioCommand("   ", null, null, null, null, null, null);
+
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rs.getId(), command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("title");
+        }
+
+        @Test
+        void rejectsBlankThreatSource() {
+            var rs = makeScenario();
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
+
+            var command = new UpdateRiskScenarioCommand(null, "", null, null, null, null, null);
+
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rs.getId(), command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("threatSource");
+        }
+
+        @Test
+        void rejectsBlankThreatEvent() {
+            var rs = makeScenario();
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
+
+            var command = new UpdateRiskScenarioCommand(null, null, " ", null, null, null, null);
+
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rs.getId(), command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("threatEvent");
+        }
+
+        @Test
+        void rejectsBlankAffectedObject() {
+            var rs = makeScenario();
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
+
+            var command = new UpdateRiskScenarioCommand(null, null, null, "", null, null, null);
+
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rs.getId(), command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("affectedObject");
+        }
+
+        @Test
+        void rejectsBlankConsequence() {
+            var rs = makeScenario();
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
+
+            var command = new UpdateRiskScenarioCommand(null, null, null, null, null, "", null);
+
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rs.getId(), command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("consequence");
+        }
+
+        @Test
+        void rejectsBlankTimeHorizon() {
+            var rs = makeScenario();
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
+
+            var command = new UpdateRiskScenarioCommand(null, null, null, null, null, null, "   ");
+
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rs.getId(), command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("timeHorizon");
+        }
+
+        @Test
+        void allowsAbsentRequiredFields() {
+            // A partial update that touches only the optional vulnerability field
+            // must not be blocked by the new blank-if-present checks.
+            var rs = makeScenario();
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
+            when(riskScenarioRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateRiskScenarioCommand(null, null, null, null, "new vuln", null, null);
+            var result = riskScenarioService.update(projectId, rs.getId(), command);
+
+            assertThat(result.getVulnerability()).isEqualTo("new vuln");
+            assertThat(result.getTitle()).isEqualTo("Credential stuffing on customer portal");
+        }
     }
 
     @Nested
