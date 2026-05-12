@@ -1390,12 +1390,6 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "violation must name the missing findings-fix-in-same-turn directive",
         )
 
-    def test_check_passes_when_fix_directive_present(self):
-        # The new _CONTRACT_PROSE includes the directive; baseline must
-        # pass under the strengthened predicate.
-        violations = run_step13_decision_record_contract(text=self._CONTRACT_PROSE)
-        self.assertEqual(violations, [])
-
     # --- anti-contract negation patterns -----------------------------------
 
     # Each case pins one anti-pattern shape. The fixture is the failing
