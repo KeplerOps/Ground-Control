@@ -1426,6 +1426,12 @@ const RISK_GOVERNANCE_ENTITIES = [
   "treatment_plan", "verification_result",
 ];
 const RISK_GOVERNANCE_ACTIONS = ["create", "update", "delete", "transition", "transition_approval"];
+const RISK_GOVERNANCE_STATUS_SCHEMA = z.union([
+  z.enum(METHODOLOGY_PROFILE_STATUSES),
+  z.enum(RISK_REGISTER_STATUSES),
+  z.enum(TREATMENT_PLAN_STATUSES),
+  z.enum(VERIFICATION_STATUSES),
+]);
 
 // Per-entity field allowlists for gc_risk_governance create/update DTOs.
 const GOVERNANCE_FIELDS = {
@@ -1446,7 +1452,7 @@ server.tool(
     action: z.enum(RISK_GOVERNANCE_ACTIONS),
     id: z.string().uuid().optional(),
     project: z.string().optional(),
-    status: z.string().optional(),
+    status: RISK_GOVERNANCE_STATUS_SCHEMA.optional(),
     approval_state: z.enum(RISK_ASSESSMENT_APPROVAL_STATUSES).optional(),
     // Shared entity fields. Per-entity allowlist (GOVERNANCE_FIELDS) gates which
     // ones reach the backend on create/update, so unrelated MCP control fields

@@ -2,9 +2,11 @@ package com.keplerops.groundcontrol.unit.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.keplerops.groundcontrol.api.GlobalExceptionHandler;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import com.keplerops.groundcontrol.domain.riskscenarios.state.TreatmentPlanStatus;
 import com.keplerops.groundcontrol.shared.web.ErrorResponse;
 import java.io.Serializable;
 import java.util.LinkedHashMap;
@@ -34,6 +36,25 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().error().code()).isEqualTo("bad_request");
         assertThat(response.getBody().error().message()).isEqualTo("Malformed request body");
+    }
+
+    @Test
+    void handleHttpMessageNotReadable_returnsValidationErrorForInvalidEnumValue() throws Exception {
+        var mapper = new ObjectMapper();
+        var cause = assertThrowsInvalidFormat(
+                () -> mapper.readValue("{\"status\":\"PROPOSED\"}", TreatmentPlanStatusRequest.class));
+        var ex = new HttpMessageNotReadableException("bad enum", cause);
+
+        var response = handler.handleHttpMessageNotReadable(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error().code()).isEqualTo("validation_error");
+        assertThat(response.getBody().error().message()).contains("Invalid value for field 'status'");
+        assertThat(response.getBody().error().detail()).containsEntry("field", "status");
+        assertThat(response.getBody().error().detail().get("validValues"))
+                .asList()
+                .contains("PLANNED", "IN_PROGRESS", "BLOCKED", "COMPLETED", "CANCELED");
     }
 
     @Test
@@ -187,5 +208,24 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().error().code()).isEqualTo("validation_error");
         assertThat(response.getBody().error().detail()).containsEntry("field", "title");
+    }
+
+    private static com.fasterxml.jackson.databind.exc.InvalidFormatException assertThrowsInvalidFormat(
+            ThrowingRunnable runnable) {
+        try {
+            runnable.run();
+        } catch (com.fasterxml.jackson.databind.exc.InvalidFormatException ex) {
+            return ex;
+        } catch (Exception ex) {
+            throw new AssertionError("Expected InvalidFormatException", ex);
+        }
+        throw new AssertionError("Expected InvalidFormatException");
+    }
+
+    private record TreatmentPlanStatusRequest(TreatmentPlanStatus status) {}
+
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 }

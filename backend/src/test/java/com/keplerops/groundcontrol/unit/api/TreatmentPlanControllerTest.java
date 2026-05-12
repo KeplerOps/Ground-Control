@@ -1,6 +1,7 @@
 package com.keplerops.groundcontrol.unit.api;
 
 import static com.keplerops.groundcontrol.TestUtil.setField;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
@@ -130,6 +131,34 @@ class TreatmentPlanControllerTest {
                 .andExpect(jsonPath("$.actionItems", hasSize(1)))
                 .andExpect(jsonPath("$.reassessmentTriggers", hasSize(1)))
                 .andExpect(jsonPath("$.reassessmentTriggers[0]", is("Quarterly review")));
+    }
+
+    @Test
+    void createReturns422WhenStatusIsInvalidEnumValue() throws Exception {
+        mockMvc.perform(post("/api/v1/treatment-plans")
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(
+                                """
+                                {
+                                  "uid": "TP-001",
+                                  "title": "Enforce MFA",
+                                  "riskRegisterRecordId": "%s",
+                                  "strategy": "MITIGATE",
+                                  "status": "PROPOSED"
+                                }
+                                """
+                                        .formatted(RECORD_ID)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.code", is("validation_error")))
+                .andExpect(
+                        jsonPath(
+                                "$.error.message",
+                is(
+                        "Invalid value for field 'status'. Valid values: PLANNED, IN_PROGRESS, BLOCKED, COMPLETED, CANCELED")))
+                .andExpect(jsonPath("$.error.detail.field", is("status")))
+                .andExpect(jsonPath("$.error.detail.validValues", hasItem("PLANNED")))
+                .andExpect(jsonPath("$.error.detail.validValues", hasItem("CANCELED")));
     }
 
     @Test
