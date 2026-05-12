@@ -178,6 +178,11 @@ import {
   GC_THREAT_MODEL_DESCRIPTION,
 } from "./gc-threat-model.js";
 import {
+  gcRiskScenarioZodShape,
+  gcRiskScenarioToolHandler,
+  GC_RISK_SCENARIO_DESCRIPTION,
+} from "./gc-risk-scenario.js";
+import {
   linkCreateOptionalSharedZodFields,
   performLinkCreate,
 } from "./link-create.js";
@@ -1330,68 +1335,14 @@ server.tool(
   },
 );
 
-const RISK_SCENARIO_ACTIONS = ["create", "update", "delete", "transition", "requirements", "link_create", "link_delete"];
-
 server.tool(
   "gc_risk_scenario",
-  `Risk scenarios + their links. Actions: ${RISK_SCENARIO_ACTIONS.join(", ")}. ` +
-    `link_create requires target_type + link_type; pass target_entity_id for internal target types ` +
-    `or target_identifier for external types. target_url / target_title are optional. ` +
-    `Reads (list, get, links_list) route through gc_query.`,
-  {
-    action: z.enum(RISK_SCENARIO_ACTIONS),
-    id: z.string().uuid().optional(),
-    uid: z.string().optional(),
-    project: z.string().optional(),
-    title: z.string().optional(),
-    description: z.string().optional(),
-    status: z.enum(RISK_SCENARIO_STATUSES).optional(),
-    methodology_profile_id: z.string().uuid().nullable().optional(),
-    metadata: z.record(z.any()).optional(),
-    // links
-    scenario_id: z.string().uuid().optional(),
-    target_type: z.enum(RISK_SCENARIO_LINK_TARGET_TYPES).optional(),
-    link_type: z.enum(RISK_SCENARIO_LINK_TYPES).optional(),
-    ...linkCreateOptionalSharedZodFields,
-    link_id: z.string().uuid().optional(),
-  },
+  GC_RISK_SCENARIO_DESCRIPTION,
+  gcRiskScenarioZodShape,
   async (args) => {
     try {
-      const ENTITY_FIELDS = ["uid", "title", "description", "status", "methodology_profile_id", "metadata"];
-      switch (args.action) {
-        case "create": {
-          reqArg(args, "title", "create");
-          return ok(JSON.stringify(await createRiskScenario(pick(args, ENTITY_FIELDS), args.project), null, 2));
-        }
-        case "update": {
-          reqArg(args, "id", "update");
-          return ok(JSON.stringify(await updateRiskScenario(args.id, pick(args, ENTITY_FIELDS), args.project), null, 2));
-        }
-        case "delete": {
-          reqArg(args, "id", "delete");
-          await deleteRiskScenario(args.id, args.project);
-          return ok("Deleted");
-        }
-        case "transition": {
-          reqArg(args, "id", "transition"); reqArg(args, "status", "transition");
-          return ok(JSON.stringify(await transitionRiskScenarioStatus(args.id, args.status, args.project), null, 2));
-        }
-        case "requirements": {
-          reqArg(args, "id", "requirements");
-          return ok(JSON.stringify(await getRiskScenarioRequirements(args.id, args.project), null, 2));
-        }
-        case "link_create": {
-          // lib.js: createRiskScenarioLink(scenarioId, data, project). Body
-          // shape + target_type/link_type preconditions live in link-create.js.
-          return ok(JSON.stringify(await performLinkCreate(args, "scenario_id", createRiskScenarioLink), null, 2));
-        }
-        case "link_delete": {
-          reqArg(args, "scenario_id", "link_delete"); reqArg(args, "link_id", "link_delete");
-          await deleteRiskScenarioLink(args.scenario_id, args.link_id, args.project);
-          return ok("Deleted");
-        }
-        default: return err(new Error(`Unknown action: ${args.action}`));
-      }
+      const result = await gcRiskScenarioToolHandler(args);
+      return result === null ? ok("Deleted") : ok(JSON.stringify(result, null, 2));
     } catch (e) { return err(e); }
   },
 );
