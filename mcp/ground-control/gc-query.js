@@ -324,14 +324,92 @@ export async function executeGcQuery(path, params, opts = {}) {
 }
 
 /**
+ * Recognizes a runtime `AbortSignal` value. The handler must only strip a
+ * `signal` key when the value really is SDK runtime plumbing; a caller-
+ * supplied plain object under the same name must fall through to the
+ * public-argument allowlist so the user-facing contract stays exactly
+ * `path` + optional `params`. Uses `instanceof` for the same-realm case
+ * and a duck-type fallback for cross-realm signals (workers, isolated
+ * module realms) so a legitimate AbortSignal originating elsewhere still
+ * matches.
+ */
+function isAbortSignalLike(v) {
+  if (typeof globalThis.AbortSignal === "function" && v instanceof globalThis.AbortSignal) {
+    return true;
+  }
+  return (
+    v !== null &&
+    typeof v === "object" &&
+    typeof v.aborted === "boolean" &&
+    typeof v.addEventListener === "function" &&
+    typeof v.removeEventListener === "function"
+  );
+}
+
+/**
+ * Map of key → predicate that recognizes the runtime/SDK-injected value
+ * shape for that key. The handler strips a key only when both the name AND
+ * the value shape match; this preserves the handler's defense-in-depth
+ * contract for arbitrary unknown user inputs.
+ */
+const SDK_INJECTED_KEY_PREDICATES = Object.freeze(
+  new Map([["signal", isAbortSignalLike]]),
+);
+
+/**
+ * Runtime keys that some MCP clients/transports pipe into the tool-handler
+ * `args` object even though they are not user-supplied arguments. `signal`
+ * (an `AbortSignal` used downstream for `AbortController` plumbing) is the
+ * documented case (issue #874). Stripping happens at the adapter boundary
+ * BEFORE the public-argument allowlist so the public contract stays exactly
+ * `path` + optional `params` while runtime plumbing is consumed harmlessly.
+ *
+ * ADR-035 "Public argument boundary"; preflight note
+ * `architecture/notes/mcp-tool-catalog-surface-preflight.md` "MCP runtime
+ * plumbing". Growing this set is a deliberate change — keep it narrow.
+ */
+export const GC_QUERY_SDK_INJECTED_KEYS = Object.freeze(
+  new Set(SDK_INJECTED_KEY_PREDICATES.keys()),
+);
+
+/**
+ * Return a shallow copy of `args` with the known SDK-injected runtime keys
+ * removed when their value matches the documented runtime shape. Does not
+ * mutate the input. Does NOT strip other unknown keys (e.g. `headers`,
+ * `method`): those are caller-facing and must still fail loudly via
+ * `gcQueryToolHandler`'s allowlist. A `signal` key whose value is NOT an
+ * AbortSignal also survives the strip and is rejected by the same allowlist
+ * — the per-key value predicate is what keeps the public contract intact.
+ */
+export function stripSdkInjectedKeys(args) {
+  if (args === undefined || args === null) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(args)) {
+    const predicate = SDK_INJECTED_KEY_PREDICATES.get(k);
+    if (predicate && predicate(v)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/**
  * MCP tool handler entrypoint for `gc_query`. Defense-in-depth on top of the
  * strict Zod schema below: explicitly rejects any args object key beyond
  * `path` and `params` so a future SDK relaxation can't silently let unknown
  * keys through.
+ *
+ * Some clients/transports (issue #874) inject runtime control fields like
+ * `signal` (an `AbortSignal`) into `args` outside the Zod-validated payload.
+ * Those keys are stripped via {@link stripSdkInjectedKeys} BEFORE the public
+ * allowlist runs, so the public contract stays `path` + optional `params`
+ * and the inbound SDK signal does not leak into URL construction, headers,
+ * or the outbound `AbortController.signal` (which `executeGcQuery` builds
+ * for its own 30s timeout — the two must not be conflated).
  */
 export async function gcQueryToolHandler(args, opts = {}) {
+  const userArgs = stripSdkInjectedKeys(args);
   const allowedKeys = new Set(["path", "params"]);
-  for (const k of Object.keys(args ?? {})) {
+  for (const k of Object.keys(userArgs)) {
     if (!allowedKeys.has(k)) {
       throw new RequestError({
         status: 0,
@@ -341,7 +419,7 @@ export async function gcQueryToolHandler(args, opts = {}) {
       });
     }
   }
-  return executeGcQuery(args?.path, args?.params, opts);
+  return executeGcQuery(userArgs.path, userArgs.params, opts);
 }
 
 /**
