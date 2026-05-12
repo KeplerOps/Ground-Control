@@ -108,6 +108,63 @@ class AgeGraphServiceTest {
             assertThat(result).isEmpty();
             verifyNoInteractions(jdbcTemplate);
         }
+
+        @Test
+        void getVisualization_appliesFilterBeforeCapInFallback() {
+            var requirement = new GraphNode(
+                    "REQUIREMENT:req-1", "req-1", GraphEntityType.REQUIREMENT, "p", "U-REQ", "REQ", Map.of());
+            var asset = new GraphNode(
+                    "OPERATIONAL_ASSET:asset-1",
+                    "asset-1",
+                    GraphEntityType.OPERATIONAL_ASSET,
+                    "p",
+                    "U-AS",
+                    "AS",
+                    Map.of());
+            var edgeBetween = new GraphEdge(
+                    "e1",
+                    "ASSOCIATED",
+                    requirement.id(),
+                    asset.id(),
+                    GraphEntityType.REQUIREMENT,
+                    GraphEntityType.OPERATIONAL_ASSET,
+                    Map.of());
+            when(graphProjectionRegistryService.buildProjectionForProject(PROJECT_ID))
+                    .thenReturn(new GraphProjection(List.of(requirement, asset), List.of(edgeBetween)));
+
+            var filtered = service.getVisualization(PROJECT_ID, java.util.Set.of(GraphEntityType.REQUIREMENT));
+
+            assertThat(filtered.nodes()).containsExactly(requirement);
+            // Edge endpoints not both in the filter set → edge is pruned.
+            assertThat(filtered.edges()).isEmpty();
+            verifyNoInteractions(jdbcTemplate);
+        }
+
+        @Test
+        void getVisualization_rejectsWhenFilteredProjectionExceedsCapInFallback() {
+            // Even after filter, if the result still exceeds MAX_PROJECTION_NODES we reject —
+            // belt-and-suspenders for the AGE-disabled path where contributors materialize
+            // everything before we can filter.
+            int oversize = com.keplerops.groundcontrol.domain.graph.GraphTraversalLimits.MAX_PROJECTION_NODES + 1;
+            java.util.List<GraphNode> nodes = new java.util.ArrayList<>(oversize);
+            for (int i = 0; i < oversize; i++) {
+                nodes.add(new GraphNode(
+                        "REQUIREMENT:r-" + i,
+                        "r-" + i,
+                        GraphEntityType.REQUIREMENT,
+                        "p",
+                        "U-" + i,
+                        "L-" + i,
+                        Map.of()));
+            }
+            when(graphProjectionRegistryService.buildProjectionForProject(PROJECT_ID))
+                    .thenReturn(new GraphProjection(nodes, List.of()));
+            var emptyFilter = java.util.Set.<GraphEntityType>of();
+
+            assertThatThrownBy(() -> service.getVisualization(PROJECT_ID, emptyFilter))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("projection node count");
+        }
     }
 
     @Nested
@@ -300,10 +357,101 @@ class AgeGraphServiceTest {
         }
 
         @Test
+        void getVisualization_filtersEntityTypesInCypherAndBindsAsParam() {
+            // The entityTypes filter MUST land in AGE Cypher as a parameter-bound IN list — the
+            // label string itself must never reach the SQL text — and the cap on the filtered
+            // node/edge sets MUST be expressed as the LIMIT (MAX + 1) idiom so the AGE engine
+            // stops materializing past the bound.
+            when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
+
+            enabledService.getVisualization(
+                    PROJECT_ID, java.util.Set.of(GraphEntityType.REQUIREMENT, GraphEntityType.OPERATIONAL_ASSET));
+
+            ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+            ArgumentCaptor<PreparedStatementSetter> pssCaptor = ArgumentCaptor.forClass(PreparedStatementSetter.class);
+            verify(jdbcTemplate, times(2))
+                    .query(sqlCaptor.capture(), pssCaptor.capture(), any(RowCallbackHandler.class));
+
+            String nodeSql = sqlCaptor.getAllValues().get(0);
+            String edgeSql = sqlCaptor.getAllValues().get(1);
+            /*
+             * Cypher shape: filter is expressed as a parameter-bound IN clause; the LIMIT is the
+             * canonical MAX_PROJECTION_* + 1 cap. Caller-supplied entityType names must NOT be
+             * inlined into the SQL text — they reach AGE through the bound agtype params payload.
+             */
+            assertThat(nodeSql)
+                    .contains("WHERE n.entity_type IN $entity_types")
+                    .contains("LIMIT "
+                            + (com.keplerops.groundcontrol.domain.graph.GraphTraversalLimits.MAX_PROJECTION_NODES + 1))
+                    .doesNotContain("REQUIREMENT")
+                    .doesNotContain("OPERATIONAL_ASSET");
+            assertThat(edgeSql)
+                    .contains("WHERE s.entity_type IN $entity_types AND t.entity_type IN $entity_types")
+                    .contains("LIMIT "
+                            + (com.keplerops.groundcontrol.domain.graph.GraphTraversalLimits.MAX_PROJECTION_EDGES + 1))
+                    .doesNotContain("REQUIREMENT")
+                    .doesNotContain("OPERATIONAL_ASSET");
+            String nodeParams = capturedAgtypeParam(pssCaptor.getAllValues().get(0));
+            String edgeParams = capturedAgtypeParam(pssCaptor.getAllValues().get(1));
+            assertThat(nodeParams).contains("REQUIREMENT").contains("OPERATIONAL_ASSET");
+            assertThat(edgeParams).contains("REQUIREMENT").contains("OPERATIONAL_ASSET");
+        }
+
+        @Test
+        void getVisualization_omitsFilterClauseWhenEntityTypesIsEmpty() {
+            // No filter supplied → no WHERE clause; the LIMIT (MAX + 1) cap still applies because
+            // it is the canonical adapter-level bound on database work, regardless of filtering.
+            when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
+
+            enabledService.getVisualization(PROJECT_ID, java.util.Set.of());
+
+            ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+            verify(jdbcTemplate, times(2))
+                    .query(sqlCaptor.capture(), any(PreparedStatementSetter.class), any(RowCallbackHandler.class));
+
+            for (String sql : sqlCaptor.getAllValues()) {
+                assertThat(sql).doesNotContain("WHERE n.entity_type").doesNotContain("$entity_types");
+            }
+            assertThat(sqlCaptor.getAllValues().get(0))
+                    .contains("LIMIT "
+                            + (com.keplerops.groundcontrol.domain.graph.GraphTraversalLimits.MAX_PROJECTION_NODES + 1));
+            assertThat(sqlCaptor.getAllValues().get(1))
+                    .contains("LIMIT "
+                            + (com.keplerops.groundcontrol.domain.graph.GraphTraversalLimits.MAX_PROJECTION_EDGES + 1));
+        }
+
+        @Test
+        void getVisualization_rejectsWhenNodeCapExceeded() throws SQLException {
+            // Simulate AGE returning MAX_PROJECTION_NODES + 1 vertex rows: that +1 row signals
+            // overflow at the adapter, and the service must convert it into a 422 envelope rather
+            // than serializing the bounded-but-partial result.
+            when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
+            int rowsToReturn = com.keplerops.groundcontrol.domain.graph.GraphTraversalLimits.MAX_PROJECTION_NODES + 1;
+            java.sql.ResultSet rs = mock(java.sql.ResultSet.class);
+            when(rs.getString(1))
+                    .thenReturn("{\"id\": \"REQUIREMENT:x\", \"domain_id\": \"x\", \"entity_type\": \"REQUIREMENT\", "
+                            + "\"project_identifier\": \"p\", \"uid\": \"U\", \"label\": \"L\"}");
+            org.mockito.Mockito.doAnswer(invocation -> {
+                        RowCallbackHandler handler = invocation.getArgument(2);
+                        for (int i = 0; i < rowsToReturn; i++) {
+                            handler.processRow(rs);
+                        }
+                        return null;
+                    })
+                    .when(jdbcTemplate)
+                    .query(anyString(), any(PreparedStatementSetter.class), any(RowCallbackHandler.class));
+            var emptyFilter = java.util.Set.<GraphEntityType>of();
+
+            assertThatThrownBy(() -> enabledService.getVisualization(PROJECT_ID, emptyFilter))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("projection node count");
+        }
+
+        @Test
         void getVisualization_userValuesAreParameterizedNotInlined() {
             when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
 
-            enabledService.getVisualization(PROJECT_ID);
+            enabledService.getVisualization(PROJECT_ID, java.util.Set.of());
 
             ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
             ArgumentCaptor<PreparedStatementSetter> pssCaptor = ArgumentCaptor.forClass(PreparedStatementSetter.class);
