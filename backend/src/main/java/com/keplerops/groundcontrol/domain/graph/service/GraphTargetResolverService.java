@@ -24,6 +24,22 @@ public class GraphTargetResolverService {
 
     public record ValidatedTarget(UUID targetEntityId, String targetIdentifier, boolean internal) {}
 
+    // Human-readable labels used by internalTarget to format DomainValidationException
+    // messages. Each label is reused across multiple validate*Target methods; defining
+    // them here keeps the wire-shape of validation errors stable and avoids the literal
+    // duplication that triggers Sonar S1192.
+    private static final String LABEL_REQUIREMENT = "Requirement";
+    private static final String LABEL_ASSET = "Asset";
+    private static final String LABEL_OBSERVATION = "Observation";
+    private static final String LABEL_RISK_SCENARIO = "Risk scenario";
+    private static final String LABEL_RISK_REGISTER_RECORD = "Risk register record";
+    private static final String LABEL_RISK_ASSESSMENT_RESULT = "Risk assessment result";
+    private static final String LABEL_TREATMENT_PLAN = "Treatment plan";
+    private static final String LABEL_METHODOLOGY_PROFILE = "Methodology profile";
+    private static final String LABEL_CONTROL = "Control";
+    private static final String LABEL_THREAT_MODEL = "Threat model";
+    private static final String LABEL_VERIFICATION_RESULT = "Verification result";
+
     private final RequirementRepository requirementRepository;
     private final OperationalAssetRepository assetRepository;
     private final ObservationRepository observationRepository;
@@ -67,41 +83,41 @@ public class GraphTargetResolverService {
             case REQUIREMENT -> internalTarget(
                     targetEntityId,
                     requirementRepository.existsByIdAndProjectId(targetEntityId, projectId),
-                    "Requirement");
+                    LABEL_REQUIREMENT);
             case RISK_SCENARIO -> internalTarget(
                     targetEntityId,
                     riskScenarioRepository.existsByIdAndProjectId(targetEntityId, projectId),
-                    "Risk scenario");
+                    LABEL_RISK_SCENARIO);
             case RISK_REGISTER_RECORD -> internalTarget(
                     targetEntityId,
                     riskRegisterRecordRepository
                             .findByIdAndProjectIdWithScenarios(targetEntityId, projectId)
                             .isPresent(),
-                    "Risk register record");
+                    LABEL_RISK_REGISTER_RECORD);
             case RISK_ASSESSMENT_RESULT -> internalTarget(
                     targetEntityId,
                     riskAssessmentResultRepository
                             .findByIdAndProjectIdWithObservations(targetEntityId, projectId)
                             .isPresent(),
-                    "Risk assessment result");
+                    LABEL_RISK_ASSESSMENT_RESULT);
             case TREATMENT_PLAN -> internalTarget(
                     targetEntityId,
                     treatmentPlanRepository
                             .findByIdAndProjectId(targetEntityId, projectId)
                             .isPresent(),
-                    "Treatment plan");
+                    LABEL_TREATMENT_PLAN);
             case METHODOLOGY_PROFILE -> internalTarget(
                     targetEntityId,
                     methodologyProfileRepository
                             .findByIdAndProjectId(targetEntityId, projectId)
                             .isPresent(),
-                    "Methodology profile");
+                    LABEL_METHODOLOGY_PROFILE);
             case CONTROL -> internalTarget(
-                    targetEntityId, controlRepository.existsByIdAndProjectId(targetEntityId, projectId), "Control");
+                    targetEntityId, controlRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_CONTROL);
             case THREAT_MODEL_ENTRY -> internalTarget(
                     targetEntityId,
                     threatModelRepository.existsByIdAndProjectId(targetEntityId, projectId),
-                    "Threat model");
+                    LABEL_THREAT_MODEL);
             case FINDING, EVIDENCE, AUDIT, ISSUE, CODE, CONFIGURATION, EXTERNAL -> externalTarget(targetIdentifier);
         };
     }
@@ -114,43 +130,43 @@ public class GraphTargetResolverService {
                     observationRepository
                             .findByIdWithAssetAndProjectId(targetEntityId, projectId)
                             .isPresent(),
-                    "Observation");
+                    LABEL_OBSERVATION);
             case ASSET -> internalTarget(
-                    targetEntityId, assetRepository.existsByIdAndProjectId(targetEntityId, projectId), "Asset");
+                    targetEntityId, assetRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_ASSET);
             case REQUIREMENT -> internalTarget(
                     targetEntityId,
                     requirementRepository.existsByIdAndProjectId(targetEntityId, projectId),
-                    "Requirement");
+                    LABEL_REQUIREMENT);
             case RISK_REGISTER_RECORD -> internalTarget(
                     targetEntityId,
                     riskRegisterRecordRepository
                             .findByIdAndProjectIdWithScenarios(targetEntityId, projectId)
                             .isPresent(),
-                    "Risk register record");
+                    LABEL_RISK_REGISTER_RECORD);
             case RISK_ASSESSMENT_RESULT -> internalTarget(
                     targetEntityId,
                     riskAssessmentResultRepository
                             .findByIdAndProjectIdWithObservations(targetEntityId, projectId)
                             .isPresent(),
-                    "Risk assessment result");
+                    LABEL_RISK_ASSESSMENT_RESULT);
             case TREATMENT_PLAN -> internalTarget(
                     targetEntityId,
                     treatmentPlanRepository
                             .findByIdAndProjectId(targetEntityId, projectId)
                             .isPresent(),
-                    "Treatment plan");
+                    LABEL_TREATMENT_PLAN);
             case METHODOLOGY_PROFILE -> internalTarget(
                     targetEntityId,
                     methodologyProfileRepository
                             .findByIdAndProjectId(targetEntityId, projectId)
                             .isPresent(),
-                    "Methodology profile");
+                    LABEL_METHODOLOGY_PROFILE);
             case CONTROL -> internalTarget(
-                    targetEntityId, controlRepository.existsByIdAndProjectId(targetEntityId, projectId), "Control");
+                    targetEntityId, controlRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_CONTROL);
             case THREAT_MODEL -> internalTarget(
                     targetEntityId,
                     threatModelRepository.existsByIdAndProjectId(targetEntityId, projectId),
-                    "Threat model");
+                    LABEL_THREAT_MODEL);
             case VULNERABILITY, FINDING, EVIDENCE, AUDIT_RECORD, EXTERNAL -> externalTarget(targetIdentifier);
         };
     }
@@ -159,45 +175,45 @@ public class GraphTargetResolverService {
             UUID projectId, ControlLinkTargetType targetType, UUID targetEntityId, String targetIdentifier) {
         return switch (targetType) {
             case ASSET -> internalTarget(
-                    targetEntityId, assetRepository.existsByIdAndProjectId(targetEntityId, projectId), "Asset");
+                    targetEntityId, assetRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_ASSET);
             case REQUIREMENT -> internalTarget(
                     targetEntityId,
                     requirementRepository.existsByIdAndProjectId(targetEntityId, projectId),
-                    "Requirement");
+                    LABEL_REQUIREMENT);
             case RISK_SCENARIO -> internalTarget(
                     targetEntityId,
                     riskScenarioRepository.existsByIdAndProjectId(targetEntityId, projectId),
-                    "Risk scenario");
+                    LABEL_RISK_SCENARIO);
             case RISK_REGISTER_RECORD -> internalTarget(
                     targetEntityId,
                     riskRegisterRecordRepository
                             .findByIdAndProjectIdWithScenarios(targetEntityId, projectId)
                             .isPresent(),
-                    "Risk register record");
+                    LABEL_RISK_REGISTER_RECORD);
             case RISK_ASSESSMENT_RESULT -> internalTarget(
                     targetEntityId,
                     riskAssessmentResultRepository
                             .findByIdAndProjectIdWithObservations(targetEntityId, projectId)
                             .isPresent(),
-                    "Risk assessment result");
+                    LABEL_RISK_ASSESSMENT_RESULT);
             case TREATMENT_PLAN -> internalTarget(
                     targetEntityId,
                     treatmentPlanRepository
                             .findByIdAndProjectId(targetEntityId, projectId)
                             .isPresent(),
-                    "Treatment plan");
+                    LABEL_TREATMENT_PLAN);
             case METHODOLOGY_PROFILE -> internalTarget(
                     targetEntityId,
                     methodologyProfileRepository
                             .findByIdAndProjectId(targetEntityId, projectId)
                             .isPresent(),
-                    "Methodology profile");
+                    LABEL_METHODOLOGY_PROFILE);
             case OBSERVATION -> internalTarget(
                     targetEntityId,
                     observationRepository
                             .findByIdWithAssetAndProjectId(targetEntityId, projectId)
                             .isPresent(),
-                    "Observation");
+                    LABEL_OBSERVATION);
             case EVIDENCE, FINDING, CODE, CONFIGURATION, OPERATIONAL_ARTIFACT, EXTERNAL -> externalTarget(
                     targetIdentifier);
         };
@@ -207,33 +223,33 @@ public class GraphTargetResolverService {
             UUID projectId, ThreatModelLinkTargetType targetType, UUID targetEntityId, String targetIdentifier) {
         return switch (targetType) {
             case ASSET -> internalTarget(
-                    targetEntityId, assetRepository.existsByIdAndProjectId(targetEntityId, projectId), "Asset");
+                    targetEntityId, assetRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_ASSET);
             case REQUIREMENT -> internalTarget(
                     targetEntityId,
                     requirementRepository.existsByIdAndProjectId(targetEntityId, projectId),
-                    "Requirement");
+                    LABEL_REQUIREMENT);
             case CONTROL -> internalTarget(
-                    targetEntityId, controlRepository.existsByIdAndProjectId(targetEntityId, projectId), "Control");
+                    targetEntityId, controlRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_CONTROL);
             case RISK_SCENARIO -> internalTarget(
                     targetEntityId,
                     riskScenarioRepository.existsByIdAndProjectId(targetEntityId, projectId),
-                    "Risk scenario");
+                    LABEL_RISK_SCENARIO);
             case OBSERVATION -> internalTarget(
                     targetEntityId,
                     observationRepository
                             .findByIdWithAssetAndProjectId(targetEntityId, projectId)
                             .isPresent(),
-                    "Observation");
+                    LABEL_OBSERVATION);
             case RISK_ASSESSMENT_RESULT -> internalTarget(
                     targetEntityId,
                     riskAssessmentResultRepository
                             .findByIdAndProjectIdWithObservations(targetEntityId, projectId)
                             .isPresent(),
-                    "Risk assessment result");
+                    LABEL_RISK_ASSESSMENT_RESULT);
             case VERIFICATION_RESULT -> internalTarget(
                     targetEntityId,
                     verificationResultRepository.existsByIdAndProjectId(targetEntityId, projectId),
-                    "Verification result");
+                    LABEL_VERIFICATION_RESULT);
             case ARCHITECTURE_MODEL, CODE, ISSUE, EVIDENCE, EXTERNAL -> externalTarget(targetIdentifier);
         };
     }
