@@ -402,6 +402,7 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "055", // V055: threat_model
                         "056", // V056: threat_model_audit
                         "057", // V057: threat_model_link (target_url / target_title NOT NULL DEFAULT '')
-                        "058"); // V058: threat_model_link_audit
+                        "058", // V058: threat_model_link_audit
+                        "059"); // V059: ADR-037 users + authorities (browser session JDBC store)
     }
 }

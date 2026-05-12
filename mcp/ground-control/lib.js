@@ -7484,3 +7484,31 @@ export async function runLogStepTelemetry({ repoPath, issueNumber, branch, step,
   }
   return await appendStepTelemetry({ repoPath: repoRoot, record });
 }
+
+// ---------------------------------------------------------------------------
+// Admin User lifecycle API functions (ADR-037; ROLE_ADMIN-gated)
+// ---------------------------------------------------------------------------
+
+export async function listAdminUsers() {
+  return request("GET", "/api/v1/admin/users");
+}
+
+export async function createAdminUser(data) {
+  return request("POST", "/api/v1/admin/users", { body: data });
+}
+
+export async function updateAdminUserRole(username, role) {
+  return request("PATCH", `/api/v1/admin/users/${encodeURIComponent(username)}/role`, {
+    body: { role },
+  });
+}
+
+export async function updateAdminUserEnabled(username, enabled) {
+  return request("PATCH", `/api/v1/admin/users/${encodeURIComponent(username)}/enabled`, {
+    body: { enabled },
+  });
+}
+
+export async function deleteAdminUser(username) {
+  await request("DELETE", `/api/v1/admin/users/${encodeURIComponent(username)}`);
+}
