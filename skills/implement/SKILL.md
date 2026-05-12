@@ -529,28 +529,49 @@ Format every fix commit (Step 13 only) as `Fix review findings (<reviewer>, cycl
 
 ### Step 13: Test Quality Review
 
-**The whole point of the test-quality review is to FIX the tests, not to file a status report on them.** When the `review-tests` skill returns findings, the parent /implement workflow MUST fix every finding in the same agent turn — do not stop, do not echo the findings back to the user as if reporting completed work, do not "return control to the user." The child skill is pure review output (per ADR-029); the parent owns all action and progression. Filing the same findings back to the user as if they were a finished review is the failure mode the user reported after #884 v1 shipped, and is forbidden by this step.
+Call the `gc_test_quality_review` MCP tool with `repo_path`, `issue_number`, and `base_branch: "{cfg.workflow.base_branch|default dev}"`. The tool runs the review (shells out to `claude` CLI with the canonical rubric, parses structured JSON output, posts the durable findings record + cycle marker to the issue thread), then returns an envelope of the same shape `gc_codex_review` returns. The agent reads the envelope's `next_action` field as a directive — it is not free-prose findings to summarize.
 
-1. **Invoke** the `review-tests` skill at `skills/review-tests/SKILL.md`. Claude Code drivers call it via the `Skill` tool with `skill="review-tests"`. Codex drivers invoke it via `~/.codex/prompts/review-tests.md` (installed by `bin/install-skills.sh`). The same canonical content drives both — no driver-specific divergence.
+**This step replaces the prior `Skill("review-tests")` invocation (per issue #884 v2).** The Skill-tool boundary returned prose-formatted findings that the autoregressive parent agent kept echoing back to the user instead of fixing in-turn. The MCP tool returns a structured envelope; the `next_action` field is a directive, not a status report. See ADR-029 § "Test-quality review uses the same decision-record contract" and the architecture note at `architecture/notes/test-quality-clean-continuation-preflight.md`.
 
-2. **Branch on outcome — both branches stay in the same agent turn.**
+The tool envelope is:
+```
+{
+  ok: true,
+  cycle: <N>, cap: 3,
+  finding_count: <int>, findings: [<each finding: severity, location, problem, why_it_matters, fix>],
+  next_action: "fix_findings_and_reinvoke"
+            | "post_clean_decision_record_and_advance_to_step_14"
+            | "fix_findings_then_summarize_and_escalate"   // last in-cap cycle
+            | "post_summary_and_escalate_to_user"          // cap-refused cycle 4
+  findings_comment_url: "<URL>",
+  changed_test_files: [...],
+  override?: bool, override_reason?: str
+}
+```
 
-   **Case A — review-tests returned findings.** The parent MUST fix every finding in the same agent turn. Do not stop. Do not echo the findings to the user. Do not "return control to the user." The findings are work, not a status report. Action sequence (all in the same turn):
-   1. Classify each finding (`one-off` or `class`). For a `class` finding, design one structural fix and apply it to every instance per the Review loop rules above.
-   2. Apply the fix to the diff.
-   3. Self-verify locally: `cfg.workflow.completion_command`, `make policy`, the relevant test suite.
-   4. Stage, commit (`Fix review findings (test-quality, cycle <N>)`), and push.
-   5. Call `gc_post_decision_record` with `cycle: <N>`, `reviewer: "test-quality"`, `findings: [<each finding with fix / wontfix / not-applicable disposition>]`. Confirm the post returned `ok: true`.
-   6. Re-invoke the `review-tests` skill (cycle `<N+1>`).
+**Dispatch on `next_action`. Both branches stay in the same agent turn.**
 
-   The fix-in-same-turn requirement is the durable contract: a `class` finding's structural fix, the fix verification, the push, the decision-record post, and the re-invoke all happen before the agent yields control. Splitting any of those into a separate user turn re-opens the #884 silent-handoff failure mode in a different shape.
+**`fix_findings_and_reinvoke` (findings present, within cap)** — fix every finding in the same agent turn. Do not stop. Do not echo findings to the user. The findings are work, not a status report.
+1. Classify each finding (`one-off` or `class`). For a `class` finding, design one structural fix and apply to every instance per the Review loop rules above.
+2. Apply the fix to the diff.
+3. Self-verify locally: `cfg.workflow.completion_command`, `make policy`, the relevant test suite.
+4. Stage, commit (`Fix review findings (test-quality, cycle <N>)`), and push.
+5. Call `gc_post_decision_record` with `cycle: <N>`, `reviewer: "test-quality"`, `findings: [<each finding with fix / wontfix / not-applicable disposition>]`. Confirm the post returned `ok: true`.
+6. Re-invoke `gc_test_quality_review` (cycle `<N+1>`).
 
-   **Case B — review-tests returned "no issues found" / zero findings.**
-   1. Call `gc_post_decision_record` with `cycle: <N>`, `reviewer: "test-quality"`, `findings: []`. A clean cycle posts `findings: []`, which renders as `**Findings:** 0 (clean run)` on the issue thread (see `mcp/ground-control/lib.js::buildDecisionRecord`). This is the same structured contract Step 6.5 uses — there is no separate marker family for test-quality (per the architecture preflight at `architecture/notes/test-quality-clean-continuation-preflight.md`).
-   2. Confirm `ok: true`. On `ok: false`, do NOT enter Step 14: follow the returned `error` / `next_action` envelope, fix the underlying GitHub or tooling issue (network, `gh` auth, sensitive-content rejection, body-size cap), and retry the post. The workflow advances only when the marker is genuinely posted; treating the attempted call as the signal would re-open the original #884 silent-advance failure mode.
-   3. Proceed to Step 14 in the same agent turn — there is no user acknowledgment turn between Step 13 and Step 14. The skill's human-readable line is a transcript convenience; the structured durable record on the issue thread is what carries the workflow signal.
+Splitting any of those into a separate user turn re-opens the #884 silent-handoff failure mode in a different shape.
 
-3. **Cycle cap: 3 iterations per issue, aligned with ADR-029's reviewer cap.** This is an **agent-honored / workflow-discipline cap**, not a server-side refusal — unlike `gc_codex_review` (Step 6.5), `gc_post_decision_record` does not refuse cycle 4 for `reviewer: "test-quality"` and does not record an `override_cap` authorization on the marker. After cycle 3, if findings remain, the agent MUST stop, summarize the remaining findings on the issue thread, and escalate to the user; past cycle 3 is the architectural-escalation point — the user authorizes a further cycle explicitly, or restructures the change.
+**`post_clean_decision_record_and_advance_to_step_14` (zero findings)**:
+1. Call `gc_post_decision_record` with `cycle: <N>`, `reviewer: "test-quality"`, `findings: []`. Confirm `ok: true`. On `ok: false`, do NOT enter Step 14: follow the returned `error` / `next_action` envelope, fix the underlying tooling issue, and retry.
+2. Proceed to Step 14 in the same agent turn — no user acknowledgment turn between Step 13 and Step 14.
+
+**`fix_findings_then_summarize_and_escalate` (last in-cap cycle, findings present)** — same as `fix_findings_and_reinvoke` for steps 1–5, but instead of re-invoking, post an issue-thread summary of remaining concerns and escalate to the user. Past cycle 3 the user authorizes a further cycle via `override_cap=true` + `override_reason="<authorization quote>"`, or restructures the change.
+
+**`post_summary_and_escalate_to_user` (cap refused)** — the tool refused because cycle 4 was attempted without authorization. Post a summary of findings + fix history to the issue thread and ask the user.
+
+**Cycle cap: 3 iterations per issue, server-side.** Unlike the pre-#884-v2 implementation, this cap is enforced by `gc_test_quality_review` itself (counts `gc:test-quality-review-cycle` markers on the issue thread, refuses cycle 4 unless `override_cap=true` with a non-empty `override_reason`). The marker family is disjoint from the codex pre-push markers; the two counters never cross-count.
+
+**Authentication.** The MCP tool's exec wrapper strips `ANTHROPIC_API_KEY` from the subprocess env so `claude --print` uses the host's OAuth session (the env-var path may have a separate / empty billing balance; OAuth is the canonical user-driven auth). The host must be logged in to claude. See `docs/DEVELOPMENT_WORKFLOW.md` § "Test-quality review engine" for the full mechanism, model selection, and configuration knobs.
 
 ### Step 14: Final CI re-verification
 

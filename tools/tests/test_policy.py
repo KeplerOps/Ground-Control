@@ -1242,12 +1242,12 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
         "do not echo the findings to the user as if reporting completed\n"
         "work.\n"
         "\n"
-        "1. Invoke the `review-tests` skill at `skills/review-tests/SKILL.md`.\n"
+        "1. Call `gc_test_quality_review` MCP tool; the parent reads `next_action`.\n"
         "2. Case A — findings returned. The parent MUST fix the findings\n"
         "   in the same turn. Do not stop. Apply the named fix, commit\n"
         "   and push, call `gc_post_decision_record` with\n"
         "   `reviewer: \"test-quality\"` and the findings list, confirm\n"
-        "   `ok: true`, and re-invoke `review-tests`.\n"
+        "   `ok: true`, and re-invoke `gc_test_quality_review`.\n"
         "3. Case B — zero findings. Call `gc_post_decision_record` with\n"
         "   `reviewer: \"test-quality\"` and `findings: []` (renders as\n"
         "   `0 (clean run)`).\n"
@@ -1266,7 +1266,7 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
     _CONTRACT_MISSING_PROSE = (
         "### Step 13: Test Quality Review\n"
         "\n"
-        "1. Invoke the `review-tests` skill.\n"
+        "1. Call `gc_test_quality_review`; parent reads `next_action`.\n"
         "2. Apply the Review loop rules: fix every finding.\n"
         "3. Cycle cap: 5 iterations. After the fifth, escalate.\n"
         "\n"
@@ -1292,6 +1292,46 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
         violations = run_step13_decision_record_contract(text=self._CONTRACT_PROSE)
         self.assertEqual(violations, [])
 
+    def test_check_flags_missing_gc_test_quality_review_invocation(self):
+        # Per #884 v2: Step 13 must call the MCP tool, not the legacy Skill.
+        # If the section drops the gc_test_quality_review mention, the
+        # policy gate must flag it.
+        no_mcp_tool = (
+            "### Step 13: Test Quality Review\n"
+            "\n"
+            "1. Invoke a review skill.\n"
+            "2. After every cycle, call `gc_post_decision_record` with\n"
+            "   `reviewer: \"test-quality\"` and the findings list. Clean cycle\n"
+            "   posts `findings: []`. Advance to Step 14 after `ok: true` —\n"
+            "   proceed in the same turn. Fix findings in the same turn; do\n"
+            "   not stop. next_action is the dispatch field.\n"
+            "\n"
+            "### Step 14: Next\n"
+        )
+        violations = run_step13_decision_record_contract(text=no_mcp_tool)
+        self.assertTrue(violations)
+        message = "\n".join(v.render() for v in violations)
+        self.assertIn("gc_test_quality_review", message)
+
+    def test_check_flags_missing_next_action_dispatch_field(self):
+        # The `next_action` field is the directive the parent reads.
+        # Without it the Step 13 prose is back to free-form findings
+        # handoff.
+        no_dispatch = (
+            "### Step 13: Test Quality Review\n"
+            "\n"
+            "1. Call `gc_test_quality_review`.\n"
+            "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
+            "   and `findings: []`. Advance to Step 14 after `ok: true`. Fix\n"
+            "   findings in the same turn; do not stop.\n"
+            "\n"
+            "### Step 14: Next\n"
+        )
+        violations = run_step13_decision_record_contract(text=no_dispatch)
+        self.assertTrue(violations)
+        message = "\n".join(v.render() for v in violations)
+        self.assertIn("next_action", message)
+
     def test_check_flags_missing_decision_record_call(self):
         violations = run_step13_decision_record_contract(
             text=self._CONTRACT_MISSING_PROSE
@@ -1308,7 +1348,7 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
         partial = (
             "### Step 13: Test Quality Review\n"
             "\n"
-            "1. Invoke the `review-tests` skill.\n"
+            "1. Call `gc_test_quality_review`; parent reads `next_action`.\n"
             "2. Call gc_post_decision_record after each cycle.\n"
             "\n"
             "### Step 14: Next\n"
@@ -1345,7 +1385,7 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
         no_precondition = (
             "### Step 13: Test Quality Review\n"
             "\n"
-            "1. Invoke the `review-tests` skill.\n"
+            "1. Call `gc_test_quality_review`; parent reads `next_action`.\n"
             "2. After every cycle, call `gc_post_decision_record` with\n"
             "   `reviewer: \"test-quality\"` and the full findings list.\n"
             "   A clean cycle posts `findings: []`.\n"
@@ -1372,7 +1412,7 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
         no_fix_directive = (
             "### Step 13: Test Quality Review\n"
             "\n"
-            "1. Invoke the `review-tests` skill.\n"
+            "1. Call `gc_test_quality_review`; parent reads `next_action`.\n"
             "2. After every cycle, call `gc_post_decision_record` with\n"
             "   `reviewer: \"test-quality\"` and the full findings list.\n"
             "   A clean cycle posts `findings: []`.\n"
@@ -1403,7 +1443,7 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "skip-decision-record",
             "### Step 13: Test Quality Review\n"
             "\n"
-            "1. Invoke the `review-tests` skill.\n"
+            "1. Call `gc_test_quality_review`; parent reads `next_action`.\n"
             "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
             "   and `findings: []` for clean cycles. Advance to Step 14 after\n"
             "   `ok: true`.\n"
@@ -1430,7 +1470,7 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "do-not-proceed-step14",
             "### Step 13: Test Quality Review\n"
             "\n"
-            "1. Invoke the `review-tests` skill.\n"
+            "1. Call `gc_test_quality_review`; parent reads `next_action`.\n"
             "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
             "   and `findings: []`. Do not proceed to Step 14 automatically —\n"
             "   wait for the user to acknowledge the clean cycle.\n"
@@ -1443,7 +1483,7 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "findings-empty-not-enough",
             "### Step 13: Test Quality Review\n"
             "\n"
-            "1. Invoke the `review-tests` skill.\n"
+            "1. Call `gc_test_quality_review`; parent reads `next_action`.\n"
             "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`,\n"
             "   `findings: []`. Note: `findings: []` is not enough — also\n"
             "   require manual user sign-off before Step 14.\n"
@@ -1462,7 +1502,7 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "findings-routed-to-user",
             "### Step 13: Test Quality Review\n"
             "\n"
-            "1. Invoke the `review-tests` skill.\n"
+            "1. Call `gc_test_quality_review`; parent reads `next_action`.\n"
             "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
             "   and `findings: []` for clean cycles. Fix findings in the\n"
             "   same turn after `ok: true`. Proceed to Step 14.\n"
@@ -1476,7 +1516,7 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "findings-routed-to-user",
             "### Step 13: Test Quality Review\n"
             "\n"
-            "1. Invoke the `review-tests` skill.\n"
+            "1. Call `gc_test_quality_review`; parent reads `next_action`.\n"
             "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
             "   and `findings: []`. Fix findings in the same turn. Advance\n"
             "   to Step 14 after `ok: true`.\n"
@@ -1527,7 +1567,7 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "do-not-skip",
             "### Step 13: Test Quality Review\n"
             "\n"
-            "1. Invoke the `review-tests` skill.\n"
+            "1. Call `gc_test_quality_review`; parent reads `next_action`.\n"
             "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
             "   and `findings: []`. Do not skip the decision record on a\n"
             "   clean cycle — the durable marker is the workflow signal.\n"
@@ -1541,7 +1581,7 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "on-ok-false-do-not-advance",
             "### Step 13: Test Quality Review\n"
             "\n"
-            "1. Invoke the `review-tests` skill.\n"
+            "1. Call `gc_test_quality_review`; parent reads `next_action`.\n"
             "2. Call `gc_post_decision_record` with `reviewer: \"test-quality\"`\n"
             "   and `findings: []`. Fix findings in the same turn; do not\n"
             "   stop.\n"
@@ -1555,7 +1595,7 @@ class Step13DecisionRecordContractTest(unittest.TestCase):
             "must-never-skip",
             "### Step 13: Test Quality Review\n"
             "\n"
-            "1. Invoke the `review-tests` skill.\n"
+            "1. Call `gc_test_quality_review`; parent reads `next_action`.\n"
             "2. The agent must never skip the decision-record post on a\n"
             "   clean cycle. Call `gc_post_decision_record` with\n"
             "   `reviewer: \"test-quality\"` and `findings: []`. Fix\n"

@@ -161,10 +161,23 @@ defense-in-depth context, not reset levers for the canonical Step 6.5 cap.
 
 ### Test-quality review uses the same decision-record contract
 
-Step 13 (test-quality review via the `review-tests` skill) records every
-cycle on the issue thread using the same `gc_post_decision_record` surface
-as Step 6.5's codex review, with `reviewer: "test-quality"` and the
-findings list. A clean cycle posts `findings: []`, which renders as
+Step 13 (test-quality review via the `gc_test_quality_review` MCP tool)
+records every cycle on the issue thread using the same
+`gc_post_decision_record` surface as Step 6.5's codex review, with
+`reviewer: "test-quality"` and the findings list.
+
+The reviewer was originally a Skill (`review-tests`) but issue #884 v2
+moved it to an MCP tool to fix a behavioral regression: the Skill-tool
+boundary produced prose-formatted findings, and the autoregressive
+parent agent kept echoing them back to the user as a status report
+instead of fixing them in the same turn. The SKILL.md "do not echo,
+fix in same turn" prose could not override the tool-boundary bias.
+The `gc_test_quality_review` MCP tool returns a structured envelope
+with a `next_action` field — the parent reads it as a directive, not
+as text to summarize. See
+`architecture/notes/test-quality-review-engine.md` for the full
+mechanism (claude CLI exec wrapper, OAuth vs `ANTHROPIC_API_KEY`
+auth, cycle cap markers, findings record, failure modes). A clean cycle posts `findings: []`, which renders as
 `**Findings:** 0 (clean run)`. The successfully posted record is the
 structured durable signal that the cycle is complete and the workflow
 advances — and "successfully posted" is dispositive: the parent advances
@@ -186,28 +199,30 @@ readability; the decision-record marker on the issue thread is the
 workflow contract.
 
 The cycle cap for test-quality is 3 per issue, aligned with the codex
-review cap above. It is an **agent-honored / workflow-discipline cap**,
-not a server-side refusal — unlike `gc_codex_review`, the test-quality
-flow has no MCP review entry point, and `gc_post_decision_record` does
-not refuse cycle 4 for `reviewer: "test-quality"` (no prior-marker count
-field, no override_cap parameter, no override_reason auditing). The agent
-must stop after cycle 3 and escalate to the user; past cycle 3 is an
-architectural-escalation point — the user authorizes a further cycle
-explicitly or restructures the change. The parent owns Step 14
-progression; the child `review-tests` skill reports the review outcome
-and returns control without advancing phases.
+review cap. Per #884 v2 the cap is **server-side**: the MCP tool
+`gc_test_quality_review` counts `gc:test-quality-review-cycle` markers
+on the issue thread and refuses cycle 4 unless `override_cap=true` with
+a non-empty `override_reason`. The marker family is disjoint from
+`gc:codex-prepush-cycle` and `gc:decision-record`; the three counters
+never cross-count. Branch is recorded for audit context only — a
+branch rename on the same issue does NOT reset the counter.
 
 The whole point of the test-quality review is to **fix** the tests, not
-to file a status report on them. When `review-tests` returns findings,
-the parent `/implement` workflow MUST fix every finding in the same agent
-turn (classify, apply the fix, self-verify, commit/push, post the
-decision record with `fix` / `wontfix` / `not-applicable` dispositions,
-re-invoke) without stopping or echoing the findings back to the user.
-Surfacing findings back to the user as a status report is the failure
-mode that resurfaced after the original #884 fix shipped and is
-explicitly forbidden by the parent's Step 13 contract. The child skill's
-"return control" prose means yield the agent turn back to the parent —
-not stop the workflow.
+to file a status report on them. The MCP tool returns a structured
+envelope with `findings[]` and `next_action`; the parent /implement
+agent reads `next_action` as a directive. On
+`next_action: "fix_findings_and_reinvoke"` the parent fixes every
+finding in the same agent turn (classify, apply the fix, self-verify,
+commit/push, post the decision record with `fix` / `wontfix` /
+`not-applicable` dispositions, re-invoke). On
+`next_action: "post_clean_decision_record_and_advance_to_step_14"` the
+parent posts the clean `gc_post_decision_record(findings: [])`,
+confirms `ok: true`, and proceeds to Step 14 in the same turn. The
+parent does NOT echo findings back to the user — the v1 prose-only
+attempt to forbid that behavior failed because the Skill-tool
+boundary's autoregressive bias overrode the SKILL.md rule; the v2 MCP
+tool boundary closes that bias by returning structured `next_action`
+rather than prose findings.
 
 ### Codex findings issue-thread record
 

@@ -1363,6 +1363,30 @@ def run_step13_decision_record_contract(
         )
 
     missing: list[str] = []
+    # Per #884 v2: Step 13 must invoke the MCP tool (`gc_test_quality_review`),
+    # not the legacy `Skill("review-tests")` boundary. The Skill-tool
+    # boundary's autoregressive bias was the root cause of the #884 v1
+    # regression (parent agent echoed prose findings back to the user
+    # instead of fixing them in-turn); the MCP tool returns a structured
+    # `next_action` envelope that overrides the bias. Pin that requirement
+    # structurally so a future SKILL edit cannot silently regress to the
+    # old boundary while keeping the decision-record prose intact.
+    if "gc_test_quality_review" not in section:
+        missing.append(
+            "MCP-tool invocation `gc_test_quality_review` (per #884 v2 the "
+            "test-quality reviewer is an MCP tool returning a structured "
+            "`next_action` envelope, not a `Skill(\"review-tests\")` call; "
+            "the Skill-tool boundary's prose-return shape was the root cause "
+            "of the v1 regression)"
+        )
+    # `next_action` is the dispatch field the parent reads as a directive
+    # rather than as text to summarize. The SKILL must surface it
+    # explicitly so the dispatch branches are visible to readers.
+    if "next_action" not in section:
+        missing.append(
+            "`next_action` dispatch field (the parent reads it as a directive; "
+            "must be explicit in Step 13 prose, not implied)"
+        )
     if "gc_post_decision_record" not in section:
         missing.append(
             "tool name `gc_post_decision_record` (the canonical durable-record "

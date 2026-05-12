@@ -2807,6 +2807,167 @@ export function buildCodexReviewPrePushCycleMarker({
 }
 
 // ---------------------------------------------------------------------------
+// gc_test_quality_review cycle-cap enforcement (issue #884 follow-up)
+//
+// Step 13 used to invoke the `review-tests` skill via the agent's Skill tool.
+// The skill returned prose-formatted findings; the parent /implement agent
+// then either advanced (clean) or fixed and re-invoked (findings). In
+// practice the Skill-tool boundary creates a strong "I just got a result,
+// respond to the user" autoregressive bias that the SKILL.md prose cannot
+// reliably override: the agent kept echoing findings back to the user as a
+// status report instead of fixing them in the same turn. The fix is to
+// match the gc_codex_review tool boundary: a structured envelope with
+// `next_action`, server-side cycle cap, durable findings record on the
+// issue thread. The `next_action` field reads as a directive, not a status
+// report, so the parent agent does not yield after consuming it.
+//
+// Marker family `gc:test-quality-review-cycle` is disjoint from
+// `gc:codex-prepush-cycle` so the two counters never cross-count. The cap
+// is anchored to the resolved GitHub issue (per ADR-029), matching the
+// codex pre-push key. The cap value (3) matches the codex cap.
+// ---------------------------------------------------------------------------
+
+export const TEST_QUALITY_REVIEW_HARD_CAP = 3;
+export const TEST_QUALITY_REVIEW_MARKER_PREFIX =
+  "<!-- gc:test-quality-review-cycle";
+const TEST_QUALITY_REVIEW_MARKER_RE =
+  /<!--\s*gc:test-quality-review-cycle\s+issue="(\d+)"\s+branch="((?:[^"\\]|\\.)*)"\s+cycle="(\d+)"[^]*?-->/g;
+
+// Pure: count test-quality cycle markers for the given issue. Same shape
+// as parseCodexReviewPrePushCycleMarkers — counter anchored on the issue
+// alone; the branch attribute is audit-only context and a branch rename
+// cannot reset the counter.
+export function parseTestQualityReviewCycleMarkers(commentBodies, issueNumber) {
+  if (!Array.isArray(commentBodies)) return 0;
+  let count = 0;
+  for (const body of commentBodies) {
+    if (typeof body !== "string") continue;
+    for (const m of body.matchAll(TEST_QUALITY_REVIEW_MARKER_RE)) {
+      const markerIssue = Number.parseInt(m[1], 10);
+      if (markerIssue !== issueNumber) continue;
+      try {
+        JSON.parse(`"${m[2]}"`);
+      } catch {
+        continue;
+      }
+      count += 1;
+    }
+  }
+  return count;
+}
+
+// Pure: decide whether the next test-quality cycle is allowed. Same shape
+// and override semantics as evaluateCodexReviewPrePushCycleCap. Override
+// (cycle hardCap+1 onward) requires a non-empty override_reason; the
+// agent cannot self-authorize past the cap.
+export function evaluateTestQualityReviewCycleCap({
+  priorCount,
+  issueNumber,
+  branchName,
+  hardCap = TEST_QUALITY_REVIEW_HARD_CAP,
+  overrideCap = false,
+  overrideReason = null,
+}) {
+  if (
+    typeof priorCount !== "number" ||
+    !Number.isFinite(priorCount) ||
+    priorCount < 0
+  ) {
+    throw new Error(
+      `evaluateTestQualityReviewCycleCap: priorCount must be a non-negative number, got ${priorCount}`,
+    );
+  }
+
+  if (overrideCap === true) {
+    if (typeof overrideReason !== "string" || overrideReason.trim() === "") {
+      return {
+        ok: false,
+        error: "test_quality_review_override_missing_reason",
+        message:
+          "override_cap=true requires a non-empty override_reason quoting the user's authorization. " +
+          "Audits cannot distinguish legitimate overrides from accidents without a reason.",
+        issue_number: issueNumber,
+        branch: branchName,
+        prior_cycles: priorCount,
+        cap: hardCap,
+      };
+    }
+    return {
+      ok: true,
+      nextCycle: priorCount + 1,
+      cap: hardCap,
+      override: true,
+      override_reason: overrideReason.trim(),
+      next_action: "fix_findings_then_summarize_and_escalate",
+    };
+  }
+
+  if (priorCount >= hardCap) {
+    return {
+      ok: false,
+      error: "test_quality_review_cap_reached",
+      message:
+        `gc_test_quality_review hard cap reached (${hardCap} cycles) for issue #${issueNumber} ` +
+        `on branch '${branchName}'. Per ADR-029 / #884 follow-up, after cycle ${hardCap} you must ` +
+        `(a) post a summary of remaining findings + fix history to the issue thread, then (b) ` +
+        `escalate to the user and ask whether to run cycle ${hardCap + 1} or ship as-is. Do not ` +
+        `address findings by silently re-invoking the reviewer. If the user authorizes another ` +
+        `cycle, retry with override_cap=true and override_reason="<their authorization>".`,
+      issue_number: issueNumber,
+      branch: branchName,
+      prior_cycles: priorCount,
+      cap: hardCap,
+      next_action: "post_summary_and_escalate_to_user",
+    };
+  }
+
+  const nextCycle = priorCount + 1;
+  return {
+    ok: true,
+    nextCycle,
+    cap: hardCap,
+    next_action:
+      nextCycle === hardCap
+        ? "fix_findings_then_summarize_and_escalate"
+        : "fix_findings_and_reinvoke",
+  };
+}
+
+export function buildTestQualityReviewCycleMarker({
+  issueNumber,
+  branchName,
+  cycleNumber,
+  override = false,
+  overrideReason = null,
+}) {
+  const branchAttr = JSON.stringify(String(branchName)).slice(1, -1);
+  const overrideAttr = override === true ? ' override="true"' : "";
+  const reasonAttr =
+    override === true &&
+    typeof overrideReason === "string" &&
+    overrideReason.trim() !== ""
+      ? ` reason=${JSON.stringify(overrideReason.trim())}`
+      : "";
+  const headline = override
+    ? `_gc_test_quality_review cycle ${cycleNumber} (USER-AUTHORIZED OVERRIDE past cap ${TEST_QUALITY_REVIEW_HARD_CAP}) complete for issue #${issueNumber} on branch '${branchName}'._`
+    : `_gc_test_quality_review cycle ${cycleNumber} of ${TEST_QUALITY_REVIEW_HARD_CAP} complete for issue #${issueNumber} on branch '${branchName}'._`;
+  const reasonLine =
+    override &&
+    typeof overrideReason === "string" &&
+    overrideReason.trim() !== ""
+      ? `\nOverride reason: ${overrideReason.trim()}`
+      : "";
+  return [
+    `${TEST_QUALITY_REVIEW_MARKER_PREFIX} issue="${issueNumber}" branch="${branchAttr}" cycle="${cycleNumber}"${overrideAttr}${reasonAttr} -->`,
+    "",
+    headline +
+      ` Posted by the MCP server to enforce the gc_test_quality_review hard-cap-${TEST_QUALITY_REVIEW_HARD_CAP} contract (issue #884 follow-up). ` +
+      "Do not edit or delete — used by the next `gc_test_quality_review` invocation to count cycles." +
+      reasonLine,
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // gc workflow phase markers (issue #794 MVP-2)
 //
 // Phase markers record completion of a workflow phase on a GitHub issue so
@@ -3911,6 +4072,756 @@ export function dedupFindings(comments) {
     }
   }
   return Array.from(seen.values());
+}
+
+// ---------------------------------------------------------------------------
+// gc_test_quality_review prompt + findings parser (issue #884 follow-up)
+//
+// Engine: shell out to the `claude` CLI with the canonical review-tests
+// rubric and the changed test-file paths. The CLI returns structured JSON
+// (validated by `--json-schema`); the parser converts that JSON into the
+// internal findings shape the runner emits to the caller. The structured
+// envelope is the whole point of the migration off the Skill-tool boundary
+// — see ADR-029 "Test-quality review uses the same decision-record
+// contract" and the architecture note at
+// `architecture/notes/test-quality-clean-continuation-preflight.md`.
+// ---------------------------------------------------------------------------
+
+export const TEST_QUALITY_REVIEW_FINDINGS_SCHEMA = {
+  type: "object",
+  properties: {
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          severity: { type: "string", enum: ["critical", "warning"] },
+          location: { type: "string", minLength: 1 },
+          problem: { type: "string", minLength: 1 },
+          why_it_matters: { type: "string" },
+          fix: { type: "string", minLength: 1 },
+        },
+        required: ["severity", "location", "problem", "fix"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["findings"],
+  additionalProperties: false,
+};
+
+// Default model for the test-quality review engine. Per user direction
+// (#884 follow-up): Sonnet 4.6 is the right balance — strong enough to
+// catch false-assurance tests, cheap enough to run on every PR.
+export const TEST_QUALITY_REVIEW_DEFAULT_MODEL = "claude-sonnet-4-6";
+
+// Hard timeout for a single review call. Claude with file-reading tools
+// can take 1–3 minutes against a moderate-sized test diff. 10 minutes is
+// the worst-case ceiling; past that, fail loud rather than hang.
+export const TEST_QUALITY_REVIEW_TIMEOUT_MS = 600_000;
+
+export function buildTestQualityReviewPrompt({
+  baseBranch,
+  changedTestFiles,
+}) {
+  if (typeof baseBranch !== "string" || baseBranch.trim() === "") {
+    throw new Error("buildTestQualityReviewPrompt: baseBranch must be a non-empty string");
+  }
+  if (!Array.isArray(changedTestFiles) || changedTestFiles.length === 0) {
+    throw new Error(
+      "buildTestQualityReviewPrompt: changedTestFiles must be a non-empty array",
+    );
+  }
+  for (const path of changedTestFiles) {
+    if (typeof path !== "string" || path.trim() === "") {
+      throw new Error(
+        "buildTestQualityReviewPrompt: every changedTestFiles entry must be a non-empty string",
+      );
+    }
+  }
+  const listing = changedTestFiles.map((p) => `- ${p}`).join("\n");
+  return [
+    "You are reviewing test files changed against the base branch `" + baseBranch + "`.",
+    "Your job is to identify TESTS THAT PROVIDE FALSE ASSURANCE — tests that pass but would still pass if the implementation were broken.",
+    "",
+    "## Files to review",
+    "",
+    "The following test files have changed in this branch. For each, also read the source file it tests so you understand what behavior should be verified. Use the available Read / Glob / Grep tools to navigate the repository (Bash is intentionally not provided; restrict yourself to read-only navigation).",
+    "",
+    listing,
+    "",
+    "## What to flag",
+    "",
+    "### Critical (must fix)",
+    "1. **Assertion-free tests** — tests that call code but never assert on the result. A test that only checks \"no exception was raised\" is not a test.",
+    "2. **Mock-only assertions** — the only assertion is that a mock was called. The test must also assert on the return value, side effect, or state change produced by the code under test.",
+    "3. **Integration masquerading as unit** — tests that hit a real database, make real HTTP calls, touch the filesystem, or spawn subprocesses without being explicitly marked as integration tests.",
+    "4. **Per-test resource setup** — creating a database, connection pool, or heavy resource inside each test method instead of using shared fixtures or setup methods.",
+    "5. **Mocking language/framework internals** — mocking subprocess, os.path, datetime.now, or equivalent framework internals. If you need to mock these, the code under test needs restructuring, not more mocks.",
+    "6. **Tests that can't detect regressions** — if you could replace the function under test with a no-op and the test would still pass, the test is worthless.",
+    "",
+    "### Warnings (should fix)",
+    "7. **Inline mock/stub abuse** — excessive mock/stub/spy instantiation inside a single test method instead of shared fixtures or setup.",
+    "8. **Missing parameterization** — multiple near-identical test methods that differ only in input/expected output. These should use parameterized tests.",
+    "9. **Overly broad exception catching** — catching generic Exception types in assertions instead of the specific exception.",
+    "10. **No negative test cases** — only happy-path tests with no error/edge case coverage.",
+    "",
+    "## How to review",
+    "",
+    "For each test file:",
+    "1. Read the test file.",
+    "2. Read the source file it tests.",
+    "3. For each test method, ask: \"If I broke the implementation, would this test catch it?\" If the answer is no, flag it.",
+    "",
+    "## Output",
+    "",
+    "Return ONLY a JSON object matching the provided schema, with no surrounding prose. Shape:",
+    "",
+    "```",
+    "{ \"findings\": [",
+    "    {",
+    "      \"severity\": \"critical\" | \"warning\",",
+    "      \"location\": \"<file>::<TestClass>::<test_method>\"  OR  \"<file>:<line>\",",
+    "      \"problem\": \"<what's wrong>\",",
+    "      \"why_it_matters\": \"<what regression this would miss>\",",
+    "      \"fix\": \"<specific fix, not vague advice>\"",
+    "    },",
+    "    ...",
+    "] }",
+    "",
+    "If the tests are solid, return `{ \"findings\": [] }`.",
+    "```",
+  ].join("\n");
+}
+
+// Parse the JSON envelope returned by the claude CLI. With
+// `--output-format json` claude returns `{ result: "...", ... }` where
+// `result` is the model's actual output (which itself should be the JSON
+// matching TEST_QUALITY_REVIEW_FINDINGS_SCHEMA). We unwrap that envelope
+// when present; otherwise we accept the raw findings object directly so
+// the parser is robust to mode changes.
+//
+// Returns `{ findings: [...] }` on success. Throws a descriptive Error on
+// any structural violation — the runner surfaces the error rather than
+// silently assuming zero findings.
+export function parseTestQualityReviewFindings(stdout) {
+  if (typeof stdout !== "string") {
+    throw new Error("test-quality review output was not a string");
+  }
+  const trimmed = stdout.trim();
+  if (trimmed === "") {
+    throw new Error("test-quality review output was empty");
+  }
+  let envelope;
+  try {
+    envelope = JSON.parse(trimmed);
+  } catch (err) {
+    throw new Error(`test-quality review output is not valid JSON: ${err.message}`);
+  }
+
+  // claude --output-format json wraps the model's output in
+  // `{ type: "result", result: "...", ... }`. If we see that envelope,
+  // parse `result` as JSON; otherwise treat the top-level object as the
+  // findings payload.
+  let payload = envelope;
+  if (envelope && typeof envelope === "object" && typeof envelope.result === "string") {
+    try {
+      payload = JSON.parse(envelope.result);
+    } catch (err) {
+      throw new Error(
+        `test-quality review .result field is not valid JSON: ${err.message}`,
+      );
+    }
+  }
+
+  if (payload == null || typeof payload !== "object") {
+    throw new Error(
+      "test-quality review payload is not an object (expected { findings: [...] })",
+    );
+  }
+  if (!Array.isArray(payload.findings)) {
+    throw new Error("test-quality review payload.findings is not an array");
+  }
+
+  const out = [];
+  payload.findings.forEach((raw, i) => {
+    if (raw == null || typeof raw !== "object") {
+      throw new Error(`test-quality review findings[${i}] is not an object`);
+    }
+    const { severity, location, problem, why_it_matters, fix } = raw;
+    if (severity !== "critical" && severity !== "warning") {
+      throw new Error(
+        `test-quality review findings[${i}].severity must be 'critical' or 'warning', got ${JSON.stringify(severity)}`,
+      );
+    }
+    if (typeof location !== "string" || location.trim() === "") {
+      throw new Error(`test-quality review findings[${i}].location must be a non-empty string`);
+    }
+    if (typeof problem !== "string" || problem.trim() === "") {
+      throw new Error(`test-quality review findings[${i}].problem must be a non-empty string`);
+    }
+    if (typeof fix !== "string" || fix.trim() === "") {
+      throw new Error(`test-quality review findings[${i}].fix must be a non-empty string`);
+    }
+    if (why_it_matters != null && typeof why_it_matters !== "string") {
+      throw new Error(
+        `test-quality review findings[${i}].why_it_matters must be a string when set`,
+      );
+    }
+    out.push({
+      severity,
+      location: location.trim(),
+      problem: problem.trim(),
+      why_it_matters: typeof why_it_matters === "string" ? why_it_matters.trim() : "",
+      fix: fix.trim(),
+    });
+  });
+
+  return { findings: out };
+}
+
+// ---------------------------------------------------------------------------
+// gc_test_quality_review runner (issue #884 follow-up)
+//
+// Shell out to the `claude` CLI with the canonical review-tests rubric +
+// the changed test-file paths, parse the structured envelope, post the
+// durable findings record to the issue thread, write the cycle marker,
+// and return the same envelope shape gc_codex_review uses so the parent
+// /implement agent reads `next_action` as a directive (not a status
+// report). The whole point of the Skill-tool → MCP-tool migration is the
+// envelope: the structured `next_action` field overrides the
+// autoregressive "Skill returned, present to user" bias that defeated
+// the SKILL-prose fix in #884 v1.
+// ---------------------------------------------------------------------------
+
+// Find changed test files vs the base branch. Same predicate the legacy
+// `review-tests` Skill used (`(test_|_test\.|tests/|Test\.)`) so the
+// migration preserves coverage exactly. Returns repo-relative paths.
+export async function findChangedTestFiles({ repoRoot, baseBranch }) {
+  if (typeof repoRoot !== "string" || repoRoot.trim() === "") {
+    throw new Error("findChangedTestFiles: repoRoot must be a non-empty string");
+  }
+  if (typeof baseBranch !== "string" || baseBranch.trim() === "") {
+    throw new Error("findChangedTestFiles: baseBranch must be a non-empty string");
+  }
+  let stdout = "";
+  // Try origin/<base>...HEAD first; fall back to local <base>...HEAD; fetch
+  // and retry as a last resort. Mirrors the existing Skill behavior.
+  for (const ref of [`origin/${baseBranch}`, baseBranch]) {
+    try {
+      const result = await execFile("git", ["-C", repoRoot, "diff", "--name-only", `${ref}...HEAD`]);
+      stdout = result.stdout;
+      break;
+    } catch {
+      // try next
+    }
+  }
+  if (stdout === "") {
+    try {
+      await execFile("git", ["-C", repoRoot, "fetch", "origin", baseBranch]);
+      const result = await execFile("git", [
+        "-C",
+        repoRoot,
+        "diff",
+        "--name-only",
+        `origin/${baseBranch}...HEAD`,
+      ]);
+      stdout = result.stdout;
+    } catch (err) {
+      throw new Error(
+        `findChangedTestFiles: unable to resolve base ref '${baseBranch}': ${err.message}`,
+      );
+    }
+  }
+  return stdout
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s !== "")
+    .filter((path) => /(test_|_test\.|tests\/|Test\.)/i.test(path))
+    // Skill markdown is not a code file — exclude so the skill .md itself
+    // never appears as a "test file" needing test-quality review.
+    .filter((path) => !path.endsWith(".md"));
+}
+
+// Exec wrapper around the `claude` CLI. The env-var strip is essential:
+// when ANTHROPIC_API_KEY is set, claude uses that key (which may have no
+// credits in this environment); stripping it forces claude onto the
+// OAuth credentials that powered the parent Claude Code session.
+export async function runSingleClaudeTestQualityReview({
+  repoRoot,
+  prompt,
+  model = TEST_QUALITY_REVIEW_DEFAULT_MODEL,
+  schema = TEST_QUALITY_REVIEW_FINDINGS_SCHEMA,
+  timeoutMs = TEST_QUALITY_REVIEW_TIMEOUT_MS,
+}) {
+  const args = [
+    "--print",
+    "--model",
+    model,
+    "--output-format",
+    "json",
+    "--json-schema",
+    JSON.stringify(schema),
+    "--add-dir",
+    repoRoot,
+    "--permission-mode",
+    "bypassPermissions",
+    "--allowedTools",
+    "Read Glob Grep",
+  ];
+  const childEnv = { ...process.env };
+  delete childEnv.ANTHROPIC_API_KEY;
+  const { stdout } = await execFileWithInput("claude", args, {
+    input: prompt,
+    cwd: repoRoot,
+    env: childEnv,
+    maxBuffer: 10 * 1024 * 1024,
+    timeoutMs,
+  });
+  return stdout;
+}
+
+// Build the durable findings record body for posting to the issue thread.
+// Mirrors buildCodexReviewFindingsComments's shape but simpler (one
+// reviewer, structured findings).
+export function buildTestQualityReviewFindingsComment({
+  cycleNumber,
+  cap,
+  issueNumber,
+  branch,
+  findings,
+  model = TEST_QUALITY_REVIEW_DEFAULT_MODEL,
+}) {
+  const lines = [];
+  lines.push(
+    `<!-- gc:test-quality-review-findings issue="${issueNumber}" branch="${JSON.stringify(String(branch)).slice(1, -1)}" cycle="${cycleNumber}" -->`,
+  );
+  lines.push("");
+  lines.push(`## gc_test_quality_review cycle ${cycleNumber} of ${cap} — issue #${issueNumber}`);
+  lines.push("");
+  lines.push(`**Reviewer:** test-quality (${model} via gc_test_quality_review)  `);
+  lines.push(`**Branch:** \`${branch}\`  `);
+  lines.push(`**Cycle:** ${cycleNumber} / ${cap}  `);
+  lines.push(`**Findings:** ${findings.length}${findings.length === 0 ? " (clean run)" : ""}`);
+  if (findings.length > 0) {
+    lines.push("");
+    findings.forEach((f, i) => {
+      lines.push(`### Finding ${i + 1} — [${f.severity}] \`${f.location}\``);
+      lines.push("");
+      lines.push(`**Problem:** ${f.problem}`);
+      if (f.why_it_matters && f.why_it_matters.trim() !== "") {
+        lines.push(`**Why it matters:** ${f.why_it_matters}`);
+      }
+      lines.push(`**Fix:** ${f.fix}`);
+      if (i < findings.length - 1) lines.push("");
+    });
+  }
+  return lines.join("\n");
+}
+
+export async function runTestQualityReview({
+  repoPath,
+  baseBranch = null,
+  issueNumber = null,
+  prNumber = null,
+  overrideCap = false,
+  overrideReason = null,
+  model = TEST_QUALITY_REVIEW_DEFAULT_MODEL,
+}) {
+  const repoRoot = await ensureGitRepo(repoPath);
+
+  // Resolve base_branch: caller wins; otherwise pull from
+  // .ground-control.yaml; otherwise "dev". Preserves the legacy
+  // standalone-Skill behavior (which read the YAML directly).
+  let effectiveBaseBranch = baseBranch;
+  if (effectiveBaseBranch == null || effectiveBaseBranch === "") {
+    try {
+      const ctx = await getRepoGroundControlContext(repoRoot);
+      effectiveBaseBranch =
+        ctx?.workflow?.base_branch && ctx.workflow.base_branch.trim() !== ""
+          ? ctx.workflow.base_branch
+          : "dev";
+    } catch {
+      effectiveBaseBranch = "dev";
+    }
+  }
+
+  const branchName = await getCurrentBranchName(repoRoot);
+  if (!branchName) {
+    return {
+      ok: false,
+      error: "test_quality_review_branch_unresolved",
+      message:
+        "gc_test_quality_review requires a named branch to anchor the cycle counter; HEAD is detached or branch unresolved.",
+      next_action: "checkout_named_feature_branch",
+      finding_count: 0,
+      findings: [],
+    };
+  }
+
+  let effectiveIssue = Number.isInteger(issueNumber) && issueNumber > 0 ? issueNumber : null;
+  if (effectiveIssue == null) {
+    effectiveIssue = deriveIssueNumberFromBranch(branchName);
+  }
+  if (effectiveIssue == null) {
+    return {
+      ok: false,
+      error: "test_quality_review_issue_unresolved",
+      message:
+        `gc_test_quality_review requires an issue number to anchor the cycle counter (per ADR-029). ` +
+        `Branch '${branchName}' does not start with a numeric issue prefix; pass issue_number explicitly.`,
+      branch: branchName,
+      next_action: "pass_issue_number_or_use_numeric_branch_prefix",
+      finding_count: 0,
+      findings: [],
+    };
+  }
+
+  const { owner, name } = await getOwnerRepo(repoRoot);
+
+  // Cycle cap enforcement. Count existing test-quality cycle markers on
+  // the issue thread; refuse cycle hardCap+1 unless override_cap=true
+  // with a non-empty reason.
+  const priorCount = await readPriorTestQualityReviewCycleCount(
+    repoRoot,
+    owner,
+    name,
+    effectiveIssue,
+  );
+  const decision = evaluateTestQualityReviewCycleCap({
+    priorCount,
+    issueNumber: effectiveIssue,
+    branchName,
+    overrideCap,
+    overrideReason,
+  });
+  if (!decision.ok) {
+    return {
+      ok: false,
+      error: decision.error,
+      message: decision.message,
+      issue_number: decision.issue_number ?? effectiveIssue,
+      branch: decision.branch ?? branchName,
+      prior_cycles: decision.prior_cycles,
+      cap: decision.cap,
+      next_action: decision.next_action ?? null,
+      finding_count: 0,
+      findings: [],
+    };
+  }
+
+  // Find changed test files. Zero files is a legitimate zero-findings
+  // result — no need to spin up a Claude call.
+  const changedTestFiles = await findChangedTestFiles({ repoRoot, baseBranch: effectiveBaseBranch });
+  if (changedTestFiles.length === 0) {
+    // Still record a cycle so the cap counts correctly. Preserve override
+    // metadata in both the marker and the envelope so an authorized
+    // cycle 4 with no changed tests still leaves a durable audit trail.
+    const recordBody = buildTestQualityReviewFindingsComment({
+      cycleNumber: decision.nextCycle,
+      cap: decision.cap,
+      issueNumber: effectiveIssue,
+      branch: branchName,
+      findings: [],
+      model,
+    });
+    const markerWriteResult = await postFindingsRecordAndCycleMarker({
+      repoRoot,
+      owner,
+      name,
+      issueNumber: effectiveIssue,
+      branchName,
+      cycleNumber: decision.nextCycle,
+      override: decision.override === true,
+      overrideReason: decision.override_reason ?? null,
+      recordBody,
+    });
+    if (!markerWriteResult.ok) return markerWriteResult.envelope;
+    return {
+      ok: true,
+      issue_number: effectiveIssue,
+      branch: branchName,
+      pr_number: prNumber,
+      cycle: decision.nextCycle,
+      cap: decision.cap,
+      finding_count: 0,
+      findings: [],
+      next_action: "post_clean_decision_record_and_advance_to_step_14",
+      findings_comment_url: markerWriteResult.recordUrl,
+      changed_test_files: [],
+      override: decision.override === true,
+      override_reason: decision.override_reason ?? null,
+      model,
+    };
+  }
+
+  const prompt = buildTestQualityReviewPrompt({ baseBranch: effectiveBaseBranch, changedTestFiles });
+  let stdout;
+  try {
+    stdout = await runSingleClaudeTestQualityReview({
+      repoRoot,
+      prompt,
+      model,
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error: "test_quality_review_engine_failed",
+      message: `claude CLI invocation failed: ${err.message}`,
+      issue_number: effectiveIssue,
+      branch: branchName,
+      next_action: "fix_engine_issue_and_retry",
+      finding_count: 0,
+      findings: [],
+    };
+  }
+
+  let parsed;
+  try {
+    parsed = parseTestQualityReviewFindings(stdout);
+  } catch (err) {
+    return {
+      ok: false,
+      error: "test_quality_review_parse_failed",
+      message: `parsing claude output failed: ${err.message}`,
+      raw_output: stdout.slice(0, 2000),
+      issue_number: effectiveIssue,
+      branch: branchName,
+      next_action: "inspect_engine_output_and_retry",
+      finding_count: 0,
+      findings: [],
+    };
+  }
+
+  const findings = parsed.findings;
+
+  // Disarm caller-controlled fields against reserved marker injection
+  // (codex cycle-3 security finding F10: prompt-injected test files
+  // could otherwise place `<!-- gc:... -->` syntax into a finding's
+  // location/problem/fix and forge workflow markers that the next
+  // parser would count as real state). Mirrors the
+  // rejectReservedMarkerSequence pattern used by gc_post_decision_record.
+  for (let i = 0; i < findings.length; i++) {
+    const f = findings[i];
+    for (const [k, v] of [
+      ["location", f.location],
+      ["problem", f.problem],
+      ["why_it_matters", f.why_it_matters],
+      ["fix", f.fix],
+    ]) {
+      const e = rejectReservedMarkerSequence(v, `findings[${i}].${k}`);
+      if (e) {
+        return {
+          ok: false,
+          error: "test_quality_review_reserved_marker",
+          message: e,
+          issue_number: effectiveIssue,
+          branch: branchName,
+          next_action: "scrub_findings_and_retry",
+          finding_count: findings.length,
+          findings,
+        };
+      }
+    }
+  }
+
+  // Build the durable findings record and the cycle marker; post both
+  // to the issue thread. The wrapper enforces the body-size cap +
+  // sensitive-content scrub + ordered posts before either write so a
+  // marker-only or record-only partial state cannot be produced.
+  const recordBody = buildTestQualityReviewFindingsComment({
+    cycleNumber: decision.nextCycle,
+    cap: decision.cap,
+    issueNumber: effectiveIssue,
+    branch: branchName,
+    findings,
+    model,
+  });
+
+  const markerWriteResult = await postFindingsRecordAndCycleMarker({
+    repoRoot,
+    owner,
+    name,
+    issueNumber: effectiveIssue,
+    branchName,
+    cycleNumber: decision.nextCycle,
+    override: decision.override === true,
+    overrideReason: decision.override_reason ?? null,
+    recordBody,
+    findingCount: findings.length,
+    findings,
+  });
+  if (!markerWriteResult.ok) return markerWriteResult.envelope;
+
+  const nextAction =
+    findings.length === 0
+      ? "post_clean_decision_record_and_advance_to_step_14"
+      : decision.next_action;
+
+  return {
+    ok: true,
+    issue_number: effectiveIssue,
+    branch: branchName,
+    pr_number: prNumber,
+    cycle: decision.nextCycle,
+    cap: decision.cap,
+    finding_count: findings.length,
+    findings,
+    next_action: nextAction,
+    findings_comment_url: markerWriteResult.recordUrl,
+    changed_test_files: changedTestFiles,
+    override: decision.override === true,
+    override_reason: decision.override_reason ?? null,
+    model,
+  };
+}
+
+// Post the findings record + cycle marker, enforcing the body-size cap
+// and sensitive-content scrub on the record body, and ordering the
+// posts so the cycle marker is written ONLY after the record write
+// succeeded. On any failure returns a structured envelope; on success
+// returns `{ ok: true, recordUrl }`. Mirrors the codex review record /
+// marker write pattern (`postCodexReviewFindingsComment`) so partial
+// states cannot orphan a cycle counter.
+async function postFindingsRecordAndCycleMarker({
+  repoRoot,
+  owner,
+  name,
+  issueNumber,
+  branchName,
+  cycleNumber,
+  override,
+  overrideReason,
+  recordBody,
+  findingCount = 0,
+  findings = [],
+}) {
+  // Body-size guard. GitHub's REST issue-comment endpoint rejects bodies
+  // over 65535 chars; refuse at the boundary so the cycle isn't
+  // half-spent if a verbose Claude run overruns. Same cap as
+  // gc_post_decision_record / gc_post_final_report.
+  if (recordBody.length > GITHUB_ISSUE_COMMENT_BODY_MAX) {
+    return {
+      ok: false,
+      envelope: {
+        ok: false,
+        error: "test_quality_review_record_too_large",
+        message:
+          `rendered findings record is ${recordBody.length} bytes; GitHub issue-comment cap is ` +
+          `${GITHUB_ISSUE_COMMENT_BODY_MAX}. Reduce verbose finding fields or split.`,
+        issue_number: issueNumber,
+        branch: branchName,
+        next_action: "shorten_findings_and_retry",
+        finding_count: findingCount,
+        findings,
+      },
+    };
+  }
+  const sensitiveError = detectSensitiveBodyContent(recordBody);
+  if (sensitiveError) {
+    return {
+      ok: false,
+      envelope: {
+        ok: false,
+        error: "test_quality_review_record_rejected",
+        message: `rendered findings record matched the sensitive-content guardrail; refusing to post. ${sensitiveError}`,
+        issue_number: issueNumber,
+        branch: branchName,
+        next_action: "scrub_findings_and_retry",
+        finding_count: findingCount,
+        findings,
+      },
+    };
+  }
+  let recordUrl;
+  try {
+    recordUrl = await postIssueCommentAndReturnUrl({
+      repoRoot,
+      owner,
+      name,
+      issueNumber,
+      body: recordBody,
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      envelope: {
+        ok: false,
+        error: "test_quality_review_record_post_failed",
+        message: `findings record POST failed: ${err.message}`,
+        issue_number: issueNumber,
+        branch: branchName,
+        next_action: "fix_github_posting_and_retry",
+        finding_count: findingCount,
+        findings,
+      },
+    };
+  }
+
+  // Marker write — failure here is harder to recover from cleanly: the
+  // record is durable on the thread but the cap counter never observed
+  // this cycle. Return a structured envelope naming the orphaned record
+  // so the caller can either back out (delete the record) or write a
+  // fix-up marker by hand.
+  const markerBody = buildTestQualityReviewCycleMarker({
+    issueNumber,
+    branchName,
+    cycleNumber,
+    override,
+    overrideReason,
+  });
+  try {
+    await postIssueCommentAndReturnUrl({
+      repoRoot,
+      owner,
+      name,
+      issueNumber,
+      body: markerBody,
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      envelope: {
+        ok: false,
+        error: "test_quality_review_marker_post_failed",
+        message:
+          `cycle marker POST failed AFTER the findings record was posted: ${err.message}. ` +
+          `The record is durable at ${recordUrl}; the cycle counter did NOT observe this run. ` +
+          `Either re-POST the marker manually OR delete the record and retry; do not silently retry ` +
+          `the whole tool call (the record would duplicate).`,
+        issue_number: issueNumber,
+        branch: branchName,
+        findings_comment_url: recordUrl,
+        next_action: "manual_marker_repost_or_record_delete",
+        finding_count: findingCount,
+        findings,
+      },
+    };
+  }
+  return { ok: true, recordUrl };
+}
+
+// Helper: count test-quality cycle markers across the issue thread.
+async function readPriorTestQualityReviewCycleCount(repoRoot, owner, name, issueNumber) {
+  const bodies = await readIssueCommentBodies(repoRoot, owner, name, issueNumber);
+  return parseTestQualityReviewCycleMarkers(bodies, issueNumber);
+}
+
+// Helper: post an issue comment, return its HTML URL.
+async function postIssueCommentAndReturnUrl({ repoRoot, owner, name, issueNumber, body }) {
+  const { stdout } = await execFile(
+    "gh",
+    [
+      "api",
+      `/repos/${owner}/${name}/issues/${issueNumber}/comments`,
+      "-f",
+      `body=${body}`,
+      "--jq",
+      ".html_url",
+    ],
+    { cwd: repoRoot, maxBuffer: 10 * 1024 * 1024 },
+  );
+  return stdout.trim();
 }
 
 // ---------------------------------------------------------------------------

@@ -70,6 +70,7 @@ import {
   runSweep, runSweepAll,
   getRepoGroundControlContext,
   runCodexArchitecturePreflight, runCodexReview, runCodexVerifyFinding,
+  runTestQualityReview, TEST_QUALITY_REVIEW_HARD_CAP,
   runPostImplementationPlan,
   runPostDecisionRecord, runPostFinalReport, runRenderPrBody, runLogStepTelemetry,
   DECISION_RECORD_REVIEWERS, DECISION_RECORD_DECISIONS, DECISION_RECORD_CLASSIFICATIONS,
@@ -475,6 +476,48 @@ server.tool(
         overrideReason: override_reason ?? null,
         overridePhaseGate: Boolean(override_phase_gate),
         overridePhaseReason: override_phase_reason ?? null,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_test_quality_review",
+  `Run the canonical /implement Step 13 test-quality review against the diff vs the base branch. ` +
+    `Shells out to the \`claude\` CLI (Sonnet 4.6 by default) with the review-tests rubric and the ` +
+    `changed test-file paths, parses the structured JSON output (validated by --json-schema), posts ` +
+    `the durable findings record + cycle marker to the issue thread, and returns a structured ` +
+    `envelope: \`{ ok, finding_count, findings, cycle, cap, next_action, findings_comment_url, ... }\`. ` +
+    `The \`next_action\` field is "fix_findings_and_reinvoke" / "post_clean_decision_record_and_advance_to_step_14" / ` +
+    `"fix_findings_then_summarize_and_escalate" / "post_summary_and_escalate_to_user" — the parent ` +
+    `/implement workflow reads it as a directive. Replaces the prior Skill("review-tests") boundary, ` +
+    `which produced prose findings that the autoregressive parent agent kept echoing back to the user ` +
+    `instead of fixing in-turn (issue #884 v1 regression). Cycle cap: ${TEST_QUALITY_REVIEW_HARD_CAP} per ` +
+    `issue, server-side; cycle ${TEST_QUALITY_REVIEW_HARD_CAP + 1} requires override_cap=true + override_reason. ` +
+    `Authentication: the CLI invocation strips ANTHROPIC_API_KEY from the subprocess env so claude uses ` +
+    `the host's OAuth session — see docs/DEVELOPMENT_WORKFLOW.md "Test-quality review engine".`,
+  {
+    repo_path: z.string(),
+    base_branch: z.string().optional(),
+    issue_number: z.number().int().positive().optional(),
+    pr_number: z.number().int().positive().optional(),
+    override_cap: z.boolean().optional(),
+    override_reason: z.string().optional(),
+    model: z.string().optional(),
+  },
+  async ({ repo_path, base_branch, issue_number, pr_number, override_cap, override_reason, model }) => {
+    try {
+      return ok(JSON.stringify(await runTestQualityReview({
+        repoPath: repo_path,
+        // Pass null when not supplied so the runner resolves from
+        // .ground-control.yaml; the runner falls back to "dev" only if
+        // YAML doesn't declare workflow.base_branch.
+        baseBranch: base_branch ?? null,
+        issueNumber: issue_number != null ? issue_number : null,
+        prNumber: pr_number != null ? pr_number : null,
+        overrideCap: Boolean(override_cap),
+        overrideReason: override_reason ?? null,
+        ...(model ? { model } : {}),
       }), null, 2));
     } catch (e) { return err(e); }
   },
