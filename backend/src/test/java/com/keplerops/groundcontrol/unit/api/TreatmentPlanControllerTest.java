@@ -154,8 +154,8 @@ class TreatmentPlanControllerTest {
                 .andExpect(
                         jsonPath(
                                 "$.error.message",
-                is(
-                        "Invalid value for field 'status'. Valid values: PLANNED, IN_PROGRESS, BLOCKED, COMPLETED, CANCELED")))
+                                is(
+                                        "Invalid value for field 'status'. Valid values: PLANNED, IN_PROGRESS, BLOCKED, COMPLETED, CANCELED")))
                 .andExpect(jsonPath("$.error.detail.field", is("status")))
                 .andExpect(jsonPath("$.error.detail.validValues", hasItem("PLANNED")))
                 .andExpect(jsonPath("$.error.detail.validValues", hasItem("CANCELED")));
