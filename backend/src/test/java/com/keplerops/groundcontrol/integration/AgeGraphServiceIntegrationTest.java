@@ -78,25 +78,32 @@ class AgeGraphServiceIntegrationTest extends BaseAgeIntegrationTest {
 
     @Test
     void getVisualization_filtersByEntityTypeAgainstRealAge() {
-        // Round-trip the entityTypes filter through real AGE 1.6 to confirm the
-        // `WHERE n.entity_type IN $entity_types` clause and the agtype-bound list parameter
-        // actually filter at the database layer (not just in unit tests with a mock JdbcTemplate).
-        // Materializes a project with both REQUIREMENT and RISK_SCENARIO nodes, then filters to
-        // REQUIREMENT only and asserts the RISK_SCENARIO node was rejected by AGE itself.
+        // Round-trip the entityTypes filter through real AGE 1.6. To prove the filter is actually
+        // applied at the database layer (not just a no-op that happens to return the same set as
+        // the unfiltered call), materialize a REQUIREMENT then call getVisualization with a
+        // filter to OPERATIONAL_ASSET — a *different* entity type. If the AGE-side WHERE clause
+        // is broken, the REQUIREMENT would still appear in the result; with the filter working,
+        // the REQUIREMENT must be excluded and every returned node (if any) must be an
+        // OPERATIONAL_ASSET.
         requirementRepository.save(new Requirement(testProject, "AGE-FILT-A", "Filter A", "stmt"));
         graphClient.materializeGraph();
 
         var filtered = mixedGraphClient.getVisualization(
                 testProject.getId(),
-                java.util.Set.of(com.keplerops.groundcontrol.domain.graph.model.GraphEntityType.REQUIREMENT));
+                java.util.Set.of(com.keplerops.groundcontrol.domain.graph.model.GraphEntityType.OPERATIONAL_ASSET));
 
-        // Every node in the filtered projection must have entityType == REQUIREMENT.
         assertThat(filtered.nodes())
-                .as("AGE-side filter must exclude all non-REQUIREMENT entity types")
-                .allMatch(n ->
-                        n.entityType() == com.keplerops.groundcontrol.domain.graph.model.GraphEntityType.REQUIREMENT);
-        // AGE-FILT-A is REQUIREMENT — must be present after filtering.
-        assertThat(filtered.nodes()).anyMatch(n -> "AGE-FILT-A".equals(n.uid()));
+                .as("AGE-side filter must exclude REQUIREMENT-typed nodes when filter is OPERATIONAL_ASSET")
+                .noneMatch(n -> "AGE-FILT-A".equals(n.uid()))
+                .allMatch(n -> n.entityType()
+                        == com.keplerops.groundcontrol.domain.graph.model.GraphEntityType.OPERATIONAL_ASSET);
+
+        // Sanity check: the unfiltered call MUST include the requirement, so the regression check
+        // above is asymmetric and meaningful (it isn't just "result is empty in both cases").
+        var unfiltered = mixedGraphClient.getVisualization(testProject.getId(), java.util.Set.of());
+        assertThat(unfiltered.nodes())
+                .as("control: unfiltered visualization includes the seeded REQUIREMENT")
+                .anyMatch(n -> "AGE-FILT-A".equals(n.uid()));
     }
 
     @Test
