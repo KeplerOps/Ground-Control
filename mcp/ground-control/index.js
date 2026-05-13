@@ -495,17 +495,22 @@ server.tool(
 
 server.tool(
   "gc_test_quality_review",
-  `Run the canonical /implement Step 13 test-quality review against the diff vs the base branch. ` +
-    `Shells out to the \`claude\` CLI (Sonnet 4.6 by default) with the review-tests rubric and the ` +
+  `Run the canonical /implement Step 6.6 pre-push test-quality review against the staged + unstaged + ` +
+    `untracked diff vs the base branch. (Issue #906 moved this from the former post-PR Step 13 to ` +
+    `pre-push Step 6.6 so the PR opens with both AI-assisted reviewers clean.) Shells out to the ` +
+    `\`claude\` CLI (Sonnet 4.6 by default) with the review-tests rubric and the ` +
     `changed test-file paths, parses the structured JSON output (validated by --json-schema), posts ` +
     `the durable findings record + cycle marker to the issue thread, and returns a structured ` +
     `envelope: \`{ ok, finding_count, findings, cycle, cap, next_action, findings_comment_url, ... }\`. ` +
-    `The \`next_action\` field is "fix_findings_and_reinvoke" / "post_clean_decision_record_and_advance_to_step_14" / ` +
+    `The \`next_action\` field is "fix_findings_and_reinvoke" / "post_clean_decision_record_and_advance_to_phase_c" / ` +
     `"fix_findings_then_summarize_and_escalate" / "post_summary_and_escalate_to_user" — the parent ` +
-    `/implement workflow reads it as a directive. Replaces the prior Skill("review-tests") boundary, ` +
+    `/implement workflow reads it as a directive. "fix_findings_then_summarize_and_escalate" is the ` +
+    `last-in-cap action: fix the findings, post the decision record, then summarize and escalate to the ` +
+    `user; it is NOT a normal re-invoke path. Replaces the prior Skill("review-tests") boundary, ` +
     `which produced prose findings that the autoregressive parent agent kept echoing back to the user ` +
-    `instead of fixing in-turn (issue #884 v1 regression). Cycle cap: ${TEST_QUALITY_REVIEW_HARD_CAP} per ` +
-    `issue, server-side; cycle ${TEST_QUALITY_REVIEW_HARD_CAP + 1} requires override_cap=true + override_reason. ` +
+    `instead of fixing in-turn (issue #884 v1 regression). Default cycle cap: ${TEST_QUALITY_REVIEW_HARD_CAP} per ` +
+    `issue (issue #906; configurable per repo via \`workflow.test_quality_review.pre_push_cap\` in ` +
+    `.ground-control.yaml; bounds [1, 10]); cycle cap+1 requires override_cap=true + override_reason. ` +
     `Authentication: the CLI invocation strips ANTHROPIC_API_KEY from the subprocess env so claude uses ` +
     `the host's OAuth session — see docs/DEVELOPMENT_WORKFLOW.md "Test-quality review engine".`,
   {
@@ -571,7 +576,7 @@ server.tool(
 
 server.tool(
   "gc_post_final_report",
-  "Post the canonical /implement Step 19 final report as a comment on the GitHub issue. Renders structured input (in-scope requirements, files-by-change-kind, reviews, traceability reconciliation, CI/SonarCloud status) into the standard final-report Markdown layout. Replaces free-prose Step 19 comments. Returns the posted comment's URL and id.",
+  "Post the canonical /implement Step 19 final report (or the /quickfix Step Q19 slim close comment) as a comment on the GitHub issue. Renders structured input (in-scope requirements, files-by-change-kind, reviews, traceability reconciliation, CI/SonarCloud status) into the standard final-report Markdown layout. Pass lane='quickfix' (issue #906) to enable the slim payload — empty reviews[] and no codex-entry requirement — for the /quickfix lane where AI-assisted reviews are opt-in; every other gate (CI green, Sonar pass-or-legit-skipped, sensitive-content / no-defer / reserved-marker scrubs) still applies. Replaces free-prose Step 19 comments. Returns the posted comment's URL and id.",
   {
     repo_path: z.string(),
     issue_number: z.number().int().positive(),
@@ -603,8 +608,9 @@ server.tool(
     sonar_status: z.enum(["passed", "failed", "skipped"]),
     plan_comment_url: z.string().optional(),
     summary: z.string().optional(),
+    lane: z.enum(["implement", "quickfix"]).optional(),
   },
-  async ({ repo_path, issue_number, pr_number, requirements, files, reviews, traceability, ci_status, sonar_status, plan_comment_url, summary }) => {
+  async ({ repo_path, issue_number, pr_number, requirements, files, reviews, traceability, ci_status, sonar_status, plan_comment_url, summary, lane }) => {
     try {
       return ok(JSON.stringify(await runPostFinalReport({
         repoPath: repo_path,
@@ -617,6 +623,7 @@ server.tool(
         ciStatus: ci_status,
         sonarStatus: sonar_status,
         planCommentUrl: plan_comment_url ?? null,
+        lane: lane ?? null,
         summary: summary ?? null,
       }), null, 2));
     } catch (e) { return err(e); }

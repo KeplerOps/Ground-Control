@@ -1159,25 +1159,29 @@ def check_pr_body(body: str) -> list[Violation]:
 
 
 # ---------------------------------------------------------------------------
-# Step 13 decision-record contract (issue #884).
+# Test-quality decision-record contract (issue #884; step moved by #906).
 #
-# `/implement` Step 13 (test-quality review) used to halt the workflow when
-# the `review-tests` skill returned a clean cycle, because the workflow
-# contract was prose-only: there was no structured signal the parent agent
-# could branch on to advance into Step 14 without a user turn. The fix is
-# to reuse the existing `gc_post_decision_record` contract uniformly across
-# Step 6.5 and Step 13: every cycle ends with a decision-record post
-# carrying `reviewer: "test-quality"` and the findings list (empty for a
-# clean cycle). A clean record IS the advance-to-Step-14 signal.
+# The `/implement` test-quality review used to halt the workflow when the
+# `review-tests` skill returned a clean cycle, because the workflow contract
+# was prose-only: there was no structured signal the parent agent could
+# branch on to advance without a user turn. The fix is to reuse the existing
+# `gc_post_decision_record` contract uniformly across the codex review (Step
+# 6.5) and the test-quality review (Step 6.6 per #906; formerly Step 13):
+# every cycle ends with a decision-record post carrying
+# `reviewer: "test-quality"` and the findings list (empty for a clean
+# cycle). A clean record IS the advance signal.
 #
-# `run_step13_decision_record_contract` enforces that the SKILL prose
-# continues to mandate that contract. It parses Step 13's section out of
-# the SKILL body and checks for the structural tokens that encode the
+# `run_test_quality_decision_record_contract` enforces that the SKILL prose
+# continues to mandate that contract. It parses the test-quality section out
+# of the SKILL body and checks for the structural tokens that encode the
 # contract — the canonical tool name, the test-quality reviewer literal,
 # the empty-findings clean cycle case, and a continuation signal. This is
 # the same "parser over a fixed vocabulary" structural-gate pattern as
-# `run_changelog_fragment_check` (see commentary at line 509+), not a
-# snapshot of specific prose. Wording can change; the contract cannot.
+# `run_changelog_fragment_check`, not a snapshot of specific prose. Wording
+# can change; the contract cannot. Section heading the check looks for is
+# `### Step 6.6: Pre-push Test-Quality Review` (the #906 placement). If the
+# step is ever renumbered again, update the `extract_step_section` call
+# below — the contract substance is independent of the step number.
 # ---------------------------------------------------------------------------
 
 IMPLEMENT_SKILL_PATH = "skills/implement/SKILL.md"
@@ -1207,45 +1211,50 @@ def extract_step_section(body: str, step_label: str) -> str | None:
     return body[start:end]
 
 
-def run_step13_decision_record_contract(
+def run_test_quality_decision_record_contract(
     *,
     text: str | None = None,
     root: Path = REPO_ROOT,
 ) -> list[Violation]:
-    """Assert `/implement` Step 13 mandates the test-quality decision-record contract.
+    """Assert the test-quality review step mandates the decision-record contract.
 
-    The contract is: every Step 13 cycle ends with a `gc_post_decision_record`
-    post carrying `reviewer: "test-quality"` and the findings list, and a
-    clean cycle (`findings: []`) is the structured advance-to-Step-14 signal
-    (no user acknowledgment turn).
+    The contract is: every test-quality cycle ends with a
+    `gc_post_decision_record` post carrying `reviewer: "test-quality"` and
+    the findings list, and a clean cycle (`findings: []`) is the structured
+    advance signal (no user acknowledgment turn).
+
+    Section heading the check looks for is `### Step 6.6: ...` (the #906
+    placement; the step was at `### Step 13: ...` from #884 v2 until #906
+    moved it pre-push).
 
     Pass `text=` directly to validate a fixture string. With no `text`, the
     check reads `skills/implement/SKILL.md` from `root`.
 
     Emits:
-      ``step13-section-missing``       — `### Step 13: ...` heading absent.
-      ``step13-decision-record-contract`` — section present, contract not.
+      ``test-quality-section-missing``       — `### Step 6.6: ...` heading absent.
+      ``test-quality-decision-record-contract`` — section present, contract not.
     """
     if text is None:
         skill_path = root / IMPLEMENT_SKILL_PATH
         if not skill_path.exists():
             return [
                 Violation(
-                    code="step13-skill-missing",
-                    message=f"{IMPLEMENT_SKILL_PATH} is missing — Step 13 contract cannot be verified.",
+                    code="test-quality-skill-missing",
+                    message=f"{IMPLEMENT_SKILL_PATH} is missing — test-quality contract cannot be verified.",
                     details=[f"expected at {IMPLEMENT_SKILL_PATH}"],
                 )
             ]
         text = skill_path.read_text(encoding="utf-8")
 
-    section = extract_step_section(text, "Step 13")
+    section = extract_step_section(text, "Step 6.6")
     if section is None:
         return [
             Violation(
-                code="step13-section-missing",
-                message="`### Step 13: ...` section is missing from the SKILL.",
+                code="test-quality-section-missing",
+                message="`### Step 6.6: ...` section is missing from the SKILL.",
                 details=[
-                    "Step 13 is the test-quality review phase; the section "
+                    "Step 6.6 is the pre-push test-quality review phase "
+                    "(moved from former Step 13 by issue #906); the section "
                     "must exist and must mandate the gc_post_decision_record "
                     "contract per issue #884.",
                 ],
@@ -1353,10 +1362,10 @@ def run_step13_decision_record_contract(
     if matched_anti:
         violations.append(
             Violation(
-                code="step13-anti-contract-prose",
+                code="test-quality-anti-contract-prose",
                 message=(
-                    "Step 13 contains anti-contract prose that re-introduces "
-                    "the #884 silent-advance failure mode."
+                    "Step 6.6 (test-quality review) contains anti-contract prose "
+                    "that re-introduces the #884 silent-advance failure mode."
                 ),
                 details=[f"matched anti-contract pattern: {code}" for code in matched_anti],
             )
@@ -1406,19 +1415,25 @@ def run_step13_decision_record_contract(
     # advances into Step 14 in the same turn. Accept any of "advance",
     # "proceed", or "continue" within a window that mentions Step 14, OR
     # the explicit "no acknowledgment turn" / "no user turn" phrasing.
+    # The advance target was "Step 14" under the pre-#906 placement; under
+    # #906 the test-quality review moved pre-push to Step 6.6 and the
+    # advance target is "Phase C" (stage / commit / push). Accept either
+    # token so the gate doesn't pin to a historical step number that the
+    # workflow may renumber again.
     has_continuation = bool(
         re.search(
-            r"(?is)(?:advance|proceed|continue)[^\n]{0,200}?step\s*14"
-            r"|step\s*14[^\n]{0,200}?(?:advance|proceed|continue)"
+            r"(?is)(?:advance|proceed|continue)[^\n]{0,200}?(?:step\s*14|phase\s*c)"
+            r"|(?:step\s*14|phase\s*c)[^\n]{0,200}?(?:advance|proceed|continue)"
             r"|no\s+(?:user\s+)?(?:acknowledg(?:e)?ment|user)\s+turn",
             section,
         )
     )
     if not has_continuation:
         missing.append(
-            "explicit advance-to-Step-14 signal (a clean decision record IS "
-            "the continuation signal — no acknowledgment turn between Step 13 "
-            "and Step 14)"
+            "explicit advance signal (a clean decision record IS "
+            "the continuation signal — no acknowledgment turn between the "
+            "test-quality review and the next phase; cite Phase C or Step 14 "
+            "explicitly)"
         )
     # Success precondition: advancement must be gated on the
     # `gc_post_decision_record` call returning `ok: true`. Without this,
@@ -1483,10 +1498,11 @@ def run_step13_decision_record_contract(
     if missing:
         violations.append(
             Violation(
-                code="step13-decision-record-contract",
+                code="test-quality-decision-record-contract",
                 message=(
-                    "Step 13 must mandate the gc_post_decision_record contract for "
-                    "test-quality cycles (issue #884)."
+                    "Step 6.6 (test-quality review) must mandate the "
+                    "gc_post_decision_record contract for test-quality cycles "
+                    "(issue #884; step moved pre-push by #906)."
                 ),
                 details=missing,
             )
@@ -1569,7 +1585,7 @@ def main(argv: list[str] | None = None) -> int:
     violations.extend(run_changelog_fragment_check(changed_files))
     violations.extend(run_deploy_compose_credential_passthrough())
     violations.extend(run_enum_contract_check())
-    violations.extend(run_step13_decision_record_contract())
+    violations.extend(run_test_quality_decision_record_contract())
 
     if not args.skip_pr_body:
         body = _resolve_pr_body(args)
