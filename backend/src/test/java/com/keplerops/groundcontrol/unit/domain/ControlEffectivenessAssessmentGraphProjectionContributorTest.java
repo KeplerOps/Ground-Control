@@ -112,8 +112,10 @@ class ControlEffectivenessAssessmentGraphProjectionContributorTest {
 
         var edges = contributor.contributeEdges(PROJECT_ID);
 
-        assertThat(edges).hasSize(3); // 1 OF_CONTROL + 2 SUPPORTED_BY
+        // 1 OF_CONTROL + 2 SUPPORTED_BY edges, asserted in one chain to keep AssertJ's
+        // failure message coherent if the contributor regresses.
         assertThat(edges)
+                .hasSize(3)
                 .anyMatch(e -> "OF_CONTROL".equals(e.edgeType()) && e.targetEntityType() == GraphEntityType.CONTROL)
                 .anyMatch(e -> "SUPPORTED_BY".equals(e.edgeType())
                         && e.targetEntityType() == GraphEntityType.CONTROL_TEST
