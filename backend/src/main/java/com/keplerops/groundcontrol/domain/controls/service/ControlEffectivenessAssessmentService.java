@@ -30,6 +30,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class ControlEffectivenessAssessmentService {
 
     private static final Logger log = LoggerFactory.getLogger(ControlEffectivenessAssessmentService.class);
+    private static final String FIELD = "field";
+    private static final String SUPPORTING_TEST_IDS = "supportingTestIds";
+    private static final String VALIDATION_ERROR = "validation_error";
 
     private final ControlEffectivenessAssessmentRepository repository;
     private final ControlTestRepository controlTestRepository;
@@ -94,8 +97,8 @@ public class ControlEffectivenessAssessmentService {
             if (command.assessor().isBlank()) {
                 throw new DomainValidationException(
                         "assessor must not be blank when present",
-                        "validation_error",
-                        java.util.Map.of("field", "assessor"));
+                        VALIDATION_ERROR,
+                        java.util.Map.of(FIELD, "assessor"));
             }
             assessment.setAssessor(command.assessor());
         }
@@ -135,8 +138,8 @@ public class ControlEffectivenessAssessmentService {
             if (id == null) {
                 throw new DomainValidationException(
                         "supportingTestIds must not contain null elements",
-                        "validation_error",
-                        java.util.Map.of("field", "supportingTestIds"));
+                        VALIDATION_ERROR,
+                        java.util.Map.of(FIELD, SUPPORTING_TEST_IDS));
             }
         }
         var deduped = new LinkedHashSet<>(ids);
@@ -150,14 +153,14 @@ public class ControlEffectivenessAssessmentService {
         }
         if (!missing.isEmpty()) {
             java.util.Map<String, java.io.Serializable> detail = new java.util.LinkedHashMap<>();
-            detail.put("field", "supportingTestIds");
+            detail.put(FIELD, SUPPORTING_TEST_IDS);
             detail.put(
                     "missingIds",
                     new ArrayList<>(missing.stream().map(UUID::toString).toList()));
             throw new DomainValidationException(
                     "supportingTestIds must reference ControlTest rows belonging to this assessment's control: "
                             + missing,
-                    "validation_error",
+                    VALIDATION_ERROR,
                     detail);
         }
         var out = new ArrayList<String>(deduped.size());
