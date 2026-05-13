@@ -1,0 +1,163 @@
+package com.keplerops.groundcontrol.domain.controls.service;
+
+import com.keplerops.groundcontrol.domain.controls.model.ControlTest;
+import com.keplerops.groundcontrol.domain.controls.repository.ControlEffectivenessAssessmentRepository;
+import com.keplerops.groundcontrol.domain.controls.repository.ControlTestRepository;
+import com.keplerops.groundcontrol.domain.exception.ConflictException;
+import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
+import java.io.Serializable;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * Service for {@link ControlTest} per GC-I012.
+ *
+ * <p>Owns project-scoped CRUD: resolves the parent {@code Control} through {@link ControlService}
+ * so cross-project access is rejected before any persistence call, enforces project-scoped UID
+ * uniqueness, and emits structured lifecycle log lines. Domain validation (null/blank field
+ * checks) lives on the DTO layer via Bean Validation; this service handles semantic checks only.
+ */
+@Service
+@Transactional
+public class ControlTestService {
+
+    private static final Logger log = LoggerFactory.getLogger(ControlTestService.class);
+
+    private final ControlTestRepository controlTestRepository;
+    private final ControlEffectivenessAssessmentRepository effectivenessAssessmentRepository;
+    private final ControlService controlService;
+    private final ProjectService projectService;
+
+    public ControlTestService(
+            ControlTestRepository controlTestRepository,
+            ControlEffectivenessAssessmentRepository effectivenessAssessmentRepository,
+            ControlService controlService,
+            ProjectService projectService) {
+        this.controlTestRepository = controlTestRepository;
+        this.effectivenessAssessmentRepository = effectivenessAssessmentRepository;
+        this.controlService = controlService;
+        this.projectService = projectService;
+    }
+
+    public ControlTest create(CreateControlTestCommand command) {
+        var project = projectService.getById(command.projectId());
+        var control = controlService.getById(project.getId(), command.controlId());
+        if (controlTestRepository.existsByProjectIdAndUid(project.getId(), command.uid())) {
+            throw new ConflictException("ControlTest with UID " + command.uid() + " already exists in this project");
+        }
+        var controlTest = new ControlTest(
+                project,
+                control,
+                command.uid(),
+                command.methodology(),
+                command.testSteps(),
+                command.expectedResults(),
+                command.actualResults(),
+                command.conclusion(),
+                command.testerIdentity(),
+                command.testDate());
+        controlTest.setNotes(command.notes());
+        controlTest = controlTestRepository.save(controlTest);
+        log.info(
+                "control_test_created: uid={} control={} project={}",
+                controlTest.getUid(),
+                control.getUid(),
+                project.getIdentifier());
+        return controlTest;
+    }
+
+    public ControlTest update(UUID projectId, UUID id, UpdateControlTestCommand command) {
+        var controlTest = findOrThrow(projectId, id);
+        if (command.methodology() != null) {
+            controlTest.setMethodology(command.methodology());
+        }
+        if (command.testSteps() != null) {
+            controlTest.setTestSteps(command.testSteps());
+        }
+        if (command.expectedResults() != null) {
+            controlTest.setExpectedResults(command.expectedResults());
+        }
+        if (command.actualResults() != null) {
+            controlTest.setActualResults(command.actualResults());
+        }
+        if (command.conclusion() != null) {
+            controlTest.setConclusion(command.conclusion());
+        }
+        if (command.testerIdentity() != null) {
+            controlTest.setTesterIdentity(command.testerIdentity());
+        }
+        if (command.testDate() != null) {
+            controlTest.setTestDate(command.testDate());
+        }
+        if (command.notes() != null) {
+            controlTest.setNotes(command.notes());
+        }
+        controlTest = controlTestRepository.save(controlTest);
+        log.info("control_test_updated: uid={} id={}", controlTest.getUid(), controlTest.getId());
+        return controlTest;
+    }
+
+    @Transactional(readOnly = true)
+    public ControlTest getById(UUID projectId, UUID id) {
+        return findOrThrow(projectId, id);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ControlTest> listByProject(UUID projectId) {
+        return controlTestRepository.findByProjectIdOrderByTestDateDesc(projectId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ControlTest> listByProjectAndControl(UUID projectId, UUID controlId) {
+        // Verify the control exists in the project so a cross-project controlId returns 404 rather
+        // than silently filtering to an empty list.
+        controlService.getById(projectId, controlId);
+        return controlTestRepository.findByProjectIdAndControlIdOrderByTestDateDesc(projectId, controlId);
+    }
+
+    public void delete(UUID projectId, UUID id) {
+        var controlTest = findOrThrow(projectId, id);
+        // Reject deletion if any ControlEffectivenessAssessment still cites this test in its
+        // supportingTestIds. ControlEffectivenessAssessmentService.validateSupportingTestIds
+        // already constrains tests to the assessment's control, so the search scope is bounded
+        // by the test's parent control (small N — typically a handful of assessments per control).
+        // The JSON storage makes a SQL-level FK impossible; this guard keeps the contract anyway.
+        var controlId = controlTest.getControl().getId();
+        var testIdString = controlTest.getId().toString();
+        var referencingUids =
+                effectivenessAssessmentRepository
+                        .findByProjectIdAndControlIdOrderByAssessedAtDesc(projectId, controlId)
+                        .stream()
+                        .filter(a -> a.getSupportingTestIds() != null
+                                && a.getSupportingTestIds().contains(testIdString))
+                        .map(a -> a.getUid())
+                        .toList();
+        if (!referencingUids.isEmpty()) {
+            Map<String, Serializable> detail = new LinkedHashMap<>();
+            detail.put("controlTestUid", controlTest.getUid());
+            detail.put("referencingAssessmentUids", new java.util.ArrayList<>(referencingUids));
+            throw new ConflictException(
+                    "ControlTest " + controlTest.getUid()
+                            + " is referenced by effectiveness assessment(s) " + referencingUids
+                            + " as supporting evidence and cannot be deleted."
+                            + " Remove the references from the assessment(s) first.",
+                    "control_test_referenced",
+                    detail);
+        }
+        controlTestRepository.delete(controlTest);
+        log.info("control_test_deleted: uid={} id={}", controlTest.getUid(), id);
+    }
+
+    private ControlTest findOrThrow(UUID projectId, UUID id) {
+        return controlTestRepository
+                .findByIdAndProjectId(id, projectId)
+                .orElseThrow(() -> new NotFoundException("ControlTest not found: " + id));
+    }
+}

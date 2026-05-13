@@ -1,8 +1,10 @@
 package com.keplerops.groundcontrol.domain.controls.service;
 
 import com.keplerops.groundcontrol.domain.controls.model.Control;
+import com.keplerops.groundcontrol.domain.controls.repository.ControlEffectivenessAssessmentRepository;
 import com.keplerops.groundcontrol.domain.controls.repository.ControlLinkRepository;
 import com.keplerops.groundcontrol.domain.controls.repository.ControlRepository;
+import com.keplerops.groundcontrol.domain.controls.repository.ControlTestRepository;
 import com.keplerops.groundcontrol.domain.controls.state.ControlStatus;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
@@ -28,16 +30,22 @@ public class ControlService {
 
     private final ControlRepository controlRepository;
     private final ControlLinkRepository controlLinkRepository;
+    private final ControlTestRepository controlTestRepository;
+    private final ControlEffectivenessAssessmentRepository effectivenessAssessmentRepository;
     private final FindingLinkRepository findingLinkRepository;
     private final ProjectService projectService;
 
     public ControlService(
             ControlRepository controlRepository,
             ControlLinkRepository controlLinkRepository,
+            ControlTestRepository controlTestRepository,
+            ControlEffectivenessAssessmentRepository effectivenessAssessmentRepository,
             FindingLinkRepository findingLinkRepository,
             ProjectService projectService) {
         this.controlRepository = controlRepository;
         this.controlLinkRepository = controlLinkRepository;
+        this.controlTestRepository = controlTestRepository;
+        this.effectivenessAssessmentRepository = effectivenessAssessmentRepository;
         this.findingLinkRepository = findingLinkRepository;
         this.projectService = projectService;
     }
@@ -147,6 +155,28 @@ public class ControlService {
                     "Control " + control.getUid()
                             + " cannot be deleted while inbound FindingLink references exist. Remove the"
                             + " FindingLink references first, then retry.",
+                    "control_referenced",
+                    detail);
+        }
+
+        // ControlTest and ControlEffectivenessAssessment rows are audited evidence/rating records
+        // per ADR-039. Cascading them would destroy provenance silently; a database FK violation
+        // would surface as 500 internal_error. Reject the delete here with a clean 409 so the
+        // caller can either clean up the evidence rows or transition the control to a non-active
+        // status while preserving history. Count-only — full hydration of the TEXT-heavy
+        // evidence rows is unnecessary at this gate.
+        long testCount = controlTestRepository.countByProjectIdAndControlId(projectId, id);
+        long assessmentCount = effectivenessAssessmentRepository.countByProjectIdAndControlId(projectId, id);
+        if (testCount > 0 || assessmentCount > 0) {
+            Map<String, Serializable> detail = new LinkedHashMap<>();
+            detail.put("controlUid", control.getUid());
+            detail.put("controlTestCount", testCount);
+            detail.put("controlEffectivenessAssessmentCount", assessmentCount);
+            throw new ConflictException(
+                    "Control " + control.getUid()
+                            + " has dependent audit evidence and cannot be deleted."
+                            + " Remove the control_test and control_effectiveness_assessment rows first,"
+                            + " or transition the control to a non-active status to preserve history.",
                     "control_referenced",
                     detail);
         }

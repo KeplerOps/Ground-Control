@@ -39,6 +39,13 @@ class ControlServiceTest {
     private com.keplerops.groundcontrol.domain.controls.repository.ControlLinkRepository controlLinkRepository;
 
     @Mock
+    private com.keplerops.groundcontrol.domain.controls.repository.ControlTestRepository controlTestRepository;
+
+    @Mock
+    private com.keplerops.groundcontrol.domain.controls.repository.ControlEffectivenessAssessmentRepository
+            effectivenessAssessmentRepository;
+
+    @Mock
     private com.keplerops.groundcontrol.domain.findings.repository.FindingLinkRepository findingLinkRepository;
 
     @Mock
@@ -205,6 +212,10 @@ class ControlServiceTest {
                             control.getId(),
                             projectId))
                     .thenReturn(java.util.List.of());
+            when(controlTestRepository.countByProjectIdAndControlId(projectId, control.getId()))
+                    .thenReturn(0L);
+            when(effectivenessAssessmentRepository.countByProjectIdAndControlId(projectId, control.getId()))
+                    .thenReturn(0L);
             when(controlLinkRepository.findByControlId(control.getId())).thenReturn(java.util.List.of());
 
             controlService.delete(projectId, control.getId());
@@ -228,6 +239,10 @@ class ControlServiceTest {
                             control.getId(),
                             projectId))
                     .thenReturn(java.util.List.of());
+            when(controlTestRepository.countByProjectIdAndControlId(projectId, control.getId()))
+                    .thenReturn(0L);
+            when(effectivenessAssessmentRepository.countByProjectIdAndControlId(projectId, control.getId()))
+                    .thenReturn(0L);
             when(controlLinkRepository.findByControlId(control.getId())).thenReturn(outboundLinks);
 
             controlService.delete(projectId, control.getId());
@@ -271,6 +286,48 @@ class ControlServiceTest {
             org.mockito.Mockito.verifyNoInteractions(controlLinkRepository);
             org.mockito.Mockito.verify(controlRepository, org.mockito.Mockito.never())
                     .delete(control);
+        }
+
+        @Test
+        void rejectsWhenDependentControlTestsExist() {
+            // ADR-039: ControlTest rows are audited evidence; cascading them on parent delete
+            // would destroy provenance silently, and a raw FK violation would surface as 500.
+            // The service uses count-only existence checks (no full-row hydration) and returns
+            // a clean 409 with the dependent counts so the caller can act.
+            var control = makeControl();
+            when(controlRepository.findByIdAndProjectId(control.getId(), projectId))
+                    .thenReturn(Optional.of(control));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.CONTROL,
+                            control.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(controlTestRepository.countByProjectIdAndControlId(projectId, control.getId()))
+                    .thenReturn(3L);
+
+            assertThatThrownBy(() -> controlService.delete(projectId, control.getId()))
+                    .isInstanceOf(com.keplerops.groundcontrol.domain.exception.ConflictException.class)
+                    .hasMessageContaining("dependent audit evidence");
+        }
+
+        @Test
+        void rejectsWhenDependentEffectivenessAssessmentsExist() {
+            var control = makeControl();
+            when(controlRepository.findByIdAndProjectId(control.getId(), projectId))
+                    .thenReturn(Optional.of(control));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.CONTROL,
+                            control.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(controlTestRepository.countByProjectIdAndControlId(projectId, control.getId()))
+                    .thenReturn(0L);
+            when(effectivenessAssessmentRepository.countByProjectIdAndControlId(projectId, control.getId()))
+                    .thenReturn(2L);
+
+            assertThatThrownBy(() -> controlService.delete(projectId, control.getId()))
+                    .isInstanceOf(com.keplerops.groundcontrol.domain.exception.ConflictException.class)
+                    .hasMessageContaining("dependent audit evidence");
         }
     }
 }

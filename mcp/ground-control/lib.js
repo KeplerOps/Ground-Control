@@ -522,6 +522,17 @@ const TO_CAMEL = {
   risk_scenario_ids: "riskScenarioIds",
   control_function: "controlFunction",
   control_id: "controlId",
+  control_uid: "controlUid",
+  // ControlTest / ControlEffectivenessAssessment fields (ADR-038)
+  test_steps: "testSteps",
+  expected_results: "expectedResults",
+  actual_results: "actualResults",
+  tester_identity: "testerIdentity",
+  test_date: "testDate",
+  design_effectiveness: "designEffectiveness",
+  operating_effectiveness: "operatingEffectiveness",
+  assessed_at: "assessedAt",
+  supporting_test_ids: "supportingTestIds",
   implementation_scope: "implementationScope",
   methodology_factors: "methodologyFactors",
   analyst_identity: "analystIdentity",
@@ -7195,6 +7206,51 @@ export async function deleteControlLink(controlId, linkId, project) {
     `/api/v1/controls/${encodeURIComponent(controlId)}/links/${encodeURIComponent(linkId)}`,
     { params: { project } },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Control Test API functions (GC-I012)
+// ---------------------------------------------------------------------------
+
+export const CONTROL_TEST_METHODOLOGIES = ["INQUIRY", "OBSERVATION", "INSPECTION", "RE_PERFORMANCE"];
+export const CONTROL_TEST_CONCLUSIONS = ["EFFECTIVE", "INEFFECTIVE", "NOT_TESTED"];
+
+export async function createControlTest(data, project) {
+  return request("POST", "/api/v1/control-tests", { body: data, params: { project } });
+}
+
+export async function updateControlTest(id, data, project) {
+  return request("PUT", `/api/v1/control-tests/${encodeURIComponent(id)}`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function deleteControlTest(id, project) {
+  await request("DELETE", `/api/v1/control-tests/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+// ---------------------------------------------------------------------------
+// Control Effectiveness Assessment API functions (GC-I013)
+// ---------------------------------------------------------------------------
+
+export const CONTROL_EFFECTIVENESS_RATINGS = ["EFFECTIVE", "PARTIALLY_EFFECTIVE", "INEFFECTIVE"];
+
+export async function createControlEffectivenessAssessment(data, project) {
+  return request("POST", "/api/v1/control-effectiveness-assessments", { body: data, params: { project } });
+}
+
+export async function updateControlEffectivenessAssessment(id, data, project) {
+  return request("PUT", `/api/v1/control-effectiveness-assessments/${encodeURIComponent(id)}`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function deleteControlEffectivenessAssessment(id, project) {
+  await request("DELETE", `/api/v1/control-effectiveness-assessments/${encodeURIComponent(id)}`, {
+    params: { project },
+  });
 }
 
 // ---------------------------------------------------------------------------

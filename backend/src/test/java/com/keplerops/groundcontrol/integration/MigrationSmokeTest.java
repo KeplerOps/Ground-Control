@@ -41,7 +41,8 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         "014", "015", "016", "017", "018", "019", "020", "021", "022", "023", "024", "025", "026",
                         "027", "028", "029", "030", "031", "032", "033", "034", "035", "036", "037", "038", "039",
                         "040", "041", "042", "043", "044", "045", "046", "047", "048", "049", "050", "051", "052",
-                        "053", "054", "055", "056", "057", "058", "059", "060", "061", "062", "063", "064");
+                        "053", "054", "055", "056", "057", "058", "059", "060", "061", "062", "063", "064", "065",
+                        "066", "067", "068");
     }
 
     @Test
@@ -235,6 +236,18 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                 .getSingleResult();
         entityManager
                 .createNativeQuery("SELECT 1 FROM finding_link_audit LIMIT 1")
+                .getResultList();
+        // V065-V066 control_test + audit (GC-I012 / ADR-039)
+        entityManager.createNativeQuery("SELECT 1 FROM control_test LIMIT 1").getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM control_test_audit LIMIT 1")
+                .getResultList();
+        // V067-V068 control_effectiveness_assessment + audit (GC-I013 / ADR-039)
+        entityManager
+                .createNativeQuery("SELECT 1 FROM control_effectiveness_assessment LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM control_effectiveness_assessment_audit LIMIT 1")
                 .getResultList();
     }
 }
