@@ -95,7 +95,13 @@ class ControlLinkControllerTest {
         mockMvc.perform(get("/api/v1/controls/{controlId}/links", CONTROL_ID).param("project", "ground-control"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].targetIdentifier", is("ASSET-001")));
+                .andExpect(jsonPath("$[0].targetIdentifier", is("ASSET-001")))
+                // The response must report the controlId from the path, not from a
+                // lazy parent dereference: with spring.jpa.open-in-view=false the
+                // session is closed by the time the response mapper runs. Carrying
+                // the path variable through .from(link, controlId) sidesteps the
+                // LazyInitializationException.
+                .andExpect(jsonPath("$[0].controlId", is(CONTROL_ID.toString())));
     }
 
     @Test

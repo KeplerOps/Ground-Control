@@ -18,10 +18,10 @@ public record RiskScenarioLinkResponse(
         Instant createdAt,
         Instant updatedAt) {
 
-    public static RiskScenarioLinkResponse from(RiskScenarioLink link) {
+    public static RiskScenarioLinkResponse from(RiskScenarioLink link, UUID riskScenarioId) {
         return new RiskScenarioLinkResponse(
                 link.getId(),
-                link.getRiskScenario().getId(),
+                riskScenarioId,
                 link.getTargetType(),
                 link.getTargetEntityId(),
                 link.getTargetIdentifier(),

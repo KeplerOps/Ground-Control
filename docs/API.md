@@ -813,6 +813,77 @@ architecture model, code, or issue), ASSOCIATED (generic association).
 
 **Lifecycle states:** DRAFT → ACTIVE → ARCHIVED (and DRAFT → ARCHIVED directly).
 
+### Findings
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/findings` | FindingRequest | 201 | Create finding |
+| GET | `/findings` | — | 200 | List findings for a project |
+| GET | `/findings/{id}` | — | 200 | Get finding by UUID |
+| GET | `/findings/uid/{uid}` | — | 200 | Get finding by UID |
+| PUT | `/findings/{id}` | UpdateFindingRequest | 200 | Update mutable fields |
+| DELETE | `/findings/{id}` | — | 204 | Delete finding (cascades to links) |
+| PUT | `/findings/{id}/status` | `{"status": "REMEDIATION_IN_PROGRESS"}` | 200 | Transition lifecycle status |
+| POST | `/findings/{id}/links` | FindingLinkRequest | 201 | Create finding link |
+| GET | `/findings/{id}/links` | — | 200 | List links for a finding |
+| DELETE | `/findings/{id}/links/{linkId}` | — | 204 | Delete finding link |
+
+All endpoints accept an optional `project` query parameter (same semantics as the
+Threat Model endpoints above).
+
+Findings are a separate aggregate from observations, controls, and the risk-management
+cluster per ADR-038. They capture governed GRC issues (audit findings, control
+deficiencies, policy violations, vulnerabilities, exception escalations) and own the
+remediation lifecycle. Affected controls, risks, assets, observations, evidence,
+audits, and remediation plans are represented as outbound `FindingLink` edges.
+
+`DELETE /findings/{id}` is rejected with 409 `finding_referenced` while any
+`AssetLink` (`FINDING` target), `ControlLink` (`FINDING` target), or `RiskScenarioLink`
+(`FINDING` target) still references the finding by `targetEntityId`. The conflict
+envelope's `detail` block lists the referencing asset, control, and scenario UIDs so
+callers can clean them up before retrying.
+
+**FindingRequest fields:** `uid` (required, max 30), `title` (required, max 200),
+`findingType` (required, enum: AUDIT_FINDING, CONTROL_DEFICIENCY, POLICY_VIOLATION,
+VULNERABILITY, EXCEPTION_ESCALATION), `severity` (required, enum: CRITICAL, HIGH,
+MEDIUM, LOW, INFORMATIONAL), `description` (required), `rootCauseAnalysis` (optional),
+`owner` (optional, max 100), `dueDate` (optional, ISO-8601 date).
+
+**UpdateFindingRequest fields:** `title`, `findingType`, `severity`, `description`,
+`rootCauseAnalysis`, `owner`, `dueDate`, `clearRootCauseAnalysis` (boolean),
+`clearOwner` (boolean), `clearDueDate` (boolean). Only fields present in the request
+body are updated. Required fields (`title`, `description`) reject blank strings
+server-side with 422 `validation_error` when present. Optional fields cannot be
+cleared by sending `null` (which means "no change") — set the corresponding `clear*`
+flag to `true` to explicitly null them. When a `clear*` flag is true, any value
+supplied in the corresponding field is ignored.
+
+**FindingLinkRequest fields:** `targetType` (required, FindingLinkTargetType enum),
+`targetEntityId` (UUID, for internal first-class targets), `targetIdentifier` (string
+max 500, for external / not-yet-modeled targets), `linkType` (required,
+FindingLinkType enum), `targetUrl` (optional, max 2000), `targetTitle` (optional, max
+255).
+
+**Internal target types (require `targetEntityId`, resolved project-scoped):**
+CONTROL, RISK_SCENARIO, ASSET, OBSERVATION.
+
+**External target types (require `targetIdentifier`):** OPERATIONAL_ARTIFACT (generic
+artifact reference, per ADR-011), EVIDENCE (external evidence reference, e.g.
+`s3://evidence/...`), AUDIT (audit identifier), REMEDIATION_PLAN (remediation plan
+identifier), EXTERNAL (catch-all).
+
+**Link types:** AFFECTS (finding affects an entity), CAUSED_BY (finding is caused by
+the linked entity), MITIGATED_BY (finding is mitigated by a control or plan),
+EVIDENCED_BY (finding is evidenced by a referenced artifact), OBSERVED_IN (finding
+was observed in an audit, observation, or evidence record), REMEDIATED_BY (finding is
+remediated by a plan or control), ASSOCIATED (generic association).
+
+**Lifecycle states:** OPEN → REMEDIATION_IN_PROGRESS → REMEDIATION_COMPLETE →
+VERIFIED_CLOSED. `REMEDIATION_COMPLETE` can transition back to
+`REMEDIATION_IN_PROGRESS` when verification rejects the claimed remediation.
+`VERIFIED_CLOSED` is terminal — reopening a verified-closed finding creates a new
+finding rather than reanimating the closed record.
+
 ## Request / Response Format
 
 JSON. Error responses use a nested envelope:

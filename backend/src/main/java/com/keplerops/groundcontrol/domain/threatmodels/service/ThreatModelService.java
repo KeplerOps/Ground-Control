@@ -9,6 +9,7 @@ import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskScenarioLinkRepository;
 import com.keplerops.groundcontrol.domain.riskscenarios.state.RiskScenarioLinkTargetType;
 import com.keplerops.groundcontrol.domain.threatmodels.model.ThreatModel;
+import com.keplerops.groundcontrol.domain.threatmodels.repository.ThreatModelLinkRepository;
 import com.keplerops.groundcontrol.domain.threatmodels.repository.ThreatModelRepository;
 import com.keplerops.groundcontrol.domain.threatmodels.state.ThreatModelStatus;
 import java.io.Serializable;
@@ -28,16 +29,19 @@ public class ThreatModelService {
     private static final Logger log = LoggerFactory.getLogger(ThreatModelService.class);
 
     private final ThreatModelRepository threatModelRepository;
+    private final ThreatModelLinkRepository threatModelLinkRepository;
     private final ProjectService projectService;
     private final AssetLinkRepository assetLinkRepository;
     private final RiskScenarioLinkRepository riskScenarioLinkRepository;
 
     public ThreatModelService(
             ThreatModelRepository threatModelRepository,
+            ThreatModelLinkRepository threatModelLinkRepository,
             ProjectService projectService,
             AssetLinkRepository assetLinkRepository,
             RiskScenarioLinkRepository riskScenarioLinkRepository) {
         this.threatModelRepository = threatModelRepository;
+        this.threatModelLinkRepository = threatModelLinkRepository;
         this.projectService = projectService;
         this.assetLinkRepository = assetLinkRepository;
         this.riskScenarioLinkRepository = riskScenarioLinkRepository;
@@ -174,8 +178,19 @@ public class ThreatModelService {
                     detail);
         }
 
+        // Delete outbound links through the repository before the parent so Envers
+        // writes delete revisions for each ThreatModelLink. The migration's FK has
+        // ON DELETE CASCADE only as a defense-in-depth fallback; relying on it
+        // would bypass Hibernate and leave threat_model_link_audit incomplete
+        // for the parent-delete path.
+        var outboundLinks = threatModelLinkRepository.findByThreatModelId(id);
+        threatModelLinkRepository.deleteAll(outboundLinks);
         threatModelRepository.delete(threatModel);
-        log.info("threat_model_deleted: id={} uid={}", threatModel.getId(), threatModel.getUid());
+        log.info(
+                "threat_model_deleted: id={} uid={} outbound_links_deleted={}",
+                threatModel.getId(),
+                threatModel.getUid(),
+                outboundLinks.size());
     }
 
     private ThreatModel findByIdOrThrow(UUID projectId, UUID id) {

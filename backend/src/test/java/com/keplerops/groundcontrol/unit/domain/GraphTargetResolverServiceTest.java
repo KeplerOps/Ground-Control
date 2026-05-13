@@ -9,6 +9,8 @@ import com.keplerops.groundcontrol.domain.assets.repository.OperationalAssetRepo
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.controls.state.ControlLinkTargetType;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import com.keplerops.groundcontrol.domain.findings.repository.FindingRepository;
+import com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType;
 import com.keplerops.groundcontrol.domain.graph.service.GraphTargetResolverService;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
 import com.keplerops.groundcontrol.domain.riskscenarios.repository.MethodologyProfileRepository;
@@ -65,6 +67,9 @@ class GraphTargetResolverServiceTest {
     @Mock
     private VerificationResultRepository verificationResultRepository;
 
+    @Mock
+    private FindingRepository findingRepository;
+
     @InjectMocks
     private GraphTargetResolverService graphTargetResolverService;
 
@@ -82,7 +87,8 @@ class GraphTargetResolverServiceTest {
                 "TREATMENT_PLAN",
                 "METHODOLOGY_PROFILE",
                 "CONTROL",
-                "THREAT_MODEL_ENTRY"
+                "THREAT_MODEL_ENTRY",
+                "FINDING"
             })
     void validateAssetTargetAcceptsInternalTargets(AssetLinkTargetType targetType) {
         stubAssetInternalTarget(targetType, true);
@@ -97,7 +103,7 @@ class GraphTargetResolverServiceTest {
     @ParameterizedTest
     @EnumSource(
             value = AssetLinkTargetType.class,
-            names = {"FINDING", "EVIDENCE", "AUDIT", "ISSUE", "CODE", "CONFIGURATION", "EXTERNAL"})
+            names = {"EVIDENCE", "AUDIT", "ISSUE", "CODE", "CONFIGURATION", "EXTERNAL"})
     void validateAssetTargetAcceptsExternalTargets(AssetLinkTargetType targetType) {
         var validated = graphTargetResolverService.validateAssetTarget(projectId, targetType, null, "EXT-1");
 
@@ -118,7 +124,8 @@ class GraphTargetResolverServiceTest {
                 "TREATMENT_PLAN",
                 "METHODOLOGY_PROFILE",
                 "CONTROL",
-                "THREAT_MODEL"
+                "THREAT_MODEL",
+                "FINDING"
             })
     void validateRiskScenarioTargetAcceptsInternalTargets(RiskScenarioLinkTargetType targetType) {
         stubScenarioInternalTarget(targetType, true);
@@ -132,7 +139,7 @@ class GraphTargetResolverServiceTest {
     @ParameterizedTest
     @EnumSource(
             value = RiskScenarioLinkTargetType.class,
-            names = {"VULNERABILITY", "FINDING", "EVIDENCE", "AUDIT_RECORD", "EXTERNAL"})
+            names = {"VULNERABILITY", "EVIDENCE", "AUDIT_RECORD", "EXTERNAL"})
     void validateRiskScenarioTargetAcceptsExternalTargets(RiskScenarioLinkTargetType targetType) {
         var validated = graphTargetResolverService.validateRiskScenarioTarget(projectId, targetType, null, "EXT-2");
 
@@ -267,7 +274,8 @@ class GraphTargetResolverServiceTest {
                 "RISK_ASSESSMENT_RESULT",
                 "TREATMENT_PLAN",
                 "METHODOLOGY_PROFILE",
-                "OBSERVATION"
+                "OBSERVATION",
+                "FINDING"
             })
     void validateControlTargetAcceptsInternalTargets(ControlLinkTargetType targetType) {
         stubControlInternalTarget(targetType, true);
@@ -281,7 +289,7 @@ class GraphTargetResolverServiceTest {
     @ParameterizedTest
     @EnumSource(
             value = ControlLinkTargetType.class,
-            names = {"EVIDENCE", "FINDING", "CODE", "CONFIGURATION", "OPERATIONAL_ARTIFACT", "EXTERNAL"})
+            names = {"EVIDENCE", "CODE", "CONFIGURATION", "OPERATIONAL_ARTIFACT", "EXTERNAL"})
     void validateControlTargetAcceptsExternalTargets(ControlLinkTargetType targetType) {
         var validated = graphTargetResolverService.validateControlTarget(projectId, targetType, null, "ref://ext/1");
 
@@ -358,7 +366,9 @@ class GraphTargetResolverServiceTest {
                     .thenReturn(exists);
             case THREAT_MODEL_ENTRY -> when(threatModelRepository.existsByIdAndProjectId(targetId, projectId))
                     .thenReturn(exists);
-            case FINDING, EVIDENCE, AUDIT, ISSUE, CODE, CONFIGURATION, EXTERNAL -> throw new IllegalArgumentException(
+            case FINDING -> when(findingRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case EVIDENCE, AUDIT, ISSUE, CODE, CONFIGURATION, EXTERNAL -> throw new IllegalArgumentException(
                     "Not an internal target type");
         }
     }
@@ -408,7 +418,9 @@ class GraphTargetResolverServiceTest {
                     .thenReturn(exists);
             case THREAT_MODEL -> when(threatModelRepository.existsByIdAndProjectId(targetId, projectId))
                     .thenReturn(exists);
-            case VULNERABILITY, FINDING, EVIDENCE, AUDIT_RECORD, EXTERNAL -> throw new IllegalArgumentException(
+            case FINDING -> when(findingRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case VULNERABILITY, EVIDENCE, AUDIT_RECORD, EXTERNAL -> throw new IllegalArgumentException(
                     "Not an internal target type");
         }
     }
@@ -487,11 +499,79 @@ class GraphTargetResolverServiceTest {
                                     ? java.util.Optional.of(org.mockito.Mockito.mock(
                                             com.keplerops.groundcontrol.domain.assets.model.Observation.class))
                                     : java.util.Optional.empty());
-            case EVIDENCE,
-                    FINDING,
-                    CODE,
-                    CONFIGURATION,
-                    OPERATIONAL_ARTIFACT,
+            case FINDING -> when(findingRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case EVIDENCE, CODE, CONFIGURATION, OPERATIONAL_ARTIFACT, EXTERNAL -> throw new IllegalArgumentException(
+                    "Not an internal target type");
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = FindingLinkTargetType.class,
+            names = {"CONTROL", "RISK_SCENARIO", "ASSET", "OBSERVATION"})
+    void validateFindingTargetAcceptsInternalTargets(FindingLinkTargetType targetType) {
+        stubFindingInternalTarget(targetType, true);
+
+        var validated = graphTargetResolverService.validateFindingTarget(projectId, targetType, targetId, null);
+
+        assertThat(validated.internal()).isTrue();
+        assertThat(validated.targetEntityId()).isEqualTo(targetId);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = FindingLinkTargetType.class,
+            names = {"OPERATIONAL_ARTIFACT", "EVIDENCE", "AUDIT", "REMEDIATION_PLAN", "EXTERNAL"})
+    void validateFindingTargetAcceptsExternalTargets(FindingLinkTargetType targetType) {
+        var validated = graphTargetResolverService.validateFindingTarget(projectId, targetType, null, "EXT-F");
+
+        assertThat(validated.internal()).isFalse();
+        assertThat(validated.targetEntityId()).isNull();
+        assertThat(validated.targetIdentifier()).isEqualTo("EXT-F");
+    }
+
+    @Test
+    void validateFindingTargetRejectsMissingExternalIdentifier() {
+        assertThatThrownBy(() -> graphTargetResolverService.validateFindingTarget(
+                        projectId, FindingLinkTargetType.EXTERNAL, null, " "))
+                .isInstanceOf(DomainValidationException.class)
+                .hasMessageContaining("targetIdentifier");
+    }
+
+    @Test
+    void validateFindingTargetRejectsMissingInternalTargetEntityId() {
+        assertThatThrownBy(() -> graphTargetResolverService.validateFindingTarget(
+                        projectId, FindingLinkTargetType.CONTROL, null, null))
+                .isInstanceOf(DomainValidationException.class)
+                .hasMessageContaining("targetEntityId");
+    }
+
+    @Test
+    void validateFindingTargetRejectsCrossProjectInternalTarget() {
+        when(controlRepository.existsByIdAndProjectId(targetId, projectId)).thenReturn(false);
+
+        assertThatThrownBy(() -> graphTargetResolverService.validateFindingTarget(
+                        projectId, FindingLinkTargetType.CONTROL, targetId, null))
+                .isInstanceOf(DomainValidationException.class)
+                .hasMessageContaining("not found");
+    }
+
+    private void stubFindingInternalTarget(FindingLinkTargetType targetType, boolean exists) {
+        switch (targetType) {
+            case CONTROL -> when(controlRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case RISK_SCENARIO -> when(riskScenarioRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case ASSET -> when(assetRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case OBSERVATION -> when(observationRepository.findByIdWithAssetAndProjectId(targetId, projectId))
+                    .thenReturn(java.util.Optional.of(org.mockito.Mockito.mock(
+                            com.keplerops.groundcontrol.domain.assets.model.Observation.class)));
+            case OPERATIONAL_ARTIFACT,
+                    EVIDENCE,
+                    AUDIT,
+                    REMEDIATION_PLAN,
                     EXTERNAL -> throw new IllegalArgumentException("Not an internal target type");
         }
     }

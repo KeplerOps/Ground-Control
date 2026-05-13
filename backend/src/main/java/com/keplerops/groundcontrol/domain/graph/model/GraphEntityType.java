@@ -12,5 +12,6 @@ public enum GraphEntityType {
     CONTROL,
     CONTROL_LINK,
     VERIFICATION_RESULT,
-    THREAT_MODEL
+    THREAT_MODEL,
+    FINDING
 }

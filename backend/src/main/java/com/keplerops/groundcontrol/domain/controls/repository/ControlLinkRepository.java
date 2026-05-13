@@ -31,4 +31,11 @@ public interface ControlLinkRepository extends JpaRepository<ControlLink, UUID> 
             ControlLinkTargetType targetType,
             UUID targetEntityId,
             com.keplerops.groundcontrol.domain.controls.state.ControlLinkType linkType);
+
+    @Query("SELECT l.control.uid FROM ControlLink l WHERE l.targetType = :targetType"
+            + " AND l.targetEntityId = :targetEntityId AND l.control.project.id = :projectId")
+    List<String> findControlUidsByTargetTypeAndTargetEntityIdAndProjectId(
+            @Param("targetType") ControlLinkTargetType targetType,
+            @Param("targetEntityId") UUID targetEntityId,
+            @Param("projectId") UUID projectId);
 }

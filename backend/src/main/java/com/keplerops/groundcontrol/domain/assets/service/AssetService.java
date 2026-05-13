@@ -14,11 +14,16 @@ import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.findings.repository.FindingLinkRepository;
+import com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType;
 import com.keplerops.groundcontrol.domain.graph.service.GraphTargetResolverService;
 import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
+import java.io.Serializable;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +36,7 @@ public class AssetService {
     private final AssetRelationRepository relationRepository;
     private final AssetLinkRepository linkRepository;
     private final AssetExternalIdRepository externalIdRepository;
+    private final FindingLinkRepository findingLinkRepository;
     private final ProjectRepository projectRepository;
     private final GraphTargetResolverService graphTargetResolverService;
 
@@ -39,12 +45,14 @@ public class AssetService {
             AssetRelationRepository relationRepository,
             AssetLinkRepository linkRepository,
             AssetExternalIdRepository externalIdRepository,
+            FindingLinkRepository findingLinkRepository,
             ProjectRepository projectRepository,
             GraphTargetResolverService graphTargetResolverService) {
         this.assetRepository = assetRepository;
         this.relationRepository = relationRepository;
         this.linkRepository = linkRepository;
         this.externalIdRepository = externalIdRepository;
+        this.findingLinkRepository = findingLinkRepository;
         this.projectRepository = projectRepository;
         this.graphTargetResolverService = graphTargetResolverService;
     }
@@ -127,12 +135,47 @@ public class AssetService {
 
     public void delete(UUID projectId, UUID id) {
         var asset = getById(projectId, id);
+        rejectIfInboundFindingLinksReferenceAsset(projectId, id, asset.getUid());
+        // Delete outbound links through the repository before the parent so Envers
+        // writes delete revisions for each AssetLink. The migration's FK has
+        // ON DELETE CASCADE only as a defense-in-depth fallback; relying on it
+        // would bypass Hibernate and leave asset_link_audit incomplete for the
+        // parent-delete path.
+        var outboundLinks = linkRepository.findByAssetId(id);
+        linkRepository.deleteAll(outboundLinks);
         assetRepository.delete(asset);
     }
 
     @Deprecated(forRemoval = false)
     public void delete(UUID id) {
-        assetRepository.delete(getById(id));
+        var asset = getById(id);
+        rejectIfInboundFindingLinksReferenceAsset(asset.getProject().getId(), id, asset.getUid());
+        // Mirror the project-scoped overload's link-then-parent ordering so the
+        // deprecated path also fires Envers delete revisions for each AssetLink
+        // (see the project-scoped delete javadoc).
+        var outboundLinks = linkRepository.findByAssetId(id);
+        linkRepository.deleteAll(outboundLinks);
+        assetRepository.delete(asset);
+    }
+
+    private void rejectIfInboundFindingLinksReferenceAsset(UUID projectId, UUID assetId, String assetUid) {
+        // FindingLink.targetEntityId is not an FK, so a delete here would leave
+        // dangling rows that FindingLinkController.list and the graph projection
+        // would happily surface (ADR-038 / cycle-3 codex review on issue #279).
+        var inboundFindingUids = findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                FindingLinkTargetType.ASSET, assetId, projectId);
+        if (!inboundFindingUids.isEmpty()) {
+            Map<String, Serializable> detail = new LinkedHashMap<>();
+            detail.put("assetUid", assetUid);
+            detail.put("findingCount", inboundFindingUids.size());
+            detail.put("findingUids", new ArrayList<>(inboundFindingUids));
+            throw new ConflictException(
+                    "Asset " + assetUid
+                            + " cannot be deleted while inbound FindingLink references exist. Remove the"
+                            + " FindingLink references first, then retry.",
+                    "asset_referenced",
+                    detail);
+        }
     }
 
     public AssetRelation createRelation(UUID projectId, UUID sourceId, UUID targetId, AssetRelationType relationType) {

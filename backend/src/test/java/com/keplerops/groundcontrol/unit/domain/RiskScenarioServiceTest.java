@@ -38,6 +38,13 @@ class RiskScenarioServiceTest {
     private RiskScenarioRepository riskScenarioRepository;
 
     @Mock
+    private com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskScenarioLinkRepository
+            riskScenarioLinkRepository;
+
+    @Mock
+    private com.keplerops.groundcontrol.domain.findings.repository.FindingLinkRepository findingLinkRepository;
+
+    @Mock
     private ProjectService projectService;
 
     @SuppressWarnings("UnusedVariable") // needed by @InjectMocks for constructor injection
@@ -346,10 +353,71 @@ class RiskScenarioServiceTest {
             var rs = makeScenario();
             when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
                     .thenReturn(Optional.of(rs));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.RISK_SCENARIO,
+                            rs.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(riskScenarioLinkRepository.findByRiskScenarioId(rs.getId())).thenReturn(java.util.List.of());
 
             riskScenarioService.delete(projectId, rs.getId());
 
             verify(riskScenarioRepository).delete(rs);
+        }
+
+        @Test
+        void rejectsDeleteWhenInboundFindingLinkReferencesScenario() {
+            var rs = makeScenario();
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.RISK_SCENARIO,
+                            rs.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of("FIND-001"));
+
+            // FindingLink.targetEntityId is not an FK, so without this guard the
+            // delete would leave dangling FindingLink rows (cycle-3 pre-push codex
+            // review on issue #279, ADR-038).
+            var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
+                    () -> riskScenarioService.delete(projectId, rs.getId()), ConflictException.class);
+            assertThat(thrown).isNotNull().hasMessageContaining("FindingLink references exist");
+            assertThat(thrown.getErrorCode()).isEqualTo("risk_scenario_referenced");
+            assertThat(thrown.getDetail()).containsEntry("findingCount", 1);
+            // Parent + outbound-link cleanup must be skipped when the guard fires.
+            org.mockito.Mockito.verifyNoInteractions(riskScenarioLinkRepository);
+            org.mockito.Mockito.verify(riskScenarioRepository, org.mockito.Mockito.never())
+                    .delete(rs);
+        }
+
+        @Test
+        void deletesOutboundLinksThroughRepositoryBeforeParent() {
+            var rs = makeScenario();
+            var outboundLinks =
+                    java.util.List.of(new com.keplerops.groundcontrol.domain.riskscenarios.model.RiskScenarioLink(
+                            rs,
+                            com.keplerops.groundcontrol.domain.riskscenarios.state.RiskScenarioLinkTargetType.CONTROL,
+                            UUID.randomUUID(),
+                            null,
+                            com.keplerops.groundcontrol.domain.riskscenarios.state.RiskScenarioLinkType.MITIGATED_BY));
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.RISK_SCENARIO,
+                            rs.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(riskScenarioLinkRepository.findByRiskScenarioId(rs.getId())).thenReturn(outboundLinks);
+
+            riskScenarioService.delete(projectId, rs.getId());
+
+            // Envers writes delete revisions only when Hibernate sees the link
+            // delete. Driving outbound link deletes through the repository before
+            // deleting the parent closes the parent-delete audit-history gap
+            // (cycle-2 pre-push codex review on issue #279).
+            var inOrder = org.mockito.Mockito.inOrder(riskScenarioLinkRepository, riskScenarioRepository);
+            inOrder.verify(riskScenarioLinkRepository).deleteAll(outboundLinks);
+            inOrder.verify(riskScenarioRepository).delete(rs);
         }
     }
 }

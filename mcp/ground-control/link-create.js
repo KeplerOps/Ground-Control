@@ -12,9 +12,10 @@
 // GraphTargetResolverService then enforces per-target-type semantics:
 //   - internal target types (REQUIREMENT, ASSET, CONTROL, RISK_SCENARIO,
 //     OBSERVATION, THREAT_MODEL, RISK_ASSESSMENT_RESULT, VERIFICATION_RESULT,
-//     etc.) → targetEntityId required
-//   - external target types (EXTERNAL, EVIDENCE, FINDING, ISSUE, CODE, AUDIT,
-//     CONFIGURATION, etc.)                         → targetIdentifier required
+//     FINDING, etc.) → targetEntityId required
+//   - external target types (EXTERNAL, EVIDENCE, ISSUE, CODE, AUDIT,
+//     CONFIGURATION, OPERATIONAL_ARTIFACT, REMEDIATION_PLAN, VULNERABILITY,
+//     AUDIT_RECORD, etc.)                          → targetIdentifier required
 //
 // The MCP layer does NOT mirror that dispatch (the preflight for #875 ruled out
 // duplicating backend validators). It exposes both target_entity_id and

@@ -43,7 +43,7 @@ public class ThreatModelLinkController {
                 request.linkType(),
                 request.targetUrl(),
                 request.targetTitle());
-        return ThreatModelLinkResponse.from(linkService.create(projectId, threatModelId, command));
+        return ThreatModelLinkResponse.from(linkService.create(projectId, threatModelId, command), threatModelId);
     }
 
     @GetMapping
@@ -51,7 +51,7 @@ public class ThreatModelLinkController {
             @PathVariable UUID threatModelId, @RequestParam(required = false) String project) {
         var projectId = projectService.resolveProjectId(project);
         return linkService.listByThreatModel(projectId, threatModelId).stream()
-                .map(ThreatModelLinkResponse::from)
+                .map(link -> ThreatModelLinkResponse.from(link, threatModelId))
                 .toList();
     }
 

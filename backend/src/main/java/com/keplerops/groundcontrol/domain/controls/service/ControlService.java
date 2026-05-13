@@ -1,12 +1,19 @@
 package com.keplerops.groundcontrol.domain.controls.service;
 
 import com.keplerops.groundcontrol.domain.controls.model.Control;
+import com.keplerops.groundcontrol.domain.controls.repository.ControlLinkRepository;
 import com.keplerops.groundcontrol.domain.controls.repository.ControlRepository;
 import com.keplerops.groundcontrol.domain.controls.state.ControlStatus;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.findings.repository.FindingLinkRepository;
+import com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,10 +27,18 @@ public class ControlService {
     private static final Logger log = LoggerFactory.getLogger(ControlService.class);
 
     private final ControlRepository controlRepository;
+    private final ControlLinkRepository controlLinkRepository;
+    private final FindingLinkRepository findingLinkRepository;
     private final ProjectService projectService;
 
-    public ControlService(ControlRepository controlRepository, ProjectService projectService) {
+    public ControlService(
+            ControlRepository controlRepository,
+            ControlLinkRepository controlLinkRepository,
+            FindingLinkRepository findingLinkRepository,
+            ProjectService projectService) {
         this.controlRepository = controlRepository;
+        this.controlLinkRepository = controlLinkRepository;
+        this.findingLinkRepository = findingLinkRepository;
         this.projectService = projectService;
     }
 
@@ -116,7 +131,34 @@ public class ControlService {
 
     public void delete(UUID projectId, UUID id) {
         var control = findOrThrow(projectId, id);
+
+        // Reject delete while inbound FindingLink rows still target this control.
+        // FindingLink.targetEntityId is not a database FK, so a delete here would
+        // leave dangling rows that FindingLinkController.list and the graph
+        // projection would happily surface (ADR-038 / cycle-3 codex review).
+        var inboundFindingUids = findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                FindingLinkTargetType.CONTROL, id, projectId);
+        if (!inboundFindingUids.isEmpty()) {
+            Map<String, Serializable> detail = new LinkedHashMap<>();
+            detail.put("controlUid", control.getUid());
+            detail.put("findingCount", inboundFindingUids.size());
+            detail.put("findingUids", new ArrayList<>(inboundFindingUids));
+            throw new ConflictException(
+                    "Control " + control.getUid()
+                            + " cannot be deleted while inbound FindingLink references exist. Remove the"
+                            + " FindingLink references first, then retry.",
+                    "control_referenced",
+                    detail);
+        }
+
+        // Delete outbound links through the repository before the parent so Envers
+        // writes delete revisions for each ControlLink. The migration's FK has
+        // ON DELETE CASCADE only as a defense-in-depth fallback; relying on it
+        // would bypass Hibernate and leave control_link_audit incomplete for the
+        // parent-delete path.
+        var outboundLinks = controlLinkRepository.findByControlId(id);
+        controlLinkRepository.deleteAll(outboundLinks);
         controlRepository.delete(control);
-        log.info("control_deleted: uid={} id={}", control.getUid(), id);
+        log.info("control_deleted: uid={} id={} outbound_links_deleted={}", control.getUid(), id, outboundLinks.size());
     }
 }

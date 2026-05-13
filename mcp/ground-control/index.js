@@ -181,6 +181,11 @@ import {
   GC_THREAT_MODEL_DESCRIPTION,
 } from "./gc-threat-model.js";
 import {
+  gcFindingZodShape,
+  gcFindingToolHandler,
+  GC_FINDING_DESCRIPTION,
+} from "./gc-finding.js";
+import {
   gcRiskScenarioZodShape,
   gcRiskScenarioToolHandler,
   GC_RISK_SCENARIO_DESCRIPTION,
@@ -1381,6 +1386,18 @@ server.tool(
   async (args) => {
     try {
       const result = await gcThreatModelToolHandler(args);
+      return result === null ? ok("Deleted") : ok(JSON.stringify(result, null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_finding",
+  GC_FINDING_DESCRIPTION,
+  gcFindingZodShape,
+  async (args) => {
+    try {
+      const result = await gcFindingToolHandler(args);
       return result === null ? ok("Deleted") : ok(JSON.stringify(result, null, 2));
     } catch (e) { return err(e); }
   },
