@@ -115,7 +115,13 @@ path; no new GitHub client, no new marker family beyond the two listed above.
 
 The SKILL stops `gh issue comment`-ing decision records and final reports
 once these tools land. Step 9 calls `gc_render_pr_body` and uses the returned
-body; Step 6.5 calls `gc_post_decision_record` for every cycle; **Step 13
+body; **per issue #901, Step 9 also validates the PR *title* locally against
+two stable conventional-commit rules before `gh pr create` — single
+`<type>(<optional-scope>): <subject>` (no compound `security/docs:` prefixes)
+and a lowercase-leading subject (`^[a-z].*$`, uppercase acronyms reshaped).
+The body renderer and the title validator are independent concerns living in
+the same Step 9 — the renderer is an MCP tool, the title rule is a local
+predicate the agent re-applies on every reshape.** Step 6.5 calls `gc_post_decision_record` for every cycle; **Step 13
 calls `gc_test_quality_review`** (per #884 v2 — the prior `Skill("review-tests")`
 boundary returned prose findings that the autoregressive parent agent
 kept echoing back to the user instead of fixing in-turn, defeating the
