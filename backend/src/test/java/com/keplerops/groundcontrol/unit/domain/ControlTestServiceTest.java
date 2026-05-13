@@ -110,7 +110,8 @@ class ControlTestServiceTest {
             when(controlTestRepository.existsByProjectIdAndUid(projectId, "CT-001"))
                     .thenReturn(true);
 
-            assertThatThrownBy(() -> service.create(happyCommand()))
+            var command = happyCommand();
+            assertThatThrownBy(() -> service.create(command))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("CT-001");
         }
@@ -124,7 +125,8 @@ class ControlTestServiceTest {
             when(controlService.getById(projectId, controlId))
                     .thenThrow(new NotFoundException("Control not found: " + controlId));
 
-            assertThatThrownBy(() -> service.create(happyCommand())).isInstanceOf(NotFoundException.class);
+            var command = happyCommand();
+            assertThatThrownBy(() -> service.create(command)).isInstanceOf(NotFoundException.class);
         }
     }
 
@@ -256,12 +258,12 @@ class ControlTestServiceTest {
                 control,
                 "CT-001",
                 ControlTestMethodology.INSPECTION,
-                "Inspect access logs.",
-                "No unauthorized.",
-                "Observed none.",
                 ControlTestConclusion.EFFECTIVE,
                 "auditor@example.com",
                 LocalDate.of(2026, 5, 1));
+        ct.setTestSteps("Inspect access logs.");
+        ct.setExpectedResults("No unauthorized.");
+        ct.setActualResults("Observed none.");
         setField(ct, "id", UUID.randomUUID());
         return ct;
     }

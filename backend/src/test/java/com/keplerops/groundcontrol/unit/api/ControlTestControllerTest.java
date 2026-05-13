@@ -63,12 +63,12 @@ class ControlTestControllerTest {
                 control,
                 "CT-001",
                 ControlTestMethodology.INSPECTION,
-                "Inspect access logs.",
-                "No unauthorized attempts.",
-                "0 unauthorized attempts.",
                 ControlTestConclusion.EFFECTIVE,
                 "auditor@example.com",
                 LocalDate.of(2026, 5, 1));
+        ct.setTestSteps("Inspect access logs.");
+        ct.setExpectedResults("No unauthorized attempts.");
+        ct.setActualResults("0 unauthorized attempts.");
         setField(ct, "id", TEST_ID);
         setField(ct, "createdAt", NOW);
         setField(ct, "updatedAt", NOW);

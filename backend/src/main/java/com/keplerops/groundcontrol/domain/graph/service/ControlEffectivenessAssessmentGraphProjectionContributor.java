@@ -78,34 +78,38 @@ public class ControlEffectivenessAssessmentGraphProjectionContributor implements
                     GraphEntityType.CONTROL_EFFECTIVENESS_ASSESSMENT,
                     GraphEntityType.CONTROL,
                     Map.of()));
-            // SUPPORTED_BY edges: one per supporting ControlTest. Skip IDs that no longer resolve
-            // in the same project so the graph never carries dangling edges (AGE materialization
-            // would reject edges whose target nodes don't exist). Edge ID is composite to stay
-            // unique across multiple assessments referencing the same test.
+            // SUPPORTED_BY edges: one per supporting ControlTest. Skip IDs that don't parse or
+            // no longer resolve in the same project so the graph never carries dangling edges
+            // (AGE materialization would reject edges whose target nodes don't exist). Edge ID
+            // is composite to stay unique across multiple assessments referencing the same test.
             if (assessment.getSupportingTestIds() != null) {
                 for (String rawTestId : assessment.getSupportingTestIds()) {
-                    UUID testId;
-                    try {
-                        testId = UUID.fromString(rawTestId);
-                    } catch (IllegalArgumentException e) {
-                        continue;
+                    UUID testId = tryParseUuid(rawTestId);
+                    boolean resolved = testId != null
+                            && controlTestRepository
+                                    .findByIdAndProjectId(testId, projectId)
+                                    .isPresent();
+                    if (resolved) {
+                        edges.add(new GraphEdge(
+                                assessment.getId() + ":supports:" + testId,
+                                EDGE_SUPPORTED_BY,
+                                GraphIds.nodeId(GraphEntityType.CONTROL_EFFECTIVENESS_ASSESSMENT, assessment.getId()),
+                                GraphIds.nodeId(GraphEntityType.CONTROL_TEST, testId),
+                                GraphEntityType.CONTROL_EFFECTIVENESS_ASSESSMENT,
+                                GraphEntityType.CONTROL_TEST,
+                                Map.of()));
                     }
-                    if (controlTestRepository
-                            .findByIdAndProjectId(testId, projectId)
-                            .isEmpty()) {
-                        continue;
-                    }
-                    edges.add(new GraphEdge(
-                            assessment.getId() + ":supports:" + testId,
-                            EDGE_SUPPORTED_BY,
-                            GraphIds.nodeId(GraphEntityType.CONTROL_EFFECTIVENESS_ASSESSMENT, assessment.getId()),
-                            GraphIds.nodeId(GraphEntityType.CONTROL_TEST, testId),
-                            GraphEntityType.CONTROL_EFFECTIVENESS_ASSESSMENT,
-                            GraphEntityType.CONTROL_TEST,
-                            Map.of()));
                 }
             }
         }
         return edges;
+    }
+
+    private static UUID tryParseUuid(String raw) {
+        try {
+            return UUID.fromString(raw);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 }

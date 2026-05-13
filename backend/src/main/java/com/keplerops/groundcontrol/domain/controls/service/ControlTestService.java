@@ -57,12 +57,12 @@ public class ControlTestService {
                 control,
                 command.uid(),
                 command.methodology(),
-                command.testSteps(),
-                command.expectedResults(),
-                command.actualResults(),
                 command.conclusion(),
                 command.testerIdentity(),
                 command.testDate());
+        controlTest.setTestSteps(command.testSteps());
+        controlTest.setExpectedResults(command.expectedResults());
+        controlTest.setActualResults(command.actualResults());
         controlTest.setNotes(command.notes());
         controlTest = controlTestRepository.save(controlTest);
         log.info(
@@ -79,18 +79,22 @@ public class ControlTestService {
             controlTest.setMethodology(command.methodology());
         }
         if (command.testSteps() != null) {
+            requireNonBlank(command.testSteps(), "testSteps");
             controlTest.setTestSteps(command.testSteps());
         }
         if (command.expectedResults() != null) {
+            requireNonBlank(command.expectedResults(), "expectedResults");
             controlTest.setExpectedResults(command.expectedResults());
         }
         if (command.actualResults() != null) {
+            requireNonBlank(command.actualResults(), "actualResults");
             controlTest.setActualResults(command.actualResults());
         }
         if (command.conclusion() != null) {
             controlTest.setConclusion(command.conclusion());
         }
         if (command.testerIdentity() != null) {
+            requireNonBlank(command.testerIdentity(), "testerIdentity");
             controlTest.setTesterIdentity(command.testerIdentity());
         }
         if (command.testDate() != null) {
@@ -159,5 +163,19 @@ public class ControlTestService {
         return controlTestRepository
                 .findByIdAndProjectId(id, projectId)
                 .orElseThrow(() -> new NotFoundException("ControlTest not found: " + id));
+    }
+
+    /**
+     * Reject whitespace-only updates on evidence/provenance fields. Replaces the @Pattern
+     * approach that Sonar flagged as polynomial-backtracking risk. A null-element check is
+     * unnecessary here — the update flow only calls this when the value is non-null.
+     */
+    private static void requireNonBlank(String value, String fieldName) {
+        if (value.isBlank()) {
+            throw new com.keplerops.groundcontrol.domain.exception.DomainValidationException(
+                    fieldName + " must not be blank when present",
+                    "validation_error",
+                    java.util.Map.of("field", fieldName));
+        }
     }
 }

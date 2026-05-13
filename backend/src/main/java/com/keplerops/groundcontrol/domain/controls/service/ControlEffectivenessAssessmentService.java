@@ -91,6 +91,12 @@ public class ControlEffectivenessAssessmentService {
             assessment.setAssessedAt(command.assessedAt());
         }
         if (command.assessor() != null) {
+            if (command.assessor().isBlank()) {
+                throw new DomainValidationException(
+                        "assessor must not be blank when present",
+                        "validation_error",
+                        java.util.Map.of("field", "assessor"));
+            }
             assessment.setAssessor(command.assessor());
         }
         if (command.rationale() != null) {

@@ -83,14 +83,18 @@ public class ControlTest extends BaseEntity {
         // JPA
     }
 
+    /**
+     * Minimal constructor — sets the entity's identity and lifecycle anchors. The TEXT
+     * evidence fields ({@code testSteps}, {@code expectedResults}, {@code actualResults}) are
+     * required at persist time (DB columns are NOT NULL) but are populated via setters so the
+     * constructor stays under the seven-parameter ceiling. Callers (the service layer) set every
+     * required field before saving.
+     */
     public ControlTest(
             Project project,
             Control control,
             String uid,
             ControlTestMethodology methodology,
-            String testSteps,
-            String expectedResults,
-            String actualResults,
             ControlTestConclusion conclusion,
             String testerIdentity,
             LocalDate testDate) {
@@ -98,9 +102,6 @@ public class ControlTest extends BaseEntity {
         this.control = control;
         this.uid = uid;
         this.methodology = methodology;
-        this.testSteps = testSteps;
-        this.expectedResults = expectedResults;
-        this.actualResults = actualResults;
         this.conclusion = conclusion;
         this.testerIdentity = testerIdentity;
         this.testDate = testDate;

@@ -118,7 +118,8 @@ class ControlEffectivenessAssessmentServiceTest {
             when(controlService.getById(projectId, controlId)).thenReturn(control);
             when(repository.existsByProjectIdAndUid(projectId, "CEA-001")).thenReturn(true);
 
-            assertThatThrownBy(() -> service.create(happyCommand()))
+            var command = happyCommand();
+            assertThatThrownBy(() -> service.create(command))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("CEA-001");
         }
@@ -129,7 +130,8 @@ class ControlEffectivenessAssessmentServiceTest {
             when(controlService.getById(projectId, controlId))
                     .thenThrow(new NotFoundException("Control not found: " + controlId));
 
-            assertThatThrownBy(() -> service.create(happyCommand())).isInstanceOf(NotFoundException.class);
+            var command = happyCommand();
+            assertThatThrownBy(() -> service.create(command)).isInstanceOf(NotFoundException.class);
         }
 
         @Test
@@ -140,9 +142,6 @@ class ControlEffectivenessAssessmentServiceTest {
                     control,
                     "CT-001",
                     com.keplerops.groundcontrol.domain.controls.state.ControlTestMethodology.INSPECTION,
-                    "x",
-                    "x",
-                    "x",
                     com.keplerops.groundcontrol.domain.controls.state.ControlTestConclusion.EFFECTIVE,
                     "auditor",
                     LocalDate.of(2026, 5, 1));
@@ -182,9 +181,6 @@ class ControlEffectivenessAssessmentServiceTest {
                     control,
                     "CT-A",
                     com.keplerops.groundcontrol.domain.controls.state.ControlTestMethodology.INSPECTION,
-                    "x",
-                    "x",
-                    "x",
                     com.keplerops.groundcontrol.domain.controls.state.ControlTestConclusion.EFFECTIVE,
                     "auditor",
                     LocalDate.of(2026, 5, 1));
@@ -194,9 +190,6 @@ class ControlEffectivenessAssessmentServiceTest {
                     control,
                     "CT-B",
                     com.keplerops.groundcontrol.domain.controls.state.ControlTestMethodology.INSPECTION,
-                    "x",
-                    "x",
-                    "x",
                     com.keplerops.groundcontrol.domain.controls.state.ControlTestConclusion.EFFECTIVE,
                     "auditor",
                     LocalDate.of(2026, 5, 2));
