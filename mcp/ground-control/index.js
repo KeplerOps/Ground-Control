@@ -114,8 +114,6 @@ import {
   createThreatModel, listThreatModels, getThreatModel, updateThreatModel,
   deleteThreatModel, transitionThreatModelStatus,
   createThreatModelLink, listThreatModelLinks, deleteThreatModelLink,
-  createControl, listControls, getControl, updateControl, deleteControl,
-  transitionControlStatus, createControlLink, listControlLinks, deleteControlLink,
   createMethodologyProfile, listMethodologyProfiles, getMethodologyProfile,
   updateMethodologyProfile, deleteMethodologyProfile,
   createRiskRegisterRecord, listRiskRegisterRecords, getRiskRegisterRecord,
@@ -155,7 +153,6 @@ import {
   RISK_SCENARIO_LINK_TARGET_TYPES, RISK_SCENARIO_LINK_TYPES,
   THREAT_MODEL_STATUSES, STRIDE_CATEGORIES,
   THREAT_MODEL_LINK_TARGET_TYPES, THREAT_MODEL_LINK_TYPES,
-  CONTROL_STATUSES, CONTROL_FUNCTIONS, CONTROL_LINK_TARGET_TYPES, CONTROL_LINK_TYPES,
   VERIFICATION_STATUSES, ASSURANCE_LEVELS,
   PLUGIN_TYPES, PLUGIN_LIFECYCLE_STATES,
   CONTROL_PACK_LIFECYCLE_STATES, CONTROL_PACK_ENTRY_STATUSES,
@@ -195,6 +192,11 @@ import {
   gcRiskGovernanceToolHandler,
   GC_RISK_GOVERNANCE_DESCRIPTION,
 } from "./gc-risk-governance.js";
+import {
+  gcControlZodShape,
+  gcControlToolHandler,
+  GC_CONTROL_DESCRIPTION,
+} from "./gc-control.js";
 import {
   linkCreateOptionalSharedZodFields,
   performLinkCreate,
@@ -1403,64 +1405,19 @@ server.tool(
   },
 );
 
-const CONTROL_ACTIONS = ["create", "update", "delete", "transition", "link_create", "link_delete"];
-
+// gc_control: control + control_test (GC-I012) + control_effectiveness_assessment
+// (GC-I013). Handler logic (Zod shape, per-entity per-action allowlist dispatch
+// via lib.js CONTROL_FIELDS) lives in gc-control.js so the adapter is testable
+// in isolation. The entity discriminator defaults to "control" so callers from
+// before the GC-I012/GC-I013 split keep working unchanged.
 server.tool(
   "gc_control",
-  `Controls + their links. Actions: ${CONTROL_ACTIONS.join(", ")}. ` +
-    `link_create requires target_type + link_type; pass target_entity_id for internal target types ` +
-    `or target_identifier for external types. target_url / target_title are optional. ` +
-    `Reads (list, get, links_list) route through gc_query.`,
-  {
-    action: z.enum(CONTROL_ACTIONS),
-    id: z.string().uuid().optional(),
-    uid: z.string().optional(),
-    project: z.string().optional(),
-    title: z.string().optional(),
-    description: z.string().optional(),
-    status: z.enum(CONTROL_STATUSES).optional(),
-    control_function: z.enum(CONTROL_FUNCTIONS).optional(),
-    metadata: z.record(z.any()).optional(),
-    // links
-    control_id: z.string().uuid().optional(),
-    target_type: z.enum(CONTROL_LINK_TARGET_TYPES).optional(),
-    link_type: z.enum(CONTROL_LINK_TYPES).optional(),
-    ...linkCreateOptionalSharedZodFields,
-    link_id: z.string().uuid().optional(),
-  },
+  GC_CONTROL_DESCRIPTION,
+  gcControlZodShape,
   async (args) => {
     try {
-      const ENTITY_FIELDS = ["uid", "title", "description", "status", "control_function", "metadata"];
-      switch (args.action) {
-        case "create": {
-          reqArg(args, "title", "create");
-          return ok(JSON.stringify(await createControl(pick(args, ENTITY_FIELDS), args.project), null, 2));
-        }
-        case "update": {
-          reqArg(args, "id", "update");
-          return ok(JSON.stringify(await updateControl(args.id, pick(args, ENTITY_FIELDS), args.project), null, 2));
-        }
-        case "delete": {
-          reqArg(args, "id", "delete");
-          await deleteControl(args.id, args.project);
-          return ok("Deleted");
-        }
-        case "transition": {
-          reqArg(args, "id", "transition"); reqArg(args, "status", "transition");
-          return ok(JSON.stringify(await transitionControlStatus(args.id, args.status, args.project), null, 2));
-        }
-        case "link_create": {
-          // lib.js: createControlLink(controlId, data, project). Body shape +
-          // target_type/link_type preconditions live in link-create.js.
-          return ok(JSON.stringify(await performLinkCreate(args, "control_id", createControlLink), null, 2));
-        }
-        case "link_delete": {
-          reqArg(args, "control_id", "link_delete"); reqArg(args, "link_id", "link_delete");
-          await deleteControlLink(args.control_id, args.link_id, args.project);
-          return ok("Deleted");
-        }
-        default: return err(new Error(`Unknown action: ${args.action}`));
-      }
+      const result = await gcControlToolHandler(args);
+      return result === null ? ok("Deleted") : ok(JSON.stringify(result, null, 2));
     } catch (e) { return err(e); }
   },
 );

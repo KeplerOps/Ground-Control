@@ -884,6 +884,70 @@ VERIFIED_CLOSED. `REMEDIATION_COMPLETE` can transition back to
 `VERIFIED_CLOSED` is terminal — reopening a verified-closed finding creates a new
 finding rather than reanimating the closed record.
 
+### Control Tests (GC-I012)
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/control-tests` | ControlTestRequest | 201 | Create a control test evidence row |
+| GET | `/control-tests` | — | 200 | List control tests for a project (optional `controlId` filter) |
+| GET | `/control-tests/{id}` | — | 200 | Get control test by UUID |
+| PUT | `/control-tests/{id}` | UpdateControlTestRequest | 200 | Update mutable fields |
+| DELETE | `/control-tests/{id}` | — | 204 | Delete the control test row |
+
+All endpoints accept the same optional `project` query parameter as the rest of `/api/v1/**`.
+The control test is the durable, audited evidence record for one execution of a test plan
+against a {@link Control}; it is not the same thing as a `ControlEffectivenessAssessment`
+(which is a rating, not an execution). See ADR-039.
+
+**ControlTestRequest fields:** `controlId` (required UUID, must belong to the same project),
+`uid` (required, max 50), `methodology` (required, ControlTestMethodology enum: INQUIRY,
+OBSERVATION, INSPECTION, RE_PERFORMANCE — PCAOB AS 2201 vocabulary), `testSteps` (required
+TEXT), `expectedResults` (required TEXT), `actualResults` (required TEXT), `conclusion`
+(required, ControlTestConclusion enum: EFFECTIVE, INEFFECTIVE, NOT_TESTED), `testerIdentity`
+(required, max 200 — domain provenance; does **not** replace the authenticated audit actor),
+`testDate` (required LocalDate, `@PastOrPresent`), `notes` (optional TEXT).
+
+**UpdateControlTestRequest fields:** `methodology`, `testSteps`, `expectedResults`,
+`actualResults`, `conclusion`, `testerIdentity`, `testDate`, `notes` — all optional; only
+fields present in the request body are updated. `controlId` and `uid` are create-only
+(updates ignore them).
+
+### Control Effectiveness Assessments (GC-I013)
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/control-effectiveness-assessments` | ControlEffectivenessAssessmentRequest | 201 | Create an effectiveness rating row |
+| GET | `/control-effectiveness-assessments` | — | 200 | List assessments for a project (optional `controlId` filter) |
+| GET | `/control-effectiveness-assessments/{id}` | — | 200 | Get assessment by UUID |
+| PUT | `/control-effectiveness-assessments/{id}` | UpdateControlEffectivenessAssessmentRequest | 200 | Update mutable fields |
+| DELETE | `/control-effectiveness-assessments/{id}` | — | 204 | Delete the assessment row |
+
+The assessment is the durable rating record. Design and operating effectiveness are stored
+as separate fields because a control can be well-designed but poorly operated, or vice versa
+(SOC 2 Type II / SOX testing convention). `operatingEffectiveness` is the stable, audited
+read target that future GC-T003 risk-scoring code consumes; this PR does not perform the
+residual-risk computation itself. See ADR-039.
+
+**ControlEffectivenessAssessmentRequest fields:** `controlId` (required UUID, same project),
+`uid` (required, max 50), `designEffectiveness` (required, ControlEffectivenessRating enum:
+EFFECTIVE, PARTIALLY_EFFECTIVE, INEFFECTIVE), `operatingEffectiveness` (required, same enum),
+`assessedAt` (required LocalDate, `@PastOrPresent`), `assessor` (required, max 200 — domain
+provenance), `rationale` (optional TEXT), `notes` (optional TEXT), `supportingTestIds` (optional
+list of `ControlTest` UUIDs that support this assessment's operating-effectiveness judgment;
+every ID must resolve to a `ControlTest` belonging to the same control as the assessment;
+duplicates are de-duplicated; null elements rejected with 422).
+
+**UpdateControlEffectivenessAssessmentRequest fields:** `designEffectiveness`,
+`operatingEffectiveness`, `assessedAt`, `assessor`, `rationale`, `notes`, `supportingTestIds`
+— all optional; `controlId` and `uid` are create-only. A non-null `supportingTestIds` replaces
+the existing list wholesale; pass `null` to leave it unchanged or an empty list to clear it.
+
+**Response includes `supportingTestIds`** as a `List<UUID>`. The graph projection emits one
+`SUPPORTED_BY` edge from the assessment to each `ControlTest` listed (plus the standard
+`OF_CONTROL` edge to the parent control); edges pointing at non-resolving tests are skipped to
+keep AGE materialization safe. `ControlTest` deletion is rejected with HTTP 409
+`control_test_referenced` while any assessment still references the test.
+
 ## Request / Response Format
 
 JSON. Error responses use a nested envelope:

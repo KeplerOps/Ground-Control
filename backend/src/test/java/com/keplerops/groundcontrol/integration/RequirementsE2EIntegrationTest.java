@@ -392,10 +392,57 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
         }
         assertThat(versions)
                 .containsExactly(
-                        "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012", "013",
-                        "014", "015", "016", "017", "018", "019", "020", "021", "022", "023", "024", "025", "026",
-                        "027", "028", "029", "030", "031", "032", "033", "034", "035", "036", "037", "038", "039",
-                        "040", "041", "042", "043", "044", "045", "046", "047", "048", "049", "050", "051",
+                        "001",
+                        "002",
+                        "003",
+                        "004",
+                        "005",
+                        "006",
+                        "007",
+                        "008",
+                        "009",
+                        "010",
+                        "011",
+                        "012",
+                        "013",
+                        "014",
+                        "015",
+                        "016",
+                        "017",
+                        "018",
+                        "019",
+                        "020",
+                        "021",
+                        "022",
+                        "023",
+                        "024",
+                        "025",
+                        "026",
+                        "027",
+                        "028",
+                        "029",
+                        "030",
+                        "031",
+                        "032",
+                        "033",
+                        "034",
+                        "035",
+                        "036",
+                        "037",
+                        "038",
+                        "039",
+                        "040",
+                        "041",
+                        "042",
+                        "043",
+                        "044",
+                        "045",
+                        "046",
+                        "047",
+                        "048",
+                        "049",
+                        "050",
+                        "051",
                         "052", // V052: control pack tables
                         "053", // V053: pack registry tables
                         "054", // V054: typed control-pack registry payloads
@@ -408,7 +455,11 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "061", // V061: finding_audit
                         "062", // V062: finding_link (target_url / target_title NOT NULL DEFAULT '')
                         "063", // V063: finding_link_audit
-                        "064"); // V064: drop ON DELETE CASCADE on asset_link / control_link / risk_scenario_link /
-        // threat_model_link FKs (Envers audit gap)
+                        "064", // V064: drop ON DELETE CASCADE on asset_link / control_link / risk_scenario_link /
+                        // threat_model_link FKs (Envers audit gap)
+                        "065", // V065: control_test (GC-I012 / ADR-039)
+                        "066", // V066: control_test_audit
+                        "067", // V067: control_effectiveness_assessment (GC-I013 / ADR-039)
+                        "068"); // V068: control_effectiveness_assessment_audit
     }
 }
