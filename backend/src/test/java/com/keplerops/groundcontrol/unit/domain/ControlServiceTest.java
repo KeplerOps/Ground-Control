@@ -255,13 +255,18 @@ class ControlServiceTest {
             // FindingLink.targetEntityId is not an FK, so without this guard the
             // delete would leave dangling FindingLink rows (cycle-3 pre-push codex
             // review on issue #279, ADR-038).
+            var controlId = control.getId();
             var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
-                    () -> controlService.delete(projectId, control.getId()),
-                    com.keplerops.groundcontrol.domain.exception.ConflictException.class);
-            assertThat(thrown).isNotNull().hasMessageContaining("FindingLink references exist");
-            assertThat(thrown.getErrorCode()).isEqualTo("control_referenced");
-            assertThat(thrown.getDetail()).containsEntry("findingCount", 1);
-            assertThat(thrown.getDetail().get("findingUids")).isEqualTo(java.util.List.of("FIND-001"));
+                    com.keplerops.groundcontrol.domain.exception.ConflictException.class,
+                    () -> controlService.delete(projectId, controlId));
+            assertThat(thrown)
+                    .isNotNull()
+                    .hasMessageContaining("FindingLink references exist")
+                    .extracting("errorCode")
+                    .isEqualTo("control_referenced");
+            assertThat(thrown.getDetail())
+                    .containsEntry("findingCount", 1)
+                    .containsEntry("findingUids", (java.io.Serializable) java.util.List.of("FIND-001"));
             // Parent + outbound-link cleanup must be skipped when the guard fires.
             org.mockito.Mockito.verifyNoInteractions(controlLinkRepository);
             org.mockito.Mockito.verify(controlRepository, org.mockito.Mockito.never())

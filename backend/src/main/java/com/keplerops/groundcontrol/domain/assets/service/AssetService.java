@@ -148,7 +148,11 @@ public class AssetService {
 
     @Deprecated(forRemoval = false)
     public void delete(UUID id) {
-        var asset = getById(id);
+        // Resolve the asset directly via the repository rather than via getById(id):
+        // Sonar S6809 flags self-invocation of @Transactional methods because the
+        // proxy is bypassed and any per-method tx semantics would be lost. Both
+        // getById overloads share the class-default tx, so behavior is unchanged.
+        var asset = assetRepository.findById(id).orElseThrow(() -> new NotFoundException("Asset not found: " + id));
         rejectIfInboundFindingLinksReferenceAsset(asset.getProject().getId(), id, asset.getUid());
         // Mirror the project-scoped overload's link-then-parent ordering so the
         // deprecated path also fires Envers delete revisions for each AssetLink

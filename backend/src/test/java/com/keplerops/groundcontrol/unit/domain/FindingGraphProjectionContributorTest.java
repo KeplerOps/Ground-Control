@@ -70,13 +70,13 @@ class FindingGraphProjectionContributorTest {
 
         // VERIFIED_CLOSED findings stay in the graph as historical evidence so
         // inbound AssetLink/ControlLink/RiskScenarioLink edges to them remain valid.
-        assertThat(nodes).hasSize(3);
-        assertThat(nodes).allMatch(node -> node.entityType() == GraphEntityType.FINDING);
+        assertThat(nodes).hasSize(3).allMatch(node -> node.entityType() == GraphEntityType.FINDING);
         assertThat(nodes.stream().map(n -> n.properties().get("status")))
                 .containsExactlyInAnyOrder("OPEN", "REMEDIATION_IN_PROGRESS", "VERIFIED_CLOSED");
         assertThat(nodes.get(0).id()).isEqualTo(GraphIds.nodeId(GraphEntityType.FINDING, open.getId()));
-        assertThat(nodes.get(0).properties().get("severity")).isEqualTo("HIGH");
-        assertThat(nodes.get(0).properties().get("findingType")).isEqualTo("CONTROL_DEFICIENCY");
+        assertThat(nodes.get(0).properties())
+                .containsEntry("severity", "HIGH")
+                .containsEntry("findingType", "CONTROL_DEFICIENCY");
     }
 
     @Test
@@ -95,13 +95,14 @@ class FindingGraphProjectionContributorTest {
         var properties = nodes.get(0).properties();
         // Null-valued optional fields must be absent rather than present-with-null,
         // because Apache AGE / Cypher property maps reject null property values.
-        assertThat(properties).doesNotContainKey("rootCauseAnalysis");
-        assertThat(properties).doesNotContainKey("owner");
-        assertThat(properties).doesNotContainKey("dueDate");
-        assertThat(properties).doesNotContainKey("createdBy");
         // Required fields are still present.
-        assertThat(properties).containsEntry("title", "Sparse finding");
-        assertThat(properties).containsEntry("description", "desc");
+        assertThat(properties)
+                .doesNotContainKey("rootCauseAnalysis")
+                .doesNotContainKey("owner")
+                .doesNotContainKey("dueDate")
+                .doesNotContainKey("createdBy")
+                .containsEntry("title", "Sparse finding")
+                .containsEntry("description", "desc");
     }
 
     @Test
@@ -119,11 +120,11 @@ class FindingGraphProjectionContributorTest {
 
         var nodes = contributor.contributeNodes(projectId);
 
-        var properties = nodes.get(0).properties();
-        assertThat(properties).containsEntry("rootCauseAnalysis", "Identity provider misconfigured during migration.");
-        assertThat(properties).containsEntry("owner", "alice");
-        assertThat(properties).containsEntry("dueDate", "2026-06-30");
-        assertThat(properties).containsEntry("createdBy", "analyst");
+        assertThat(nodes.get(0).properties())
+                .containsEntry("rootCauseAnalysis", "Identity provider misconfigured during migration.")
+                .containsEntry("owner", "alice")
+                .containsEntry("dueDate", "2026-06-30")
+                .containsEntry("createdBy", "analyst");
     }
 
     @Test

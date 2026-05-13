@@ -257,21 +257,22 @@ class AssetServiceTest {
         @Test
         void deletesOutboundLinksThroughRepositoryBeforeParent() {
             var asset = createAsset("ASSET-001", "Test");
+            var assetId = asset.getId();
             var outboundLinks = java.util.List.of(new com.keplerops.groundcontrol.domain.assets.model.AssetLink(
                     asset,
                     com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType.CONTROL,
                     UUID.randomUUID(),
                     null,
                     com.keplerops.groundcontrol.domain.assets.state.AssetLinkType.GOVERNED_BY));
-            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.of(asset));
             when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
                             com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.ASSET,
-                            asset.getId(),
+                            assetId,
                             projectId))
                     .thenReturn(java.util.List.of());
-            when(linkRepository.findByAssetId(asset.getId())).thenReturn(outboundLinks);
+            when(linkRepository.findByAssetId(assetId)).thenReturn(outboundLinks);
 
-            assetService.delete(asset.getId());
+            assetService.delete(projectId, assetId);
 
             // Envers writes delete revisions only when Hibernate sees the link
             // delete. Driving outbound link deletes through the repository before
@@ -285,10 +286,11 @@ class AssetServiceTest {
         @Test
         void rejectsDeleteWhenInboundFindingLinkReferencesAsset() {
             var asset = createAsset("ASSET-001", "Test");
-            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            var assetId = asset.getId();
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.of(asset));
             when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
                             com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.ASSET,
-                            asset.getId(),
+                            assetId,
                             projectId))
                     .thenReturn(java.util.List.of("FIND-001"));
 
@@ -296,10 +298,13 @@ class AssetServiceTest {
             // delete would leave dangling FindingLink rows (cycle-3 pre-push codex
             // review on issue #279, ADR-038).
             var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
-                    () -> assetService.delete(asset.getId()),
-                    com.keplerops.groundcontrol.domain.exception.ConflictException.class);
-            assertThat(thrown).isNotNull().hasMessageContaining("FindingLink references exist");
-            assertThat(thrown.getErrorCode()).isEqualTo("asset_referenced");
+                    com.keplerops.groundcontrol.domain.exception.ConflictException.class,
+                    () -> assetService.delete(projectId, assetId));
+            assertThat(thrown)
+                    .isNotNull()
+                    .hasMessageContaining("FindingLink references exist")
+                    .extracting("errorCode")
+                    .isEqualTo("asset_referenced");
             assertThat(thrown.getDetail()).containsEntry("findingCount", 1);
             // Parent + outbound-link cleanup must be skipped when the guard fires.
             org.mockito.Mockito.verifyNoInteractions(linkRepository);

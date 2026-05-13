@@ -204,11 +204,12 @@ class FindingServiceTest {
         @Test
         void rejectsBlankTitle() {
             var f = makeFinding();
-            when(findingRepository.findByIdAndProjectId(f.getId(), projectId)).thenReturn(Optional.of(f));
+            var fId = f.getId();
+            when(findingRepository.findByIdAndProjectId(fId, projectId)).thenReturn(Optional.of(f));
 
             var cmd = new UpdateFindingCommand("   ", null, null, null, null, null, null, false, false, false);
 
-            assertThatThrownBy(() -> findingService.update(projectId, f.getId(), cmd))
+            assertThatThrownBy(() -> findingService.update(projectId, fId, cmd))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("title");
         }
@@ -216,11 +217,12 @@ class FindingServiceTest {
         @Test
         void rejectsBlankDescription() {
             var f = makeFinding();
-            when(findingRepository.findByIdAndProjectId(f.getId(), projectId)).thenReturn(Optional.of(f));
+            var fId = f.getId();
+            when(findingRepository.findByIdAndProjectId(fId, projectId)).thenReturn(Optional.of(f));
 
             var cmd = new UpdateFindingCommand(null, null, null, "", null, null, null, false, false, false);
 
-            assertThatThrownBy(() -> findingService.update(projectId, f.getId(), cmd))
+            assertThatThrownBy(() -> findingService.update(projectId, fId, cmd))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("description");
         }
@@ -297,10 +299,10 @@ class FindingServiceTest {
         @Test
         void throwsOnInvalidTransition() {
             var f = makeFinding();
-            when(findingRepository.findByIdAndProjectId(f.getId(), projectId)).thenReturn(Optional.of(f));
+            var fId = f.getId();
+            when(findingRepository.findByIdAndProjectId(fId, projectId)).thenReturn(Optional.of(f));
 
-            assertThatThrownBy(
-                            () -> findingService.transitionStatus(projectId, f.getId(), FindingStatus.VERIFIED_CLOSED))
+            assertThatThrownBy(() -> findingService.transitionStatus(projectId, fId, FindingStatus.VERIFIED_CLOSED))
                     .isInstanceOf(DomainValidationException.class);
         }
     }
@@ -447,16 +449,19 @@ class FindingServiceTest {
                             RiskScenarioLinkTargetType.FINDING, f.getId(), projectId))
                     .thenReturn(List.of());
 
-            var thrown =
-                    catchThrowableOfType(() -> findingService.delete(projectId, f.getId()), ConflictException.class);
-            assertThat(thrown).isNotNull().hasMessageContaining("reverse links");
-            assertThat(thrown.getErrorCode()).isEqualTo("finding_referenced");
-            var detail = thrown.getDetail();
-            assertThat(detail).containsEntry("findingUid", f.getUid());
-            assertThat(detail).containsEntry("assetCount", 2);
-            assertThat(detail).containsEntry("controlCount", 0);
-            assertThat(detail).containsEntry("scenarioCount", 0);
-            assertThat(detail.get("assetUids")).isEqualTo(List.of("ASSET-A", "ASSET-B"));
+            var fId = f.getId();
+            var thrown = catchThrowableOfType(ConflictException.class, () -> findingService.delete(projectId, fId));
+            assertThat(thrown)
+                    .isNotNull()
+                    .hasMessageContaining("reverse links")
+                    .extracting("errorCode")
+                    .isEqualTo("finding_referenced");
+            assertThat(thrown.getDetail())
+                    .containsEntry("findingUid", f.getUid())
+                    .containsEntry("assetCount", 2)
+                    .containsEntry("controlCount", 0)
+                    .containsEntry("scenarioCount", 0)
+                    .containsEntry("assetUids", (java.io.Serializable) List.of("ASSET-A", "ASSET-B"));
         }
 
         @Test
@@ -473,11 +478,12 @@ class FindingServiceTest {
                             RiskScenarioLinkTargetType.FINDING, f.getId(), projectId))
                     .thenReturn(List.of());
 
-            var thrown =
-                    catchThrowableOfType(() -> findingService.delete(projectId, f.getId()), ConflictException.class);
+            var fId = f.getId();
+            var thrown = catchThrowableOfType(ConflictException.class, () -> findingService.delete(projectId, fId));
             assertThat(thrown).isNotNull();
-            assertThat(thrown.getDetail()).containsEntry("controlCount", 1);
-            assertThat(thrown.getDetail().get("controlUids")).isEqualTo(List.of("CTRL-1"));
+            assertThat(thrown.getDetail())
+                    .containsEntry("controlCount", 1)
+                    .containsEntry("controlUids", (java.io.Serializable) List.of("CTRL-1"));
         }
 
         @Test
@@ -494,11 +500,12 @@ class FindingServiceTest {
                             RiskScenarioLinkTargetType.FINDING, f.getId(), projectId))
                     .thenReturn(List.of("RS-001"));
 
-            var thrown =
-                    catchThrowableOfType(() -> findingService.delete(projectId, f.getId()), ConflictException.class);
+            var fId = f.getId();
+            var thrown = catchThrowableOfType(ConflictException.class, () -> findingService.delete(projectId, fId));
             assertThat(thrown).isNotNull();
-            assertThat(thrown.getDetail()).containsEntry("scenarioCount", 1);
-            assertThat(thrown.getDetail().get("scenarioUids")).isEqualTo(List.of("RS-001"));
+            assertThat(thrown.getDetail())
+                    .containsEntry("scenarioCount", 1)
+                    .containsEntry("scenarioUids", (java.io.Serializable) List.of("RS-001"));
         }
     }
 }

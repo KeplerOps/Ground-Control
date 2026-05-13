@@ -379,10 +379,14 @@ class RiskScenarioServiceTest {
             // FindingLink.targetEntityId is not an FK, so without this guard the
             // delete would leave dangling FindingLink rows (cycle-3 pre-push codex
             // review on issue #279, ADR-038).
+            var rsId = rs.getId();
             var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
-                    () -> riskScenarioService.delete(projectId, rs.getId()), ConflictException.class);
-            assertThat(thrown).isNotNull().hasMessageContaining("FindingLink references exist");
-            assertThat(thrown.getErrorCode()).isEqualTo("risk_scenario_referenced");
+                    ConflictException.class, () -> riskScenarioService.delete(projectId, rsId));
+            assertThat(thrown)
+                    .isNotNull()
+                    .hasMessageContaining("FindingLink references exist")
+                    .extracting("errorCode")
+                    .isEqualTo("risk_scenario_referenced");
             assertThat(thrown.getDetail()).containsEntry("findingCount", 1);
             // Parent + outbound-link cleanup must be skipped when the guard fires.
             org.mockito.Mockito.verifyNoInteractions(riskScenarioLinkRepository);

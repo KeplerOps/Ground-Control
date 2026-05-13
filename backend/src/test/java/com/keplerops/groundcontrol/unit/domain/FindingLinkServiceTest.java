@@ -232,11 +232,11 @@ class FindingLinkServiceTest {
         @Test
         void throwsWhenLinkBelongsToDifferentFinding() {
             var link = makeLink();
-            when(linkRepository.findByIdAndFindingProjectId(link.getId(), projectId))
-                    .thenReturn(Optional.of(link));
+            var linkId = link.getId();
+            when(linkRepository.findByIdAndFindingProjectId(linkId, projectId)).thenReturn(Optional.of(link));
 
             var wrongFindingId = UUID.randomUUID();
-            assertThatThrownBy(() -> linkService.delete(projectId, wrongFindingId, link.getId()))
+            assertThatThrownBy(() -> linkService.delete(projectId, wrongFindingId, linkId))
                     .isInstanceOf(NotFoundException.class);
         }
     }
