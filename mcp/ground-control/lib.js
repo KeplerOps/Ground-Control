@@ -4612,11 +4612,35 @@ export function parseTestQualityReviewFindings(stdout) {
   }
 
   // claude --output-format json wraps the model's output in
-  // `{ type: "result", result: "...", ... }`. If we see that envelope,
-  // parse `result` as JSON; otherwise treat the top-level object as the
-  // findings payload.
+  // `{ type: "result", result: "...", structured_output: { findings: [...] }, ... }`.
+  // Two shapes coexist:
+  //   1. `structured_output.findings` carries the JSON-schema-validated payload
+  //      directly (new path; produced when the agent honors the schema via
+  //      tool-use / --json-schema mode). When the agent returns no free-prose
+  //      `result` text — which Sonnet often does once it's emitted the
+  //      structured output — `result` is the empty string, so we must prefer
+  //      `structured_output` (issue #904).
+  //   2. `result` carries the same payload as a JSON-encoded string (older
+  //      path; produced when the agent serializes its findings into the
+  //      text channel).
+  // Fall back to treating the top-level object as the findings payload when
+  // neither envelope shape applies (e.g., unit tests that pass a bare
+  // `{ findings: [...] }` literal).
   let payload = envelope;
-  if (envelope && typeof envelope === "object" && typeof envelope.result === "string") {
+  if (
+    envelope
+    && typeof envelope === "object"
+    && envelope.structured_output != null
+    && typeof envelope.structured_output === "object"
+    && Array.isArray(envelope.structured_output.findings)
+  ) {
+    payload = envelope.structured_output;
+  } else if (envelope && typeof envelope === "object" && typeof envelope.result === "string") {
+    if (envelope.result.trim() === "") {
+      throw new Error(
+        "test-quality review .result field is empty and no structured_output.findings was provided",
+      );
+    }
     try {
       payload = JSON.parse(envelope.result);
     } catch (err) {

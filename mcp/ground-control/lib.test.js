@@ -7387,6 +7387,53 @@ describe("parseTestQualityReviewFindings", () => {
     assert.throws(() => parseTestQualityReviewFindings(stdout));
   });
 
+  it("prefers structured_output.findings over .result (issue #904)", () => {
+    // claude --output-format json with --json-schema returns the validated
+    // payload in `structured_output` and may leave `result` as the empty
+    // string when the agent doesn't emit free-prose text. Without this
+    // fallback the parser fails on JSON.parse("").
+    const stdout = JSON.stringify({
+      type: "result",
+      result: "",
+      structured_output: {
+        findings: [
+          {
+            severity: "critical",
+            location: "backend/.../FooTest.java::Foo::test_bar",
+            problem: "Assertion-free test.",
+            why_it_matters: "Trivially passes.",
+            fix: "Add an assertion on the return value.",
+          },
+        ],
+      },
+    });
+    const r = parseTestQualityReviewFindings(stdout);
+    assert.equal(r.findings.length, 1);
+    assert.equal(r.findings[0].severity, "critical");
+    assert.equal(r.findings[0].fix, "Add an assertion on the return value.");
+  });
+
+  it("uses structured_output.findings even when .result is populated", () => {
+    // structured_output is the schema-validated source of truth; the
+    // free-prose `result` channel may carry analyst commentary that does
+    // not parse as JSON. Prefer the structured channel unconditionally.
+    const stdout = JSON.stringify({
+      type: "result",
+      result: "(human-readable summary that is not JSON)",
+      structured_output: { findings: [] },
+    });
+    const r = parseTestQualityReviewFindings(stdout);
+    assert.deepEqual(r.findings, []);
+  });
+
+  it("throws on .result empty AND no structured_output.findings", () => {
+    // Defends against the half-shaped envelope: empty result + missing or
+    // malformed structured_output should fail explicitly rather than fall
+    // through to a confusing 'payload is not an object' error.
+    const stdout = JSON.stringify({ type: "result", result: "" });
+    assert.throws(() => parseTestQualityReviewFindings(stdout), /empty/);
+  });
+
   it("throws on a bad severity value", () => {
     const stdout = JSON.stringify({
       findings: [
