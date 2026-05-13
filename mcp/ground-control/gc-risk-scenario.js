@@ -76,8 +76,8 @@ export const GC_RISK_SCENARIO_DESCRIPTION =
   `status is consumed only by the transition action (creation defaults to DRAFT). ` +
   `link_create requires target_type + link_type; for internal target types ` +
   `(OBSERVATION / ASSET / REQUIREMENT / RISK_REGISTER_RECORD / RISK_ASSESSMENT_RESULT / ` +
-  `TREATMENT_PLAN / METHODOLOGY_PROFILE / CONTROL / THREAT_MODEL) pass target_entity_id; ` +
-  `for external types (VULNERABILITY / FINDING / EVIDENCE / AUDIT_RECORD / EXTERNAL) ` +
+  `TREATMENT_PLAN / METHODOLOGY_PROFILE / CONTROL / THREAT_MODEL / FINDING) pass target_entity_id; ` +
+  `for external types (VULNERABILITY / EVIDENCE / AUDIT_RECORD / EXTERNAL) ` +
   `pass target_identifier. target_url and target_title are optional. ` +
   `Reads (list, get, links_list) route through gc_query.`;
 

@@ -61,6 +61,9 @@ class AssetServiceTest {
     private AssetExternalIdRepository externalIdRepository;
 
     @Mock
+    private com.keplerops.groundcontrol.domain.findings.repository.FindingLinkRepository findingLinkRepository;
+
+    @Mock
     private ProjectRepository projectRepository;
 
     @Mock
@@ -240,9 +243,73 @@ class AssetServiceTest {
         void deleteSucceeds() {
             var asset = createAsset("ASSET-001", "Test");
             when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.ASSET,
+                            asset.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(linkRepository.findByAssetId(asset.getId())).thenReturn(java.util.List.of());
 
             assetService.delete(asset.getId());
             verify(assetRepository).delete(asset);
+        }
+
+        @Test
+        void deletesOutboundLinksThroughRepositoryBeforeParent() {
+            var asset = createAsset("ASSET-001", "Test");
+            var assetId = asset.getId();
+            var outboundLinks = java.util.List.of(new com.keplerops.groundcontrol.domain.assets.model.AssetLink(
+                    asset,
+                    com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType.CONTROL,
+                    UUID.randomUUID(),
+                    null,
+                    com.keplerops.groundcontrol.domain.assets.state.AssetLinkType.GOVERNED_BY));
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.of(asset));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.ASSET,
+                            assetId,
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(linkRepository.findByAssetId(assetId)).thenReturn(outboundLinks);
+
+            assetService.delete(projectId, assetId);
+
+            // Envers writes delete revisions only when Hibernate sees the link
+            // delete. Driving outbound link deletes through the repository before
+            // deleting the parent closes the parent-delete audit-history gap
+            // (cycle-2 pre-push codex review on issue #279).
+            var inOrder = org.mockito.Mockito.inOrder(linkRepository, assetRepository);
+            inOrder.verify(linkRepository).deleteAll(outboundLinks);
+            inOrder.verify(assetRepository).delete(asset);
+        }
+
+        @Test
+        void rejectsDeleteWhenInboundFindingLinkReferencesAsset() {
+            var asset = createAsset("ASSET-001", "Test");
+            var assetId = asset.getId();
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.of(asset));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.ASSET,
+                            assetId,
+                            projectId))
+                    .thenReturn(java.util.List.of("FIND-001"));
+
+            // FindingLink.targetEntityId is not an FK, so without this guard the
+            // delete would leave dangling FindingLink rows (cycle-3 pre-push codex
+            // review on issue #279, ADR-038).
+            var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
+                    com.keplerops.groundcontrol.domain.exception.ConflictException.class,
+                    () -> assetService.delete(projectId, assetId));
+            assertThat(thrown)
+                    .isNotNull()
+                    .hasMessageContaining("FindingLink references exist")
+                    .extracting("errorCode")
+                    .isEqualTo("asset_referenced");
+            assertThat(thrown.getDetail()).containsEntry("findingCount", 1);
+            // Parent + outbound-link cleanup must be skipped when the guard fires.
+            org.mockito.Mockito.verifyNoInteractions(linkRepository);
+            org.mockito.Mockito.verify(assetRepository, org.mockito.Mockito.never())
+                    .delete(asset);
         }
     }
 

@@ -403,6 +403,12 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "056", // V056: threat_model_audit
                         "057", // V057: threat_model_link (target_url / target_title NOT NULL DEFAULT '')
                         "058", // V058: threat_model_link_audit
-                        "059"); // V059: ADR-037 users + authorities (browser session JDBC store)
+                        "059", // V059: ADR-037 users + authorities (browser session JDBC store)
+                        "060", // V060: finding (GC-V001 / ADR-038)
+                        "061", // V061: finding_audit
+                        "062", // V062: finding_link (target_url / target_title NOT NULL DEFAULT '')
+                        "063", // V063: finding_link_audit
+                        "064"); // V064: drop ON DELETE CASCADE on asset_link / control_link / risk_scenario_link /
+        // threat_model_link FKs (Envers audit gap)
     }
 }

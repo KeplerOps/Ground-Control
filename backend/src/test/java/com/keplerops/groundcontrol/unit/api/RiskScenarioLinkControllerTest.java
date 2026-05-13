@@ -117,7 +117,13 @@ class RiskScenarioLinkControllerTest {
                         .param("project", "ground-control"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].targetIdentifier", is("CTRL-001")));
+                .andExpect(jsonPath("$[0].targetIdentifier", is("CTRL-001")))
+                // The response must report the riskScenarioId from the path, not
+                // from a lazy parent dereference: with spring.jpa.open-in-view=false
+                // the session is closed by the time the response mapper runs.
+                // Carrying the path variable through .from(link, riskScenarioId)
+                // sidesteps the LazyInitializationException.
+                .andExpect(jsonPath("$[0].riskScenarioId", is(RS_ID.toString())));
     }
 
     @Test

@@ -494,6 +494,15 @@ const TO_CAMEL = {
   stride_category: "stride",
   clear_stride: "clearStride",
   clear_narrative: "clearNarrative",
+  // GC-V001 finding adapter — backend FindingRequest / UpdateFindingRequest
+  // use these camelCase field names. Mapping is needed so `gc_finding` reaches
+  // backend Bean Validation with the right field names (issue #279).
+  finding_id: "findingId",
+  finding_type: "findingType",
+  root_cause_analysis: "rootCauseAnalysis",
+  clear_root_cause_analysis: "clearRootCauseAnalysis",
+  clear_owner: "clearOwner",
+  clear_due_date: "clearDueDate",
   affected_object: "affectedObject",
   time_horizon: "timeHorizon",
   observation_refs: "observationRefs",
@@ -7039,6 +7048,84 @@ export async function deleteThreatModelLink(threatModelId, linkId, project) {
   await request(
     "DELETE",
     `/api/v1/threat-models/${encodeURIComponent(threatModelId)}/links/${encodeURIComponent(linkId)}`,
+    { params: { project } },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Finding API functions (GC-V001, ADR-038)
+//
+// All finding routes accept `project` as optional. The backend auto-resolves
+// to the single project in single-project deployments and returns 422
+// `project_required` in multi-project deployments when the parameter is
+// missing. `deleteFinding` returns 409 `finding_referenced` while AssetLink,
+// ControlLink, or RiskScenarioLink rows still reference the finding — see
+// ADR-038.
+// ---------------------------------------------------------------------------
+
+export const FINDING_TYPES = [
+  "AUDIT_FINDING", "CONTROL_DEFICIENCY", "POLICY_VIOLATION", "VULNERABILITY", "EXCEPTION_ESCALATION",
+];
+export const FINDING_SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL"];
+export const FINDING_STATUSES = [
+  "OPEN", "REMEDIATION_IN_PROGRESS", "REMEDIATION_COMPLETE", "VERIFIED_CLOSED",
+];
+export const FINDING_LINK_TARGET_TYPES = [
+  "CONTROL", "RISK_SCENARIO", "ASSET", "OBSERVATION",
+  "OPERATIONAL_ARTIFACT", "EVIDENCE", "AUDIT", "REMEDIATION_PLAN", "EXTERNAL",
+];
+export const FINDING_LINK_TYPES = [
+  "AFFECTS", "CAUSED_BY", "MITIGATED_BY", "EVIDENCED_BY", "OBSERVED_IN", "REMEDIATED_BY", "ASSOCIATED",
+];
+
+export async function createFinding(data, project) {
+  return request("POST", "/api/v1/findings", { body: data, params: { project } });
+}
+
+export async function listFindings(project) {
+  return request("GET", "/api/v1/findings", { params: { project } });
+}
+
+export async function getFinding(id, project) {
+  return request("GET", `/api/v1/findings/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function getFindingByUid(uid, project) {
+  return request("GET", `/api/v1/findings/uid/${encodeURIComponent(uid)}`, { params: { project } });
+}
+
+export async function updateFinding(id, data, project) {
+  return request("PUT", `/api/v1/findings/${encodeURIComponent(id)}`, { body: data, params: { project } });
+}
+
+export async function deleteFinding(id, project) {
+  await request("DELETE", `/api/v1/findings/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function transitionFindingStatus(id, status, project) {
+  return request("PUT", `/api/v1/findings/${encodeURIComponent(id)}/status`, {
+    body: { status },
+    params: { project },
+  });
+}
+
+export async function createFindingLink(findingId, data, project) {
+  return request("POST", `/api/v1/findings/${encodeURIComponent(findingId)}/links`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function listFindingLinks(findingId, project) {
+  return request("GET", `/api/v1/findings/${encodeURIComponent(findingId)}/links`, {
+    params: { project },
+  });
+}
+
+export async function deleteFindingLink(findingId, linkId, project) {
+  await request(
+    "DELETE",
+    `/api/v1/findings/${encodeURIComponent(findingId)}/links/${encodeURIComponent(linkId)}`,
     { params: { project } },
   );
 }

@@ -145,7 +145,12 @@ public class AssetGraphProjectionContributor implements GraphProjectionContribut
                         // intentionally keeps archived threat-model nodes in the graph
                         // (see its contributeNodes javadoc) so this edge never dangles.
                     case THREAT_MODEL_ENTRY -> GraphEntityType.THREAT_MODEL;
-                    case FINDING, EVIDENCE, AUDIT, ISSUE, CODE, CONFIGURATION, EXTERNAL -> null;
+                        // Always emits an edge to the FINDING node regardless of the
+                        // finding's status. FindingGraphProjectionContributor intentionally
+                        // keeps VERIFIED_CLOSED finding nodes in the graph (see its
+                        // contributeNodes javadoc) so this edge never dangles.
+                    case FINDING -> GraphEntityType.FINDING;
+                    case EVIDENCE, AUDIT, ISSUE, CODE, CONFIGURATION, EXTERNAL -> null;
                 };
         if (targetEntityType == null) {
             return null;

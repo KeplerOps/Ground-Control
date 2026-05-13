@@ -7,8 +7,14 @@ import com.keplerops.groundcontrol.domain.assets.state.ObservationCategory;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.findings.repository.FindingLinkRepository;
+import com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType;
+import java.io.Serializable;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,10 +25,15 @@ public class ObservationService {
 
     private final ObservationRepository observationRepository;
     private final OperationalAssetRepository assetRepository;
+    private final FindingLinkRepository findingLinkRepository;
 
-    public ObservationService(ObservationRepository observationRepository, OperationalAssetRepository assetRepository) {
+    public ObservationService(
+            ObservationRepository observationRepository,
+            OperationalAssetRepository assetRepository,
+            FindingLinkRepository findingLinkRepository) {
         this.observationRepository = observationRepository;
         this.assetRepository = assetRepository;
+        this.findingLinkRepository = findingLinkRepository;
     }
 
     public Observation create(UUID projectId, UUID assetId, CreateObservationCommand command) {
@@ -187,12 +198,37 @@ public class ObservationService {
     }
 
     public void delete(UUID projectId, UUID assetId, UUID observationId) {
-        observationRepository.delete(getObservationBelongingTo(projectId, assetId, observationId));
+        var observation = getObservationBelongingTo(projectId, assetId, observationId);
+        rejectIfInboundFindingLinksReferenceObservation(projectId, observationId);
+        observationRepository.delete(observation);
     }
 
     @Deprecated(forRemoval = false)
     public void delete(UUID assetId, UUID observationId) {
-        observationRepository.delete(getLegacyObservationBelongingTo(assetId, observationId));
+        var observation = getLegacyObservationBelongingTo(assetId, observationId);
+        rejectIfInboundFindingLinksReferenceObservation(
+                observation.getAsset().getProject().getId(), observationId);
+        observationRepository.delete(observation);
+    }
+
+    private void rejectIfInboundFindingLinksReferenceObservation(UUID projectId, UUID observationId) {
+        // FindingLink.targetEntityId is not an FK, so a delete here would leave
+        // dangling rows that FindingLinkController.list and the graph projection
+        // would happily surface (ADR-038 / cycle-3 codex review on issue #279).
+        var inboundFindingUids = findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                FindingLinkTargetType.OBSERVATION, observationId, projectId);
+        if (!inboundFindingUids.isEmpty()) {
+            Map<String, Serializable> detail = new LinkedHashMap<>();
+            detail.put("observationId", observationId.toString());
+            detail.put("findingCount", inboundFindingUids.size());
+            detail.put("findingUids", new ArrayList<>(inboundFindingUids));
+            throw new ConflictException(
+                    "Observation " + observationId
+                            + " cannot be deleted while inbound FindingLink references exist. Remove the"
+                            + " FindingLink references first, then retry.",
+                    "observation_referenced",
+                    detail);
+        }
     }
 
     private Observation getObservationBelongingTo(UUID projectId, UUID assetId, UUID observationId) {

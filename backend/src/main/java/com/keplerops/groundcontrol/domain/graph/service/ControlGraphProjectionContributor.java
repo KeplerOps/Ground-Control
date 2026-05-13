@@ -79,7 +79,8 @@ public class ControlGraphProjectionContributor implements GraphProjectionContrib
                     case TREATMENT_PLAN -> GraphEntityType.TREATMENT_PLAN;
                     case METHODOLOGY_PROFILE -> GraphEntityType.METHODOLOGY_PROFILE;
                     case OBSERVATION -> GraphEntityType.OBSERVATION;
-                    case EVIDENCE, FINDING, CODE, CONFIGURATION, OPERATIONAL_ARTIFACT, EXTERNAL -> null;
+                    case FINDING -> GraphEntityType.FINDING;
+                    case EVIDENCE, CODE, CONFIGURATION, OPERATIONAL_ARTIFACT, EXTERNAL -> null;
                 };
         if (targetEntityType == null) {
             return null;

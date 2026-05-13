@@ -4,11 +4,14 @@ import com.keplerops.groundcontrol.domain.audit.ActorHolder;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.findings.repository.FindingLinkRepository;
+import com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.riskscenarios.model.RiskScenario;
+import com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskScenarioLinkRepository;
 import com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskScenarioRepository;
 import com.keplerops.groundcontrol.domain.riskscenarios.state.RiskScenarioStatus;
 import java.util.List;
@@ -25,14 +28,20 @@ public class RiskScenarioService {
     private static final Logger log = LoggerFactory.getLogger(RiskScenarioService.class);
 
     private final RiskScenarioRepository riskScenarioRepository;
+    private final RiskScenarioLinkRepository riskScenarioLinkRepository;
+    private final FindingLinkRepository findingLinkRepository;
     private final ProjectService projectService;
     private final TraceabilityLinkRepository traceabilityLinkRepository;
 
     public RiskScenarioService(
             RiskScenarioRepository riskScenarioRepository,
+            RiskScenarioLinkRepository riskScenarioLinkRepository,
+            FindingLinkRepository findingLinkRepository,
             ProjectService projectService,
             TraceabilityLinkRepository traceabilityLinkRepository) {
         this.riskScenarioRepository = riskScenarioRepository;
+        this.riskScenarioLinkRepository = riskScenarioLinkRepository;
+        this.findingLinkRepository = findingLinkRepository;
         this.projectService = projectService;
         this.traceabilityLinkRepository = traceabilityLinkRepository;
     }
@@ -171,8 +180,39 @@ public class RiskScenarioService {
 
     public void delete(UUID projectId, UUID id) {
         var scenario = findByIdOrThrow(projectId, id);
+
+        // Reject delete while inbound FindingLink rows still target this scenario.
+        // FindingLink.targetEntityId is not a database FK, so a delete here would
+        // leave dangling rows that FindingLinkController.list and the graph
+        // projection would happily surface (ADR-038 / cycle-3 codex review).
+        var inboundFindingUids = findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                FindingLinkTargetType.RISK_SCENARIO, id, projectId);
+        if (!inboundFindingUids.isEmpty()) {
+            java.util.Map<String, java.io.Serializable> detail = new java.util.LinkedHashMap<>();
+            detail.put("riskScenarioUid", scenario.getUid());
+            detail.put("findingCount", inboundFindingUids.size());
+            detail.put("findingUids", new java.util.ArrayList<>(inboundFindingUids));
+            throw new ConflictException(
+                    "Risk scenario " + scenario.getUid()
+                            + " cannot be deleted while inbound FindingLink references exist. Remove the"
+                            + " FindingLink references first, then retry.",
+                    "risk_scenario_referenced",
+                    detail);
+        }
+
+        // Delete outbound links through the repository before the parent so Envers
+        // writes delete revisions for each RiskScenarioLink. The migration's FK has
+        // ON DELETE CASCADE only as a defense-in-depth fallback; relying on it
+        // would bypass Hibernate and leave risk_scenario_link_audit incomplete
+        // for the parent-delete path.
+        var outboundLinks = riskScenarioLinkRepository.findByRiskScenarioId(id);
+        riskScenarioLinkRepository.deleteAll(outboundLinks);
         riskScenarioRepository.delete(scenario);
-        log.info("risk_scenario_deleted: id={} uid={}", scenario.getId(), scenario.getUid());
+        log.info(
+                "risk_scenario_deleted: id={} uid={} outbound_links_deleted={}",
+                scenario.getId(),
+                scenario.getUid(),
+                outboundLinks.size());
     }
 
     @Deprecated(forRemoval = false)

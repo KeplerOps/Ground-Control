@@ -43,7 +43,7 @@ public class ControlLinkController {
                 request.linkType(),
                 request.targetUrl(),
                 request.targetTitle());
-        return ControlLinkResponse.from(controlLinkService.create(projectId, controlId, command));
+        return ControlLinkResponse.from(controlLinkService.create(projectId, controlId, command), controlId);
     }
 
     @GetMapping
@@ -53,7 +53,7 @@ public class ControlLinkController {
             @RequestParam(required = false) String project) {
         var projectId = projectService.requireProjectId(project);
         return controlLinkService.listByControl(projectId, controlId, targetType).stream()
-                .map(ControlLinkResponse::from)
+                .map(link -> ControlLinkResponse.from(link, controlId))
                 .toList();
     }
 

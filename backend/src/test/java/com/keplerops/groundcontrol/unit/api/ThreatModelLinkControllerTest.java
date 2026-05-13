@@ -180,7 +180,13 @@ class ThreatModelLinkControllerTest {
                         .param("project", "ground-control"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].targetType", is("ASSET")));
+                .andExpect(jsonPath("$[0].targetType", is("ASSET")))
+                // The response must report the threatModelId from the path, not from
+                // a lazy parent dereference: with spring.jpa.open-in-view=false, the
+                // session is closed by the time the response mapper runs. Carrying the
+                // path variable through .from(link, threatModelId) sidesteps the
+                // LazyInitializationException.
+                .andExpect(jsonPath("$[0].threatModelId", is(TM_ID.toString())));
     }
 
     @Test

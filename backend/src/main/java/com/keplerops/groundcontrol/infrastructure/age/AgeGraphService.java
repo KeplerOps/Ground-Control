@@ -189,7 +189,11 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
             "assuranceLevel",
             // Methodology profile.
             "family",
-            "version");
+            "version",
+            // Finding projection (GC-V001 / ADR-038).
+            "findingType",
+            "severity",
+            "rootCauseAnalysis");
     // AGE's ag_catalog.cypher() function takes cstring/cstring/agtype. Its first two arguments
     // are parsed at SQL parse time by AGE's parser hook, so they cannot be JDBC bind parameters
     // — they must be SQL literals. The third argument (params agtype) is the user-data carrier
