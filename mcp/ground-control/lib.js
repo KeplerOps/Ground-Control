@@ -1496,7 +1496,51 @@ function emptyWorkflowConfig() {
     lint_command: null,
     format_command: null,
     base_branch: null,
+    // Per-reviewer pre-push cap defaults. `null` means "use the MCP tool
+    // default" (issue #906 lowered the tool default from 3 to 1; repos that
+    // want the old behavior set `pre_push_cap: 3` explicitly).
+    codex_review: { pre_push_cap: null },
+    test_quality_review: { pre_push_cap: null },
   };
+}
+
+// Bounds for the per-reviewer pre-push cap. Lower bound 1: a cap of 0 would
+// mean "no review allowed", which is what `/quickfix` without `--review`
+// achieves by not invoking the reviewer at all; the cap is for runs that DO
+// invoke it. Upper bound 10: empirical worst case in this repo is 4 cycles;
+// 10 is a safety net against runaway loops at the cap.
+const REVIEWER_PRE_PUSH_CAP_MIN = 1;
+const REVIEWER_PRE_PUSH_CAP_MAX = 10;
+
+function normalizeReviewerConfig(rawBlock, blockName) {
+  if (rawBlock == null) {
+    return { ok: true, value: { pre_push_cap: null } };
+  }
+  if (typeof rawBlock !== "object" || Array.isArray(rawBlock)) {
+    return { ok: false, errors: [`${blockName} must be a mapping when set`] };
+  }
+  const allowed = ["pre_push_cap"];
+  const errors = [];
+  for (const key of Object.keys(rawBlock)) {
+    if (!allowed.includes(key)) {
+      errors.push(`${blockName} has unknown key '${key}'`);
+    }
+  }
+  let pre_push_cap = null;
+  if (rawBlock.pre_push_cap != null) {
+    const v = rawBlock.pre_push_cap;
+    if (typeof v !== "number" || !Number.isInteger(v)) {
+      errors.push(`${blockName}.pre_push_cap must be an integer`);
+    } else if (v < REVIEWER_PRE_PUSH_CAP_MIN || v > REVIEWER_PRE_PUSH_CAP_MAX) {
+      errors.push(
+        `${blockName}.pre_push_cap must be between ${REVIEWER_PRE_PUSH_CAP_MIN} and ${REVIEWER_PRE_PUSH_CAP_MAX} inclusive`,
+      );
+    } else {
+      pre_push_cap = v;
+    }
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, value: { pre_push_cap } };
 }
 
 // `workflow.base_branch` is rendered into shell-evaluated `gh` commands by
@@ -1524,7 +1568,11 @@ function normalizeWorkflowConfig(raw) {
   if (Array.isArray(raw)) {
     return { ok: false, errors: ["workflow must be a mapping, not a list"] };
   }
-  const allowed = ["test_command", "completion_command", "lint_command", "format_command", "base_branch"];
+  // Scalar string-typed keys handled inline; nested-mapping keys delegated to
+  // their own normalizers below.
+  const allowedScalar = ["test_command", "completion_command", "lint_command", "format_command", "base_branch"];
+  const allowedNested = ["codex_review", "test_quality_review"];
+  const allowed = [...allowedScalar, ...allowedNested];
   const value = emptyWorkflowConfig();
   const errors = [];
   for (const key of Object.keys(raw)) {
@@ -1532,6 +1580,7 @@ function normalizeWorkflowConfig(raw) {
       errors.push(`workflow has unknown key '${key}'`);
       continue;
     }
+    if (allowedNested.includes(key)) continue; // handled below
     const v = raw[key];
     if (v == null) continue;
     if (typeof v !== "string" || v.trim() === "") {
@@ -1546,6 +1595,12 @@ function normalizeWorkflowConfig(raw) {
     }
     value[key] = v;
   }
+  const codexResult = normalizeReviewerConfig(raw.codex_review, "workflow.codex_review");
+  if (!codexResult.ok) errors.push(...codexResult.errors);
+  else value.codex_review = codexResult.value;
+  const testQualityResult = normalizeReviewerConfig(raw.test_quality_review, "workflow.test_quality_review");
+  if (!testQualityResult.ok) errors.push(...testQualityResult.errors);
+  else value.test_quality_review = testQualityResult.value;
   if (errors.length) return { ok: false, errors };
   return { ok: true, value };
 }
@@ -3054,7 +3109,13 @@ export function buildCodexVerifyCycleMarker({ prNumber, commentId, cycleNumber, 
 // regex so the two parsers never accidentally cross-count.
 // ---------------------------------------------------------------------------
 
-export const CODEX_REVIEW_PREPUSH_HARD_CAP = 3;
+// Default pre-push cap. Per issue #906 this dropped from 3 → 1: the first
+// cycle catches the obvious production-readiness issues; CI / SonarCloud /
+// the human reviewer cover the rest. Repos that want the old 3-cycle behavior
+// set `workflow.codex_review.pre_push_cap: 3` in `.ground-control.yaml`;
+// runCodexReview resolves that knob via `resolveReviewerPrePushCap` and
+// passes the effective cap to `evaluateCodexReviewPrePushCycleCap`'s `hardCap`.
+export const CODEX_REVIEW_PREPUSH_HARD_CAP = 1;
 export const CODEX_REVIEW_PREPUSH_MARKER_PREFIX = "<!-- gc:codex-prepush-cycle";
 // Matches `<!-- gc:codex-prepush-cycle issue="N" branch="..." cycle="M" ... -->`.
 // `branch` is JSON-encoded so it can carry slashes and escaped quotes; the
@@ -3185,6 +3246,11 @@ export function buildCodexReviewPrePushCycleMarker({
   cycleNumber,
   override = false,
   overrideReason = null,
+  // The effective cap that gated this cycle. Defaults to the module constant
+  // so legacy callers that don't pass it stay correct; new callers (issue #906)
+  // pass the cfg-resolved cap so the marker headline reflects what the run
+  // actually enforced.
+  hardCap = CODEX_REVIEW_PREPUSH_HARD_CAP,
 }) {
   const branchAttr = JSON.stringify(String(branchName)).slice(1, -1); // raw inner JSON-encoded form
   const overrideAttr = override === true ? ' override="true"' : "";
@@ -3193,8 +3259,8 @@ export function buildCodexReviewPrePushCycleMarker({
       ? ` reason=${JSON.stringify(overrideReason.trim())}`
       : "";
   const headline = override
-    ? `_gc_codex_review pre-push cycle ${cycleNumber} (USER-AUTHORIZED OVERRIDE past cap ${CODEX_REVIEW_PREPUSH_HARD_CAP}) complete for issue #${issueNumber} on branch '${branchName}'._`
-    : `_gc_codex_review pre-push cycle ${cycleNumber} of ${CODEX_REVIEW_PREPUSH_HARD_CAP} complete for issue #${issueNumber} on branch '${branchName}'._`;
+    ? `_gc_codex_review pre-push cycle ${cycleNumber} (USER-AUTHORIZED OVERRIDE past cap ${hardCap}) complete for issue #${issueNumber} on branch '${branchName}'._`
+    : `_gc_codex_review pre-push cycle ${cycleNumber} of ${hardCap} complete for issue #${issueNumber} on branch '${branchName}'._`;
   const reasonLine =
     override && typeof overrideReason === "string" && overrideReason.trim() !== ""
       ? `\nOverride reason: ${overrideReason.trim()}`
@@ -3203,7 +3269,7 @@ export function buildCodexReviewPrePushCycleMarker({
     `${CODEX_REVIEW_PREPUSH_MARKER_PREFIX} issue="${issueNumber}" branch="${branchAttr}" cycle="${cycleNumber}"${overrideAttr}${reasonAttr} -->`,
     "",
     headline +
-      ` Posted by the MCP server to enforce the pre-push hard-cap-${CODEX_REVIEW_PREPUSH_HARD_CAP} contract (issues #796, #804). ` +
+      ` Posted by the MCP server to enforce the pre-push hard-cap-${hardCap} contract (issues #796, #804, #906). ` +
       "Do not edit or delete — used by the next `gc_codex_review` (uncommitted) invocation to count cycles." +
       reasonLine,
   ].join("\n");
@@ -3230,7 +3296,57 @@ export function buildCodexReviewPrePushCycleMarker({
 // codex pre-push key. The cap value (3) matches the codex cap.
 // ---------------------------------------------------------------------------
 
-export const TEST_QUALITY_REVIEW_HARD_CAP = 3;
+// Default test-quality cap, lowered from 3 → 1 by issue #906 alongside the
+// codex-review default. Override via `workflow.test_quality_review.pre_push_cap`.
+export const TEST_QUALITY_REVIEW_HARD_CAP = 1;
+
+// Resolve the effective per-reviewer pre-push cap from `.ground-control.yaml`.
+// Falls back to `moduleDefault` ONLY for legitimate absence (missing file,
+// missing block, missing key). Throws `ReviewerCapConfigError` when the cfg
+// file is present but malformed (`status: "invalid_ground_control_yaml"`),
+// so a mistyped pre_push_cap value cannot silently look like a deliberate
+// default (issue #906 codex finding F7). `blockName` is the
+// `workflow.<reviewer>` key (`codex_review` or `test_quality_review`).
+export class ReviewerCapConfigError extends Error {
+  constructor(blockName, configErrors) {
+    super(
+      `resolveReviewerPrePushCap: .ground-control.yaml failed validation while reading ` +
+        `workflow.${blockName}.pre_push_cap — refusing to silently fall back to the module ` +
+        `default. Validation errors: ${(configErrors || []).join("; ")}`,
+    );
+    this.name = "ReviewerCapConfigError";
+    this.blockName = blockName;
+    this.configErrors = configErrors;
+  }
+}
+
+export async function resolveReviewerPrePushCap(repoPath, blockName, moduleDefault) {
+  let ctx;
+  try {
+    ctx = await getRepoGroundControlContext(repoPath);
+  } catch {
+    // Hard IO / fs error reading the file — soft-fall back. This branch
+    // covers cases like the repo path going away mid-run; it does NOT cover
+    // schema validation failures, which surface as a structured `status:
+    // "invalid_ground_control_yaml"` return rather than a thrown error.
+    return moduleDefault;
+  }
+  // Legitimate absence — no cfg file or schema-clean cfg with no override
+  // for this block / key. Use the module default.
+  if (!ctx || ctx.status === "missing_ground_control_yaml") return moduleDefault;
+  // Cfg is present but failed schema validation. The validator in
+  // normalizeReviewerConfig rejects out-of-bounds / non-integer / unknown
+  // keys; surfacing the error here preserves that strictness for the
+  // resolver path. A silent fall-back would mask a mistyped knob.
+  if (ctx.status === "invalid_ground_control_yaml") {
+    throw new ReviewerCapConfigError(blockName, ctx.errors);
+  }
+  const block = ctx?.workflow?.[blockName];
+  if (block && typeof block.pre_push_cap === "number" && Number.isInteger(block.pre_push_cap)) {
+    return block.pre_push_cap;
+  }
+  return moduleDefault;
+}
 export const TEST_QUALITY_REVIEW_MARKER_PREFIX =
   "<!-- gc:test-quality-review-cycle";
 const TEST_QUALITY_REVIEW_MARKER_RE =
@@ -3342,6 +3458,10 @@ export function buildTestQualityReviewCycleMarker({
   cycleNumber,
   override = false,
   overrideReason = null,
+  // Effective cap that gated this cycle. Defaults to the module constant for
+  // legacy callers; runTestQualityReview passes the cfg-resolved cap so the
+  // marker headline reflects what the run actually enforced (issue #906).
+  hardCap = TEST_QUALITY_REVIEW_HARD_CAP,
 }) {
   const branchAttr = JSON.stringify(String(branchName)).slice(1, -1);
   const overrideAttr = override === true ? ' override="true"' : "";
@@ -3352,8 +3472,8 @@ export function buildTestQualityReviewCycleMarker({
       ? ` reason=${JSON.stringify(overrideReason.trim())}`
       : "";
   const headline = override
-    ? `_gc_test_quality_review cycle ${cycleNumber} (USER-AUTHORIZED OVERRIDE past cap ${TEST_QUALITY_REVIEW_HARD_CAP}) complete for issue #${issueNumber} on branch '${branchName}'._`
-    : `_gc_test_quality_review cycle ${cycleNumber} of ${TEST_QUALITY_REVIEW_HARD_CAP} complete for issue #${issueNumber} on branch '${branchName}'._`;
+    ? `_gc_test_quality_review cycle ${cycleNumber} (USER-AUTHORIZED OVERRIDE past cap ${hardCap}) complete for issue #${issueNumber} on branch '${branchName}'._`
+    : `_gc_test_quality_review cycle ${cycleNumber} of ${hardCap} complete for issue #${issueNumber} on branch '${branchName}'._`;
   const reasonLine =
     override &&
     typeof overrideReason === "string" &&
@@ -3364,7 +3484,7 @@ export function buildTestQualityReviewCycleMarker({
     `${TEST_QUALITY_REVIEW_MARKER_PREFIX} issue="${issueNumber}" branch="${branchAttr}" cycle="${cycleNumber}"${overrideAttr}${reasonAttr} -->`,
     "",
     headline +
-      ` Posted by the MCP server to enforce the gc_test_quality_review hard-cap-${TEST_QUALITY_REVIEW_HARD_CAP} contract (issue #884 follow-up). ` +
+      ` Posted by the MCP server to enforce the gc_test_quality_review hard-cap-${hardCap} contract (issue #884 follow-up, default lowered in #906). ` +
       "Do not edit or delete — used by the next `gc_test_quality_review` invocation to count cycles." +
       reasonLine,
   ].join("\n");
@@ -4235,6 +4355,9 @@ async function readPriorCodexReviewPrePushCycleCount(repoRoot, owner, name, issu
 }
 
 // Post the pre-push cycle marker on the resolved issue thread.
+// `extras.hardCap` (optional) carries the cfg-resolved cap so the marker
+// headline matches the enforced value (issue #906); falls back to the module
+// constant.
 async function postCodexReviewPrePushCycleMarker(
   repoRoot,
   owner,
@@ -4250,6 +4373,7 @@ async function postCodexReviewPrePushCycleMarker(
     cycleNumber,
     override: extras.override === true,
     overrideReason: extras.overrideReason ?? null,
+    hardCap: extras.hardCap ?? CODEX_REVIEW_PREPUSH_HARD_CAP,
   });
   await execFile(
     "gh",
@@ -4724,7 +4848,14 @@ export function parseTestQualityReviewFindings(stdout) {
 // Find changed test files vs the base branch. Same predicate the legacy
 // `review-tests` Skill used (`(test_|_test\.|tests/|Test\.)`) so the
 // migration preserves coverage exactly. Returns repo-relative paths.
-export async function findChangedTestFiles({ repoRoot, baseBranch }) {
+//
+// When `includeUncommitted` is true (issue #906 — test-quality review moved
+// pre-push), also include staged + unstaged + untracked test files. Without
+// this the pre-push placement misses every change the agent has not yet
+// committed, which is the entire diff at Step 6.6, and the review wrongly
+// takes the zero-files fast path — consuming the cap without reviewing
+// anything.
+export async function findChangedTestFiles({ repoRoot, baseBranch, includeUncommitted = false }) {
   if (typeof repoRoot !== "string" || repoRoot.trim() === "") {
     throw new Error("findChangedTestFiles: repoRoot must be a non-empty string");
   }
@@ -4733,17 +4864,22 @@ export async function findChangedTestFiles({ repoRoot, baseBranch }) {
   }
   let stdout = "";
   // Try origin/<base>...HEAD first; fall back to local <base>...HEAD; fetch
-  // and retry as a last resort. Mirrors the existing Skill behavior.
+  // and retry as a last resort. Track resolved success vs empty-stdout-from-
+  // empty-diff explicitly: a legitimately empty diff (HEAD == base, common
+  // pre-push at #906's Step 6.6 before the first commit) must not trigger a
+  // `git fetch` against an `origin` remote that may not exist.
+  let baseResolved = false;
   for (const ref of [`origin/${baseBranch}`, baseBranch]) {
     try {
       const result = await execFile("git", ["-C", repoRoot, "diff", "--name-only", `${ref}...HEAD`]);
       stdout = result.stdout;
+      baseResolved = true;
       break;
     } catch {
       // try next
     }
   }
-  if (stdout === "") {
+  if (!baseResolved) {
     try {
       await execFile("git", ["-C", repoRoot, "fetch", "origin", baseBranch]);
       const result = await execFile("git", [
@@ -4754,20 +4890,65 @@ export async function findChangedTestFiles({ repoRoot, baseBranch }) {
         `origin/${baseBranch}...HEAD`,
       ]);
       stdout = result.stdout;
+      baseResolved = true;
     } catch (err) {
-      throw new Error(
-        `findChangedTestFiles: unable to resolve base ref '${baseBranch}': ${err.message}`,
-      );
+      // In pre-push contexts (`includeUncommitted: true`) the staged + unstaged
+      // + untracked diff carries the call, so an unresolvable base ref is
+      // non-fatal. In post-push contexts the base ref is the only source, so
+      // preserve the legacy hard-fail.
+      if (!includeUncommitted) {
+        throw new Error(
+          `findChangedTestFiles: unable to resolve base ref '${baseBranch}': ${err.message}`,
+        );
+      }
     }
   }
-  return stdout
-    .split("\n")
-    .map((s) => s.trim())
-    .filter((s) => s !== "")
-    .filter((path) => /(test_|_test\.|tests\/|Test\.)/i.test(path))
-    // Skill markdown is not a code file — exclude so the skill .md itself
-    // never appears as a "test file" needing test-quality review.
-    .filter((path) => !path.endsWith(".md"));
+
+  // Pre-push placement (issue #906): merge in the agent's staged + unstaged
+  // + untracked test edits. `git diff --cached` covers staged; `git diff`
+  // covers unstaged tracked edits; `git ls-files --others --exclude-standard`
+  // covers brand-new untracked test files. Each list is allowed to fail
+  // independently (e.g. brand-new repo with no HEAD) without taking down
+  // the review.
+  let uncommittedStdout = "";
+  if (includeUncommitted) {
+    for (const extraArgs of [["diff", "--name-only", "--cached"], ["diff", "--name-only"], ["ls-files", "--others", "--exclude-standard"]]) {
+      try {
+        const result = await execFile("git", ["-C", repoRoot, ...extraArgs]);
+        uncommittedStdout += "\n" + result.stdout;
+      } catch {
+        // Best-effort: skip this list, continue with the others.
+      }
+    }
+  }
+
+  const combined = stdout + (uncommittedStdout ? "\n" + uncommittedStdout : "");
+  return Array.from(
+    new Set(
+      combined
+        .split("\n")
+        .map((s) => s.trim())
+        .filter((s) => s !== "")
+        // Recognized test-file shapes:
+        //   - `test_foo` / `foo_test.` / `FooTest.` — legacy Skill predicate.
+        //   - `test/` (singular) and `tests/` (plural) directories — covers
+        //     Maven-style `src/test/...`, `test/parser/...`, etc. (`test/`
+        //     added per #906 codex cycle-3 F3).
+        //   - `.test.<ext>` — JS / TS test convention (`foo.test.js`,
+        //     `bar.test.ts`, `baz.test.tsx`). Added per #906 codex F3.
+        //   - `.spec.<ext>` — alternate JS / TS test convention. Added per
+        //     #906 codex F3.
+        // The SKILL.md documents the broader test-glob contract; the predicate
+        // here is the only place that contract is actually enforced. `test/`
+        // is matched as either a leading segment or anywhere after a `/` so a
+        // file like `src/test/parser/foo.py` qualifies while a file like
+        // `latest_results.json` does not.
+        .filter((path) => /(?:^|\/)tests?\/|test_|_test\.|Test\.|\.test\.|\.spec\./i.test(path))
+        // Skill markdown is not a code file — exclude so the skill .md itself
+        // never appears as a "test file" needing test-quality review.
+        .filter((path) => !path.endsWith(".md")),
+    ),
+  );
 }
 
 // Exec wrapper around the `claude` CLI. The env-var strip is essential:
@@ -4915,10 +5096,40 @@ export async function runTestQualityReview({
     name,
     effectiveIssue,
   );
+  // Resolve the per-reviewer cap from `.ground-control.yaml` (issue #906).
+  // ReviewerCapConfigError (invalid cfg) is the one expected configuration
+  // failure; translate it into the stable JSON envelope shape the parent
+  // /implement agent reads as a directive, otherwise the MCP wrapper would
+  // surface it as an unstructured tool error (codex cycle-2 F4).
+  let effectiveCap;
+  try {
+    effectiveCap = await resolveReviewerPrePushCap(
+      repoRoot,
+      "test_quality_review",
+      TEST_QUALITY_REVIEW_HARD_CAP,
+    );
+  } catch (err) {
+    if (err instanceof ReviewerCapConfigError) {
+      return {
+        ok: false,
+        error: "reviewer_cap_config_invalid",
+        message: err.message,
+        block: err.blockName,
+        config_errors: err.configErrors,
+        issue_number: effectiveIssue,
+        branch: branchName,
+        next_action: "fix_ground_control_yaml_and_retry",
+        finding_count: 0,
+        findings: [],
+      };
+    }
+    throw err;
+  }
   const decision = evaluateTestQualityReviewCycleCap({
     priorCount,
     issueNumber: effectiveIssue,
     branchName,
+    hardCap: effectiveCap,
     overrideCap,
     overrideReason,
   });
@@ -4938,8 +5149,15 @@ export async function runTestQualityReview({
   }
 
   // Find changed test files. Zero files is a legitimate zero-findings
-  // result — no need to spin up a Claude call.
-  const changedTestFiles = await findChangedTestFiles({ repoRoot, baseBranch: effectiveBaseBranch });
+  // result — no need to spin up a Claude call. Pre-push placement (#906)
+  // requires `includeUncommitted: true` to catch staged + unstaged + untracked
+  // test edits; without it the pre-push call sees only what HEAD already has,
+  // which is the empty set on the first cycle.
+  const changedTestFiles = await findChangedTestFiles({
+    repoRoot,
+    baseBranch: effectiveBaseBranch,
+    includeUncommitted: true,
+  });
   if (changedTestFiles.length === 0) {
     // Still record a cycle so the cap counts correctly. Preserve override
     // metadata in both the marker and the envelope so an authorized
@@ -4962,6 +5180,7 @@ export async function runTestQualityReview({
       override: decision.override === true,
       overrideReason: decision.override_reason ?? null,
       recordBody,
+      hardCap: effectiveCap,
     });
     if (!markerWriteResult.ok) return markerWriteResult.envelope;
     return {
@@ -4973,7 +5192,7 @@ export async function runTestQualityReview({
       cap: decision.cap,
       finding_count: 0,
       findings: [],
-      next_action: "post_clean_decision_record_and_advance_to_step_14",
+      next_action: "post_clean_decision_record_and_advance_to_phase_c",
       findings_comment_url: markerWriteResult.recordUrl,
       changed_test_files: [],
       override: decision.override === true,
@@ -5077,12 +5296,13 @@ export async function runTestQualityReview({
     recordBody,
     findingCount: findings.length,
     findings,
+    hardCap: effectiveCap,
   });
   if (!markerWriteResult.ok) return markerWriteResult.envelope;
 
   const nextAction =
     findings.length === 0
-      ? "post_clean_decision_record_and_advance_to_step_14"
+      ? "post_clean_decision_record_and_advance_to_phase_c"
       : decision.next_action;
 
   return {
@@ -5122,6 +5342,10 @@ async function postFindingsRecordAndCycleMarker({
   recordBody,
   findingCount = 0,
   findings = [],
+  // Effective cap (resolved by the caller from cfg + module default). Defaults
+  // to the module constant for callers that don't pass it; issue #906 added
+  // the cfg-resolved path through runTestQualityReview.
+  hardCap = TEST_QUALITY_REVIEW_HARD_CAP,
 }) {
   // Body-size guard. GitHub's REST issue-comment endpoint rejects bodies
   // over 65535 chars; refuse at the boundary so the cycle isn't
@@ -5196,6 +5420,7 @@ async function postFindingsRecordAndCycleMarker({
     cycleNumber,
     override,
     overrideReason,
+    hardCap,
   });
   try {
     await postIssueCommentAndReturnUrl({
@@ -5405,10 +5630,43 @@ export async function runCodexReview({
       name,
       effectiveIssue,
     );
+    // Resolve the per-reviewer cap from `.ground-control.yaml` (issue #906).
+    // Translate ReviewerCapConfigError into the stable JSON envelope shape
+    // the parent /implement agent reads as a directive, mirroring the
+    // test-quality runner's handling (codex cycle-2 F4).
+    let effectivePrePushCap;
+    try {
+      effectivePrePushCap = await resolveReviewerPrePushCap(
+        repoRoot,
+        "codex_review",
+        CODEX_REVIEW_PREPUSH_HARD_CAP,
+      );
+    } catch (err) {
+      if (err instanceof ReviewerCapConfigError) {
+        return {
+          repo_path: repoRoot,
+          base_branch: baseBranch,
+          uncommitted,
+          pr_number: null,
+          ok: false,
+          error: "reviewer_cap_config_invalid",
+          message: err.message,
+          block: err.blockName,
+          config_errors: err.configErrors,
+          issue_number: effectiveIssue,
+          branch: branchName,
+          next_action: "fix_ground_control_yaml_and_retry",
+          finding_count: 0,
+          findings: [],
+        };
+      }
+      throw err;
+    }
     const decision = evaluateCodexReviewPrePushCycleCap({
       priorCount,
       issueNumber: effectiveIssue,
       branchName,
+      hardCap: effectivePrePushCap,
       overrideCap,
       overrideReason,
     });
@@ -5438,6 +5696,11 @@ export async function runCodexReview({
       branchName,
       cycleNumber: decision.nextCycle,
       cap: decision.cap,
+      // Effective cap also held separately so the deferred marker write at
+      // the end of the run uses the same value the decision was made against
+      // (issue #906). decision.cap is the resolved value; we mirror it here
+      // to avoid re-reading cfg later.
+      hardCap: effectivePrePushCap,
       nextAction: decision.next_action ?? null,
       override: decision.override === true,
       overrideReason: decision.override_reason ?? null,
@@ -5805,7 +6068,11 @@ export async function runCodexReview({
         prePushOwnership.issueNumber,
         prePushOwnership.branchName,
         prePushOwnership.cycleNumber,
-        { override: prePushOwnership.override, overrideReason: prePushOwnership.overrideReason },
+        {
+          override: prePushOwnership.override,
+          overrideReason: prePushOwnership.overrideReason,
+          hardCap: prePushOwnership.hardCap,
+        },
       );
     } catch (markerError) {
       return {
@@ -7970,7 +8237,10 @@ export function validateFinalReportInput(input) {
   if (input == null || typeof input !== "object") {
     return { ok: false, errors: ["input must be an object"] };
   }
-  const { issueNumber, prNumber, requirements, files, reviews, traceability, ciStatus, sonarStatus, planCommentUrl, summary } = input;
+  const { issueNumber, prNumber, requirements, files, reviews, traceability, ciStatus, sonarStatus, planCommentUrl, summary, lane } = input;
+  if (lane != null && lane !== "implement" && lane !== "quickfix") {
+    errors.push("lane must be 'implement' or 'quickfix' when set");
+  }
   if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
     errors.push("issueNumber must be a positive integer");
   }
@@ -8057,7 +8327,17 @@ export function buildFinalReport(input) {
   if (!validation.ok) {
     throw new Error(`buildFinalReport input invalid: ${validation.errors.join("; ")}`);
   }
-  const { issueNumber, prNumber, requirements, files = {}, reviews, traceability = {}, ciStatus, sonarStatus, planCommentUrl, summary } = input;
+  const { issueNumber, prNumber, requirements, files = {}, reviews, traceability = {}, ciStatus, sonarStatus, planCommentUrl, summary, lane } = input;
+  // Slim quickfix renderer (issue #906 codex cycle-3 F2). When lane='quickfix'
+  // the close comment is structurally smaller: no "In-scope requirements",
+  // no "Traceability reconciliation", no "Reviews" section when empty.
+  // The /implement final-report sections become empty noise on a /quickfix
+  // run; the slim renderer matches the SKILL.md Step Q19 contract.
+  if (lane === "quickfix") {
+    return buildQuickfixCloseComment({
+      issueNumber, prNumber, files, reviews, ciStatus, sonarStatus, planCommentUrl, summary,
+    });
+  }
   const lines = [];
   lines.push(buildFinalReportMarker({ issueNumber, prNumber }));
   lines.push("");
@@ -8126,6 +8406,56 @@ export function buildFinalReport(input) {
   return lines.join("\n");
 }
 
+// Slim renderer for /quickfix Step Q19 close comments (issue #906). Drops
+// the /implement sections that would render empty on a requirement-free
+// fix-shaped run: no In-scope requirements section, no Traceability
+// reconciliation section, no Reviews section when reviews[] is empty.
+// Keeps every gate the standard renderer enforces (the same sensitive-
+// content / no-defer / reserved-marker scrubs run in runPostFinalReport
+// before this body is built).
+function buildQuickfixCloseComment({ issueNumber, prNumber, files, reviews, ciStatus, sonarStatus, planCommentUrl, summary }) {
+  const lines = [];
+  lines.push(buildFinalReportMarker({ issueNumber, prNumber }));
+  lines.push("");
+  lines.push(`## Quickfix close — issue #${issueNumber} complete`);
+  lines.push("");
+  lines.push(`**PR:** #${prNumber}  `);
+  if (planCommentUrl) lines.push(`**Plan:** ${planCommentUrl}`);
+  if (summary) {
+    lines.push("");
+    lines.push(summary.trim());
+  }
+  lines.push("");
+  lines.push(`### Files changed`);
+  lines.push("");
+  let anyFiles = false;
+  for (const kind of FINAL_REPORT_FILE_KINDS) {
+    const list = Array.isArray(files[kind]) ? files[kind] : [];
+    if (list.length === 0) continue;
+    anyFiles = true;
+    lines.push(`**${kind[0].toUpperCase() + kind.slice(1)}:**`);
+    lines.push("");
+    for (const p of list) lines.push(`- \`${p}\``);
+    lines.push("");
+  }
+  if (!anyFiles) {
+    lines.push("- (none)");
+    lines.push("");
+  }
+  if (reviews.length > 0) {
+    lines.push(`### Reviews`);
+    lines.push("");
+    for (const r of reviews) lines.push(`- **${r.reviewer}:** ${r.summary}`);
+    lines.push("");
+  }
+  lines.push(`### Status`);
+  lines.push("");
+  lines.push(`- CI: ${renderCiStatus(ciStatus)}`);
+  lines.push(`- SonarCloud: ${renderSonarStatus(sonarStatus)}`);
+  lines.push(`- PR ready for user review and merge.`);
+  return lines.join("\n");
+}
+
 function renderCiStatus(s) {
   if (s === "green") return "✅ green";
   if (s === "red") return "❌ red";
@@ -8182,24 +8512,57 @@ export async function runPostFinalReport(input) {
   // Codex review is mandatory for every /implement run; the runner refuses
   // a final report without at least one codex review entry. (codex cycle-3
   // F4 widened by cycle-4 F3.)
-  if (!Array.isArray(rest.reviews) || rest.reviews.length === 0) {
+  //
+  // The `lane: "quickfix"` carve-out (issue #906) intentionally relaxes
+  // these two checks: /quickfix runs with AI-assisted reviews off by
+  // default and the Q19 close comment is structurally smaller than a
+  // /implement Step 19 final report. The relaxation is bounded — every
+  // other gate (CI green, Sonar pass-or-legit-skipped, sensitive-content
+  // scrub, no-defer scrub, reserved-marker scrub) still applies — so the
+  // server-side filters that make this tool the only driver-neutral
+  // close-comment surface remain in force.
+  const isQuickfixLane = rest.lane === "quickfix";
+  // The `lane: "quickfix"` carve-out is bounded by the lane's own
+  // requirement-free invariant: a /quickfix run cannot have requirements in
+  // scope (per the SKILL.md hard precondition). Reject the combination
+  // server-side so a caller cannot bypass the review-evidence gate by
+  // setting `lane: "quickfix"` on an `/implement`-shape payload (codex
+  // cycle-3 F1 + security F1). The tool cannot verify the issue body's
+  // `## Requirements` section without an extra GitHub round-trip, but
+  // rejecting the inconsistent payload shape covers the realistic case.
+  if (isQuickfixLane && Array.isArray(rest.requirements) && rest.requirements.length > 0) {
     return {
       ok: false,
-      error: "final_report_no_reviews",
-      message: "reviews[] is empty — Step 19 requires at least the pre-push Codex review summary; pass a reviews entry like { reviewer: 'codex', summary: '<cycle history + outcome>' }",
+      error: "final_report_quickfix_with_requirements",
+      message:
+        "lane='quickfix' is incompatible with requirements.length > 0; /quickfix runs are " +
+        "requirement-free by precondition. If the run actually has requirements in scope, drop " +
+        "lane='quickfix' and provide the mandatory codex review entry; if it does not, pass " +
+        "requirements: [].",
       issue_number: rest.issueNumber,
-      next_action: "collect_review_summaries_and_retry",
+      next_action: "drop_lane_quickfix_or_drop_requirements_and_retry",
     };
   }
-  const hasCodexReview = rest.reviews.some((r) => r && typeof r === "object" && r.reviewer === "codex");
-  if (!hasCodexReview) {
-    return {
-      ok: false,
-      error: "final_report_codex_review_missing",
-      message: "reviews[] does not include a 'codex' entry — the pre-push Codex review is mandatory per ADR-029; add a reviews entry with reviewer:'codex'",
-      issue_number: rest.issueNumber,
-      next_action: "add_codex_review_entry_and_retry",
-    };
+  if (!isQuickfixLane) {
+    if (!Array.isArray(rest.reviews) || rest.reviews.length === 0) {
+      return {
+        ok: false,
+        error: "final_report_no_reviews",
+        message: "reviews[] is empty — Step 19 requires at least the pre-push Codex review summary; pass a reviews entry like { reviewer: 'codex', summary: '<cycle history + outcome>' } (or pass lane='quickfix' for the /quickfix slim path where AI reviews are opt-in)",
+        issue_number: rest.issueNumber,
+        next_action: "collect_review_summaries_and_retry",
+      };
+    }
+    const hasCodexReview = rest.reviews.some((r) => r && typeof r === "object" && r.reviewer === "codex");
+    if (!hasCodexReview) {
+      return {
+        ok: false,
+        error: "final_report_codex_review_missing",
+        message: "reviews[] does not include a 'codex' entry — the pre-push Codex review is mandatory per ADR-029; add a reviews entry with reviewer:'codex' (or pass lane='quickfix' for the /quickfix slim path)",
+        issue_number: rest.issueNumber,
+        next_action: "add_codex_review_entry_and_retry",
+      };
+    }
   }
   // If the caller claims sonarStatus='skipped', validate that the repo
   // actually has no sonarcloud config (codex cycle-4 F3). Otherwise a caller
@@ -8796,7 +9159,6 @@ export const DEFAULT_IMPLEMENT_ROUTING_STAGES = Object.freeze({
   ci_monitor: { tier: "low" },
   sonarcloud: { tier: "low" },
   test_quality_review: { tier: "medium" },
-  final_ci_verify: { tier: "low" },
   transition_reconcile: { tier: "medium" },
   close_issue: { tier: "low" },
   final_report: { tier: "low" },

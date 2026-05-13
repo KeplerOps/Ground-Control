@@ -45,8 +45,10 @@ LLM call, no workflow state. They become Temporal activities directly under
 GC-O009 with no shape change.
 
 The gate model is preserved end to end: one human touchpoint (PR merge), no
-plan-approval gate, no post-push Codex review, ADR-029's three-cycle pre-push
-cap, zero deferral. This ADR amends ADR-021 with cost-side machinery; it does
+plan-approval gate, no post-push Codex review, ADR-029's configurable
+pre-push cap (default 1 cycle per issue #906; per-repo override via
+`.ground-control.yaml::workflow.codex_review.pre_push_cap`, bounds `[1, 10]`),
+zero deferral. This ADR amends ADR-021 with cost-side machinery; it does
 not redefine GC-O007's gate contract.
 
 ## Decision
@@ -121,16 +123,24 @@ two stable conventional-commit rules before `gh pr create` — single
 and a lowercase-leading subject (`^[a-z].*$`, uppercase acronyms reshaped).
 The body renderer and the title validator are independent concerns living in
 the same Step 9 — the renderer is an MCP tool, the title rule is a local
-predicate the agent re-applies on every reshape.** Step 6.5 calls `gc_post_decision_record` for every cycle; **Step 13
+predicate the agent re-applies on every reshape.** Step 6.5 calls `gc_post_decision_record` for every cycle; **Step 6.6
 calls `gc_test_quality_review`** (per #884 v2 — the prior `Skill("review-tests")`
 boundary returned prose findings that the autoregressive parent agent
 kept echoing back to the user instead of fixing in-turn, defeating the
 SKILL.md prose rule; the MCP tool returns a structured envelope with
-`next_action` that the agent reads as a directive). After Step 13's
+`next_action` that the agent reads as a directive). Issue #906 moved this
+call pre-push (former Step 13 → new Step 6.6) so the PR opens with both
+AI-assisted reviewers clean; the same #906 amendment dropped the default
+pre-push cap for both reviewers from 3 to 1, configurable per repo via
+`workflow.codex_review.pre_push_cap` and `workflow.test_quality_review.pre_push_cap`.
+The MCP tool itself is unchanged — only its workflow placement and default
+cap value shifted. After Step 6.6's
 cycle the parent calls `gc_post_decision_record` with the
 `fix`/`wontfix`/`not-applicable` dispositions (cycle counter, durable
-record); a clean cycle is the structured advance-to-Step-14 signal once
-that post returns `ok: true`. See
+record); a clean cycle is the structured advance-to-Phase-C signal once
+that post returns `ok: true` (the string was `..._advance_to_step_14`
+before issue #906 collapsed Step 14 into Step 10's existing CI watch;
+new MCP envelope returns `..._advance_to_phase_c`). See
 `architecture/notes/test-quality-review-engine.md` for the full MCP
 tool mechanism (claude CLI exec, `ANTHROPIC_API_KEY` strip / OAuth,
 cycle markers, failure modes). Step 19 calls `gc_post_final_report`.
@@ -204,7 +214,9 @@ queue, or worker code. It only ensures the bridge surface is Temporal-shaped.
 - **ADR-021** is amended (gain a new amendment blockquote citing this ADR).
   The gate model and phase structure are unchanged; only the cost-side
   machinery changes.
-- **ADR-029** is not amended. The three-cycle Codex cap, zero-deferral rule,
+- **ADR-029** is amended by issue #906 only to make the Codex cap
+  configurable per repo (default 1, override via
+  `workflow.codex_review.pre_push_cap`); the zero-deferral rule,
   issue-thread-as-durable-record contract, and one-human-touchpoint contract
   all stand.
 - **ADR-027** is unchanged; the agent-neutral packaging seam absorbs the new

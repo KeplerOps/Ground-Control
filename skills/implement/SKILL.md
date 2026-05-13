@@ -54,8 +54,7 @@ Per ADR-036, every step below carries a **capability tier** (`low`, `medium`, `h
 | 9 — PR body (tool-rendered) | `low` | tool does the rendering |
 | 10 — CI monitor | `low` | polling |
 | 11 — SonarCloud | `low` | polling |
-| 13 — test-quality review consume | `medium` | reading test files |
-| 14 — final CI re-verify | `low` | polling |
+| 6.6 — test-quality review consume | `medium` | reading test files (pre-push per #906) |
 | 15–17 — transitions + reconcile | `medium` | judgment-bounded |
 | 18 — close issue | `low` | one gh call |
 | 19 — final report (tool-rendered) | `low` | tool does the rendering |
@@ -65,8 +64,9 @@ Per ADR-036, every step below carries a **capability tier** (`low`, `medium`, `h
 `codebase_assessment`, `planning`, `implementation`, `clause_mapping`,
 `precommit`, `completion_gate`, `review_cycle_1_consume`,
 `review_fix_application`, `git_publish`, `pr_body`, `ci_monitor`,
-`sonarcloud`, `test_quality_review`, `final_ci_verify`,
-`transition_reconcile`, `close_issue`, and `final_report`.
+`sonarcloud`, `test_quality_review`, `transition_reconcile`, `close_issue`,
+and `final_report`. (The former `final_ci_verify` stage was removed by issue
+#906 when Step 14 collapsed into Step 10's existing CI watch.)
 
 **Mechanism** (Claude Code): before any routed step, resolve the stage/purpose through `gc_resolve_workflow_route` using the stage names above. The resolver reads `.ground-control.yaml` and returns the concrete provider, agent, model, tier, and fallback policy. For routes whose agent is `subagent`, the parent spawns an `Agent` subagent with the returned model and delegates the step's actual work to it. For routes whose agent is `parent`, the parent runs the step and records that route. If the resolver returns disabled or unavailable, follow the returned fallback policy; do not silently claim routing happened. The decision-record / final-report / PR-body comments are no longer agent free-prose — they are produced by deterministic MCP tools (`gc_post_decision_record`, `gc_post_final_report`, `gc_render_pr_body`), so the routed-step prose is reduced to "collect structured input + call the tool".
 
@@ -385,9 +385,9 @@ Two things must be kept separate.
 
 *What a cycle does (semantics).* Every cycle reviews the whole diff, including any code the agent wrote in a prior cycle to address prior findings. Fix code is new code; the next cycle reviews it as it does everything else. A cycle is NOT "verify my fix to cycle N−1's findings" — verification of fixes is the agent's own responsibility (run the relevant tests, `cfg.workflow.completion_command`, `make policy`, read the fix code against the finding's intent). Cycles surface NEW classes of production-readiness defect that the reviewer's bounded depth in a prior pass couldn't reach.
 
-*What completes the loop (completion predicate — unchanged from ADR-029).* The pre-push review loop is required to reach reviewer-clean before the push, OR hit the hard-cap-3 and escalate to the user. There is no "skip the next cycle because the local gates are green" path: local gates verify that fix code does the agent's intended thing, but the reviewer is the one that catches what the agent didn't intend. After applying fixes for cycle N's findings AND self-verifying locally, re-invoke `gc_codex_review`. Stop only when the reviewer reports zero findings, or when the cap refuses the next invocation.
+*What completes the loop (completion predicate).* The pre-push review loop is required to reach reviewer-clean before the push, OR hit the configured pre-push cap and escalate to the user. There is no "skip the next cycle because the local gates are green" path: local gates verify that fix code does the agent's intended thing, but the reviewer is the one that catches what the agent didn't intend. **The dispatch is driven by the returned `next_action`, not by the agent's own assumption about whether more cycles are available.** On `fix_findings_and_reinvoke`: apply fixes, self-verify locally, post the cycle decision record, re-stage, re-invoke. On `fix_findings_then_summarize_and_escalate` (last in-cap cycle — under the cap-1 default, cycle 1 itself is last-in-cap): apply fixes, self-verify, post the decision record, then summarize and escalate to the user **without** a blind re-invocation that would only return `error: "codex_review_prepush_cap_reached"`. On `post_clean_decision_record_and_advance_to_phase_c`: post the clean decision record, proceed to Step 6.6 in the same turn.
 
-Why multiple cycles exist at all: a single review pass has bounded depth — typically one or two classes of issue per pass. Cycles let the reviewer go deeper as the obvious issues clear out. ADR-029's hard cap of 3 reflects empirical experience: clean by cycle 3 in practice; concerns past cycle 3 are a signal to escalate (user authorizes cycle 4 with `override_cap`, or restructures the change), not to push to merge.
+Why caps exist: a single review pass has bounded depth — typically one or two classes of issue per pass. The cap value trades reviewer-recall against agent-loop cost. The default cap **dropped from 3 to 1** in issue #906: empirically, cycle 1 catches the production-readiness issues that matter; cycles 2–3 often surface defects the agent introduced *while fixing cycle 1's findings*, compounding cost rather than catching net-new bugs, and CI / SonarCloud / the human reviewer cover the residual risk. Repos that want the old 3-cycle loop (or any other value) set `workflow.codex_review.pre_push_cap` in `.ground-control.yaml`; bounds are `[1, 10]`. The `override_cap=true` + `override_reason=<authorization quote>` escape lets the user authorize a single over-cap cycle on demand, regardless of the configured default.
 
 1. Stage everything you intend to push (`git add -A` for the full diff).
 2. Call the `gc_codex_review` MCP tool with:
@@ -395,12 +395,32 @@ Why multiple cycles exist at all: a single review pass has bounded depth — typ
    - `base_branch`: `{cfg.workflow.base_branch|default dev}`
    - `uncommitted`: `true`
    - `issue_number`: the issue number resolved at Step 1, so the MCP server anchors the cycle counter to the issue thread (per ADR-029). When omitted, the server derives it from the current branch's leading numeric prefix (e.g. `796-cap-pre-push` → 796); pass it explicitly when the branch was named manually.
-3. Apply the **Review loop rules** (defined below) to the returned findings. **Fix every finding AND self-verify locally** (re-run `cfg.workflow.completion_command`, `make policy`, the relevant test suite; read the fix code against the finding's intent). Then re-stage the diff AND re-invoke `gc_codex_review`. The loop completes when the reviewer reports zero findings, OR the hard cap refuses the next invocation. Self-verification is the agent's own responsibility; it does not substitute for the reviewer's re-read of the fix code.
-4. **Hard cap: 3 iterations** (enforced by the MCP server, issues #796 and #804). The next invocation reads existing markers on the issue thread, counts pre-push cycles **per issue** (the current branch is recorded in the marker for audit context but is NOT part of the cap key — a branch rename on the same issue cannot reset the counter), and refuses cycle 4 with `error: "codex_review_prepush_cap_reached"` and `next_action: "post_summary_and_escalate_to_user"`. After cycle 3, if findings remain, STOP, post the remaining findings + your fix history as an issue comment, and escalate to the user. If the user authorizes cycle 4, retry with `override_cap=true` and `override_reason="<one-line quote of the user's authorization>"`.
+3. Apply the **Review loop rules** (defined below) to the returned findings. **Fix every finding AND self-verify locally** (re-run `cfg.workflow.completion_command`, `make policy`, the relevant test suite; read the fix code against the finding's intent). Then dispatch on the returned `next_action`: on `fix_findings_and_reinvoke` re-stage and re-invoke; on `fix_findings_then_summarize_and_escalate` (last-in-cap — the cap-1 default makes cycle 1 last-in-cap when findings are present) post the decision record and escalate to the user without a blind re-invoke; on `post_clean_decision_record_and_advance_to_phase_c` advance to Step 6.6 in the same turn. Self-verification is the agent's own responsibility; it does not substitute for the reviewer's re-read of the fix code.
+4. **Configured cap, default 1** (enforced by the MCP server, issues #796 / #804 / #906). The next invocation reads existing markers on the issue thread, counts pre-push cycles **per issue** (the current branch is recorded in the marker for audit context but is NOT part of the cap key — a branch rename on the same issue cannot reset the counter), and refuses the first cycle past the cap with `error: "codex_review_prepush_cap_reached"` and `next_action: "post_summary_and_escalate_to_user"`. If the user authorizes another cycle, retry with `override_cap=true` and `override_reason="<one-line quote of the user's authorization>"`.
 5. **Findings record**: every successful cycle posts a verbatim findings comment to the resolved issue thread (per ADR-029). The comment carries the cycle/cap/mode header and both reviewers' verbatim text. If that post fails, the run returns `ok: false, error: "review_comment_post_failed"` — fix the underlying GitHub issue (network, gh auth, repo perms) and retry.
-6. Once clean, proceed to Phase C with the staged diff.
+6. Once clean, proceed to Step 6.6 with the staged diff.
 
 Skip this step only if the diff is so trivial (one-liner typo fix) that codex would have nothing to find. When in doubt, run it.
+
+### Step 6.6: Pre-push Test-Quality Review
+
+Run `gc_test_quality_review` against the same staged + unstaged diff BEFORE pushing. Per issue #906 this review moved from post-PR (former Step 13) to pre-push so the PR opens with **both** AI-assisted reviewers clean. Without the move, a reviewer scanning the PR sees a stale picture (codex clean, test-quality pending), and any test-quality fix costs an extra commit + push + CI run + SonarCloud re-analyze cycle. Pre-push, it's just re-stage + re-run.
+
+Same loop shape as Step 6.5; same review-loop rules apply.
+
+1. Call the `gc_test_quality_review` MCP tool with:
+   - `repo_path`: absolute path from Step 1
+   - `base_branch`: `{cfg.workflow.base_branch|default dev}`
+   - `issue_number`: the issue number resolved at Step 1
+2. The tool runs the review (shells out to `claude` CLI with the canonical rubric, parses the structured JSON output, posts a durable findings record + cycle marker to the issue thread) and returns the same envelope shape `gc_codex_review` returns. The `next_action` field is a directive — `fix_findings_and_reinvoke`, `post_clean_decision_record_and_advance_to_phase_c`, `fix_findings_then_summarize_and_escalate` (last in-cap cycle: fix the findings, post the decision record, then escalate — NOT a normal re-invoke), or `post_summary_and_escalate_to_user` (cap-refused). It is not free-prose findings to summarize to the user.
+3. Apply the **Review loop rules** to the returned findings (same as Step 6.5). On `fix_findings_and_reinvoke`: classify each finding (`one-off` or `class`), then **fix every finding in the same agent turn — do not stop, do not echo findings to the user as a status report.** The whole point of the review is to fix the tests; echoing the findings back without fixing them is the issue #884 regression in a different shape. After fixing, self-verify locally (`cfg.workflow.completion_command`, `make policy`, the relevant test suite), re-stage with `git add -A`, post the cycle decision record via `gc_post_decision_record` with `reviewer: "test-quality"`, then re-invoke. On `fix_findings_then_summarize_and_escalate` (last in-cap cycle): same fix-in-same-turn rule, post the decision record, then summarize the cap-reached state to the user instead of re-invoking. On `post_clean_decision_record_and_advance_to_phase_c`: post the clean (`findings: []`) decision record, then proceed to Phase C in the same agent turn.
+4. **Success precondition.** Advance to Phase C ONLY after `gc_post_decision_record` returns `ok: true`. On `ok: false` (sensitive-content rejection, body-size cap, `gh` posting failure, network), fix the underlying tooling issue and retry the post — do not advance with the durable marker missing. This guards against re-introducing #884 in a different shape.
+5. **Configured cap, default 1** (`workflow.test_quality_review.pre_push_cap` in `.ground-control.yaml`; bounds `[1, 10]`). Same override semantics as Step 6.5: `override_cap=true` + non-empty `override_reason` quoting the user's authorization. The cycle counter is anchored to the issue thread via the existing `gc:test-quality-review-cycle` marker family — disjoint from the codex pre-push markers so the two reviewers never cross-count.
+6. **Local-only iteration.** Like Step 6.5, this step does NOT commit between cycles. Re-stage with `git add -A` and re-invoke; the tool reads the staged + unstaged diff against the base branch.
+7. **Authentication.** The MCP tool's exec wrapper strips `ANTHROPIC_API_KEY` from the subprocess env so `claude --print` uses the host's OAuth session. See `docs/DEVELOPMENT_WORKFLOW.md` § "Test-quality review engine" for the full mechanism.
+8. Once clean, proceed to Phase C with the staged diff.
+
+Skip this step only if the diff has no test files (no `**/test/**`, `**/*Test.java`, `**/*.test.js`, etc.). When in doubt, run it.
 
 ---
 
@@ -482,7 +502,7 @@ Skip this step only if the diff is so trivial (one-liner typo fix) that codex wo
 
 ### Step 11: SonarCloud
 
-**Skip this step entirely if `cfg.sonarcloud` is null.** Log "SonarCloud skipped — no sonarcloud block in .ground-control.yaml" and proceed to Step 13.
+**Skip this step entirely if `cfg.sonarcloud` is null.** Log "SonarCloud skipped — no sonarcloud block in .ground-control.yaml" and proceed to Step 15 (per #906; Steps 13 / 14 were merged out).
 
 This step runs AFTER Step 10 (CI Monitor) reports green. A green CI run does not imply a clean SonarCloud — the quality gate and the issue list are separate from CI conclusions and must be checked independently.
 
@@ -511,11 +531,11 @@ Otherwise:
 
 6. **Cycle cap: 5 iterations for SonarCloud.** If the issue list is still non-empty after 5 fix→re-analyze cycles, STOP, post the remaining findings as an issue comment, and escalate to the user.
 
-7. Proceed to Step 13 only when: the quality gate is `OK` AND `api/issues/search?resolved=false` returns zero rows for this PR AND `api/hotspots/search?status=TO_REVIEW` returns zero rows for this PR.
+7. Proceed to Step 15 only when: the quality gate is `OK` AND `api/issues/search?resolved=false` returns zero rows for this PR AND `api/hotspots/search?status=TO_REVIEW` returns zero rows for this PR. (Steps 13–14 were merged out in #906: test-quality review moved pre-push to Step 6.6, and there is no separate "final CI re-verify" because there is no post-push fix loop after Sonar clean.)
 
 ## Review loop rules (apply to every review step in this skill)
 
-Codex review now runs as a single pre-push pass at Step 6.5; the remaining review step in Phase D is **test quality review (Step 13)**. Both follow the **same loop**:
+Both AI-assisted reviews run pre-push: **codex review at Step 6.5** and **test-quality review at Step 6.6**. There is no post-PR review step (Step 13 was merged into Step 6.6 by issue #906). Both follow the **same loop**:
 
 1. **Invoke the review.**
 2. **Read the FULL output.** Do not stop after the first few findings.
@@ -532,14 +552,14 @@ Codex review now runs as a single pre-push pass at Step 6.5; the remaining revie
 4. **Fix every finding, pre-existing or not.** The zero-deferral rule applies: there is no `defer` decision — not "out of scope for this PR", not "follow-up issue to track it", not "addressed in a subsequent PR", not "deferred to a later iteration", not "TBD later" in a closing comment. Filing a tracking issue does **not** convert a deferral into a valid disposition. The PreToolUse hook (`.claude/hooks/block-defer-language.py`) and `bin/policy` enforce this mechanically; the contract is fix-or-escalate. If you think a finding is dangerous to fix, unwise in context, or a false positive, STOP, post your reasoning as an issue comment with `decision: <fix|wontfix|not-applicable>` and rationale, and ask the user. Wait for their answer; do not push commits while the question is open. `wontfix` requires explicit user approval; `not-applicable` is for findings that don't actually apply (false positive on this codebase, finding outside the diff's scope, etc.).
 5. **Record decisions on the issue thread.** Per ADR-029 + ADR-036, after every cycle the agent calls **`gc_post_decision_record`** with the cycle number, reviewer, and the full `findings[]` list. Each finding entry carries: `id`, `title`, `classification` (`one-off` or `class`), `decision` (`fix` / `wontfix` / `not-applicable`), `rationale`, optional `location` / `comment_url` / `instances` (required when classification is `class`), and **`user_authorization`** — required when `decision: "wontfix"`. The `user_authorization` value is either a URL to the user's authorizing comment on the issue thread OR a verbatim quote with the issue/comment id; the runner refuses a wontfix without it (`decision_record_input_invalid` envelope). The tool renders the canonical decision-record Markdown, filters sensitive content, posts to the issue thread under a `gc:decision-record` marker, and rejects `decision: "defer"` server-side. Do NOT `gh issue comment` decision records directly — the tool is now the only canonical surface. A `class` finding's `rationale` says how the category was closed, not just that the named site was patched. Agent silence on a finding is a process violation; text scanning catches *written* deferral language, but the issue-thread findings-vs-decisions reconciliation is what catches *silent* omission.
 6. **Self-verify the fix locally before re-invoking the review.** Re-run the relevant test suite, the completion gate (`cfg.workflow.completion_command`), and `make policy` after every fix. Local verification proves the fix does the agent's intended thing — but the reviewer's re-read is what catches what the agent didn't intend, including defects in the fix code itself.
-7. **Re-invoke the SAME review after fixing.** The loop continues until the reviewer reports zero findings AND the cycle's `gc_post_decision_record` returns `ok: true`, OR the hard cap (3 cycles per issue, per ADR-029) refuses the next invocation. The reason multiple cycles exist is bounded review depth — each pass surfaces one or two classes of defect that the prior pass couldn't reach. Cycles are NOT for "fix verification" (that's the agent's own loop); they are for finding new classes of defect in the *current* state of the diff. The completion signal is **a cycle that surfaces zero findings whose decision-record post returns `ok: true`** — raw zero-findings prose alone is not the signal (issue #884). A cap-refused cycle 4 is the escalation signal.
+7. **Dispatch on `next_action`, do not blindly re-invoke.** The loop continues only on `next_action: "fix_findings_and_reinvoke"`: fix, self-verify, post the decision record, re-stage, re-invoke. On `next_action: "fix_findings_then_summarize_and_escalate"` (the **last-in-cap** action — under the cap-1 default this fires on cycle 1 when findings are present) fix and self-verify and post the decision record, but **do not re-invoke**; summarize the cap-reached state to the user and let them authorize an over-cap cycle via `override_cap=true` + `override_reason` if they want one. On `next_action: "post_clean_decision_record_and_advance_to_phase_c"` post the clean decision record and advance to Step 6.6 in the same turn. The reason caps exist is bounded review depth — each pass surfaces one or two classes of defect that the prior pass couldn't reach, but cycle 2/3 gains compound the agent's own fix-introduced bugs more than they catch net-new bugs (the empirical observation that drove the #906 cap-1 default). Cycles are NOT for "fix verification" (that's the agent's own loop); they are for finding new classes of defect in the *current* state of the diff. A clean cycle's `gc_post_decision_record` must return `ok: true` before advancing — raw zero-findings prose alone is not the signal (issue #884).
 
 For every cycle, after applying fixes the agent must update the tree the reviewer sees BEFORE re-running:
 
-- **Step 6.5 (pre-push codex review)** is local-only. Re-stage with `git add -A` and re-invoke; do NOT commit or push between cycles. The pre-push review reads the staged + unstaged diff against the base branch.
-- **Step 13 (test quality review)** runs after the PR is open. Commit and push fixes BEFORE re-invoking so the reviewer sees the updated tree.
+- **Step 6.5 (pre-push codex review)** is local-only. Re-stage with `git add -A` and re-invoke; do NOT commit or push between cycles. The pre-push codex review reads the staged + unstaged diff against the base branch.
+- **Step 6.6 (pre-push test-quality review)** is also local-only — moved pre-push by issue #906. Same re-stage-then-re-invoke loop as Step 6.5; do NOT commit or push between cycles.
 
-Format every fix commit (Step 13 only) as `Fix review findings (<reviewer>, cycle <N>)` so the loop history is visible in git log.
+Decision records (`gc_post_decision_record`) are still posted per cycle for both reviewers — that's the durable record per ADR-029 — but neither review needs a fix-commit since iteration is local.
 
 <!-- Step 12 (post-push codex review) intentionally removed by issue #804.
      The single codex review pass now lives at Step 6.5 (pre-push). The
@@ -550,62 +570,18 @@ Format every fix commit (Step 13 only) as `Fix review findings (<reviewer>, cycl
      per-finding cap that still applies when an agent does invoke the
      tool-layer post-push entrypoint by hand. -->
 
-### Step 13: Test Quality Review
-
-Call the `gc_test_quality_review` MCP tool with `repo_path`, `issue_number`, and `base_branch: "{cfg.workflow.base_branch|default dev}"`. The tool runs the review (shells out to `claude` CLI with the canonical rubric, parses structured JSON output, posts the durable findings record + cycle marker to the issue thread), then returns an envelope of the same shape `gc_codex_review` returns. The agent reads the envelope's `next_action` field as a directive — it is not free-prose findings to summarize.
-
-**This step replaces the prior `Skill("review-tests")` invocation (per issue #884 v2).** The Skill-tool boundary returned prose-formatted findings that the autoregressive parent agent kept echoing back to the user instead of fixing in-turn. The MCP tool returns a structured envelope; the `next_action` field is a directive, not a status report. See ADR-029 § "Test-quality review uses the same decision-record contract" and the architecture note at `architecture/notes/test-quality-clean-continuation-preflight.md`.
-
-The tool envelope is:
-```
-{
-  ok: true,
-  cycle: <N>, cap: 3,
-  finding_count: <int>, findings: [<each finding: severity, location, problem, why_it_matters, fix>],
-  next_action: "fix_findings_and_reinvoke"
-            | "post_clean_decision_record_and_advance_to_step_14"
-            | "fix_findings_then_summarize_and_escalate"   // last in-cap cycle
-            | "post_summary_and_escalate_to_user"          // cap-refused cycle 4
-  findings_comment_url: "<URL>",
-  changed_test_files: [...],
-  override?: bool, override_reason?: str
-}
-```
-
-**Dispatch on `next_action`. Both branches stay in the same agent turn.**
-
-**`fix_findings_and_reinvoke` (findings present, within cap)** — fix every finding in the same agent turn. Do not stop. Do not echo findings to the user. The findings are work, not a status report.
-1. Classify each finding (`one-off` or `class`). For a `class` finding, design one structural fix and apply to every instance per the Review loop rules above.
-2. Apply the fix to the diff.
-3. Self-verify locally: `cfg.workflow.completion_command`, `make policy`, the relevant test suite.
-4. Stage, commit (`Fix review findings (test-quality, cycle <N>)`), and push.
-5. Call `gc_post_decision_record` with `cycle: <N>`, `reviewer: "test-quality"`, `findings: [<each finding with fix / wontfix / not-applicable disposition>]`. Confirm the post returned `ok: true`.
-6. Re-invoke `gc_test_quality_review` (cycle `<N+1>`).
-
-Splitting any of those into a separate user turn re-opens the #884 silent-handoff failure mode in a different shape.
-
-**`post_clean_decision_record_and_advance_to_step_14` (zero findings)**:
-1. Call `gc_post_decision_record` with `cycle: <N>`, `reviewer: "test-quality"`, `findings: []`. Confirm `ok: true`. On `ok: false`, do NOT enter Step 14: follow the returned `error` / `next_action` envelope, fix the underlying tooling issue, and retry.
-2. Proceed to Step 14 in the same agent turn — no user acknowledgment turn between Step 13 and Step 14.
-
-**`fix_findings_then_summarize_and_escalate` (last in-cap cycle, findings present)** — same as `fix_findings_and_reinvoke` for steps 1–5, but instead of re-invoking, post an issue-thread summary of remaining concerns and escalate to the user. Past cycle 3 the user authorizes a further cycle via `override_cap=true` + `override_reason="<authorization quote>"`, or restructures the change.
-
-**`post_summary_and_escalate_to_user` (cap refused)** — the tool refused because cycle 4 was attempted without authorization. Post a summary of findings + fix history to the issue thread and ask the user.
-
-**Cycle cap: 3 iterations per issue, server-side.** Unlike the pre-#884-v2 implementation, this cap is enforced by `gc_test_quality_review` itself (counts `gc:test-quality-review-cycle` markers on the issue thread, refuses cycle 4 unless `override_cap=true` with a non-empty `override_reason`). The marker family is disjoint from the codex pre-push markers; the two counters never cross-count.
-
-**Authentication.** The MCP tool's exec wrapper strips `ANTHROPIC_API_KEY` from the subprocess env so `claude --print` uses the host's OAuth session (the env-var path may have a separate / empty billing balance; OAuth is the canonical user-driven auth). The host must be logged in to claude. See `docs/DEVELOPMENT_WORKFLOW.md` § "Test-quality review engine" for the full mechanism, model selection, and configuration knobs.
-
-### Step 14: Final CI re-verification
-
-Step 14 begins only after Step 13's most recent cycle has both (a) reported zero findings (or carries user-approved exceptions documented as decision comments) AND (b) successfully posted its `gc_post_decision_record(reviewer: "test-quality", findings: [...])` with `ok: true`. The successful decision-record post is the durable advance signal — without it, the workflow is still in Step 13's responsibility and must not enter Step 14 (issue #884).
-
-With that precondition satisfied:
-
-1. Verify the branch is pushed with the latest fix commits.
-2. Re-run Step 10 (CI Monitor) to confirm CI is still green.
-3. Re-run Step 11 (SonarCloud) — or skip again if `cfg.sonarcloud` is null.
-4. If either re-check fails, loop back through the appropriate review step — the cycle cap applies per review step, not total.
+<!-- Step 13 (post-PR test-quality review) and Step 14 (post-PR final CI
+     re-verify) were merged out by issue #906. Test-quality review now runs
+     pre-push at Step 6.6 in the same local-iteration band as the codex
+     review (Step 6.5), so the PR opens with both AI-assisted reviewers
+     clean. Final CI re-verify collapsed into Step 10's existing CI watch on
+     the original push — without a post-push fix loop there is no second CI
+     run to re-verify. The numbering of subsequent steps is preserved so
+     external references (ADR text, policy rules, docs) don't need to track
+     a moving target; Step 13 / Step 14 are intentional tombstones, not
+     errors. The pre-merge sequence is now: Step 10 (CI) → Step 11
+     (SonarCloud) → Step 15 (requirement transitions). See ADR-021 and
+     ADR-029 amendments for the rationale. -->
 
 ### Step 15: Transition In-Scope Requirements to ACTIVE
 

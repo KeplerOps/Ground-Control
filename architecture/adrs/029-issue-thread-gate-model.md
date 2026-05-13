@@ -8,6 +8,8 @@ Accepted
 
 2026-05-03
 
+> **Amended by issue #906 (2026-05-13):** Two changes to the review-loop contract this ADR establishes. (1) **Pre-push Codex review default cap drops from 3 → 1** (the cap value lives on the MCP tool as `CODEX_REVIEW_PREPUSH_HARD_CAP` and is now overrideable per-repo via `.ground-control.yaml::workflow.codex_review.pre_push_cap`, bounds `[1, 10]`); the `override_cap=true` + `override_reason=<authorization quote>` escape is unchanged and continues to grant a single over-cap cycle. Empirical rationale: PR #903 (a 4-cycle run) showed cycles 2–3 partly compounding the agent's own fix-introduced bugs rather than catching net-new bugs, and CI / SonarCloud / human review cover the residual risk. (2) **Test-quality review moves pre-push** to a new Step 6.6 in the same local-iteration band as the codex pre-push review (former Step 13 is merged out; former Step 14 collapses into Step 10's existing CI watch). Test-quality's default cap also drops to 1 with the same `workflow.test_quality_review.pre_push_cap` override path. The `gc:test-quality-review-cycle` marker family and the `gc_post_decision_record` contract are **unchanged** — what moves is the placement of the step in the workflow, not the durability mechanism. The PR now opens with both AI-assisted reviewers clean; CI + SonarCloud + human reviewer are the only post-push gates. SKILL.md Steps 13 / 14 are intentional tombstones; downstream Step 15 / 18 / 19 numbering is preserved so external references don't track a moving target. See `skills/implement/SKILL.md` Step 6.5 / 6.6 for the operative loop prose and `architecture/notes/quickfix-workflow-lane-preflight.md` for the preflight design context.
+
 ## Context
 
 ADR-021 ("Gated Agentic Development Loop") and the prior GC-O007 statement
@@ -90,8 +92,13 @@ relative to the target branch is covered by CI, integration tests, and
 SonarCloud, not by a duplicate Codex pass.
 
 Because the workflow now has one Codex review step instead of two, the
-`gc_codex_review` hard cap is three cycles for both pre-push and post-push
-tool entrypoints. `gc_codex_verify_finding` remains capped at two calls per
+`gc_codex_review` hard cap is **configurable per repo** (per the issue #906
+amendment above). The MCP tool's module defaults are 1 cycle pre-push and
+3 cycles post-push; the pre-push default may be overridden via
+`workflow.codex_review.pre_push_cap` in `.ground-control.yaml`. The cap
+remains anchored per issue (pre-push) and per PR (post-push); branch is
+audit context, not part of the cap key.
+`gc_codex_verify_finding` remains capped at two calls per
 finding because verification loops are per-finding, not whole-review cycles.
 Any older workflow text, issue prose, or ADR amendment that refers to a
 five-cycle Codex cap, a hard two-cycle `gc_codex_review` cap, or two Codex
@@ -110,15 +117,17 @@ available via the user-authorized `override_cap=true` + `override_reason`
 path; the override marker stays distinguishable from regular cycle markers in
 the audit trail.
 
-The three-cycle cap is hard against agent self-authorization: the agent
-cannot run cycle 4 to "verify the fix" of cycle 3 findings. Cycle 3 findings
-must be fixed in place; if concern remains after fixing them, the agent posts
-an issue-thread comment summarizing the remaining concern and fix history and
-escalates to the user. The user may then authorize cycle 4 explicitly via
-`override_cap=true` + an `override_reason` quoting that authorization, or
-decide a different workflow move (stop, re-scope, open a fresh issue). The
-marker preserves the distinction so the audit trail records whether each
-cycle ran in-cap or under user-authorized override.
+The configured cap (default 1 per #906; per-repo override via
+`workflow.codex_review.pre_push_cap`, bounds `[1, 10]`) is hard against agent
+self-authorization: the agent cannot run cycle cap+1 to "verify the fix" of
+the previous cycle's findings. Last-in-cap findings must be fixed in place;
+if concern remains after fixing them, the agent posts an issue-thread comment
+summarizing the remaining concern and fix history and escalates to the user.
+The user may then authorize cycle cap+1 explicitly via `override_cap=true`
++ an `override_reason` quoting that authorization, or decide a different
+workflow move (stop, re-scope, open a fresh issue). The marker preserves the
+distinction so the audit trail records whether each cycle ran in-cap or under
+user-authorized override.
 
 The marker belongs to the same issue-thread marker family as plan, phase,
 review-cycle, and verify-cycle markers. Implementations must reuse the
@@ -161,10 +170,11 @@ defense-in-depth context, not reset levers for the canonical Step 6.5 cap.
 
 ### Test-quality review uses the same decision-record contract
 
-Step 13 (test-quality review via the `gc_test_quality_review` MCP tool)
-records every cycle on the issue thread using the same
-`gc_post_decision_record` surface as Step 6.5's codex review, with
-`reviewer: "test-quality"` and the findings list.
+The test-quality review step (Step 6.6 per the #906 amendment; formerly
+Step 13) via the `gc_test_quality_review` MCP tool records every cycle on
+the issue thread using the same `gc_post_decision_record` surface as
+Step 6.5's codex review, with `reviewer: "test-quality"` and the findings
+list.
 
 The reviewer was originally a Skill (`review-tests`) but issue #884 v2
 moved it to an MCP tool to fix a behavioral regression: the Skill-tool
@@ -181,25 +191,30 @@ auth, cycle cap markers, findings record, failure modes). A clean cycle posts `f
 `**Findings:** 0 (clean run)`. The successfully posted record is the
 structured durable signal that the cycle is complete and the workflow
 advances — and "successfully posted" is dispositive: the parent advances
-into Step 14 only after `gc_post_decision_record` returns `ok: true` with
-a posted comment id/url. On `ok: false`, the parent follows the returned
-`error` / `next_action` envelope (sensitive-content rejection, body-size
-cap, `gh` posting failure, network), fixes the underlying issue, and
-retries the post — it does NOT enter Step 14 with the durable marker
-missing. Treating the attempted call as the signal would re-open the
-#884 silent-advance failure mode in a different shape. There is no
-separate marker family for test-quality cycles, and there is no human
-acknowledgment turn between Step 13 and Step 14: the parent `/implement`
-workflow consumes the successful clean record and proceeds in the same
-turn. Issue #884 was the original regression — when the SKILL prose
+to Phase C (stage / commit / push) only after `gc_post_decision_record`
+returns `ok: true` with a posted comment id/url. On `ok: false`, the parent
+follows the returned `error` / `next_action` envelope (sensitive-content
+rejection, body-size cap, `gh` posting failure, network), fixes the
+underlying issue, and retries the post — it does NOT enter Phase C with
+the durable marker missing. Treating the attempted call as the signal would
+re-open the #884 silent-advance failure mode in a different shape. There is
+no separate marker family for test-quality cycles, and there is no human
+acknowledgment turn between the test-quality clean signal and Phase C —
+the parent `/implement` workflow consumes the successful clean record and
+proceeds in the same turn. (Per the #906 amendment, the former Step 13 /
+Step 14 post-PR phase merged into Step 6.6 pre-push + Step 10 CI watch;
+the contract above is unchanged in substance — the "advance" target just
+shifted from Step 14 to Phase C entry.) Issue #884 was the original regression — when the SKILL prose
 treated the `review-tests` skill's human-readable "no issues found" line
 as the only signal, the parent agent stopped at the skill-return boundary
 instead of advancing. The skill's prose line remains for transcript
 readability; the decision-record marker on the issue thread is the
 workflow contract.
 
-The cycle cap for test-quality is 3 per issue, aligned with the codex
-review cap. Per #884 v2 the cap is **server-side**: the MCP tool
+The cycle cap for test-quality defaults to 1 per issue (per the #906
+amendment above), aligned with the codex pre-push cap default. It is
+configurable per repo via `workflow.test_quality_review.pre_push_cap`
+in `.ground-control.yaml`. Per #884 v2 the cap is **server-side**: the MCP tool
 `gc_test_quality_review` counts `gc:test-quality-review-cycle` markers
 on the issue thread and refuses cycle 4 unless `override_cap=true` with
 a non-empty `override_reason`. The marker family is disjoint from
@@ -215,9 +230,12 @@ agent reads `next_action` as a directive. On
 finding in the same agent turn (classify, apply the fix, self-verify,
 commit/push, post the decision record with `fix` / `wontfix` /
 `not-applicable` dispositions, re-invoke). On
-`next_action: "post_clean_decision_record_and_advance_to_step_14"` the
+`next_action: "post_clean_decision_record_and_advance_to_phase_c"` the
 parent posts the clean `gc_post_decision_record(findings: [])`,
-confirms `ok: true`, and proceeds to Step 14 in the same turn. The
+confirms `ok: true`, and proceeds to Phase C (stage / commit / push) in
+the same turn. (The string changed from `..._advance_to_step_14` to
+`..._advance_to_phase_c` when issue #906 moved Step 13's test-quality
+review pre-push to Step 6.6; Step 14 no longer exists.) The
 parent does NOT echo findings back to the user — the v1 prose-only
 attempt to forbid that behavior failed because the Skill-tool
 boundary's autoregressive bias overrode the SKILL.md rule; the v2 MCP

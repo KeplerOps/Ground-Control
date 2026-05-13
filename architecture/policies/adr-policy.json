@@ -10,6 +10,7 @@
           "id": "workflow-guardrail-sync",
           "whenAny": [
             "skills/implement/SKILL.md",
+            "skills/quickfix/SKILL.md",
             ".claude/skills/implement/SKILL.md",
             ".claude/agents/completion-verifier.md",
             ".claude/rules/*.md",
@@ -21,9 +22,12 @@
             "docs/DEVELOPMENT_WORKFLOW.md",
             "docs/WORKFLOW.md",
             "architecture/adrs/021-gated-agentic-development-loop.md",
-            "architecture/adrs/036-per-step-routing-tool-surfaces-telemetry.md"
+            "architecture/adrs/029-issue-thread-gate-model.md",
+            "architecture/adrs/031-codex-review-stopping-model.md",
+            "architecture/adrs/036-per-step-routing-tool-surfaces-telemetry.md",
+            "skills/quickfix/SKILL.md"
           ],
-          "message": "Workflow guardrails changed without syncing ADR-021 / ADR-036 and workflow docs."
+          "message": "Workflow guardrails changed without syncing ADR-021 / ADR-029 / ADR-031 / ADR-036, workflow docs, and the /quickfix sibling lane."
         }
       ]
     },

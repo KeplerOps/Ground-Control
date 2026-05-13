@@ -1,4 +1,4 @@
-import { describe, it, before } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -83,6 +83,9 @@ import {
   buildTestQualityReviewPrompt,
   parseTestQualityReviewFindings,
   TEST_QUALITY_REVIEW_FINDINGS_SCHEMA,
+  findChangedTestFiles,
+  resolveReviewerPrePushCap,
+  ReviewerCapConfigError,
   runCodexReview,
   dedupFindings,
   buildCodexVerifyPrompt,
@@ -498,6 +501,8 @@ describe("parseGroundControlYaml", () => {
       lint_command: null,
       format_command: null,
       base_branch: null,
+      codex_review: { pre_push_cap: null },
+      test_quality_review: { pre_push_cap: null },
     });
     assert.equal(result.value.sonarcloud, null);
     assert.equal(result.value.rules.plan_rules_path, null);
@@ -628,6 +633,121 @@ describe("parseGroundControlYaml", () => {
         `expected base_branch validation error for ${value}, got: ${JSON.stringify(result.errors)}`,
       );
     }
+  });
+
+  // ---------------------------------------------------------------------
+  // workflow.codex_review.pre_push_cap (issue #906)
+  // ---------------------------------------------------------------------
+
+  it("accepts a workflow.codex_review.pre_push_cap integer", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: x",
+      "workflow:",
+      "  codex_review:",
+      "    pre_push_cap: 2",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, true, JSON.stringify(result.errors));
+    assert.deepEqual(result.value.workflow.codex_review, { pre_push_cap: 2 });
+  });
+
+  it("defaults workflow.codex_review.pre_push_cap when the block is absent", () => {
+    const yaml = "schema_version: 1\nproject: x\n";
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, true);
+    // Cap default lives at the MCP-tool layer (so override_cap-aware callers
+    // see the consistent number) — the parser surfaces null to mean
+    // "use the tool default".
+    assert.deepEqual(result.value.workflow.codex_review, { pre_push_cap: null });
+  });
+
+  it("rejects workflow.codex_review with unknown keys", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: x",
+      "workflow:",
+      "  codex_review:",
+      "    pre_push_cap: 1",
+      "    bogus: true",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes("workflow.codex_review") && e.includes("unknown key")));
+  });
+
+  it("rejects a non-integer workflow.codex_review.pre_push_cap", () => {
+    for (const bad of ["'three'", "3.5", "true"]) {
+      const yaml = [
+        "schema_version: 1",
+        "project: x",
+        "workflow:",
+        "  codex_review:",
+        `    pre_push_cap: ${bad}`,
+        "",
+      ].join("\n");
+      const result = parseGroundControlYaml(yaml);
+      assert.equal(result.ok, false, `expected ${bad} to fail`);
+      assert.ok(result.errors.some((e) => e.includes("pre_push_cap") && e.includes("integer")));
+    }
+  });
+
+  it("rejects workflow.codex_review.pre_push_cap outside [1, 10]", () => {
+    // Lower bound: must be at least 1 (zero would mean "no review allowed",
+    // which is what `/quickfix` without `--review` achieves by not invoking
+    // the reviewer at all; the cap is for runs that DO invoke it).
+    // Upper bound: 10 is a safety net against runaway loops at the cap; the
+    // empirical worst case in this repo's history is 4 cycles.
+    for (const bad of [0, -1, 11, 100]) {
+      const yaml = [
+        "schema_version: 1",
+        "project: x",
+        "workflow:",
+        "  codex_review:",
+        `    pre_push_cap: ${bad}`,
+        "",
+      ].join("\n");
+      const result = parseGroundControlYaml(yaml);
+      assert.equal(result.ok, false, `expected ${bad} to fail`);
+      assert.ok(result.errors.some((e) => e.includes("pre_push_cap")));
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // workflow.test_quality_review.pre_push_cap (issue #906)
+  // ---------------------------------------------------------------------
+
+  it("accepts a workflow.test_quality_review.pre_push_cap integer", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: x",
+      "workflow:",
+      "  test_quality_review:",
+      "    pre_push_cap: 2",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, true, JSON.stringify(result.errors));
+    assert.deepEqual(result.value.workflow.test_quality_review, { pre_push_cap: 2 });
+  });
+
+  it("rejects workflow.test_quality_review with unknown keys", () => {
+    const yaml = [
+      "schema_version: 1",
+      "project: x",
+      "workflow:",
+      "  test_quality_review:",
+      "    pre_push_cap: 1",
+      "    bogus: true",
+      "",
+    ].join("\n");
+    const result = parseGroundControlYaml(yaml);
+    assert.equal(result.ok, false);
+    assert.ok(
+      result.errors.some((e) => e.includes("workflow.test_quality_review") && e.includes("unknown key")),
+    );
   });
 
   it("requires both sonarcloud fields when sonarcloud is set", () => {
@@ -3482,7 +3602,12 @@ describe("parseCodexReviewPrePushCycleMarkers", () => {
 });
 
 describe("evaluateCodexReviewPrePushCycleCap", () => {
-  it("allows cycle 1 with a fix-and-push next_action", () => {
+  // Default (no hardCap arg) — issue #906 dropped the module-default cap from
+  // 3 to 1. Cycle 1 is therefore the only allowed in-cap cycle; next_action
+  // is the "this is the last cycle" disposition. Repos that want the
+  // historical cap-3 behavior set `.ground-control.yaml::workflow.codex_review.pre_push_cap: 3`;
+  // those tests are below in the explicit-cap section.
+  it("allows cycle 1 under the cap-1 default with the summarize-and-escalate disposition", () => {
     const r = evaluateCodexReviewPrePushCycleCap({
       priorCount: 0,
       issueNumber: 796,
@@ -3491,40 +3616,72 @@ describe("evaluateCodexReviewPrePushCycleCap", () => {
     assert.equal(r.ok, true);
     assert.equal(r.nextCycle, 1);
     assert.equal(r.cap, CODEX_REVIEW_PREPUSH_HARD_CAP);
-    assert.equal(r.next_action, "fix_all_findings_and_restage");
+    assert.equal(r.cap, 1);
+    // Cycle 1 IS the last cycle under cap 1, so the agent must fix every
+    // finding then summarize + escalate, not run cycle 2.
+    assert.equal(r.next_action, "fix_all_findings_then_summarize_and_escalate");
     assert.notEqual(r.override, true);
   });
 
-  it("allows cycle 2 with the standard fix-and-restage next_action", () => {
-    // Cap-3 (issue #804) — cycle 2 is no longer the last cycle.
+  it("refuses cycle 2 under the cap-1 default with codex_review_prepush_cap_reached", () => {
     const r = evaluateCodexReviewPrePushCycleCap({
       priorCount: 1,
       issueNumber: 796,
       branchName: "796-foo",
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.error, "codex_review_prepush_cap_reached");
+    assert.equal(r.prior_cycles, 1);
+    assert.equal(r.cap, 1);
+    assert.equal(r.next_action, "post_summary_and_escalate_to_user");
+  });
+
+  // Explicit cap-3 — historical default (issue #804) and the contract repos
+  // restore by setting `workflow.codex_review.pre_push_cap: 3`. Tests assert
+  // the per-cycle next_action surface still works at cap 3.
+  it("allows cycle 1 under explicit cap-3 with the fix-and-restage disposition", () => {
+    const r = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 0,
+      issueNumber: 796,
+      branchName: "796-foo",
+      hardCap: 3,
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.nextCycle, 1);
+    assert.equal(r.cap, 3);
+    assert.equal(r.next_action, "fix_all_findings_and_restage");
+  });
+
+  it("allows cycle 2 under explicit cap-3 with the standard fix-and-restage next_action", () => {
+    const r = evaluateCodexReviewPrePushCycleCap({
+      priorCount: 1,
+      issueNumber: 796,
+      branchName: "796-foo",
+      hardCap: 3,
     });
     assert.equal(r.ok, true);
     assert.equal(r.nextCycle, 2);
     assert.equal(r.next_action, "fix_all_findings_and_restage");
   });
 
-  it("allows cycle 3 (the last cycle under cap-3) with the summarize-and-escalate discipline", () => {
-    // Cap-3 (issue #804) — cycle 3 is the new last cycle.
+  it("allows cycle 3 under explicit cap-3 with the summarize-and-escalate discipline", () => {
     const r = evaluateCodexReviewPrePushCycleCap({
       priorCount: 2,
       issueNumber: 796,
       branchName: "796-foo",
+      hardCap: 3,
     });
     assert.equal(r.ok, true);
     assert.equal(r.nextCycle, 3);
     assert.equal(r.next_action, "fix_all_findings_then_summarize_and_escalate");
   });
 
-  it("refuses cycle 4 with codex_review_prepush_cap_reached", () => {
-    // Cap-3 (issue #804) — cycle 4 is the first cap-refused cycle.
+  it("refuses cycle 4 under explicit cap-3 with codex_review_prepush_cap_reached", () => {
     const r = evaluateCodexReviewPrePushCycleCap({
       priorCount: 3,
       issueNumber: 796,
       branchName: "796-foo",
+      hardCap: 3,
     });
     assert.equal(r.ok, false);
     assert.equal(r.error, "codex_review_prepush_cap_reached");
@@ -3654,12 +3811,16 @@ describe("buildCodexReviewPrePushCycleMarker", () => {
   });
 
   it("includes the cycle, cap, issue, and branch in the human-readable body", () => {
+    // Pass an explicit hardCap so this test documents the marker's "cycle N
+    // of M" shape independent of the module default (which dropped to 1 in
+    // issue #906). The cap value in the marker is whatever the resolved
+    // workflow.codex_review.pre_push_cap was for that cycle.
     const marker = buildCodexReviewPrePushCycleMarker({
       issueNumber: 796,
       branchName: "796-foo",
       cycleNumber: 2,
+      hardCap: 3,
     });
-    // Cap-3 (issue #804): the marker for cycle 2 reads "cycle 2 of 3".
     assert.match(marker, /cycle 2 of 3/);
     assert.match(marker, /issue #796/);
     assert.match(marker, /796-foo/);
@@ -5470,13 +5631,18 @@ describe("buildCodexReviewOverrideReasonDescription", () => {
   });
 
   it("uses a concrete next-cycle example when caps are equal", () => {
+    // Post-push and pre-push caps diverged when issue #906 lowered the
+    // pre-push default to 1 while leaving the post-push default at 3. Pass
+    // equal explicit caps so this test continues to exercise the
+    // equal-caps branch of the description renderer.
+    const equalCap = 3;
     const desc = buildCodexReviewOverrideReasonDescription({
-      postPushCap: CODEX_REVIEW_HARD_CAP,
-      prepushCap: CODEX_REVIEW_PREPUSH_HARD_CAP,
+      postPushCap: equalCap,
+      prepushCap: equalCap,
     });
     assert.match(
       desc,
-      new RegExp(`run cycle ${CODEX_REVIEW_HARD_CAP + 1}`),
+      new RegExp(`run cycle ${equalCap + 1}`),
       `equal-cap example should name the first cycle past the cap; got: ${desc}`,
     );
   });
@@ -6676,6 +6842,182 @@ describe("runPostDecisionRecord / runPostFinalReport boundary checks (codex cycl
     }
   });
 
+  // The `lane: "quickfix"` carve-out relaxes the empty-reviews and missing-
+  // codex gates for the /quickfix Step Q19 path (issue #906); all other
+  // gates remain in force. Without these tests, future edits could
+  // re-tighten the gate and leave default `/quickfix` runs unable to
+  // publish their close comment.
+  it("final-report accepts empty reviews when lane='quickfix' (issue #906)", async () => {
+    const dir = makeTempRepo();
+    try {
+      // Use sonarStatus='skipped' with no sonarcloud cfg so the runner returns
+      // early past the lane-gated checks without trying to reach GitHub.
+      // Configure a sonar block to flip to the `final_report_sonar_skipped_but_configured`
+      // path, proving we've reached the post-lane-gate code. (If lane='quickfix'
+      // were rejected at the no-reviews gate, we'd never see this sonar error.)
+      writeFileSync(
+        join(dir, ".ground-control.yaml"),
+        "schema_version: 1\nproject: gc\nsonarcloud:\n  project_key: gc\n  organization: gc\n",
+      );
+      const r = await import("./lib.js").then(({ runPostFinalReport }) =>
+        runPostFinalReport({
+          repoPath: dir,
+          issueNumber: 1, prNumber: 1,
+          requirements: [],
+          reviews: [],
+          ciStatus: "green", sonarStatus: "skipped",
+          lane: "quickfix",
+          summary: "Fixed the parser bug.",
+        })
+      );
+      // The lane-gated errors must NOT fire — that proves quickfix bypassed them.
+      assert.notEqual(r.error, "final_report_no_reviews");
+      assert.notEqual(r.error, "final_report_codex_review_missing");
+      // The runner reached the sonar-configured-but-skipped check downstream,
+      // proving lane='quickfix' got past the reviews gates.
+      assert.equal(r.error, "final_report_sonar_skipped_but_configured");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("final-report still requires codex review entry when lane='implement' (default)", async () => {
+    const dir = makeTempRepo();
+    try {
+      const r = await import("./lib.js").then(({ runPostFinalReport }) =>
+        runPostFinalReport({
+          repoPath: dir,
+          issueNumber: 1, prNumber: 1,
+          requirements: [],
+          reviews: [{ reviewer: "test-quality", summary: "0 findings" }],
+          ciStatus: "green", sonarStatus: "passed",
+          lane: "implement",
+        })
+      );
+      assert.equal(r.ok, false);
+      assert.equal(r.error, "final_report_codex_review_missing");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("final-report still requires non-empty reviews when lane is absent", async () => {
+    const dir = makeTempRepo();
+    try {
+      const r = await import("./lib.js").then(({ runPostFinalReport }) =>
+        runPostFinalReport({
+          repoPath: dir,
+          issueNumber: 1, prNumber: 1,
+          requirements: [],
+          reviews: [],
+          ciStatus: "green", sonarStatus: "passed",
+          // lane intentionally omitted — default /implement contract
+        })
+      );
+      assert.equal(r.ok, false);
+      assert.equal(r.error, "final_report_no_reviews");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The lane='quickfix' carve-out is bounded by the lane's requirement-free
+  // invariant: a /quickfix run cannot carry a non-empty requirements[].
+  // Without this server-side rejection, any caller could publish a final
+  // report for requirement-scoped work while bypassing the mandatory codex
+  // review evidence. Added per #906 codex cycle-3 F1 + security F1.
+  it("final-report rejects lane='quickfix' when requirements[] is non-empty", async () => {
+    const dir = makeTempRepo();
+    try {
+      const r = await import("./lib.js").then(({ runPostFinalReport }) =>
+        runPostFinalReport({
+          repoPath: dir,
+          issueNumber: 1, prNumber: 1,
+          requirements: [{ uid: "GC-X001", title: "T", status: "ACTIVE" }],
+          reviews: [],
+          ciStatus: "green", sonarStatus: "passed",
+          lane: "quickfix",
+        })
+      );
+      assert.equal(r.ok, false);
+      assert.equal(r.error, "final_report_quickfix_with_requirements");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The slim quickfix renderer emits a different body shape from the full
+  // /implement final report — no In-scope requirements section, no
+  // Traceability reconciliation section. Added per #906 codex cycle-3 F2.
+  it("buildFinalReport with lane='quickfix' renders the slim close comment", async () => {
+    const { buildFinalReport } = await import("./lib.js");
+    const body = buildFinalReport({
+      issueNumber: 1, prNumber: 2,
+      requirements: [],
+      files: { modified: ["foo.js"] },
+      reviews: [],
+      ciStatus: "green", sonarStatus: "passed",
+      lane: "quickfix",
+      summary: "Fixed the bug.",
+    });
+    assert.match(body, /Quickfix close — issue #1 complete/);
+    assert.ok(!body.includes("In-scope requirements"));
+    assert.ok(!body.includes("Traceability reconciliation"));
+    // Reviews section is only rendered when reviews[] is non-empty.
+    assert.ok(!body.includes("### Reviews"));
+  });
+
+  it("buildFinalReport with lane='quickfix' includes Reviews section when reviews are present", async () => {
+    const { buildFinalReport } = await import("./lib.js");
+    const body = buildFinalReport({
+      issueNumber: 1, prNumber: 2,
+      requirements: [],
+      files: { modified: ["foo.js"] },
+      reviews: [{ reviewer: "codex", summary: "1 cycle, 0 findings" }],
+      ciStatus: "green", sonarStatus: "passed",
+      lane: "quickfix",
+      summary: "Fixed the bug.",
+    });
+    assert.match(body, /### Reviews/);
+    assert.match(body, /\*\*codex:\*\* 1 cycle, 0 findings/);
+  });
+
+  it("buildFinalReport without lane='quickfix' still emits the full /implement template", async () => {
+    const { buildFinalReport } = await import("./lib.js");
+    const body = buildFinalReport({
+      issueNumber: 1, prNumber: 2,
+      requirements: [],
+      files: { modified: ["foo.js"] },
+      reviews: [{ reviewer: "codex", summary: "1 cycle, 0 findings" }],
+      ciStatus: "green", sonarStatus: "passed",
+      summary: "Done.",
+    });
+    assert.match(body, /Final report — issue #1 complete/);
+    assert.match(body, /In-scope requirements/);
+    assert.match(body, /Traceability reconciliation/);
+  });
+
+  it("final-report rejects an unknown lane value", async () => {
+    const dir = makeTempRepo();
+    try {
+      const r = await import("./lib.js").then(({ runPostFinalReport }) =>
+        runPostFinalReport({
+          repoPath: dir,
+          issueNumber: 1, prNumber: 1,
+          requirements: [],
+          reviews: [{ reviewer: "codex", summary: "0 findings" }],
+          ciStatus: "green", sonarStatus: "passed",
+          lane: "nope",
+        })
+      );
+      assert.equal(r.ok, false);
+      assert.equal(r.error, "final_report_input_invalid");
+      assert.match(r.message, /lane must be 'implement' or 'quickfix'/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("final-report refuses sonar='skipped' when .ground-control.yaml has a sonarcloud block (codex cycle-4 F3)", async () => {
     const dir = makeTempRepo();
     try {
@@ -7122,7 +7464,10 @@ describe("parseTestQualityReviewCycleMarkers", () => {
 });
 
 describe("evaluateTestQualityReviewCycleCap", () => {
-  it("allows cycle 1 with fix_findings_and_reinvoke next_action", () => {
+  // Default (no hardCap) — cap dropped from 3 → 1 by issue #906. Cycle 1 is
+  // therefore the only allowed in-cap cycle and its next_action is the
+  // "last in-cap cycle" disposition.
+  it("allows cycle 1 under the cap-1 default with the summarize-and-escalate disposition", () => {
     const r = evaluateTestQualityReviewCycleCap({
       priorCount: 0,
       issueNumber: 884,
@@ -7131,30 +7476,60 @@ describe("evaluateTestQualityReviewCycleCap", () => {
     assert.equal(r.ok, true);
     assert.equal(r.nextCycle, 1);
     assert.equal(r.cap, TEST_QUALITY_REVIEW_HARD_CAP);
+    assert.equal(r.cap, 1);
+    assert.equal(r.next_action, "fix_findings_then_summarize_and_escalate");
+  });
+
+  it("refuses cycle 2 under the cap-1 default with test_quality_review_cap_reached", () => {
+    const r = evaluateTestQualityReviewCycleCap({
+      priorCount: 1,
+      issueNumber: 884,
+      branchName: "884-x",
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.error, "test_quality_review_cap_reached");
+    assert.equal(r.cap, 1);
+    assert.equal(r.next_action, "post_summary_and_escalate_to_user");
+  });
+
+  // Explicit cap-3 — historical default (issue #884 follow-up). Repos restore
+  // it by setting `workflow.test_quality_review.pre_push_cap: 3`.
+  it("allows cycle 1 under explicit cap-3 with fix_findings_and_reinvoke next_action", () => {
+    const r = evaluateTestQualityReviewCycleCap({
+      priorCount: 0,
+      issueNumber: 884,
+      branchName: "884-x",
+      hardCap: 3,
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.nextCycle, 1);
+    assert.equal(r.cap, 3);
     assert.equal(r.next_action, "fix_findings_and_reinvoke");
   });
 
-  it("returns escalate next_action for cycle 3 (last in-cap)", () => {
+  it("returns escalate next_action for cycle 3 (last in-cap) under explicit cap-3", () => {
     const r = evaluateTestQualityReviewCycleCap({
       priorCount: 2,
       issueNumber: 884,
       branchName: "884-x",
+      hardCap: 3,
     });
     assert.equal(r.ok, true);
     assert.equal(r.nextCycle, 3);
     assert.equal(r.next_action, "fix_findings_then_summarize_and_escalate");
   });
 
-  it("refuses cycle 4 without override", () => {
+  it("refuses cycle 4 under explicit cap-3 without override", () => {
     const r = evaluateTestQualityReviewCycleCap({
       priorCount: 3,
       issueNumber: 884,
       branchName: "884-x",
+      hardCap: 3,
     });
     assert.equal(r.ok, false);
     assert.equal(r.error, "test_quality_review_cap_reached");
     assert.equal(r.prior_cycles, 3);
-    assert.equal(r.cap, TEST_QUALITY_REVIEW_HARD_CAP);
+    assert.equal(r.cap, 3);
     assert.equal(r.next_action, "post_summary_and_escalate_to_user");
   });
 
@@ -7214,10 +7589,14 @@ describe("buildTestQualityReviewCycleMarker", () => {
   });
 
   it("renders human-readable body with cycle / cap / issue / branch", () => {
+    // Pass explicit hardCap so this test documents the marker's "cycle N
+    // of M" shape independent of the module default (which dropped to 1 in
+    // issue #906).
     const m = buildTestQualityReviewCycleMarker({
       issueNumber: 884,
       branchName: "884-foo",
       cycleNumber: 2,
+      hardCap: 3,
     });
     assert.match(m, /cycle 2 of 3/);
     assert.match(m, /issue #884/);
@@ -7951,5 +8330,248 @@ describe("MCP upload action path policies", () => {
       process.chdir(prevCwd);
       rmSync(nonGit, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findChangedTestFiles uncommitted-aware path (issue #906 codex finding F2)
+//
+// The test-quality review moved pre-push at #906. The legacy file discovery
+// looked only at `git diff <base>...HEAD`, which is empty pre-commit; the
+// review would have taken the zero-files fast path on every first cycle and
+// consumed the cap without reviewing the actual staged test edits. The
+// `includeUncommitted: true` option closes that hole.
+// ---------------------------------------------------------------------------
+
+describe("findChangedTestFiles uncommitted-aware path", () => {
+  const tmpRepos = [];
+  function makeRepo() {
+    const dir = mkdtempSync(join(tmpdir(), "gc-findtests-"));
+    tmpRepos.push(dir);
+    execFileSync("git", ["-C", dir, "init", "-q", "-b", "main"]);
+    execFileSync("git", ["-C", dir, "config", "user.email", "test@example.com"]);
+    execFileSync("git", ["-C", dir, "config", "user.name", "Test"]);
+    writeFileSync(join(dir, "seed"), "seed");
+    execFileSync("git", ["-C", dir, "add", "seed"]);
+    execFileSync("git", ["-C", dir, "commit", "-q", "-m", "seed"]);
+    execFileSync("git", ["-C", dir, "checkout", "-q", "-b", "feat"]);
+    return dir;
+  }
+
+  // Clean up at module scope (not after each test) so a single failing test
+  // doesn't masquerade as the failure of every subsequent test through a
+  // dirty workspace.
+  after(() => {
+    for (const d of tmpRepos) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("includes staged test files when includeUncommitted=true", async () => {
+    const dir = makeRepo();
+    writeFileSync(join(dir, "FooTest.java"), "// staged\n");
+    execFileSync("git", ["-C", dir, "add", "FooTest.java"]);
+    const files = await findChangedTestFiles({
+      repoRoot: dir,
+      baseBranch: "main",
+      includeUncommitted: true,
+    });
+    assert.ok(files.includes("FooTest.java"));
+  });
+
+  it("includes unstaged tracked test edits when includeUncommitted=true", async () => {
+    const dir = makeRepo();
+    writeFileSync(join(dir, "BarTest.java"), "// initial\n");
+    execFileSync("git", ["-C", dir, "add", "BarTest.java"]);
+    execFileSync("git", ["-C", dir, "commit", "-q", "-m", "add bar test"]);
+    writeFileSync(join(dir, "BarTest.java"), "// edited\n");
+    const files = await findChangedTestFiles({
+      repoRoot: dir,
+      baseBranch: "main",
+      includeUncommitted: true,
+    });
+    assert.ok(files.includes("BarTest.java"));
+  });
+
+  it("includes brand-new untracked test files when includeUncommitted=true", async () => {
+    const dir = makeRepo();
+    writeFileSync(join(dir, "BazTest.java"), "// untracked\n");
+    const files = await findChangedTestFiles({
+      repoRoot: dir,
+      baseBranch: "main",
+      includeUncommitted: true,
+    });
+    assert.ok(files.includes("BazTest.java"));
+  });
+
+  it("returns the empty set when includeUncommitted=false and HEAD has no test changes", async () => {
+    const dir = makeRepo();
+    writeFileSync(join(dir, "QuxTest.java"), "// staged but uncommitted\n");
+    execFileSync("git", ["-C", dir, "add", "QuxTest.java"]);
+    const files = await findChangedTestFiles({
+      repoRoot: dir,
+      baseBranch: "main",
+      includeUncommitted: false,
+    });
+    assert.equal(files.length, 0);
+  });
+
+  it("deduplicates a file that appears in HEAD and in staged/unstaged", async () => {
+    const dir = makeRepo();
+    writeFileSync(join(dir, "DupTest.java"), "// initial\n");
+    execFileSync("git", ["-C", dir, "add", "DupTest.java"]);
+    execFileSync("git", ["-C", dir, "commit", "-q", "-m", "dup"]);
+    writeFileSync(join(dir, "DupTest.java"), "// edited\n");
+    const files = await findChangedTestFiles({
+      repoRoot: dir,
+      baseBranch: "main",
+      includeUncommitted: true,
+    });
+    assert.equal(files.filter((f) => f === "DupTest.java").length, 1);
+  });
+
+  // Predicate-coverage tests for the JS / TS test-file conventions added by
+  // #906 codex F3. Without these, a PR that only changes `foo.test.js` or
+  // `bar.spec.ts` would take the zero-files fast path and consume the cap
+  // without running the reviewer.
+  it("matches `.test.js` JS test convention", async () => {
+    const dir = makeRepo();
+    writeFileSync(join(dir, "foo.test.js"), "// staged\n");
+    execFileSync("git", ["-C", dir, "add", "foo.test.js"]);
+    const files = await findChangedTestFiles({
+      repoRoot: dir,
+      baseBranch: "main",
+      includeUncommitted: true,
+    });
+    assert.ok(files.includes("foo.test.js"));
+  });
+
+  it("matches `.test.ts` / `.test.tsx` TypeScript test conventions", async () => {
+    const dir = makeRepo();
+    writeFileSync(join(dir, "a.test.ts"), "// staged\n");
+    writeFileSync(join(dir, "b.test.tsx"), "// staged\n");
+    execFileSync("git", ["-C", dir, "add", "a.test.ts", "b.test.tsx"]);
+    const files = await findChangedTestFiles({
+      repoRoot: dir,
+      baseBranch: "main",
+      includeUncommitted: true,
+    });
+    assert.ok(files.includes("a.test.ts"));
+    assert.ok(files.includes("b.test.tsx"));
+  });
+
+  it("matches `.spec.js` / `.spec.ts` alternate test conventions", async () => {
+    const dir = makeRepo();
+    writeFileSync(join(dir, "x.spec.js"), "// staged\n");
+    writeFileSync(join(dir, "y.spec.ts"), "// staged\n");
+    execFileSync("git", ["-C", dir, "add", "x.spec.js", "y.spec.ts"]);
+    const files = await findChangedTestFiles({
+      repoRoot: dir,
+      baseBranch: "main",
+      includeUncommitted: true,
+    });
+    assert.ok(files.includes("x.spec.js"));
+    assert.ok(files.includes("y.spec.ts"));
+  });
+
+  // `test/` (singular) directory predicate — covers Maven-style src/test/...
+  // and similar singular layouts the SKILL.md test-glob contract names.
+  // Added per #906 codex cycle-3 F3.
+  it("matches files inside a singular `test/` directory anywhere in the path", async () => {
+    const dir = makeRepo();
+    mkdirSync(join(dir, "src", "test", "parser"), { recursive: true });
+    writeFileSync(join(dir, "src", "test", "parser", "case.json"), "{}\n");
+    mkdirSync(join(dir, "test", "parser"), { recursive: true });
+    writeFileSync(join(dir, "test", "parser", "foo.py"), "# x\n");
+    execFileSync("git", ["-C", dir, "add", "src/test/parser/case.json", "test/parser/foo.py"]);
+    const files = await findChangedTestFiles({
+      repoRoot: dir,
+      baseBranch: "main",
+      includeUncommitted: true,
+    });
+    assert.ok(files.includes("src/test/parser/case.json"));
+    assert.ok(files.includes("test/parser/foo.py"));
+  });
+
+  it("does NOT match non-test files lacking any anchored test-shape substring", async () => {
+    const dir = makeRepo();
+    // None of these contain `test_`, `_test.`, `Test.`, `.test.`, `.spec.`,
+    // or `tests?/` — pure non-test paths.
+    writeFileSync(join(dir, "foo.go"), "// x\n");
+    writeFileSync(join(dir, "bar.json"), "{}\n");
+    execFileSync("git", ["-C", dir, "add", "foo.go", "bar.json"]);
+    const files = await findChangedTestFiles({
+      repoRoot: dir,
+      baseBranch: "main",
+      includeUncommitted: true,
+    });
+    assert.ok(!files.includes("foo.go"));
+    assert.ok(!files.includes("bar.json"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveReviewerPrePushCap config validation surfacing (issue #906 F7)
+//
+// A malformed `workflow.codex_review.pre_push_cap` (out-of-bounds, non-integer,
+// unknown nested keys) used to silently fall back to the module default. The
+// fix preserves strict validation: invalid_ground_control_yaml throws
+// ReviewerCapConfigError; legitimate absence still falls back.
+// ---------------------------------------------------------------------------
+
+describe("resolveReviewerPrePushCap config validation surfacing", () => {
+  const tmpRepos = [];
+  function makeRepo(yamlText) {
+    const dir = mkdtempSync(join(tmpdir(), "gc-resolve-cap-"));
+    tmpRepos.push(dir);
+    execFileSync("git", ["-C", dir, "init", "-q", "-b", "main"]);
+    execFileSync("git", ["-C", dir, "config", "user.email", "test@example.com"]);
+    execFileSync("git", ["-C", dir, "config", "user.name", "Test"]);
+    if (yamlText !== null) {
+      writeFileSync(join(dir, ".ground-control.yaml"), yamlText);
+    }
+    return dir;
+  }
+
+  after(() => {
+    for (const d of tmpRepos) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("returns the module default when the cfg file is missing", async () => {
+    const dir = makeRepo(null);
+    const cap = await resolveReviewerPrePushCap(dir, "codex_review", 7);
+    assert.equal(cap, 7);
+  });
+
+  it("returns the module default when the block is absent", async () => {
+    const dir = makeRepo("schema_version: 1\nproject: test-proj\n");
+    const cap = await resolveReviewerPrePushCap(dir, "codex_review", 7);
+    assert.equal(cap, 7);
+  });
+
+  it("returns the configured cap when present and valid", async () => {
+    const dir = makeRepo(
+      "schema_version: 1\nproject: test-proj\nworkflow:\n  codex_review:\n    pre_push_cap: 4\n",
+    );
+    const cap = await resolveReviewerPrePushCap(dir, "codex_review", 7);
+    assert.equal(cap, 4);
+  });
+
+  it("throws ReviewerCapConfigError when the cfg is present but invalid", async () => {
+    const dir = makeRepo(
+      "schema_version: 1\nproject: test-proj\nworkflow:\n  codex_review:\n    pre_push_cap: 0\n",
+    );
+    await assert.rejects(
+      () => resolveReviewerPrePushCap(dir, "codex_review", 7),
+      (err) => err instanceof ReviewerCapConfigError && err.blockName === "codex_review",
+    );
+  });
+
+  it("throws when an unknown nested key is present under the reviewer block", async () => {
+    const dir = makeRepo(
+      "schema_version: 1\nproject: test-proj\nworkflow:\n  test_quality_review:\n    pre_push_cap: 2\n    bogus_key: true\n",
+    );
+    await assert.rejects(
+      () => resolveReviewerPrePushCap(dir, "test_quality_review", 7),
+      (err) => err instanceof ReviewerCapConfigError,
+    );
   });
 });
