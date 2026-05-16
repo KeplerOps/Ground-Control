@@ -524,6 +524,13 @@ const TO_CAMEL = {
   clear_preconditions: "clearPreconditions",
   clear_postconditions: "clearPostconditions",
   clear_estimated_duration: "clearEstimatedDuration",
+  // TC-002 / ADR-041 — TestCaseStepRequest / UpdateTestCaseStepRequest fields.
+  // Same rationale as the TC-001 entries above: omitting these would let
+  // `gc_test_case` step actions forward snake-case names that Jackson drops.
+  step_number: "stepNumber",
+  expected_result: "expectedResult",
+  actual_result: "actualResult",
+  clear_actual_result: "clearActualResult",
   // GC-V001 finding adapter — backend FindingRequest / UpdateFindingRequest
   // use these camelCase field names. Mapping is needed so `gc_finding` reaches
   // backend Bean Validation with the right field names (issue #279).
@@ -7510,6 +7517,32 @@ export async function transitionTestCaseStatus(id, status, project) {
     body: { status },
     params: { project },
   });
+}
+
+// TC-002 / ADR-041 — step-based test case format. Reads (list, get) route
+// through gc_query against the TestCaseStep entity.
+
+export async function createTestCaseStep(testCaseId, data, project) {
+  return request("POST", `/api/v1/test-cases/${encodeURIComponent(testCaseId)}/steps`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function updateTestCaseStep(testCaseId, stepId, data, project) {
+  return request(
+    "PUT",
+    `/api/v1/test-cases/${encodeURIComponent(testCaseId)}/steps/${encodeURIComponent(stepId)}`,
+    { body: data, params: { project } },
+  );
+}
+
+export async function deleteTestCaseStep(testCaseId, stepId, project) {
+  await request(
+    "DELETE",
+    `/api/v1/test-cases/${encodeURIComponent(testCaseId)}/steps/${encodeURIComponent(stepId)}`,
+    { params: { project } },
+  );
 }
 
 export async function createControl(data, project) {

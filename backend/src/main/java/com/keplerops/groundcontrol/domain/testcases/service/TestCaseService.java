@@ -21,10 +21,15 @@ public class TestCaseService {
 
     private final TestCaseRepository testCaseRepository;
     private final ProjectService projectService;
+    private final TestCaseStepService testCaseStepService;
 
-    public TestCaseService(TestCaseRepository testCaseRepository, ProjectService projectService) {
+    public TestCaseService(
+            TestCaseRepository testCaseRepository,
+            ProjectService projectService,
+            TestCaseStepService testCaseStepService) {
         this.testCaseRepository = testCaseRepository;
         this.projectService = projectService;
+        this.testCaseStepService = testCaseStepService;
     }
 
     public TestCase create(CreateTestCaseCommand command) {
@@ -110,6 +115,7 @@ public class TestCaseService {
 
     public void delete(UUID projectId, UUID id) {
         var testCase = findOrThrow(projectId, id);
+        testCaseStepService.deleteAllByTestCase(id);
         testCaseRepository.delete(testCase);
         log.info("test_case_deleted: uid={} id={}", testCase.getUid(), id);
     }

@@ -470,6 +470,9 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "069", // V069: operational_asset ownership/criticality/scope (GC-M012)
                         "070", // V070: operational_asset_audit parity for GC-M012
                         "071", // V071: test_case (TC-001 / ADR-040)
-                        "072"); // V072: test_case_audit
+                        "072", // V072: test_case_audit
+                        "073", // V073: test_case_step (TC-002 / ADR-041)
+                        "074", // V074: test_case_step_audit
+                        "075"); // V075: forward-fix V072 missing timestamp columns on test_case_audit
     }
 }

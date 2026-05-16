@@ -18,16 +18,20 @@ import {
   TEST_CASE_STATUSES,
   TEST_CASE_TYPES,
   createTestCase,
+  createTestCaseStep,
   deleteTestCase,
+  deleteTestCaseStep,
   getTestCase,
   getTestCaseByUid,
   listTestCases,
   transitionTestCaseStatus,
   updateTestCase,
+  updateTestCaseStep,
 } from "./lib.js";
 
 const BASE_URL = "http://gc-test:8000";
 const TEST_CASE_ID = "11111111-1111-1111-1111-111111111111";
+const STEP_ID = "22222222-2222-2222-2222-222222222222";
 
 let fetchCalls;
 let originalFetch;
@@ -197,6 +201,97 @@ describe("transitionTestCaseStatus (gc_test_case action=transition)", () => {
   });
 });
 
+describe("createTestCaseStep (gc_test_case action=step-create)", () => {
+  it("POSTs /api/v1/test-cases/{tc}/steps with camelCase body (TC-002)", async () => {
+    setNextResponse({
+      body: {
+        id: STEP_ID,
+        testCaseId: TEST_CASE_ID,
+        stepNumber: 1,
+        action: "Open login page",
+        expectedResult: "Page renders",
+      },
+    });
+
+    const result = await createTestCaseStep(
+      TEST_CASE_ID,
+      {
+        step_number: 1,
+        action: "Open login page",
+        expected_result: "Page renders",
+        actual_result: null,
+      },
+      "ground-control",
+    );
+
+    assert.equal(fetchCalls.length, 1);
+    const { url, opts } = fetchCalls[0];
+    const parsed = new URL(url);
+    assert.equal(opts.method, "POST");
+    assert.equal(parsed.pathname, `/api/v1/test-cases/${TEST_CASE_ID}/steps`);
+    assert.equal(parsed.searchParams.get("project"), "ground-control");
+    // Critical: snake → camel mapping must reach Spring's TestCaseStepRequest.
+    // A missing TO_CAMEL entry would have Jackson silently drop the field —
+    // same failure mode as TC-001 codex cycle 1.
+    assert.deepEqual(JSON.parse(opts.body), {
+      stepNumber: 1,
+      action: "Open login page",
+      expectedResult: "Page renders",
+      actualResult: null,
+    });
+    assert.equal(result.id, STEP_ID);
+  });
+});
+
+describe("updateTestCaseStep (gc_test_case action=step-update)", () => {
+  it("PUTs /api/v1/test-cases/{tc}/steps/{s} with clear_actual_result mapped to camelCase", async () => {
+    setNextResponse({ body: { id: STEP_ID, stepNumber: 1, actualResult: null } });
+
+    const result = await updateTestCaseStep(
+      TEST_CASE_ID,
+      STEP_ID,
+      {
+        step_number: 2,
+        action: "## Updated\n![img](https://example.com/x.png)",
+        expected_result: "Updated result",
+        clear_actual_result: true,
+      },
+      "ground-control",
+    );
+
+    const { url, opts } = fetchCalls[0];
+    const parsed = new URL(url);
+    assert.equal(opts.method, "PUT");
+    assert.equal(parsed.pathname, `/api/v1/test-cases/${TEST_CASE_ID}/steps/${STEP_ID}`);
+    // Match every other write-test in this file: assert the `project` query
+    // param is forwarded. A regression that dropped `params: { project }` from
+    // updateTestCaseStep's request() call would route the update to whichever
+    // project the server defaults to instead of the caller's intended one.
+    assert.equal(parsed.searchParams.get("project"), "ground-control");
+    assert.deepEqual(JSON.parse(opts.body), {
+      stepNumber: 2,
+      action: "## Updated\n![img](https://example.com/x.png)",
+      expectedResult: "Updated result",
+      clearActualResult: true,
+    });
+    assert.equal(result.id, STEP_ID);
+  });
+});
+
+describe("deleteTestCaseStep (gc_test_case action=step-delete)", () => {
+  it("DELETEs /api/v1/test-cases/{tc}/steps/{s}", async () => {
+    setNextResponse({ ok: true, status: 204, body: null });
+
+    await deleteTestCaseStep(TEST_CASE_ID, STEP_ID, "ground-control");
+
+    const { url, opts } = fetchCalls[0];
+    const parsed = new URL(url);
+    assert.equal(opts.method, "DELETE");
+    assert.equal(parsed.pathname, `/api/v1/test-cases/${TEST_CASE_ID}/steps/${STEP_ID}`);
+    assert.equal(parsed.searchParams.get("project"), "ground-control");
+  });
+});
+
 describe("Read paths (gc_query routing)", () => {
   it("listTestCases GETs /api/v1/test-cases with project param and returns the array", async () => {
     setNextResponse({ body: [{ id: TEST_CASE_ID, uid: "TC-001" }] });
@@ -256,6 +351,29 @@ describe("Error envelope propagation", () => {
         && e.status === 422
         && e.code === "validation_failed"
         && e.detail?.field === "estimatedDurationSeconds",
+    );
+  });
+
+  it("createTestCaseStep surfaces a 409 duplicate_step_number envelope", async () => {
+    setNextResponse({
+      ok: false,
+      status: 409,
+      body: {
+        error: {
+          code: "conflict",
+          message: "Step number 1 already exists in test case TC-001",
+        },
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        createTestCaseStep(
+          TEST_CASE_ID,
+          { step_number: 1, action: "act", expected_result: "exp" },
+          "ground-control",
+        ),
+      (e) => e instanceof RequestError && e.status === 409,
     );
   });
 

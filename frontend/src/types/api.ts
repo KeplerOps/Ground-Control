@@ -116,6 +116,35 @@ export const TEST_CASE_PRIORITIES: TestCasePriority[] = [
   "MEDIUM",
   "LOW",
 ];
+
+// TC-002 / ADR-041 — step-based test case format. Rich-text fields hold
+// CommonMark Markdown by convention (inline images via `![alt](url)`).
+// Mirrors backend TestCaseStepResponse / TestCaseStepRequest field-for-field.
+export interface TestCaseStepResponse {
+  id: string;
+  testCaseId: string;
+  stepNumber: number;
+  action: string;
+  expectedResult: string;
+  actualResult: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TestCaseStepRequest {
+  stepNumber: number;
+  action: string;
+  expectedResult: string;
+  actualResult?: string | null;
+}
+
+export interface UpdateTestCaseStepRequest {
+  stepNumber?: number;
+  action?: string;
+  expectedResult?: string;
+  actualResult?: string | null;
+  clearActualResult?: boolean;
+}
 export type GraphEntityType =
   | "REQUIREMENT"
   | "OPERATIONAL_ASSET"

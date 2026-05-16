@@ -16,6 +16,7 @@ import com.keplerops.groundcontrol.domain.testcases.model.TestCase;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseRepository;
 import com.keplerops.groundcontrol.domain.testcases.service.CreateTestCaseCommand;
 import com.keplerops.groundcontrol.domain.testcases.service.TestCaseService;
+import com.keplerops.groundcontrol.domain.testcases.service.TestCaseStepService;
 import com.keplerops.groundcontrol.domain.testcases.service.UpdateTestCaseCommand;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCasePriority;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseStatus;
@@ -39,6 +40,9 @@ class TestCaseServiceTest {
 
     @Mock
     private ProjectService projectService;
+
+    @Mock
+    private TestCaseStepService testCaseStepService;
 
     @InjectMocks
     private TestCaseService testCaseService;
@@ -305,6 +309,23 @@ class TestCaseServiceTest {
             testCaseService.delete(projectId, existing.getId());
 
             verify(testCaseRepository).delete(existing);
+        }
+
+        @Test
+        void cascadesToDeleteSteps() {
+            // Steps must be deleted via the step service (so Envers records each
+            // step delete) BEFORE the test case row goes away. A future change
+            // that replaced this with a DB-level CASCADE would silently lose
+            // the per-step audit trail, so the test pins the order of calls.
+            var existing = makeTestCase();
+            var id = existing.getId();
+            when(testCaseRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.of(existing));
+
+            testCaseService.delete(projectId, id);
+
+            var order = org.mockito.Mockito.inOrder(testCaseStepService, testCaseRepository);
+            order.verify(testCaseStepService).deleteAllByTestCase(id);
+            order.verify(testCaseRepository).delete(existing);
         }
 
         @Test
