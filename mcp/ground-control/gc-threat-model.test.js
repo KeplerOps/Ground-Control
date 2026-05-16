@@ -93,6 +93,21 @@ describe("gcThreatModelZodShape (issue #875)", () => {
   it("rejects an unknown action enum value", () => {
     assert.throws(() => schema.parse({ action: "merge" }));
   });
+
+  it("accepts FINDING as a target_type via the Zod enum (GC-H009)", () => {
+    // Regression guard for the MCP/backend enum mirror. If FINDING is removed
+    // from THREAT_MODEL_LINK_TARGET_TYPES in lib.js, this parse would throw
+    // and real MCP link_create calls would fail before reaching the backend.
+    const parsed = schema.parse({
+      action: "link_create",
+      threat_model_id: "11111111-1111-1111-1111-111111111111",
+      target_type: "FINDING",
+      target_entity_id: "22222222-2222-2222-2222-222222222222",
+      link_type: "OBSERVED_IN",
+    });
+    assert.equal(parsed.target_type, "FINDING");
+    assert.equal(parsed.link_type, "OBSERVED_IN");
+  });
 });
 
 describe("GC_THREAT_MODEL_CREATE_BODY_FIELDS (issue #875)", () => {
@@ -304,6 +319,26 @@ describe("gcThreatModelToolHandler other actions", () => {
       targetEntityId: TARGET_ID,
       linkType: "AFFECTS",
       targetTitle: "GC-X001",
+    });
+  });
+
+  it("link_create accepts FINDING as an internal target type (GC-H009)", async () => {
+    const FINDING_ID = "77777777-7777-7777-7777-777777777777";
+    const calls = makeFetchSpy();
+    await gcThreatModelToolHandler({
+      action: "link_create",
+      threat_model_id: ID,
+      target_type: "FINDING",
+      target_entity_id: FINDING_ID,
+      link_type: "OBSERVED_IN",
+      target_title: "Vulnerability finding",
+    });
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].body, {
+      targetType: "FINDING",
+      targetEntityId: FINDING_ID,
+      linkType: "OBSERVED_IN",
+      targetTitle: "Vulnerability finding",
     });
   });
 

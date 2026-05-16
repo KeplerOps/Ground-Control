@@ -130,6 +130,7 @@ public class ThreatModelGraphProjectionContributor implements GraphProjectionCon
                     case OBSERVATION -> GraphEntityType.OBSERVATION;
                     case RISK_ASSESSMENT_RESULT -> GraphEntityType.RISK_ASSESSMENT_RESULT;
                     case VERIFICATION_RESULT -> GraphEntityType.VERIFICATION_RESULT;
+                    case FINDING -> GraphEntityType.FINDING;
                     case ARCHITECTURE_MODEL, CODE, ISSUE, EVIDENCE, EXTERNAL -> null;
                 };
         if (targetEntityType == null) {

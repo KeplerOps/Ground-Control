@@ -261,6 +261,8 @@ public class GraphTargetResolverService {
                     targetEntityId,
                     verificationResultRepository.existsByIdAndProjectId(targetEntityId, projectId),
                     LABEL_VERIFICATION_RESULT);
+            case FINDING -> internalTarget(
+                    targetEntityId, findingRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_FINDING);
             case ARCHITECTURE_MODEL, CODE, ISSUE, EVIDENCE, EXTERNAL -> externalTarget(targetIdentifier);
         };
     }

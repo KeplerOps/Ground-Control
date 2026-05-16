@@ -14,6 +14,7 @@ public enum ThreatModelLinkTargetType {
     OBSERVATION,
     RISK_ASSESSMENT_RESULT,
     VERIFICATION_RESULT,
+    FINDING,
     ARCHITECTURE_MODEL,
     CODE,
     ISSUE,

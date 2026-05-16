@@ -182,7 +182,7 @@ Other `state/` packages contain simple value enums (L0) that are **not** ESC-ver
 - `domain/plugins/state/` — `PluginType`, `PluginLifecycleState` enums
 - `domain/controlpacks/state/` — `ControlPackLifecycleState`, `ControlPackEntryStatus` enums
 - `domain/packregistry/state/` — `PackType`, `CatalogStatus`, `TrustOutcome`, `InstallOutcome`, `TrustPolicyField`, `TrustPolicyRuleOperator` enums
-- `domain/threatmodels/state/` — `ThreatModelStatus` (simple DRAFT→ACTIVE→ARCHIVED lifecycle, same pattern as `RiskScenarioStatus`), `StrideCategory`, `ThreatModelLinkTargetType`, `ThreatModelLinkType` (pure value enums, no invariants; ADR-024 treats threat modeling as an analysis surface at L0)
+- `domain/threatmodels/state/` — `ThreatModelStatus` (simple DRAFT→ACTIVE→ARCHIVED lifecycle, same pattern as `RiskScenarioStatus`), `StrideCategory`, `ThreatModelLinkTargetType` (now includes `FINDING` per GC-H009 — still a pure value enum, no invariants; dispatch lives in `GraphTargetResolverService`), `ThreatModelLinkType` (pure value enums, no invariants; ADR-024 treats threat modeling as an analysis surface at L0)
 - `domain/findings/state/` — `FindingStatus` (the 4-state remediation lifecycle `OPEN → REMEDIATION_IN_PROGRESS → REMEDIATION_COMPLETE → VERIFIED_CLOSED` with a `REMEDIATION_COMPLETE → REMEDIATION_IN_PROGRESS` reopen edge; L2 — property-tested in `FindingStatusPropertyTest`, see ADR-038 and ADR-012), `FindingType`, `FindingSeverity`, `FindingLinkTargetType`, `FindingLinkType` (pure value enums, no invariants; L0)
 
 These pack-registry enums remain L0 typed value surfaces. Use them to remove stringly typed branching and policy fields in the generic registry, but do not expand ESC scope unless they gain real transition logic or invariants.

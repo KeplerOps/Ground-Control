@@ -799,17 +799,21 @@ max 255).
 
 **Internal target types (require `targetEntityId`, resolved project-scoped):** ASSET
 (includes boundaries via `AssetType.BOUNDARY`), REQUIREMENT, CONTROL, RISK_SCENARIO,
-OBSERVATION, RISK_ASSESSMENT_RESULT, VERIFICATION_RESULT.
+OBSERVATION, RISK_ASSESSMENT_RESULT, VERIFICATION_RESULT, FINDING (per GC-H009 —
+governed vulnerability/scan/pentest finding records).
 
 **External target types (require `targetIdentifier`):** ARCHITECTURE_MODEL (e.g. C4
 source or Structurizr DSL, per ADR-011), CODE (repo-relative path), ISSUE (GitHub
-issue or PR number), EVIDENCE (external evidence reference), EXTERNAL (catch-all).
+issue or PR number), EVIDENCE (external evidence reference), EXTERNAL (catch-all —
+also covers CVE identifiers, scanner finding IDs, and pentest report IDs that have
+not been ingested as first-class `Finding` records).
 
 **Link types:** AFFECTS (threat affects an asset or boundary), EXPLOITS (threat
 exploits a requirement or condition), MITIGATED_BY (threat is mitigated by a control),
 ASSESSED_IN (threat feeds a risk scenario or assessment), OBSERVED_IN (threat
-evidenced by an observation or verification), DOCUMENTED_IN (threat documented in an
-architecture model, code, or issue), ASSOCIATED (generic association).
+evidenced by an observation, verification, or vulnerability finding), DOCUMENTED_IN
+(threat documented in an architecture model, code, or issue), ASSOCIATED (generic
+association).
 
 **Lifecycle states:** DRAFT → ACTIVE → ARCHIVED (and DRAFT → ARCHIVED directly).
 

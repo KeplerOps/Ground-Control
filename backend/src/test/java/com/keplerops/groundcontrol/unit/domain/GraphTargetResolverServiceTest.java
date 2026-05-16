@@ -157,7 +157,8 @@ class GraphTargetResolverServiceTest {
                 "RISK_SCENARIO",
                 "OBSERVATION",
                 "RISK_ASSESSMENT_RESULT",
-                "VERIFICATION_RESULT"
+                "VERIFICATION_RESULT",
+                "FINDING"
             })
     void validateThreatModelTargetAcceptsInternalTargets(ThreatModelLinkTargetType targetType) {
         stubThreatModelInternalTarget(targetType, true);
@@ -261,6 +262,46 @@ class GraphTargetResolverServiceTest {
                         projectId, ThreatModelLinkTargetType.EXTERNAL, null, " "))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("targetIdentifier");
+    }
+
+    @Test
+    void validateThreatModelTargetRejectsMissingFinding() {
+        when(findingRepository.existsByIdAndProjectId(targetId, projectId)).thenReturn(false);
+
+        assertThatThrownBy(() -> graphTargetResolverService.validateThreatModelTarget(
+                        projectId, ThreatModelLinkTargetType.FINDING, targetId, null))
+                .isInstanceOf(DomainValidationException.class)
+                .hasMessageContaining("Finding");
+    }
+
+    @Test
+    void validateAssetTargetRejectsMissingFinding() {
+        when(findingRepository.existsByIdAndProjectId(targetId, projectId)).thenReturn(false);
+
+        assertThatThrownBy(() -> graphTargetResolverService.validateAssetTarget(
+                        projectId, AssetLinkTargetType.FINDING, targetId, null))
+                .isInstanceOf(DomainValidationException.class)
+                .hasMessageContaining("Finding");
+    }
+
+    @Test
+    void validateControlTargetRejectsMissingFinding() {
+        when(findingRepository.existsByIdAndProjectId(targetId, projectId)).thenReturn(false);
+
+        assertThatThrownBy(() -> graphTargetResolverService.validateControlTarget(
+                        projectId, ControlLinkTargetType.FINDING, targetId, null))
+                .isInstanceOf(DomainValidationException.class)
+                .hasMessageContaining("Finding");
+    }
+
+    @Test
+    void validateRiskScenarioTargetRejectsMissingFinding() {
+        when(findingRepository.existsByIdAndProjectId(targetId, projectId)).thenReturn(false);
+
+        assertThatThrownBy(() -> graphTargetResolverService.validateRiskScenarioTarget(
+                        projectId, RiskScenarioLinkTargetType.FINDING, targetId, null))
+                .isInstanceOf(DomainValidationException.class)
+                .hasMessageContaining("Finding");
     }
 
     @ParameterizedTest
@@ -450,6 +491,8 @@ class GraphTargetResolverServiceTest {
                                                     .class))
                                     : java.util.Optional.empty());
             case VERIFICATION_RESULT -> when(verificationResultRepository.existsByIdAndProjectId(targetId, projectId))
+                    .thenReturn(exists);
+            case FINDING -> when(findingRepository.existsByIdAndProjectId(targetId, projectId))
                     .thenReturn(exists);
             case ARCHITECTURE_MODEL, CODE, ISSUE, EVIDENCE, EXTERNAL -> throw new IllegalArgumentException(
                     "Not an internal target type");
