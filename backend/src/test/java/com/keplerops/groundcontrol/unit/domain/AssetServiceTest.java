@@ -227,7 +227,7 @@ class AssetServiceTest {
             var asset = createAsset("ASSET-001", "Payments API");
             asset.setOwner("legacy-owner");
             asset.setCriticality(AssetCriticality.LOW);
-            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
             when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
             var command = new UpdateAssetCommand(
@@ -240,7 +240,7 @@ class AssetServiceTest {
                     AssetCriticality.CRITICAL,
                     "Revenue-bearing payments flow.",
                     AssetScope.IN_SCOPE);
-            var result = assetService.update(asset.getId(), command);
+            var result = assetService.update(projectId, asset.getId(), command);
 
             assertThat(result.getOwner()).isEqualTo("alice@example.com");
             assertThat(result.getSteward()).isEqualTo("platform-sre");
@@ -264,7 +264,7 @@ class AssetServiceTest {
             asset.setCriticality(AssetCriticality.CRITICAL);
             asset.setBusinessContext("PCI scope");
             asset.setScopeDesignation(AssetScope.IN_SCOPE);
-            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
             when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
             var command = new UpdateAssetCommand(
@@ -283,7 +283,7 @@ class AssetServiceTest {
                     /* clearCriticality */ true,
                     /* clearBusinessContext */ true,
                     /* clearScopeDesignation */ true);
-            var result = assetService.update(asset.getId(), command);
+            var result = assetService.update(projectId, asset.getId(), command);
 
             assertThat(result.getOwner()).isNull();
             assertThat(result.getSteward()).isNull();
@@ -298,7 +298,7 @@ class AssetServiceTest {
             // Documented semantic: clear wins so the wire form is unambiguous.
             var asset = createAsset("ASSET-001", "Payments API");
             asset.setCriticality(AssetCriticality.HIGH);
-            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
             when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
             var command = new UpdateAssetCommand(
@@ -317,7 +317,7 @@ class AssetServiceTest {
                     /* clearCriticality */ true,
                     false,
                     false);
-            var result = assetService.update(asset.getId(), command);
+            var result = assetService.update(projectId, asset.getId(), command);
 
             assertThat(result.getCriticality()).isNull();
         }
@@ -334,11 +334,11 @@ class AssetServiceTest {
             asset.setCriticality(AssetCriticality.CRITICAL);
             asset.setBusinessContext("PCI scope");
             asset.setScopeDesignation(AssetScope.IN_SCOPE);
-            when(assetRepository.findById(asset.getId())).thenReturn(Optional.of(asset));
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
             when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
             var command = new UpdateAssetCommand(null, "Updated description.", null);
-            var result = assetService.update(asset.getId(), command);
+            var result = assetService.update(projectId, asset.getId(), command);
 
             assertThat(result.getDescription()).isEqualTo("Updated description.");
             assertThat(result.getOwner()).isEqualTo("alice@example.com");

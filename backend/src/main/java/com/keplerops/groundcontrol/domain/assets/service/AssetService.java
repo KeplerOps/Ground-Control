@@ -558,6 +558,11 @@ public class AssetService {
     }
 
     private void applyAssetUpdates(OperationalAsset asset, UpdateAssetCommand command) {
+        applyCoreFieldUpdates(asset, command);
+        applyMetadataUpdates(asset, command);
+    }
+
+    private void applyCoreFieldUpdates(OperationalAsset asset, UpdateAssetCommand command) {
         if (command.name() != null) {
             if (command.name().isBlank()) {
                 throw new DomainValidationException("Asset name must not be blank");
@@ -570,39 +575,26 @@ public class AssetService {
         if (command.assetType() != null) {
             asset.setAssetType(command.assetType());
         }
+    }
+
+    private void applyMetadataUpdates(OperationalAsset asset, UpdateAssetCommand command) {
         // GC-M012 nullable metadata: clear flag wins over assign so a caller
         // can re-undesignate a field that was previously set. Without this,
         // NULL ("not designated") would be unreachable after first assignment
         // because enum binding cannot accept blank strings.
-        if (command.clearOwner()) {
-            asset.setOwner(null);
-        } else if (command.owner() != null) {
-            asset.setOwner(command.owner());
-        }
-        if (command.clearSteward()) {
-            asset.setSteward(null);
-        } else if (command.steward() != null) {
-            asset.setSteward(command.steward());
-        }
-        if (command.clearEnvironment()) {
-            asset.setEnvironment(null);
-        } else if (command.environment() != null) {
-            asset.setEnvironment(command.environment());
-        }
-        if (command.clearCriticality()) {
-            asset.setCriticality(null);
-        } else if (command.criticality() != null) {
-            asset.setCriticality(command.criticality());
-        }
-        if (command.clearBusinessContext()) {
-            asset.setBusinessContext(null);
-        } else if (command.businessContext() != null) {
-            asset.setBusinessContext(command.businessContext());
-        }
-        if (command.clearScopeDesignation()) {
-            asset.setScopeDesignation(null);
-        } else if (command.scopeDesignation() != null) {
-            asset.setScopeDesignation(command.scopeDesignation());
+        applyClearOrSet(command.clearOwner(), command.owner(), asset::setOwner);
+        applyClearOrSet(command.clearSteward(), command.steward(), asset::setSteward);
+        applyClearOrSet(command.clearEnvironment(), command.environment(), asset::setEnvironment);
+        applyClearOrSet(command.clearCriticality(), command.criticality(), asset::setCriticality);
+        applyClearOrSet(command.clearBusinessContext(), command.businessContext(), asset::setBusinessContext);
+        applyClearOrSet(command.clearScopeDesignation(), command.scopeDesignation(), asset::setScopeDesignation);
+    }
+
+    private <T> void applyClearOrSet(boolean clear, T newValue, java.util.function.Consumer<T> setter) {
+        if (clear) {
+            setter.accept(null);
+        } else if (newValue != null) {
+            setter.accept(newValue);
         }
     }
 

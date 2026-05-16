@@ -162,12 +162,13 @@ class AssetGraphProjectionContributorTest {
 
         assertThat(nodes).hasSize(1);
         var properties = nodes.get(0).properties();
-        assertThat(properties).containsEntry("owner", "alice@example.com");
-        assertThat(properties).containsEntry("steward", "platform-sre");
-        assertThat(properties).containsEntry("environment", "PRODUCTION");
-        assertThat(properties).containsEntry("criticality", "CRITICAL");
-        assertThat(properties).containsEntry("businessContext", "Revenue-bearing payments flow; PCI-DSS scope.");
-        assertThat(properties).containsEntry("scopeDesignation", "IN_SCOPE");
+        assertThat(properties)
+                .containsEntry("owner", "alice@example.com")
+                .containsEntry("steward", "platform-sre")
+                .containsEntry("environment", "PRODUCTION")
+                .containsEntry("criticality", "CRITICAL")
+                .containsEntry("businessContext", "Revenue-bearing payments flow; PCI-DSS scope.")
+                .containsEntry("scopeDesignation", "IN_SCOPE");
     }
 
     @Test
@@ -190,12 +191,13 @@ class AssetGraphProjectionContributorTest {
 
         assertThat(nodes).hasSize(1);
         var properties = nodes.get(0).properties();
-        assertThat(properties).containsEntry("owner", null);
-        assertThat(properties).containsEntry("steward", null);
-        assertThat(properties).containsEntry("environment", null);
-        assertThat(properties).containsEntry("criticality", null);
-        assertThat(properties).containsEntry("businessContext", null);
-        assertThat(properties).containsEntry("scopeDesignation", null);
+        assertThat(properties)
+                .containsEntry("owner", null)
+                .containsEntry("steward", null)
+                .containsEntry("environment", null)
+                .containsEntry("criticality", null)
+                .containsEntry("businessContext", null)
+                .containsEntry("scopeDesignation", null);
     }
 
     @ParameterizedTest
