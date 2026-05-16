@@ -24,6 +24,8 @@ import com.keplerops.groundcontrol.domain.assets.service.AssetCycleResult;
 import com.keplerops.groundcontrol.domain.assets.service.AssetService;
 import com.keplerops.groundcontrol.domain.assets.service.AssetSubgraphResult;
 import com.keplerops.groundcontrol.domain.assets.service.AssetTopologyService;
+import com.keplerops.groundcontrol.domain.assets.service.CreateAssetCommand;
+import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetCommand;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
@@ -35,6 +37,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -105,6 +108,87 @@ class AssetControllerTest {
     }
 
     @Test
+    void createPersistsOwnershipCriticalityScopeMetadata() throws Exception {
+        // GC-M012: POST body carries ownership/criticality/scope fields. Use
+        // ArgumentCaptor on the CreateAssetCommand so we verify the controller
+        // actually maps each request field into the command — a plain `any()`
+        // would still pass if the controller dropped the new field reads.
+        var enriched = makeAsset();
+        enriched.setOwner("alice@example.com");
+        enriched.setSteward("platform-sre");
+        enriched.setEnvironment(com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment.PRODUCTION);
+        enriched.setCriticality(com.keplerops.groundcontrol.domain.assets.state.AssetCriticality.CRITICAL);
+        enriched.setBusinessContext("PCI scope");
+        enriched.setScopeDesignation(com.keplerops.groundcontrol.domain.assets.state.AssetScope.IN_SCOPE);
+        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(assetService.create(any())).thenReturn(enriched);
+
+        mockMvc.perform(
+                        post("/api/v1/assets")
+                                .param("project", "ground-control")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                                        {
+                                          "uid":"ASSET-PCI",
+                                          "name":"Payments API",
+                                          "assetType":"SERVICE",
+                                          "owner":"alice@example.com",
+                                          "steward":"platform-sre",
+                                          "environment":"PRODUCTION",
+                                          "criticality":"CRITICAL",
+                                          "businessContext":"PCI scope",
+                                          "scopeDesignation":"IN_SCOPE"
+                                        }
+                                        """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.owner", is("alice@example.com")))
+                .andExpect(jsonPath("$.steward", is("platform-sre")))
+                .andExpect(jsonPath("$.environment", is("PRODUCTION")))
+                .andExpect(jsonPath("$.criticality", is("CRITICAL")))
+                .andExpect(jsonPath("$.businessContext", is("PCI scope")))
+                .andExpect(jsonPath("$.scopeDesignation", is("IN_SCOPE")));
+
+        var captor = ArgumentCaptor.forClass(CreateAssetCommand.class);
+        verify(assetService).create(captor.capture());
+        var cmd = captor.getValue();
+        org.assertj.core.api.Assertions.assertThat(cmd.owner()).isEqualTo("alice@example.com");
+        org.assertj.core.api.Assertions.assertThat(cmd.steward()).isEqualTo("platform-sre");
+        org.assertj.core.api.Assertions.assertThat(cmd.environment())
+                .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment.PRODUCTION);
+        org.assertj.core.api.Assertions.assertThat(cmd.criticality())
+                .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.AssetCriticality.CRITICAL);
+        org.assertj.core.api.Assertions.assertThat(cmd.businessContext()).isEqualTo("PCI scope");
+        org.assertj.core.api.Assertions.assertThat(cmd.scopeDesignation())
+                .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.AssetScope.IN_SCOPE);
+    }
+
+    @Test
+    void listSupportsOwnershipCriticalityScopeFilters() throws Exception {
+        // GC-M012: list endpoint routes through listByProjectAndFilters when
+        // any of the new filter query parameters is supplied.
+        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(assetService.listByProjectAndFilters(
+                        PROJECT_ID,
+                        null,
+                        "alice@example.com",
+                        null,
+                        com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment.PRODUCTION,
+                        com.keplerops.groundcontrol.domain.assets.state.AssetCriticality.CRITICAL,
+                        com.keplerops.groundcontrol.domain.assets.state.AssetScope.IN_SCOPE))
+                .thenReturn(List.of(makeAsset()));
+
+        mockMvc.perform(get("/api/v1/assets")
+                        .param("project", "ground-control")
+                        .param("owner", "alice@example.com")
+                        .param("environment", "PRODUCTION")
+                        .param("criticality", "CRITICAL")
+                        .param("scope", "IN_SCOPE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)));
+    }
+
+    @Test
     void getByIdReturnsAsset() throws Exception {
         when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
         when(assetService.getById(PROJECT_ID, ASSET_ID)).thenReturn(makeAsset());
@@ -139,6 +223,53 @@ class AssetControllerTest {
                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name", is("Updated Server")));
+    }
+
+    @Test
+    void updateMapsClearFlagsAndMetadataIntoCommand() throws Exception {
+        // GC-M012: the PUT body's clear flags + metadata must land on the
+        // UpdateAssetCommand. Without ArgumentCaptor, the controller could
+        // drop / transpose any of the six clear booleans (or any of the
+        // metadata fields) and the test would still pass because the mock
+        // return value is independent of the request shape.
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(assetService.update(eq(PROJECT_ID), eq(ASSET_ID), any())).thenReturn(makeAsset());
+
+        mockMvc.perform(
+                        put("/api/v1/assets/{id}", ASSET_ID)
+                                .param("project", "ground-control")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                                {
+                                  "owner":"alice@example.com",
+                                  "criticality":"CRITICAL",
+                                  "scopeDesignation":"IN_SCOPE",
+                                  "clearSteward":true,
+                                  "clearEnvironment":true,
+                                  "clearBusinessContext":true
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        var captor = ArgumentCaptor.forClass(UpdateAssetCommand.class);
+        verify(assetService).update(eq(PROJECT_ID), eq(ASSET_ID), captor.capture());
+        var cmd = captor.getValue();
+        // Assigned metadata flows through.
+        org.assertj.core.api.Assertions.assertThat(cmd.owner()).isEqualTo("alice@example.com");
+        org.assertj.core.api.Assertions.assertThat(cmd.criticality())
+                .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.AssetCriticality.CRITICAL);
+        org.assertj.core.api.Assertions.assertThat(cmd.scopeDesignation())
+                .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.AssetScope.IN_SCOPE);
+        // Clear flags that the payload set must be true; the others must be
+        // false so a transposition (e.g. clearSteward wired to clearOwner)
+        // fails the test.
+        org.assertj.core.api.Assertions.assertThat(cmd.clearSteward()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(cmd.clearEnvironment()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(cmd.clearBusinessContext()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(cmd.clearOwner()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(cmd.clearCriticality()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(cmd.clearScopeDesignation()).isFalse();
     }
 
     @Test

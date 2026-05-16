@@ -43,6 +43,24 @@ public class AssetGraphProjectionContributor implements GraphProjectionContribut
                     properties.put("name", asset.getName());
                     properties.put("description", asset.getDescription());
                     properties.put("assetType", asset.getAssetType().name());
+                    properties.put("owner", asset.getOwner());
+                    properties.put("steward", asset.getSteward());
+                    properties.put(
+                            "environment",
+                            asset.getEnvironment() == null
+                                    ? null
+                                    : asset.getEnvironment().name());
+                    properties.put(
+                            "criticality",
+                            asset.getCriticality() == null
+                                    ? null
+                                    : asset.getCriticality().name());
+                    properties.put("businessContext", asset.getBusinessContext());
+                    properties.put(
+                            "scopeDesignation",
+                            asset.getScopeDesignation() == null
+                                    ? null
+                                    : asset.getScopeDesignation().name());
                     properties.put("archivedAt", asset.getArchivedAt());
                     return new GraphNode(
                             GraphIds.nodeId(GraphEntityType.OPERATIONAL_ASSET, asset.getId()),

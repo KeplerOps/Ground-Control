@@ -220,6 +220,19 @@ export const ASSET_TYPES = [
   "BOUNDARY",
   "OTHER",
 ];
+// GC-M012 asset ownership / criticality / scope vocabularies. All three are
+// pure value enums on the backend (domain/assets/state); ADR-012 records them
+// as L0.
+export const ASSET_CRITICALITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
+export const ASSET_ENVIRONMENTS = [
+  "PRODUCTION",
+  "STAGING",
+  "DEVELOPMENT",
+  "TEST",
+  "NON_PRODUCTION",
+  "OTHER",
+];
+export const ASSET_SCOPES = ["IN_SCOPE", "OUT_OF_SCOPE"];
 export const ASSET_RELATION_TYPES = [
   "CONTAINS",
   "DEPENDS_ON",
@@ -467,6 +480,14 @@ const TO_CAMEL = {
   asset_id: "assetId",
   asset_uid: "assetUid",
   archived_at: "archivedAt",
+  business_context: "businessContext",
+  scope_designation: "scopeDesignation",
+  clear_owner: "clearOwner",
+  clear_steward: "clearSteward",
+  clear_environment: "clearEnvironment",
+  clear_criticality: "clearCriticality",
+  clear_business_context: "clearBusinessContext",
+  clear_scope_designation: "clearScopeDesignation",
   member_uids: "memberUids",
   root_uids: "rootUids",
   target_type: "targetType",

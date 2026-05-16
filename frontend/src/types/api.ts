@@ -106,6 +106,37 @@ export type GraphEntityType =
   | "TREATMENT_PLAN"
   | "METHODOLOGY_PROFILE";
 
+// GC-M012 asset ownership / criticality / scope vocabularies. Mirrors the
+// backend `AssetCriticality`, `AssetEnvironment`, and `AssetScope` enums; ADR-012
+// records them as L0 pure value enums. Distinct from `quality_gate.scopeStatus`,
+// control `implementationScope`, and risk `assetScopeSummary`.
+export type AssetCriticality = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+export const ASSET_CRITICALITIES: AssetCriticality[] = [
+  "CRITICAL",
+  "HIGH",
+  "MEDIUM",
+  "LOW",
+];
+
+export type AssetEnvironment =
+  | "PRODUCTION"
+  | "STAGING"
+  | "DEVELOPMENT"
+  | "TEST"
+  | "NON_PRODUCTION"
+  | "OTHER";
+export const ASSET_ENVIRONMENTS: AssetEnvironment[] = [
+  "PRODUCTION",
+  "STAGING",
+  "DEVELOPMENT",
+  "TEST",
+  "NON_PRODUCTION",
+  "OTHER",
+];
+
+export type AssetScope = "IN_SCOPE" | "OUT_OF_SCOPE";
+export const ASSET_SCOPES: AssetScope[] = ["IN_SCOPE", "OUT_OF_SCOPE"];
+
 // Responses
 export interface ProjectResponse {
   id: string;

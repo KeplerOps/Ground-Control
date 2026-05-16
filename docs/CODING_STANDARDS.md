@@ -176,7 +176,7 @@ ESC runs on **pure logic classes** with no String constructor parameters and no 
 - Future pure domain logic classes that follow the same pattern
 
 Other `state/` packages contain simple value enums (L0) that are **not** ESC-verified:
-- `domain/assets/state/` — `AssetType`, `AssetLinkTargetType`, `AssetLinkType`, `AssetRelationType`, `ObservationCategory`
+- `domain/assets/state/` — `AssetType`, `AssetLinkTargetType`, `AssetLinkType`, `AssetRelationType`, `ObservationCategory`, plus the GC-M012 trio `AssetCriticality` / `AssetEnvironment` / `AssetScope` (pure value enums; no transitions or invariants; L0)
 - `domain/controls/state/` — `ControlFunction`, `ControlStatus`, `ControlLinkTargetType`, `ControlLinkType`, `ControlTestMethodology`, `ControlTestConclusion`, `ControlEffectivenessRating` (ADR-039: pure value enums for GC-I012/GC-I013 — no transitions, no invariants)
 - `domain/riskscenarios/state/` — risk scenario link and status enums
 - `domain/plugins/state/` — `PluginType`, `PluginLifecycleState` enums

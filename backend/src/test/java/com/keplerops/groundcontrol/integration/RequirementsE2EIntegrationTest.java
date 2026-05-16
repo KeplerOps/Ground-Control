@@ -320,7 +320,10 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status", is("ACTIVE")));
 
-        // Create traceability link (requires ACTIVE status for IMPLEMENTS)
+        // Create traceability link (requires ACTIVE status for IMPLEMENTS).
+        // Assert the response echoes each posted field — without these
+        // assertions a silent field swap (wrong link type, mis-deserialized
+        // artifact identifier) would still produce a 201 and pass.
         var linkBody = Map.of(
                 "artifactType", "GITHUB_ISSUE",
                 "artifactIdentifier", "99",
@@ -328,7 +331,10 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
         mockMvc.perform(post("/api/v1/requirements/" + crudReqId + "/traceability")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(linkBody)))
-                .andExpect(status().isCreated());
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.linkType", is("IMPLEMENTS")))
+                .andExpect(jsonPath("$.artifactType", is("GITHUB_ISSUE")))
+                .andExpect(jsonPath("$.artifactIdentifier", is("99")));
 
         // Archive
         mockMvc.perform(post("/api/v1/requirements/" + crudReqId + "/archive"))
@@ -460,6 +466,8 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "065", // V065: control_test (GC-I012 / ADR-039)
                         "066", // V066: control_test_audit
                         "067", // V067: control_effectiveness_assessment (GC-I013 / ADR-039)
-                        "068"); // V068: control_effectiveness_assessment_audit
+                        "068", // V068: control_effectiveness_assessment_audit
+                        "069", // V069: operational_asset ownership/criticality/scope (GC-M012)
+                        "070"); // V070: operational_asset_audit parity for GC-M012
     }
 }

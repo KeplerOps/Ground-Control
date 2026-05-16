@@ -419,7 +419,7 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
 | POST | `/assets?project=` | AssetRequest | 201 | Create asset |
-| GET | `/assets?project=&type=` | — | 200 | List assets (optional type filter) |
+| GET | `/assets?project=&type=&owner=&steward=&environment=&criticality=&scope=` | — | 200 | List assets (any combination of filters is optional) |
 | GET | `/assets/{id}` | — | 200 | Get asset by UUID |
 | GET | `/assets/uid/{uid}?project=` | — | 200 | Get asset by UID |
 | PUT | `/assets/{id}` | UpdateAssetRequest | 200 | Update asset (partial) |
@@ -433,11 +433,27 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
   "uid": "ASSET-001",
   "name": "Production Database",
   "description": "Primary PostgreSQL instance",
-  "assetType": "DATABASE"
+  "assetType": "DATABASE",
+  "owner": "alice@example.com",
+  "steward": "platform-sre",
+  "environment": "PRODUCTION",
+  "criticality": "CRITICAL",
+  "businessContext": "Primary system of record for billing; PCI-DSS in scope.",
+  "scopeDesignation": "IN_SCOPE"
 }
 ```
 
+`owner`, `steward`, and `businessContext` are free-text labels (≤ 200 chars on `owner`/`steward`; `businessContext` is `TEXT`). All six GC-M012 metadata fields are optional on `AssetRequest` and on `UpdateAssetRequest`. On the update path, `null` / absent means "leave field unchanged" (mirrors the existing `name`/`description`/`assetType` null-means-unchanged semantics). To reset a previously-designated metadata field back to NULL ("not designated"), send the paired clear flag — `clearOwner`, `clearSteward`, `clearEnvironment`, `clearCriticality`, `clearBusinessContext`, or `clearScopeDesignation` — as `true`. The clear flag wins over a same-payload assignment so the wire semantics stay unambiguous (the assign loses). This mirrors the `clearRootCauseAnalysis` / `clearOwner` / `clearDueDate` pattern on `UpdateFindingRequest`.
+
 Asset types: `APPLICATION`, `SERVICE`, `SYSTEM`, `DATABASE`, `NETWORK`, `HOST`, `CONTAINER`, `IDENTITY`, `DATA_STORE`, `ENDPOINT`, `INTEGRATION`, `WORKLOAD`, `THIRD_PARTY`, `BOUNDARY`, `OTHER`
+
+Asset criticality (GC-M012): `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`. Distinct from finding severity, risk level, control effectiveness, and assurance confidence per ADR-012 / `docs/CODING_STANDARDS.md`.
+
+Asset environment (GC-M012): `PRODUCTION`, `STAGING`, `DEVELOPMENT`, `TEST`, `NON_PRODUCTION`, `OTHER`. `NON_PRODUCTION` is the umbrella value for assets that pre-date the more specific environment vocabulary.
+
+Asset scope designation (GC-M012): `IN_SCOPE`, `OUT_OF_SCOPE`. Two-state explicit; the absence of either (NULL) means "not yet designated" — distinct from `archivedAt` (lifecycle), `quality_gate.scopeStatus`, control `implementationScope`, and risk `assetScopeSummary`.
+
+List filters route through `OperationalAssetRepository.findByProjectIdAndArchivedAtIsNullAndFilters` so any combination of `type` / `owner` / `steward` / `environment` / `criticality` / `scope` query parameters is honored in a single JPQL pass; risk, control, audit, and reporting workflows consume this same surface rather than inventing per-workflow lookups.
 
 ### Asset Relations
 
