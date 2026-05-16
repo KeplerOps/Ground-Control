@@ -25,7 +25,11 @@ import com.keplerops.groundcontrol.domain.testcases.state.TestCaseType;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -93,49 +97,35 @@ class TestCaseControllerTest {
                 .andExpect(jsonPath("$.graphNodeId").doesNotExist());
     }
 
-    @Test
-    void createRejectsMissingRequiredFields() throws Exception {
-        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
-
-        mockMvc.perform(
-                        post("/api/v1/test-cases")
-                                .param("project", "ground-control")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content(
-                                        """
-                                {"uid": "TC-001", "title": "x"}
-                                """))
-                .andExpect(status().isUnprocessableEntity());
+    static Stream<Arguments> invalidCreateBodies() {
+        return Stream.of(
+                Arguments.of(
+                        "missing-required-fields",
+                        """
+                        {"uid": "TC-001", "title": "x"}
+                        """),
+                Arguments.of(
+                        "blank-uid",
+                        """
+                        {"uid": "", "title": "x", "type": "MANUAL", "priority": "LOW"}
+                        """),
+                Arguments.of(
+                        "negative-duration",
+                        """
+                        {"uid": "TC-001", "title": "x", "type": "MANUAL",
+                         "priority": "LOW", "estimatedDurationSeconds": -10}
+                        """));
     }
 
-    @Test
-    void createRejectsBlankUid() throws Exception {
+    @ParameterizedTest(name = "create rejects {0} with 422")
+    @MethodSource("invalidCreateBodies")
+    void createRejectsInvalidBody(String label, String body) throws Exception {
         when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
 
-        mockMvc.perform(
-                        post("/api/v1/test-cases")
-                                .param("project", "ground-control")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content(
-                                        """
-                                {"uid": "", "title": "x", "type": "MANUAL", "priority": "LOW"}
-                                """))
-                .andExpect(status().isUnprocessableEntity());
-    }
-
-    @Test
-    void createRejectsNegativeDuration() throws Exception {
-        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
-
-        mockMvc.perform(
-                        post("/api/v1/test-cases")
-                                .param("project", "ground-control")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content(
-                                        """
-                                {"uid": "TC-001", "title": "x", "type": "MANUAL",
-                                 "priority": "LOW", "estimatedDurationSeconds": -10}
-                                """))
+        mockMvc.perform(post("/api/v1/test-cases")
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
                 .andExpect(status().isUnprocessableEntity());
     }
 

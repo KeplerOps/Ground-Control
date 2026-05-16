@@ -41,30 +41,34 @@ class TestCaseTest {
 
     @Test
     void constructorRejectsBlankUid() {
-        assertThatThrownBy(() -> new TestCase(project(), "", "t", TestCaseType.MANUAL, TestCasePriority.LOW))
+        var project = project();
+        assertThatThrownBy(() -> new TestCase(project, "", "t", TestCaseType.MANUAL, TestCasePriority.LOW))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("UID");
-        assertThatThrownBy(() -> new TestCase(project(), "   ", "t", TestCaseType.MANUAL, TestCasePriority.LOW))
+        assertThatThrownBy(() -> new TestCase(project, "   ", "t", TestCaseType.MANUAL, TestCasePriority.LOW))
                 .isInstanceOf(DomainValidationException.class);
     }
 
     @Test
     void constructorRejectsBlankTitle() {
-        assertThatThrownBy(() -> new TestCase(project(), "TC-001", "", TestCaseType.MANUAL, TestCasePriority.LOW))
+        var project = project();
+        assertThatThrownBy(() -> new TestCase(project, "TC-001", "", TestCaseType.MANUAL, TestCasePriority.LOW))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("Title");
     }
 
     @Test
     void constructorRejectsNullType() {
-        assertThatThrownBy(() -> new TestCase(project(), "TC-001", "t", null, TestCasePriority.LOW))
+        var project = project();
+        assertThatThrownBy(() -> new TestCase(project, "TC-001", "t", null, TestCasePriority.LOW))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("Type");
     }
 
     @Test
     void constructorRejectsNullPriority() {
-        assertThatThrownBy(() -> new TestCase(project(), "TC-001", "t", TestCaseType.MANUAL, null))
+        var project = project();
+        assertThatThrownBy(() -> new TestCase(project, "TC-001", "t", TestCaseType.MANUAL, null))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("Priority");
     }

@@ -285,11 +285,10 @@ class TestCaseServiceTest {
         @Test
         void rejectsInvalidTransition() {
             var existing = makeTestCase();
-            when(testCaseRepository.findByIdAndProjectId(existing.getId(), projectId))
-                    .thenReturn(Optional.of(existing));
+            var id = existing.getId();
+            when(testCaseRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.of(existing));
 
-            assertThatThrownBy(() ->
-                            testCaseService.transitionStatus(projectId, existing.getId(), TestCaseStatus.DEPRECATED))
+            assertThatThrownBy(() -> testCaseService.transitionStatus(projectId, id, TestCaseStatus.DEPRECATED))
                     .isInstanceOf(DomainValidationException.class);
         }
     }
