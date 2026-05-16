@@ -60,6 +60,10 @@ class FindingServiceTest {
     @Mock
     private RiskScenarioLinkRepository riskScenarioLinkRepository;
 
+    @Mock
+    private com.keplerops.groundcontrol.domain.threatmodels.repository.ThreatModelLinkRepository
+            threatModelLinkRepository;
+
     @InjectMocks
     private FindingService findingService;
 
@@ -480,7 +484,7 @@ class FindingServiceTest {
 
             var fId = f.getId();
             var thrown = catchThrowableOfType(ConflictException.class, () -> findingService.delete(projectId, fId));
-            assertThat(thrown).isNotNull();
+            assertThat(thrown).isNotNull().extracting("errorCode").isEqualTo("finding_referenced");
             assertThat(thrown.getDetail())
                     .containsEntry("controlCount", 1)
                     .containsEntry("controlUids", (java.io.Serializable) List.of("CTRL-1"));
@@ -502,10 +506,45 @@ class FindingServiceTest {
 
             var fId = f.getId();
             var thrown = catchThrowableOfType(ConflictException.class, () -> findingService.delete(projectId, fId));
-            assertThat(thrown).isNotNull();
+            assertThat(thrown).isNotNull().extracting("errorCode").isEqualTo("finding_referenced");
             assertThat(thrown.getDetail())
                     .containsEntry("scenarioCount", 1)
                     .containsEntry("scenarioUids", (java.io.Serializable) List.of("RS-001"));
+        }
+
+        @Test
+        void rejectsDeleteWhenThreatModelLinkReferencesFinding() {
+            // GC-H009: a vulnerability finding linked to a threat model is an
+            // inbound reference too. Deleting the finding without removing the
+            // ThreatModelLink would leave a dangling THREAT_MODEL -> FINDING
+            // edge in the graph projection.
+            var f = makeFinding();
+            when(findingRepository.findByIdAndProjectId(f.getId(), projectId)).thenReturn(Optional.of(f));
+            when(assetLinkRepository.findAssetUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            AssetLinkTargetType.FINDING, f.getId(), projectId))
+                    .thenReturn(List.of());
+            when(controlLinkRepository.findControlUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            ControlLinkTargetType.FINDING, f.getId(), projectId))
+                    .thenReturn(List.of());
+            when(riskScenarioLinkRepository.findRiskScenarioUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            RiskScenarioLinkTargetType.FINDING, f.getId(), projectId))
+                    .thenReturn(List.of());
+            when(threatModelLinkRepository.findThreatModelUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.threatmodels.state.ThreatModelLinkTargetType.FINDING,
+                            f.getId(),
+                            projectId))
+                    .thenReturn(List.of("TM-7", "TM-9"));
+
+            var fId = f.getId();
+            var thrown = catchThrowableOfType(ConflictException.class, () -> findingService.delete(projectId, fId));
+            assertThat(thrown)
+                    .isNotNull()
+                    .hasMessageContaining("ThreatModelLink")
+                    .extracting("errorCode")
+                    .isEqualTo("finding_referenced");
+            assertThat(thrown.getDetail())
+                    .containsEntry("threatModelCount", 2)
+                    .containsEntry("threatModelUids", (java.io.Serializable) List.of("TM-7", "TM-9"));
         }
     }
 }

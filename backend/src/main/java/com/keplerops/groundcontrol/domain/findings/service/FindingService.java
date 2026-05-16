@@ -15,6 +15,8 @@ import com.keplerops.groundcontrol.domain.findings.state.FindingStatus;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskScenarioLinkRepository;
 import com.keplerops.groundcontrol.domain.riskscenarios.state.RiskScenarioLinkTargetType;
+import com.keplerops.groundcontrol.domain.threatmodels.repository.ThreatModelLinkRepository;
+import com.keplerops.groundcontrol.domain.threatmodels.state.ThreatModelLinkTargetType;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -38,6 +40,7 @@ public class FindingService {
     private final AssetLinkRepository assetLinkRepository;
     private final ControlLinkRepository controlLinkRepository;
     private final RiskScenarioLinkRepository riskScenarioLinkRepository;
+    private final ThreatModelLinkRepository threatModelLinkRepository;
 
     public FindingService(
             FindingRepository findingRepository,
@@ -45,13 +48,15 @@ public class FindingService {
             ProjectService projectService,
             AssetLinkRepository assetLinkRepository,
             ControlLinkRepository controlLinkRepository,
-            RiskScenarioLinkRepository riskScenarioLinkRepository) {
+            RiskScenarioLinkRepository riskScenarioLinkRepository,
+            ThreatModelLinkRepository threatModelLinkRepository) {
         this.findingRepository = findingRepository;
         this.findingLinkRepository = findingLinkRepository;
         this.projectService = projectService;
         this.assetLinkRepository = assetLinkRepository;
         this.controlLinkRepository = controlLinkRepository;
         this.riskScenarioLinkRepository = riskScenarioLinkRepository;
+        this.threatModelLinkRepository = threatModelLinkRepository;
     }
 
     public Finding create(CreateFindingCommand command) {
@@ -168,19 +173,24 @@ public class FindingService {
                 ControlLinkTargetType.FINDING, id, projectId);
         var scenarioUids = riskScenarioLinkRepository.findRiskScenarioUidsByTargetTypeAndTargetEntityIdAndProjectId(
                 RiskScenarioLinkTargetType.FINDING, id, projectId);
-        if (!assetUids.isEmpty() || !controlUids.isEmpty() || !scenarioUids.isEmpty()) {
+        var threatModelUids = threatModelLinkRepository.findThreatModelUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                ThreatModelLinkTargetType.FINDING, id, projectId);
+        if (!assetUids.isEmpty() || !controlUids.isEmpty() || !scenarioUids.isEmpty() || !threatModelUids.isEmpty()) {
             Map<String, Serializable> detail = new LinkedHashMap<>();
             detail.put("findingUid", finding.getUid());
             detail.put("assetCount", assetUids.size());
             detail.put("controlCount", controlUids.size());
             detail.put("scenarioCount", scenarioUids.size());
+            detail.put("threatModelCount", threatModelUids.size());
             detail.put("assetUids", new ArrayList<>(assetUids));
             detail.put("controlUids", new ArrayList<>(controlUids));
             detail.put("scenarioUids", new ArrayList<>(scenarioUids));
+            detail.put("threatModelUids", new ArrayList<>(threatModelUids));
             throw new ConflictException(
                     "Finding " + finding.getUid()
                             + " cannot be deleted while reverse links exist. Remove the AssetLink,"
-                            + " ControlLink, and RiskScenarioLink references first, then retry.",
+                            + " ControlLink, RiskScenarioLink, and ThreatModelLink references first,"
+                            + " then retry.",
                     "finding_referenced",
                     detail);
         }

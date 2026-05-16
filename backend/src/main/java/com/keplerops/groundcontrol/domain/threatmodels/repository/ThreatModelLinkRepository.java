@@ -30,4 +30,11 @@ public interface ThreatModelLinkRepository extends JpaRepository<ThreatModelLink
             ThreatModelLinkTargetType targetType,
             UUID targetEntityId,
             ThreatModelLinkType linkType);
+
+    @Query("SELECT l.threatModel.uid FROM ThreatModelLink l WHERE l.targetType = :targetType"
+            + " AND l.targetEntityId = :targetEntityId AND l.threatModel.project.id = :projectId")
+    List<String> findThreatModelUidsByTargetTypeAndTargetEntityIdAndProjectId(
+            @Param("targetType") ThreatModelLinkTargetType targetType,
+            @Param("targetEntityId") UUID targetEntityId,
+            @Param("projectId") UUID projectId);
 }
