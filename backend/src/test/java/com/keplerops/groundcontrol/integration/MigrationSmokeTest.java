@@ -20,8 +20,15 @@ class MigrationSmokeTest extends BaseIntegrationTest {
     private EntityManager entityManager;
 
     @Test
-    void contextLoads() {
-        // Spring context boots successfully with ddl-auto: validate
+    void contextLoads() throws Exception {
+        // Spring context boots successfully with ddl-auto: validate. The
+        // assertion makes the pass/fail explicit so a future config change
+        // that silently disables validation (ddl-auto: none / create) still
+        // produces a real signal — empty test bodies pass even when the
+        // intended schema-correctness guarantee has been lost.
+        try (var conn = dataSource.getConnection()) {
+            assertThat(conn.isValid(1)).isTrue();
+        }
     }
 
     @Test
@@ -42,7 +49,7 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         "027", "028", "029", "030", "031", "032", "033", "034", "035", "036", "037", "038", "039",
                         "040", "041", "042", "043", "044", "045", "046", "047", "048", "049", "050", "051", "052",
                         "053", "054", "055", "056", "057", "058", "059", "060", "061", "062", "063", "064", "065",
-                        "066", "067", "068");
+                        "066", "067", "068", "069", "070");
     }
 
     @Test
@@ -75,6 +82,25 @@ class MigrationSmokeTest extends BaseIntegrationTest {
         entityManager
                 .createNativeQuery("SELECT 1 FROM operational_asset_audit LIMIT 1")
                 .getResultList();
+        // GC-M012 column-existence probes (V069 / V070). A column-by-column
+        // SELECT throws PersistenceException if any ALTER TABLE in the
+        // migration silently omitted a column, where the table-only
+        // `SELECT 1 FROM operational_asset` check would not. Wrap with
+        // assertThatCode so the intent — "these six columns must exist" —
+        // is expressed as an assertion a reader can recognize, not as the
+        // absence of a thrown exception.
+        org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
+                        .createNativeQuery(
+                                "SELECT owner, steward, environment, criticality, business_context, scope_designation"
+                                        + " FROM operational_asset LIMIT 1")
+                        .getResultList())
+                .doesNotThrowAnyException();
+        org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
+                        .createNativeQuery(
+                                "SELECT owner, steward, environment, criticality, business_context, scope_designation"
+                                        + " FROM operational_asset_audit LIMIT 1")
+                        .getResultList())
+                .doesNotThrowAnyException();
         entityManager.createNativeQuery("SELECT 1 FROM asset_relation LIMIT 1").getResultList();
         entityManager
                 .createNativeQuery("SELECT 1 FROM asset_relation_audit LIMIT 1")

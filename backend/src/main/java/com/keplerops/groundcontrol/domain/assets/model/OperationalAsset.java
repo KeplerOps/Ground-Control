@@ -1,6 +1,9 @@
 package com.keplerops.groundcontrol.domain.assets.model;
 
 import com.keplerops.groundcontrol.domain.BaseEntity;
+import com.keplerops.groundcontrol.domain.assets.state.AssetCriticality;
+import com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment;
+import com.keplerops.groundcontrol.domain.assets.state.AssetScope;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import jakarta.persistence.Column;
@@ -38,6 +41,27 @@ public class OperationalAsset extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "asset_type", nullable = false, length = 20)
     private AssetType assetType = AssetType.OTHER;
+
+    @Column(length = 200)
+    private String owner;
+
+    @Column(length = 200)
+    private String steward;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private AssetEnvironment environment;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private AssetCriticality criticality;
+
+    @Column(name = "business_context", columnDefinition = "TEXT")
+    private String businessContext;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "scope_designation", length = 20)
+    private AssetScope scopeDesignation;
 
     @Column(name = "archived_at")
     private Instant archivedAt;
@@ -92,6 +116,54 @@ public class OperationalAsset extends BaseEntity {
 
     public Instant getArchivedAt() {
         return archivedAt;
+    }
+
+    public String getOwner() {
+        return owner;
+    }
+
+    public void setOwner(String owner) {
+        this.owner = owner;
+    }
+
+    public String getSteward() {
+        return steward;
+    }
+
+    public void setSteward(String steward) {
+        this.steward = steward;
+    }
+
+    public AssetEnvironment getEnvironment() {
+        return environment;
+    }
+
+    public void setEnvironment(AssetEnvironment environment) {
+        this.environment = environment;
+    }
+
+    public AssetCriticality getCriticality() {
+        return criticality;
+    }
+
+    public void setCriticality(AssetCriticality criticality) {
+        this.criticality = criticality;
+    }
+
+    public String getBusinessContext() {
+        return businessContext;
+    }
+
+    public void setBusinessContext(String businessContext) {
+        this.businessContext = businessContext;
+    }
+
+    public AssetScope getScopeDesignation() {
+        return scopeDesignation;
+    }
+
+    public void setScopeDesignation(AssetScope scopeDesignation) {
+        this.scopeDesignation = scopeDesignation;
     }
 
     @Override

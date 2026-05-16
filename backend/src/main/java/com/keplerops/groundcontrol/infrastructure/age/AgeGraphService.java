@@ -154,6 +154,15 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
             "assetType",
             "assetScopeSummary",
             "owner",
+            // GC-M012 asset ownership / criticality / scope metadata. Every key
+            // here is also emitted by AssetGraphProjectionContributor; any new
+            // node-property emit must register here too or AGE materialization
+            // throws DomainValidationException at write time.
+            "steward",
+            "environment",
+            "criticality",
+            "businessContext",
+            "scopeDesignation",
             "categoryTags",
             "expiresAt",
             "observedAt",

@@ -23,9 +23,12 @@ import com.keplerops.groundcontrol.domain.assets.service.CreateAssetRelationComm
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetExternalIdCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetRelationCommand;
+import com.keplerops.groundcontrol.domain.assets.state.AssetCriticality;
+import com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
+import com.keplerops.groundcontrol.domain.assets.state.AssetScope;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
@@ -137,6 +140,42 @@ class AssetServiceTest {
 
             assertThatThrownBy(() -> assetService.create(command)).isInstanceOf(ConflictException.class);
         }
+
+        @Test
+        void createPersistsOwnershipCriticalityScopeMetadata() {
+            // GC-M012: ownership, stewardship, environment, criticality,
+            // business/mission context, and scope designation must persist on
+            // the asset alongside the existing core attributes.
+            var command = new CreateAssetCommand(
+                    projectId,
+                    "ASSET-007",
+                    "Payments API",
+                    "Production payments service.",
+                    AssetType.SERVICE,
+                    "alice@example.com",
+                    "platform-sre",
+                    AssetEnvironment.PRODUCTION,
+                    AssetCriticality.CRITICAL,
+                    "Revenue-bearing customer payment flow; PCI-DSS scope.",
+                    AssetScope.IN_SCOPE);
+            when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+            when(assetRepository.existsByProjectIdAndUidIgnoreCase(projectId, "ASSET-007"))
+                    .thenReturn(false);
+            when(assetRepository.save(any())).thenAnswer(inv -> {
+                var saved = inv.getArgument(0, OperationalAsset.class);
+                setField(saved, "id", UUID.randomUUID());
+                return saved;
+            });
+
+            var result = assetService.create(command);
+
+            assertThat(result.getOwner()).isEqualTo("alice@example.com");
+            assertThat(result.getSteward()).isEqualTo("platform-sre");
+            assertThat(result.getEnvironment()).isEqualTo(AssetEnvironment.PRODUCTION);
+            assertThat(result.getCriticality()).isEqualTo(AssetCriticality.CRITICAL);
+            assertThat(result.getBusinessContext()).isEqualTo("Revenue-bearing customer payment flow; PCI-DSS scope.");
+            assertThat(result.getScopeDesignation()).isEqualTo(AssetScope.IN_SCOPE);
+        }
     }
 
     @Nested
@@ -178,6 +217,136 @@ class AssetServiceTest {
             assertThat(result.getName()).isEqualTo("New");
             assertThat(result.getDescription()).isEqualTo("A new description");
             assertThat(result.getAssetType()).isEqualTo(AssetType.DATABASE);
+        }
+
+        @Test
+        void updateOwnershipCriticalityScopeMetadata() {
+            // GC-M012: each new metadata field follows null-means-unchanged
+            // semantics (mirrors the existing name/description/assetType
+            // branch). Setting one field leaves the others on the asset alone.
+            var asset = createAsset("ASSET-001", "Payments API");
+            asset.setOwner("legacy-owner");
+            asset.setCriticality(AssetCriticality.LOW);
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateAssetCommand(
+                    null,
+                    null,
+                    null,
+                    "alice@example.com",
+                    "platform-sre",
+                    AssetEnvironment.PRODUCTION,
+                    AssetCriticality.CRITICAL,
+                    "Revenue-bearing payments flow.",
+                    AssetScope.IN_SCOPE);
+            var result = assetService.update(projectId, asset.getId(), command);
+
+            assertThat(result.getOwner()).isEqualTo("alice@example.com");
+            assertThat(result.getSteward()).isEqualTo("platform-sre");
+            assertThat(result.getEnvironment()).isEqualTo(AssetEnvironment.PRODUCTION);
+            assertThat(result.getCriticality()).isEqualTo(AssetCriticality.CRITICAL);
+            assertThat(result.getBusinessContext()).isEqualTo("Revenue-bearing payments flow.");
+            assertThat(result.getScopeDesignation()).isEqualTo(AssetScope.IN_SCOPE);
+            // Core fields (name, description, assetType) untouched.
+            assertThat(result.getName()).isEqualTo("Payments API");
+        }
+
+        @Test
+        void updateClearsMetadataFieldsWhenClearFlagSet() {
+            // GC-M012: nullable metadata must be resettable to NULL once set.
+            // The clear flag wins over null-means-unchanged so callers can
+            // re-undesignate a previously-assigned criticality / scope / etc.
+            var asset = createAsset("ASSET-001", "Payments API");
+            asset.setOwner("alice@example.com");
+            asset.setSteward("platform-sre");
+            asset.setEnvironment(AssetEnvironment.PRODUCTION);
+            asset.setCriticality(AssetCriticality.CRITICAL);
+            asset.setBusinessContext("PCI scope");
+            asset.setScopeDesignation(AssetScope.IN_SCOPE);
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateAssetCommand(
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    /* clearOwner */ true,
+                    /* clearSteward */ true,
+                    /* clearEnvironment */ true,
+                    /* clearCriticality */ true,
+                    /* clearBusinessContext */ true,
+                    /* clearScopeDesignation */ true);
+            var result = assetService.update(projectId, asset.getId(), command);
+
+            assertThat(result.getOwner()).isNull();
+            assertThat(result.getSteward()).isNull();
+            assertThat(result.getEnvironment()).isNull();
+            assertThat(result.getCriticality()).isNull();
+            assertThat(result.getBusinessContext()).isNull();
+            assertThat(result.getScopeDesignation()).isNull();
+        }
+
+        @Test
+        void updateClearFlagWinsOverSamePayloadAssignment() {
+            // Documented semantic: clear wins so the wire form is unambiguous.
+            var asset = createAsset("ASSET-001", "Payments API");
+            asset.setCriticality(AssetCriticality.HIGH);
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateAssetCommand(
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    /* criticality */ AssetCriticality.CRITICAL,
+                    null,
+                    null,
+                    false,
+                    false,
+                    false,
+                    /* clearCriticality */ true,
+                    false,
+                    false);
+            var result = assetService.update(projectId, asset.getId(), command);
+
+            assertThat(result.getCriticality()).isNull();
+        }
+
+        @Test
+        void updatePreservesUnsetMetadataFields() {
+            // Null on a metadata field means "leave alone" — the existing
+            // owner / steward / environment / criticality / scope must not
+            // get cleared by an update that only touches description.
+            var asset = createAsset("ASSET-001", "Payments API");
+            asset.setOwner("alice@example.com");
+            asset.setSteward("platform-sre");
+            asset.setEnvironment(AssetEnvironment.PRODUCTION);
+            asset.setCriticality(AssetCriticality.CRITICAL);
+            asset.setBusinessContext("PCI scope");
+            asset.setScopeDesignation(AssetScope.IN_SCOPE);
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateAssetCommand(null, "Updated description.", null);
+            var result = assetService.update(projectId, asset.getId(), command);
+
+            assertThat(result.getDescription()).isEqualTo("Updated description.");
+            assertThat(result.getOwner()).isEqualTo("alice@example.com");
+            assertThat(result.getSteward()).isEqualTo("platform-sre");
+            assertThat(result.getEnvironment()).isEqualTo(AssetEnvironment.PRODUCTION);
+            assertThat(result.getCriticality()).isEqualTo(AssetCriticality.CRITICAL);
+            assertThat(result.getBusinessContext()).isEqualTo("PCI scope");
+            assertThat(result.getScopeDesignation()).isEqualTo(AssetScope.IN_SCOPE);
         }
     }
 
@@ -233,6 +402,52 @@ class AssetServiceTest {
 
             var result = assetService.archive(asset.getId());
             assertThat(result.getArchivedAt()).isNotNull();
+        }
+    }
+
+    @Nested
+    class ListByFilters {
+
+        @Test
+        void filtersByOwnershipCriticalityScopeMetadata() {
+            // GC-M012 queryability: the filter surface routes through the
+            // repository's single JPQL query so risk/control/audit/reporting
+            // callers don't have to invent per-workflow lookups.
+            var match = createAsset("ASSET-IN-SCOPE", "Payments API");
+            when(assetRepository.findByProjectIdAndArchivedAtIsNullAndFilters(
+                            projectId,
+                            AssetType.SERVICE,
+                            "alice@example.com",
+                            "platform-sre",
+                            AssetEnvironment.PRODUCTION,
+                            AssetCriticality.CRITICAL,
+                            AssetScope.IN_SCOPE))
+                    .thenReturn(List.of(match));
+
+            var results = assetService.listByProjectAndFilters(
+                    projectId,
+                    AssetType.SERVICE,
+                    "alice@example.com",
+                    "platform-sre",
+                    AssetEnvironment.PRODUCTION,
+                    AssetCriticality.CRITICAL,
+                    AssetScope.IN_SCOPE);
+
+            assertThat(results).containsExactly(match);
+        }
+
+        @Test
+        void filtersAllNullDelegatesToProjectQuery() {
+            // No filters supplied = same shape as listByProject so the
+            // controller can fall through cleanly when no filter param hits.
+            var match = createAsset("ASSET-A", "A");
+            when(assetRepository.findByProjectIdAndArchivedAtIsNullAndFilters(
+                            projectId, null, null, null, null, null, null))
+                    .thenReturn(List.of(match));
+
+            var results = assetService.listByProjectAndFilters(projectId, null, null, null, null, null, null);
+
+            assertThat(results).containsExactly(match);
         }
     }
 

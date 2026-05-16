@@ -134,6 +134,72 @@ class AssetGraphProjectionContributorTest {
         assertThat(edges.get(0).targetEntityType()).isEqualTo(GraphEntityType.CONTROL);
     }
 
+    @Test
+    void exposesOwnershipCriticalityScopeAsNodeProperties() {
+        // GC-M012: ownership, stewardship, environment, criticality,
+        // business/mission context, and scope designation must surface as
+        // graph node properties so risk/control/audit/reporting graph reads
+        // can consume them without a second persisted aggregate.
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var asset = new OperationalAsset(project, "ASSET-PCI", "Payments API");
+        setField(asset, "id", UUID.randomUUID());
+        asset.setAssetType(AssetType.SERVICE);
+        asset.setDescription("Production payments service.");
+        asset.setOwner("alice@example.com");
+        asset.setSteward("platform-sre");
+        asset.setEnvironment(com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment.PRODUCTION);
+        asset.setCriticality(com.keplerops.groundcontrol.domain.assets.state.AssetCriticality.CRITICAL);
+        asset.setBusinessContext("Revenue-bearing payments flow; PCI-DSS scope.");
+        asset.setScopeDesignation(com.keplerops.groundcontrol.domain.assets.state.AssetScope.IN_SCOPE);
+
+        when(assetRepository.findByProjectIdAndArchivedAtIsNull(projectId)).thenReturn(List.of(asset));
+        when(observationRepository.findByProjectId(projectId)).thenReturn(List.of());
+
+        var nodes = contributor.contributeNodes(projectId);
+
+        assertThat(nodes).hasSize(1);
+        var properties = nodes.get(0).properties();
+        assertThat(properties)
+                .containsEntry("owner", "alice@example.com")
+                .containsEntry("steward", "platform-sre")
+                .containsEntry("environment", "PRODUCTION")
+                .containsEntry("criticality", "CRITICAL")
+                .containsEntry("businessContext", "Revenue-bearing payments flow; PCI-DSS scope.")
+                .containsEntry("scopeDesignation", "IN_SCOPE");
+    }
+
+    @Test
+    void exposesNullOwnershipMetadataAsNullProperties() {
+        // Legacy assets without GC-M012 metadata must still project — the
+        // node properties carry nulls rather than throwing or omitting keys
+        // so frontend / agent consumers can rely on a stable shape.
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var asset = new OperationalAsset(project, "ASSET-LEGACY", "Legacy");
+        setField(asset, "id", UUID.randomUUID());
+        asset.setAssetType(AssetType.SERVICE);
+
+        when(assetRepository.findByProjectIdAndArchivedAtIsNull(projectId)).thenReturn(List.of(asset));
+        when(observationRepository.findByProjectId(projectId)).thenReturn(List.of());
+
+        var nodes = contributor.contributeNodes(projectId);
+
+        assertThat(nodes).hasSize(1);
+        var properties = nodes.get(0).properties();
+        assertThat(properties)
+                .containsEntry("owner", null)
+                .containsEntry("steward", null)
+                .containsEntry("environment", null)
+                .containsEntry("criticality", null)
+                .containsEntry("businessContext", null)
+                .containsEntry("scopeDesignation", null);
+    }
+
     @ParameterizedTest
     @EnumSource(
             value = AssetLinkTargetType.class,

@@ -146,6 +146,7 @@ import {
   ARTIFACT_TYPES, LINK_TYPES, CHANGE_CATEGORIES, CONFIDENCE_LEVELS,
   METRIC_TYPES, COMPARISON_OPERATORS, ADR_STATUSES,
   ASSET_TYPES, ASSET_RELATION_TYPES, ASSET_LINK_TARGET_TYPES, ASSET_LINK_TYPES,
+  ASSET_CRITICALITIES, ASSET_ENVIRONMENTS, ASSET_SCOPES,
   OBSERVATION_CATEGORIES, RISK_SCENARIO_STATUSES,
   METHODOLOGY_FAMILIES, METHODOLOGY_PROFILE_STATUSES,
   RISK_REGISTER_STATUSES, RISK_ASSESSMENT_APPROVAL_STATUSES,
@@ -1229,6 +1230,23 @@ server.tool(
     name: z.string().optional(),
     description: z.string().optional(),
     asset_type: z.enum(ASSET_TYPES).optional(),
+    // GC-M012 metadata: ownership, stewardship, environment, criticality,
+    // business/mission context, and assurance scope.
+    owner: z.string().optional(),
+    steward: z.string().optional(),
+    environment: z.enum(ASSET_ENVIRONMENTS).optional(),
+    criticality: z.enum(ASSET_CRITICALITIES).optional(),
+    business_context: z.string().optional(),
+    scope_designation: z.enum(ASSET_SCOPES).optional(),
+    // GC-M012 clear flags: reset a previously-designated metadata field back
+    // to NULL ("not designated") on update. Clear wins over a same-payload
+    // assignment to keep the semantic unambiguous; see UpdateAssetCommand.
+    clear_owner: z.boolean().optional(),
+    clear_steward: z.boolean().optional(),
+    clear_environment: z.boolean().optional(),
+    clear_criticality: z.boolean().optional(),
+    clear_business_context: z.boolean().optional(),
+    clear_scope_designation: z.boolean().optional(),
     parent_id: z.string().uuid().nullable().optional(),
     // relations
     source_id: z.string().uuid().optional(),
@@ -1250,7 +1268,25 @@ server.tool(
   },
   async (args) => {
     try {
-      const ASSET_FIELDS = ["name", "description", "asset_type", "parent_id"];
+      const ASSET_FIELDS = [
+        "name",
+        "description",
+        "asset_type",
+        "parent_id",
+        // GC-M012 ownership/criticality/scope metadata + clear flags.
+        "owner",
+        "steward",
+        "environment",
+        "criticality",
+        "business_context",
+        "scope_designation",
+        "clear_owner",
+        "clear_steward",
+        "clear_environment",
+        "clear_criticality",
+        "clear_business_context",
+        "clear_scope_designation",
+      ];
       const RELATION_FIELDS = ["source_id", "target_id", "relation_type"];
       const EXT_ID_FIELDS = ["namespace", "external_id"];
       switch (args.action) {

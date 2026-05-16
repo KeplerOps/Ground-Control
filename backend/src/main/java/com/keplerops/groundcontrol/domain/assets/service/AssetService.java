@@ -74,6 +74,24 @@ public class AssetService {
         if (command.assetType() != null) {
             asset.setAssetType(command.assetType());
         }
+        if (command.owner() != null) {
+            asset.setOwner(command.owner());
+        }
+        if (command.steward() != null) {
+            asset.setSteward(command.steward());
+        }
+        if (command.environment() != null) {
+            asset.setEnvironment(command.environment());
+        }
+        if (command.criticality() != null) {
+            asset.setCriticality(command.criticality());
+        }
+        if (command.businessContext() != null) {
+            asset.setBusinessContext(command.businessContext());
+        }
+        if (command.scopeDesignation() != null) {
+            asset.setScopeDesignation(command.scopeDesignation());
+        }
         return assetRepository.save(asset);
     }
 
@@ -113,6 +131,19 @@ public class AssetService {
     @Transactional(readOnly = true)
     public List<OperationalAsset> listByProject(UUID projectId) {
         return assetRepository.findByProjectIdAndArchivedAtIsNull(projectId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<OperationalAsset> listByProjectAndFilters(
+            UUID projectId,
+            AssetType assetType,
+            String owner,
+            String steward,
+            com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment environment,
+            com.keplerops.groundcontrol.domain.assets.state.AssetCriticality criticality,
+            com.keplerops.groundcontrol.domain.assets.state.AssetScope scopeDesignation) {
+        return assetRepository.findByProjectIdAndArchivedAtIsNullAndFilters(
+                projectId, assetType, owner, steward, environment, criticality, scopeDesignation);
     }
 
     @Transactional(readOnly = true)
@@ -527,6 +558,11 @@ public class AssetService {
     }
 
     private void applyAssetUpdates(OperationalAsset asset, UpdateAssetCommand command) {
+        applyCoreFieldUpdates(asset, command);
+        applyMetadataUpdates(asset, command);
+    }
+
+    private void applyCoreFieldUpdates(OperationalAsset asset, UpdateAssetCommand command) {
         if (command.name() != null) {
             if (command.name().isBlank()) {
                 throw new DomainValidationException("Asset name must not be blank");
@@ -538,6 +574,27 @@ public class AssetService {
         }
         if (command.assetType() != null) {
             asset.setAssetType(command.assetType());
+        }
+    }
+
+    private void applyMetadataUpdates(OperationalAsset asset, UpdateAssetCommand command) {
+        // GC-M012 nullable metadata: clear flag wins over assign so a caller
+        // can re-undesignate a field that was previously set. Without this,
+        // NULL ("not designated") would be unreachable after first assignment
+        // because enum binding cannot accept blank strings.
+        applyClearOrSet(command.clearOwner(), command.owner(), asset::setOwner);
+        applyClearOrSet(command.clearSteward(), command.steward(), asset::setSteward);
+        applyClearOrSet(command.clearEnvironment(), command.environment(), asset::setEnvironment);
+        applyClearOrSet(command.clearCriticality(), command.criticality(), asset::setCriticality);
+        applyClearOrSet(command.clearBusinessContext(), command.businessContext(), asset::setBusinessContext);
+        applyClearOrSet(command.clearScopeDesignation(), command.scopeDesignation(), asset::setScopeDesignation);
+    }
+
+    private <T> void applyClearOrSet(boolean clear, T newValue, java.util.function.Consumer<T> setter) {
+        if (clear) {
+            setter.accept(null);
+        } else if (newValue != null) {
+            setter.accept(newValue);
         }
     }
 
