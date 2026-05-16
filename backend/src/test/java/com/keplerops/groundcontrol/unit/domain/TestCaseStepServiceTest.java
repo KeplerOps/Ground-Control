@@ -170,8 +170,9 @@ class TestCaseStepServiceTest {
             when(stepRepository.existsByTestCaseIdAndStepNumber(testCaseId, 5)).thenReturn(true);
 
             var command = new UpdateTestCaseStepCommand(5, null, null, null, false);
+            UUID stepId = step.getId();
 
-            assertThatThrownBy(() -> stepService.update(projectId, testCaseId, step.getId(), command))
+            assertThatThrownBy(() -> stepService.update(projectId, testCaseId, stepId, command))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("Step number 5");
         }
@@ -226,8 +227,9 @@ class TestCaseStepServiceTest {
                     .thenReturn(false);
 
             var command = new UpdateTestCaseStepCommand(null, "act", null, null, false);
+            UUID randomStepId = UUID.randomUUID();
 
-            assertThatThrownBy(() -> stepService.update(projectId, testCaseId, UUID.randomUUID(), command))
+            assertThatThrownBy(() -> stepService.update(projectId, testCaseId, randomStepId, command))
                     .isInstanceOf(NotFoundException.class);
         }
 
@@ -265,8 +267,9 @@ class TestCaseStepServiceTest {
         void getByIdRejectsCrossProjectAccess() {
             when(testCaseRepository.existsByIdAndProjectId(testCaseId, projectId))
                     .thenReturn(false);
+            UUID randomStepId = UUID.randomUUID();
 
-            assertThatThrownBy(() -> stepService.getById(projectId, testCaseId, UUID.randomUUID()))
+            assertThatThrownBy(() -> stepService.getById(projectId, testCaseId, randomStepId))
                     .isInstanceOf(NotFoundException.class);
         }
 
