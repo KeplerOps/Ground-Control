@@ -141,6 +141,9 @@ import {
   // createAdminUser is intentionally NOT imported — passwords must not flow
   // through MCP tool-call payloads (ADR-037, codex security finding).
   listAdminUsers, updateAdminUserRole, updateAdminUserEnabled, deleteAdminUser,
+  // ---- test cases (TC-001 / ADR-040) ----
+  createTestCase, updateTestCase, deleteTestCase, transitionTestCaseStatus,
+  TEST_CASE_STATUSES, TEST_CASE_TYPES, TEST_CASE_PRIORITIES,
   // ---- enums ----
   STATUSES, REQUIREMENT_TYPES, PRIORITIES, RELATION_TYPES,
   ARTIFACT_TYPES, LINK_TYPES, CHANGE_CATEGORIES, CONFIDENCE_LEVELS,
@@ -1461,6 +1464,79 @@ server.tool(
     try {
       const result = await gcControlToolHandler(args);
       return result === null ? ok("Deleted") : ok(JSON.stringify(result, null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+// gc_test_case: TC-001 / ADR-040. Reusable test-definition aggregate at
+// /api/v1/test-cases. Reads (list, get, get-by-uid) route through gc_query.
+const TEST_CASE_ACTIONS = ["create", "update", "delete", "transition"];
+
+server.tool(
+  "gc_test_case",
+  `Test case operations (TC-001 / ADR-040). Actions: ${TEST_CASE_ACTIONS.join(", ")}. ` +
+    `Reads (list, get, get-by-uid) route through gc_query.`,
+  {
+    action: z.enum(TEST_CASE_ACTIONS),
+    id: z.string().uuid().optional(),
+    project: z.string().optional(),
+    uid: z.string().optional(),
+    title: z.string().optional(),
+    type: z.enum(TEST_CASE_TYPES).optional(),
+    priority: z.enum(TEST_CASE_PRIORITIES).optional(),
+    description: z.string().optional(),
+    preconditions: z.string().optional(),
+    postconditions: z.string().optional(),
+    estimated_duration_seconds: z.number().int().nonnegative().nullable().optional(),
+    status: z.enum(TEST_CASE_STATUSES).optional(),
+    // Partial-update clear flags (TC-001 codex cycle 1) — UpdateTestCaseRequest
+    // accepts these on update so a client can wipe a nullable text/duration
+    // field. Sending clearX=true overrides any non-null value in the same body.
+    clear_description: z.boolean().optional(),
+    clear_preconditions: z.boolean().optional(),
+    clear_postconditions: z.boolean().optional(),
+    clear_estimated_duration: z.boolean().optional(),
+  },
+  async (args) => {
+    try {
+      const ENTITY_FIELDS = [
+        "uid", "title", "type", "priority", "description",
+        "preconditions", "postconditions", "estimated_duration_seconds",
+        "clear_description", "clear_preconditions", "clear_postconditions",
+        "clear_estimated_duration",
+      ];
+      switch (args.action) {
+        case "create": {
+          reqArg(args, "uid", "create");
+          reqArg(args, "title", "create");
+          reqArg(args, "type", "create");
+          reqArg(args, "priority", "create");
+          return ok(JSON.stringify(await createTestCase(pick(args, ENTITY_FIELDS), args.project), null, 2));
+        }
+        case "update": {
+          reqArg(args, "id", "update");
+          return ok(JSON.stringify(
+            await updateTestCase(args.id, pick(args, ENTITY_FIELDS), args.project),
+            null,
+            2,
+          ));
+        }
+        case "delete": {
+          reqArg(args, "id", "delete");
+          await deleteTestCase(args.id, args.project);
+          return ok("Deleted");
+        }
+        case "transition": {
+          reqArg(args, "id", "transition");
+          reqArg(args, "status", "transition");
+          return ok(JSON.stringify(
+            await transitionTestCaseStatus(args.id, args.status, args.project),
+            null,
+            2,
+          ));
+        }
+        default: return err(new Error(`Unknown action: ${args.action}`));
+      }
     } catch (e) { return err(e); }
   },
 );

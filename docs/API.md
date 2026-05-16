@@ -968,6 +968,43 @@ the existing list wholesale; pass `null` to leave it unchanged or an empty list 
 keep AGE materialization safe. `ControlTest` deletion is rejected with HTTP 409
 `control_test_referenced` while any assessment still references the test.
 
+### Test Cases (TC-001 / ADR-040)
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/test-cases` | TestCaseRequest | 201 | Create a project-scoped test-case definition |
+| GET | `/test-cases` | — | 200 | List test cases in a project (ordered by `createdAt DESC`) |
+| GET | `/test-cases/{id}` | — | 200 | Get a test case by UUID |
+| GET | `/test-cases/uid/{uid}` | — | 200 | Get a test case by project-scoped UID |
+| PUT | `/test-cases/{id}` | UpdateTestCaseRequest | 200 | Update mutable fields (null = no change) |
+| PUT | `/test-cases/{id}/status` | TestCaseStatusTransitionRequest | 200 | Transition the lifecycle status |
+| DELETE | `/test-cases/{id}` | — | 204 | Delete the test case |
+
+The `TestCase` aggregate is a reusable, version-controlled, project-scoped definition of an
+intended test. It is **definition-only** — it does not record executions, results, suites, or
+defects. Those are future aggregates that reference test cases through the existing
+project-scoped link patterns. See ADR-040.
+
+**TestCaseRequest fields:** `uid` (required, max 50, unique per project), `title` (required,
+max 200), `type` (required, `TestCaseType` enum: `MANUAL`, `AUTOMATED`, `HYBRID`),
+`priority` (required, `TestCasePriority` enum: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`),
+`description` (optional TEXT, Markdown by convention), `preconditions` (optional TEXT),
+`postconditions` (optional TEXT), `estimatedDurationSeconds` (optional non-negative `Long`).
+
+**UpdateTestCaseRequest fields:** `title`, `type`, `priority`, `description`, `preconditions`,
+`postconditions`, `estimatedDurationSeconds` — all optional with null-means-no-change. `uid`
+is create-only.
+
+**TestCaseStatusTransitionRequest fields:** `status` (required, `TestCaseStatus` enum).
+Valid lifecycle transitions are `DRAFT → APPROVED | ARCHIVED`,
+`APPROVED → DEPRECATED | ARCHIVED`, `DEPRECATED → APPROVED | ARCHIVED`, with `ARCHIVED`
+terminal. Invalid transitions surface as HTTP 422 `invalid_status_transition`. Duplicate UID
+within a project returns HTTP 409. Negative `estimatedDurationSeconds` is rejected at the DTO
+layer with HTTP 422.
+
+Rich-text fields (`description`, `preconditions`, `postconditions`) are stored as plain text
+and rendered as Markdown by clients; no HTML sanitizer is wired through this surface.
+
 ## Request / Response Format
 
 JSON. Error responses use a nested envelope:
