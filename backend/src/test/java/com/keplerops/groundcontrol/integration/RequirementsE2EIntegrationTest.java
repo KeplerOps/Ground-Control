@@ -468,6 +468,8 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "067", // V067: control_effectiveness_assessment (GC-I013 / ADR-039)
                         "068", // V068: control_effectiveness_assessment_audit
                         "069", // V069: operational_asset ownership/criticality/scope (GC-M012)
-                        "070"); // V070: operational_asset_audit parity for GC-M012
+                        "070", // V070: operational_asset_audit parity for GC-M012
+                        "071", // V071: test_case (TC-001 / ADR-040)
+                        "072"); // V072: test_case_audit
     }
 }

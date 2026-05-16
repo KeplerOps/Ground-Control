@@ -49,7 +49,7 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         "027", "028", "029", "030", "031", "032", "033", "034", "035", "036", "037", "038", "039",
                         "040", "041", "042", "043", "044", "045", "046", "047", "048", "049", "050", "051", "052",
                         "053", "054", "055", "056", "057", "058", "059", "060", "061", "062", "063", "064", "065",
-                        "066", "067", "068", "069", "070");
+                        "066", "067", "068", "069", "070", "071", "072");
     }
 
     @Test
@@ -275,5 +275,27 @@ class MigrationSmokeTest extends BaseIntegrationTest {
         entityManager
                 .createNativeQuery("SELECT 1 FROM control_effectiveness_assessment_audit LIMIT 1")
                 .getResultList();
+        // V071-V072 test_case + audit (TC-001 / ADR-040). The audit table is
+        // not a Hibernate-managed entity, so ddl-auto: validate doesn't catch
+        // a misspelled or dropped column there. Verify the structural shape
+        // via information_schema for the columns most likely to regress.
+        entityManager.createNativeQuery("SELECT 1 FROM test_case LIMIT 1").getResultList();
+        entityManager.createNativeQuery("SELECT 1 FROM test_case_audit LIMIT 1").getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_audit'"
+                        + " AND column_name = 'estimated_duration_seconds'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_audit'"
+                        + " AND column_name = 'status'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_audit'"
+                        + " AND column_name = 'type'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_audit'"
+                        + " AND column_name = 'priority'")
+                .getSingleResult();
     }
 }

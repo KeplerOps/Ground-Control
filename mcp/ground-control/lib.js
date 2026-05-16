@@ -516,6 +516,14 @@ const TO_CAMEL = {
   stride_category: "stride",
   clear_stride: "clearStride",
   clear_narrative: "clearNarrative",
+  // TC-001 / ADR-040 — TestCaseRequest fields and the partial-update clear
+  // flags. Missing entries here cause `gc_test_case` to forward the snake
+  // names to Spring, which Jackson silently drops (the codex cycle-1 finding).
+  estimated_duration_seconds: "estimatedDurationSeconds",
+  clear_description: "clearDescription",
+  clear_preconditions: "clearPreconditions",
+  clear_postconditions: "clearPostconditions",
+  clear_estimated_duration: "clearEstimatedDuration",
   // GC-V001 finding adapter — backend FindingRequest / UpdateFindingRequest
   // use these camelCase field names. Mapping is needed so `gc_finding` reaches
   // backend Bean Validation with the right field names (issue #279).
@@ -7468,6 +7476,41 @@ export const CONTROL_LINK_TARGET_TYPES = [
 export const CONTROL_LINK_TYPES = [
   "PROTECTS", "IMPLEMENTS", "EVIDENCED_BY", "OBSERVED_IN", "MITIGATES", "MAPS_TO", "ASSOCIATED",
 ];
+
+export const TEST_CASE_STATUSES = ["DRAFT", "APPROVED", "DEPRECATED", "ARCHIVED"];
+export const TEST_CASE_TYPES = ["MANUAL", "AUTOMATED", "HYBRID"];
+export const TEST_CASE_PRIORITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
+
+export async function createTestCase(data, project) {
+  return request("POST", "/api/v1/test-cases", { body: data, params: { project } });
+}
+
+export async function listTestCases(project) {
+  return request("GET", "/api/v1/test-cases", { params: { project } });
+}
+
+export async function getTestCase(id, project) {
+  return request("GET", `/api/v1/test-cases/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function getTestCaseByUid(uid, project) {
+  return request("GET", `/api/v1/test-cases/uid/${encodeURIComponent(uid)}`, { params: { project } });
+}
+
+export async function updateTestCase(id, data, project) {
+  return request("PUT", `/api/v1/test-cases/${encodeURIComponent(id)}`, { body: data, params: { project } });
+}
+
+export async function deleteTestCase(id, project) {
+  await request("DELETE", `/api/v1/test-cases/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function transitionTestCaseStatus(id, status, project) {
+  return request("PUT", `/api/v1/test-cases/${encodeURIComponent(id)}/status`, {
+    body: { status },
+    params: { project },
+  });
+}
 
 export async function createControl(data, project) {
   return request("POST", "/api/v1/controls", { body: data, params: { project } });

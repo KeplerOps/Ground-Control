@@ -42,7 +42,8 @@ public class AuditRetentionJob {
             "risk_assessment_result_observation_audit",
             "treatment_plan_audit",
             "control_test_audit",
-            "control_effectiveness_assessment_audit");
+            "control_effectiveness_assessment_audit",
+            "test_case_audit");
 
     private final AuditRetentionProperties properties;
     private final EntityManager entityManager;

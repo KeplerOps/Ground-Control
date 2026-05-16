@@ -1,0 +1,179 @@
+package com.keplerops.groundcontrol.domain.testcases.model;
+
+import com.keplerops.groundcontrol.domain.BaseEntity;
+import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.testcases.state.TestCasePriority;
+import com.keplerops.groundcontrol.domain.testcases.state.TestCaseStatus;
+import com.keplerops.groundcontrol.domain.testcases.state.TestCaseType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
+import java.util.Map;
+import org.hibernate.envers.Audited;
+import org.hibernate.envers.NotAudited;
+
+@Entity
+@Audited
+@Table(name = "test_case", uniqueConstraints = @UniqueConstraint(columnNames = {"project_id", "uid"}))
+public class TestCase extends BaseEntity {
+
+    @NotAudited
+    @ManyToOne(fetch = FetchType.EAGER, optional = false)
+    @JoinColumn(name = "project_id", nullable = false)
+    private Project project;
+
+    @Column(nullable = false, length = 50)
+    private String uid;
+
+    @Column(nullable = false, length = 200)
+    private String title;
+
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
+    @Column(columnDefinition = "TEXT")
+    private String preconditions;
+
+    @Column(columnDefinition = "TEXT")
+    private String postconditions;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private TestCasePriority priority = TestCasePriority.MEDIUM;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private TestCaseStatus status = TestCaseStatus.DRAFT;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private TestCaseType type;
+
+    @Column(name = "estimated_duration_seconds")
+    private Long estimatedDurationSeconds;
+
+    protected TestCase() {
+        // JPA
+    }
+
+    public TestCase(Project project, String uid, String title, TestCaseType type, TestCasePriority priority) {
+        if (project == null) {
+            throw new DomainValidationException("Project must not be null", "invalid_test_case", Map.of());
+        }
+        if (uid == null || uid.isBlank()) {
+            throw new DomainValidationException("UID must not be blank", "invalid_test_case", Map.of());
+        }
+        if (title == null || title.isBlank()) {
+            throw new DomainValidationException("Title must not be blank", "invalid_test_case", Map.of());
+        }
+        if (type == null) {
+            throw new DomainValidationException("Type must not be null", "invalid_test_case", Map.of());
+        }
+        if (priority == null) {
+            throw new DomainValidationException("Priority must not be null", "invalid_test_case", Map.of());
+        }
+        this.project = project;
+        this.uid = uid;
+        this.title = title;
+        this.type = type;
+        this.priority = priority;
+    }
+
+    public void transitionStatus(TestCaseStatus newStatus) {
+        if (newStatus == null || !status.canTransitionTo(newStatus)) {
+            throw new DomainValidationException(
+                    "Cannot transition test case status from " + status + " to " + newStatus,
+                    "invalid_status_transition",
+                    Map.of("current", status.name(), "requested", String.valueOf(newStatus)));
+        }
+        this.status = newStatus;
+    }
+
+    public Project getProject() {
+        return project;
+    }
+
+    public String getUid() {
+        return uid;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        if (title == null || title.isBlank()) {
+            throw new DomainValidationException("Title must not be blank", "invalid_test_case", Map.of());
+        }
+        this.title = title;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public String getPreconditions() {
+        return preconditions;
+    }
+
+    public void setPreconditions(String preconditions) {
+        this.preconditions = preconditions;
+    }
+
+    public String getPostconditions() {
+        return postconditions;
+    }
+
+    public void setPostconditions(String postconditions) {
+        this.postconditions = postconditions;
+    }
+
+    public TestCasePriority getPriority() {
+        return priority;
+    }
+
+    public void setPriority(TestCasePriority priority) {
+        if (priority == null) {
+            throw new DomainValidationException("Priority must not be null", "invalid_test_case", Map.of());
+        }
+        this.priority = priority;
+    }
+
+    public TestCaseStatus getStatus() {
+        return status;
+    }
+
+    public TestCaseType getType() {
+        return type;
+    }
+
+    public void setType(TestCaseType type) {
+        if (type == null) {
+            throw new DomainValidationException("Type must not be null", "invalid_test_case", Map.of());
+        }
+        this.type = type;
+    }
+
+    public Long getEstimatedDurationSeconds() {
+        return estimatedDurationSeconds;
+    }
+
+    public void setEstimatedDurationSeconds(Long estimatedDurationSeconds) {
+        if (estimatedDurationSeconds != null && estimatedDurationSeconds < 0) {
+            throw new DomainValidationException(
+                    "Estimated duration must be non-negative", "invalid_test_case", Map.of());
+        }
+        this.estimatedDurationSeconds = estimatedDurationSeconds;
+    }
+}

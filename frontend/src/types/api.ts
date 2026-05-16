@@ -96,6 +96,26 @@ export const PACK_REGISTRY_IMPORT_FORMATS: PackRegistryImportFormat[] = [
   "OSCAL_JSON",
   "GC_MANIFEST",
 ];
+export type TestCaseStatus =
+  | "DRAFT"
+  | "APPROVED"
+  | "DEPRECATED"
+  | "ARCHIVED";
+export const TEST_CASE_STATUSES: TestCaseStatus[] = [
+  "DRAFT",
+  "APPROVED",
+  "DEPRECATED",
+  "ARCHIVED",
+];
+export type TestCaseType = "MANUAL" | "AUTOMATED" | "HYBRID";
+export const TEST_CASE_TYPES: TestCaseType[] = ["MANUAL", "AUTOMATED", "HYBRID"];
+export type TestCasePriority = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+export const TEST_CASE_PRIORITIES: TestCasePriority[] = [
+  "CRITICAL",
+  "HIGH",
+  "MEDIUM",
+  "LOW",
+];
 export type GraphEntityType =
   | "REQUIREMENT"
   | "OPERATIONAL_ASSET"

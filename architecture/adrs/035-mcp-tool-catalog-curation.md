@@ -175,10 +175,10 @@ adds the bearer token, and the request always emits
 `/api/v1/methodology-profiles`, `/api/v1/observations`, `/api/v1/projects`,
 `/api/v1/quality-gates`, `/api/v1/relations`, `/api/v1/requirements`,
 `/api/v1/risk-assessment-results`, `/api/v1/risk-register-records`,
-`/api/v1/risk-scenarios`, `/api/v1/sections`, `/api/v1/threat-models`,
-`/api/v1/timeline`, `/api/v1/traceability`, `/api/v1/treatment-plans`,
-`/api/v1/verification-results`. A drift-catch test compares this list
-against the README and this ADR on every test run.
+`/api/v1/risk-scenarios`, `/api/v1/sections`, `/api/v1/test-cases`,
+`/api/v1/threat-models`, `/api/v1/timeline`, `/api/v1/traceability`,
+`/api/v1/treatment-plans`, `/api/v1/verification-results`. A drift-catch test
+compares this list against the README and this ADR on every test run.
 
 **Denylist:** `/api/v1/admin/**`, `/api/v1/embeddings/**`,
 `/api/v1/analysis/sweep/**`, `/api/v1/pack-registry/**` are rejected even
