@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.testcases.model.TestCase;
+import com.keplerops.groundcontrol.domain.testcases.model.TestCaseFolder;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCasePriority;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseStatus;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseType;
@@ -133,5 +134,41 @@ class TestCaseTest {
     void setTitleRejectsBlank() {
         var testCase = new TestCase(project(), "TC-001", "t", TestCaseType.MANUAL, TestCasePriority.LOW);
         assertThatThrownBy(() -> testCase.setTitle("")).isInstanceOf(DomainValidationException.class);
+    }
+
+    @Test
+    void parentFolderDefaultsToRootAndSortOrderDefaultsToZero() {
+        var testCase = new TestCase(project(), "TC-001", "t", TestCaseType.MANUAL, TestCasePriority.LOW);
+        assertThat(testCase.getParentFolder()).isNull();
+        assertThat(testCase.getSortOrder()).isZero();
+    }
+
+    @Test
+    void setParentFolderAndSortOrderTrackPlacement() {
+        var project = project();
+        var folder = new TestCaseFolder(project, null, "Smoke", null, 0);
+        var testCase = new TestCase(project, "TC-001", "t", TestCaseType.MANUAL, TestCasePriority.LOW);
+        testCase.setParentFolder(folder);
+        testCase.setSortOrder(7);
+        assertThat(testCase.getParentFolder()).isSameAs(folder);
+        assertThat(testCase.getSortOrder()).isEqualTo(7);
+    }
+
+    @Test
+    void setSortOrderRejectsNegative() {
+        var testCase = new TestCase(project(), "TC-001", "t", TestCaseType.MANUAL, TestCasePriority.LOW);
+        assertThatThrownBy(() -> testCase.setSortOrder(-1))
+                .isInstanceOf(DomainValidationException.class)
+                .hasMessageContaining("Sort order");
+    }
+
+    @Test
+    void setParentFolderAcceptsNullForRoot() {
+        var project = project();
+        var folder = new TestCaseFolder(project, null, "Smoke", null, 0);
+        var testCase = new TestCase(project, "TC-001", "t", TestCaseType.MANUAL, TestCasePriority.LOW);
+        testCase.setParentFolder(folder);
+        testCase.setParentFolder(null);
+        assertThat(testCase.getParentFolder()).isNull();
     }
 }

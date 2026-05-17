@@ -481,6 +481,10 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "080", // V080: operational_asset subtype + metadata (GC-M011)
                         "081", // V081: operational_asset_audit parity for GC-M011
                         "082", // V082: asset_subtype_schema (GC-M011 registry)
-                        "083"); // V083: asset_subtype_schema_audit
+                        "083", // V083: asset_subtype_schema_audit
+                        "084", // V084: create test_case_folder (TC-005 / ADR-043)
+                        "085", // V085: create test_case_folder_audit
+                        "086", // V086: add test_case.parent_folder_id + sort_order
+                        "087"); // V087: add test_case_audit.parent_folder_id + sort_order
     }
 }

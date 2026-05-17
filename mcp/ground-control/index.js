@@ -149,6 +149,10 @@ import {
   TEST_CASE_STATUSES, TEST_CASE_TYPES, TEST_CASE_PRIORITIES, TEST_CASE_FORMATS,
   // ---- test case steps (TC-002 / ADR-041) ----
   createTestCaseStep, updateTestCaseStep, deleteTestCaseStep,
+  // ---- test case folders + move/copy/reorder (TC-005 / ADR-043) ----
+  createTestCaseFolder, updateTestCaseFolder, deleteTestCaseFolder,
+  moveTestCaseFolder, reorderTestCaseFolders,
+  moveTestCase, copyTestCase, reorderTestCases,
   // ---- enums ----
   STATUSES, REQUIREMENT_TYPES, PRIORITIES, RELATION_TYPES,
   ARTIFACT_TYPES, LINK_TYPES, CHANGE_CATEGORIES, CONFIDENCE_LEVELS,
@@ -1566,6 +1570,9 @@ const TEST_CASE_ACTIONS = [
   "create", "update", "delete", "transition",
   "step-create", "step-update", "step-delete",
   "gherkin-create", "gherkin-update", "gherkin-delete",
+  // TC-005 / ADR-043 — Hierarchical organisation actions.
+  "folder-create", "folder-update", "folder-delete", "folder-move", "folder-reorder",
+  "move", "copy", "reorder",
 ];
 
 server.tool(
@@ -1611,6 +1618,16 @@ server.tool(
     // to avoid clashing with any other "source" field on future test_case
     // sub-resources); handler maps it to backend body `{ source }`.
     gherkin_source: z.string().optional(),
+    // TC-005 / ADR-043 — folder + move/copy/reorder action fields.
+    folder_id: z.string().uuid().optional(),
+    parent_folder_id: z.string().uuid().nullable().optional(),
+    sort_order: z.number().int().nonnegative().nullable().optional(),
+    folder_title: z.string().optional(),
+    folder_description: z.string().nullable().optional(),
+    clear_folder_description: z.boolean().optional(),
+    new_uid: z.string().optional(),
+    ordered_folder_ids: z.array(z.string().uuid()).optional(),
+    ordered_test_case_ids: z.array(z.string().uuid()).optional(),
   },
   async (args) => {
     try {
@@ -1619,7 +1636,37 @@ server.tool(
         "preconditions", "postconditions", "estimated_duration_seconds",
         "clear_description", "clear_preconditions", "clear_postconditions",
         "clear_estimated_duration",
+        // TC-005 / ADR-043 — Placement fields on create only. The
+        // backend's UpdateTestCaseRequest does NOT carry parent_folder_id
+        // or sort_order; if those were in the update allowlist the MCP
+        // call would accept them silently and Spring would drop them at
+        // deserialization (codex cycle-2 finding). Update uses a separate
+        // allowlist below; move/copy/reorder are dedicated actions.
+        "parent_folder_id", "sort_order",
       ];
+      const UPDATE_ENTITY_FIELDS = [
+        "title", "type", "priority", "description",
+        "preconditions", "postconditions", "estimated_duration_seconds",
+        "clear_description", "clear_preconditions", "clear_postconditions",
+        "clear_estimated_duration",
+      ];
+      // TC-005 / ADR-043 — TestCaseFolder request bodies. `folder_title` and
+      // `folder_description` are MCP-side names that map to the backend's
+      // `title` / `description` via lib.js FIELD_NAME_MAP; on update,
+      // `clear_folder_description` maps to `clearDescription`.
+      const folderCreateBody = () => {
+        const body = pick(args, ["parent_folder_id", "sort_order"]);
+        if (args.folder_title !== undefined) body.title = args.folder_title;
+        if (args.folder_description !== undefined) body.description = args.folder_description;
+        return body;
+      };
+      const folderUpdateBody = () => {
+        const body = {};
+        if (args.folder_title !== undefined) body.title = args.folder_title;
+        if (args.folder_description !== undefined) body.description = args.folder_description;
+        if (args.clear_folder_description !== undefined) body.clearDescription = args.clear_folder_description;
+        return body;
+      };
       const STEP_FIELDS = [
         "step_number", "expected_result", "actual_result", "clear_actual_result",
       ];
@@ -1644,7 +1691,7 @@ server.tool(
         case "update": {
           reqArg(args, "id", "update");
           return ok(JSON.stringify(
-            await updateTestCase(args.id, pick(args, ENTITY_FIELDS), args.project),
+            await updateTestCase(args.id, pick(args, UPDATE_ENTITY_FIELDS), args.project),
             null,
             2,
           ));
@@ -1716,6 +1763,84 @@ server.tool(
           reqArg(args, "test_case_id", "gherkin-delete");
           await deleteTestCaseGherkin(args.test_case_id, args.project);
           return ok("Deleted");
+        }
+        case "folder-create": {
+          reqArg(args, "folder_title", "folder-create");
+          return ok(JSON.stringify(
+            await createTestCaseFolder(folderCreateBody(), args.project),
+            null,
+            2,
+          ));
+        }
+        case "folder-update": {
+          reqArg(args, "folder_id", "folder-update");
+          return ok(JSON.stringify(
+            await updateTestCaseFolder(args.folder_id, folderUpdateBody(), args.project),
+            null,
+            2,
+          ));
+        }
+        case "folder-delete": {
+          reqArg(args, "folder_id", "folder-delete");
+          await deleteTestCaseFolder(args.folder_id, args.project);
+          return ok("Deleted");
+        }
+        case "folder-move": {
+          reqArg(args, "folder_id", "folder-move");
+          return ok(JSON.stringify(
+            await moveTestCaseFolder(
+              args.folder_id,
+              { parentFolderId: args.parent_folder_id ?? null, sortOrder: args.sort_order ?? null },
+              args.project,
+            ),
+            null,
+            2,
+          ));
+        }
+        case "folder-reorder": {
+          reqArg(args, "ordered_folder_ids", "folder-reorder");
+          await reorderTestCaseFolders(
+            { parentFolderId: args.parent_folder_id ?? null, orderedFolderIds: args.ordered_folder_ids },
+            args.project,
+          );
+          return ok("Reordered");
+        }
+        case "move": {
+          reqArg(args, "id", "move");
+          return ok(JSON.stringify(
+            await moveTestCase(
+              args.id,
+              { parentFolderId: args.parent_folder_id ?? null, sortOrder: args.sort_order ?? null },
+              args.project,
+            ),
+            null,
+            2,
+          ));
+        }
+        case "copy": {
+          reqArg(args, "id", "copy");
+          reqArg(args, "new_uid", "copy");
+          return ok(JSON.stringify(
+            await copyTestCase(
+              args.id,
+              {
+                newUid: args.new_uid,
+                parentFolderId: args.parent_folder_id ?? null,
+                sortOrder: args.sort_order ?? null,
+              },
+              args.project,
+            ),
+            null,
+            2,
+          ));
+        }
+        case "reorder": {
+          reqArg(args, "ordered_test_case_ids", "reorder");
+          await reorderTestCases(
+            { parentFolderId: args.parent_folder_id ?? null, orderedTestCaseIds: args.ordered_test_case_ids },
+            args.project,
+          );
+          return ok("Reordered");
         }
         default: return err(new Error(`Unknown action: ${args.action}`));
       }

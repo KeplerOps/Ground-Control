@@ -20,7 +20,10 @@ import com.keplerops.groundcontrol.api.testcases.TestCaseRequest;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.testcases.model.TestCase;
+import com.keplerops.groundcontrol.domain.testcases.service.CopyTestCaseCommand;
 import com.keplerops.groundcontrol.domain.testcases.service.CreateTestCaseCommand;
+import com.keplerops.groundcontrol.domain.testcases.service.MoveTestCaseCommand;
+import com.keplerops.groundcontrol.domain.testcases.service.ReorderTestCasesCommand;
 import com.keplerops.groundcontrol.domain.testcases.service.TestCaseService;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseFormat;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCasePriority;
@@ -34,6 +37,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -291,6 +295,8 @@ class TestCaseControllerTest {
                 null,
                 null,
                 null,
+                null,
+                null,
                 null);
         assertThat(request.format()).isEqualTo(TestCaseFormat.GHERKIN);
     }
@@ -308,5 +314,73 @@ class TestCaseControllerTest {
                                 {"status":"NOT_A_STATUS"}
                                 """))
                 .andExpect(status().isUnprocessableEntity());
+    }
+
+    @Test
+    void moveDelegatesToService() throws Exception {
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(testCaseService.move(eq(PROJECT_ID), eq(TEST_CASE_ID), any(MoveTestCaseCommand.class)))
+                .thenReturn(makeTestCase());
+
+        UUID folderId = UUID.randomUUID();
+        mockMvc.perform(put("/api/v1/test-cases/{id}/move", TEST_CASE_ID)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"parentFolderId\":\"" + folderId + "\",\"sortOrder\":3}"))
+                .andExpect(status().isOk());
+        // Capture so a body-binding regression dropping parentFolderId or
+        // sortOrder is caught at unit level (test-quality cycle 1).
+        ArgumentCaptor<MoveTestCaseCommand> captor = ArgumentCaptor.forClass(MoveTestCaseCommand.class);
+        verify(testCaseService).move(eq(PROJECT_ID), eq(TEST_CASE_ID), captor.capture());
+        assertThat(captor.getValue().parentFolderId()).isEqualTo(folderId);
+        assertThat(captor.getValue().sortOrder()).isEqualTo(3);
+    }
+
+    @Test
+    void copyDelegatesToServiceAndReturns201() throws Exception {
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(testCaseService.copy(eq(PROJECT_ID), eq(TEST_CASE_ID), any(CopyTestCaseCommand.class)))
+                .thenReturn(makeTestCase());
+
+        mockMvc.perform(post("/api/v1/test-cases/{id}/copy", TEST_CASE_ID)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"newUid\":\"TC-002\"}"))
+                .andExpect(status().isCreated());
+        // Capture: a regression failing to bind newUid would produce a
+        // blank-UID copy at runtime (test-quality cycle 1).
+        ArgumentCaptor<CopyTestCaseCommand> captor = ArgumentCaptor.forClass(CopyTestCaseCommand.class);
+        verify(testCaseService).copy(eq(PROJECT_ID), eq(TEST_CASE_ID), captor.capture());
+        assertThat(captor.getValue().newUid()).isEqualTo("TC-002");
+    }
+
+    @Test
+    void copyReturns422WhenNewUidBlank() throws Exception {
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+
+        mockMvc.perform(post("/api/v1/test-cases/{id}/copy", TEST_CASE_ID)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"newUid\":\"\"}"))
+                .andExpect(status().isUnprocessableEntity());
+    }
+
+    @Test
+    void reorderDelegatesToService() throws Exception {
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+
+        mockMvc.perform(put("/api/v1/test-cases/reorder")
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"parentFolderId\":null,\"orderedTestCaseIds\":[\"" + a + "\",\"" + b + "\"]}"))
+                .andExpect(status().isNoContent());
+        // Capture: a wrong DTO field name for orderedTestCaseIds would
+        // silently no-op the reorder (test-quality cycle 1).
+        ArgumentCaptor<ReorderTestCasesCommand> captor = ArgumentCaptor.forClass(ReorderTestCasesCommand.class);
+        verify(testCaseService).reorder(eq(PROJECT_ID), captor.capture());
+        assertThat(captor.getValue().parentFolderId()).isNull();
+        assertThat(captor.getValue().orderedTestCaseIds()).containsExactly(a, b);
     }
 }

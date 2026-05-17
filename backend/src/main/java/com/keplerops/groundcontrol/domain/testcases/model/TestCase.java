@@ -19,6 +19,7 @@ import jakarta.persistence.UniqueConstraint;
 import java.util.Map;
 import org.hibernate.envers.Audited;
 import org.hibernate.envers.NotAudited;
+import org.hibernate.envers.RelationTargetAuditMode;
 
 @Entity
 @Audited
@@ -70,6 +71,20 @@ public class TestCase extends BaseEntity {
 
     @Column(name = "estimated_duration_seconds")
     private Long estimatedDurationSeconds;
+
+    /**
+     * TC-005 / ADR-043 — Hierarchical placement. {@code null} parent means
+     * the test case sits at the project root. Sibling order within the
+     * container is provided by {@link #sortOrder}; reorder operations
+     * update only the affected container.
+     */
+    @Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_folder_id")
+    private TestCaseFolder parentFolder;
+
+    @Column(name = "sort_order", nullable = false)
+    private int sortOrder;
 
     protected TestCase() {
         // JPA
@@ -205,5 +220,24 @@ public class TestCase extends BaseEntity {
                     "Estimated duration must be non-negative", "invalid_test_case", Map.of());
         }
         this.estimatedDurationSeconds = estimatedDurationSeconds;
+    }
+
+    public TestCaseFolder getParentFolder() {
+        return parentFolder;
+    }
+
+    public void setParentFolder(TestCaseFolder parentFolder) {
+        this.parentFolder = parentFolder;
+    }
+
+    public int getSortOrder() {
+        return sortOrder;
+    }
+
+    public void setSortOrder(int sortOrder) {
+        if (sortOrder < 0) {
+            throw new DomainValidationException("Sort order must be non-negative", "invalid_test_case", Map.of());
+        }
+        this.sortOrder = sortOrder;
     }
 }

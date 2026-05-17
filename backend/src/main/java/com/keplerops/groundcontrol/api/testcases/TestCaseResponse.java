@@ -21,6 +21,8 @@ public record TestCaseResponse(
         TestCaseType type,
         TestCaseFormat format,
         Long estimatedDurationSeconds,
+        UUID parentFolderId,
+        int sortOrder,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -38,6 +40,8 @@ public record TestCaseResponse(
                 testCase.getType(),
                 testCase.getFormat(),
                 testCase.getEstimatedDurationSeconds(),
+                testCase.getParentFolder() != null ? testCase.getParentFolder().getId() : null,
+                testCase.getSortOrder(),
                 testCase.getCreatedAt(),
                 testCase.getUpdatedAt());
     }

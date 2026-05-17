@@ -547,6 +547,17 @@ const TO_CAMEL = {
   // gc_test_case); it maps to the backend's `source` body field via the
   // step-style explicit body construction in index.js, not via this table.
   // The `format` MCP arg is already snake-free, so no entry needed here.
+  // TC-005 / ADR-043 — TestCaseFolderRequest / move / copy / reorder fields.
+  // Same rationale: missing entries here would let `gc_test_case` forward
+  // snake-case names that Jackson silently drops on the backend.
+  parent_folder_id: "parentFolderId",
+  sort_order: "sortOrder",
+  folder_title: "title",
+  folder_description: "description",
+  clear_folder_description: "clearDescription",
+  new_uid: "newUid",
+  ordered_folder_ids: "orderedFolderIds",
+  ordered_test_case_ids: "orderedTestCaseIds",
   // GC-V001 finding adapter — backend FindingRequest / UpdateFindingRequest
   // use these camelCase field names. Mapping is needed so `gc_finding` reaches
   // backend Bean Validation with the right field names (issue #279).
@@ -7654,6 +7665,52 @@ export async function deleteTestCaseGherkin(testCaseId, project) {
   await request("DELETE", `/api/v1/test-cases/${encodeURIComponent(testCaseId)}/gherkin`, {
     params: { project },
   });
+}
+
+// TC-005 / ADR-043 — TestCaseFolder + move/copy/reorder wrappers.
+
+export async function createTestCaseFolder(data, project) {
+  return request("POST", "/api/v1/test-cases/folders", { body: data, params: { project } });
+}
+
+export async function updateTestCaseFolder(id, data, project) {
+  return request("PUT", `/api/v1/test-cases/folders/${encodeURIComponent(id)}`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function deleteTestCaseFolder(id, project) {
+  await request("DELETE", `/api/v1/test-cases/folders/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function moveTestCaseFolder(id, data, project) {
+  return request("PUT", `/api/v1/test-cases/folders/${encodeURIComponent(id)}/move`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function reorderTestCaseFolders(data, project) {
+  await request("PUT", "/api/v1/test-cases/folders/reorder", { body: data, params: { project } });
+}
+
+export async function moveTestCase(id, data, project) {
+  return request("PUT", `/api/v1/test-cases/${encodeURIComponent(id)}/move`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function copyTestCase(id, data, project) {
+  return request("POST", `/api/v1/test-cases/${encodeURIComponent(id)}/copy`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function reorderTestCases(data, project) {
+  await request("PUT", "/api/v1/test-cases/reorder", { body: data, params: { project } });
 }
 
 export async function createControl(data, project) {

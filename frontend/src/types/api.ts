@@ -96,11 +96,7 @@ export const PACK_REGISTRY_IMPORT_FORMATS: PackRegistryImportFormat[] = [
   "OSCAL_JSON",
   "GC_MANIFEST",
 ];
-export type TestCaseStatus =
-  | "DRAFT"
-  | "APPROVED"
-  | "DEPRECATED"
-  | "ARCHIVED";
+export type TestCaseStatus = "DRAFT" | "APPROVED" | "DEPRECATED" | "ARCHIVED";
 export const TEST_CASE_STATUSES: TestCaseStatus[] = [
   "DRAFT",
   "APPROVED",
@@ -108,7 +104,11 @@ export const TEST_CASE_STATUSES: TestCaseStatus[] = [
   "ARCHIVED",
 ];
 export type TestCaseType = "MANUAL" | "AUTOMATED" | "HYBRID";
-export const TEST_CASE_TYPES: TestCaseType[] = ["MANUAL", "AUTOMATED", "HYBRID"];
+export const TEST_CASE_TYPES: TestCaseType[] = [
+  "MANUAL",
+  "AUTOMATED",
+  "HYBRID",
+];
 export type TestCasePriority = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
 export const TEST_CASE_PRIORITIES: TestCasePriority[] = [
   "CRITICAL",
@@ -169,6 +169,83 @@ export interface TestCaseGherkinRequest {
 
 export interface UpdateTestCaseGherkinRequest {
   source: string;
+}
+
+// TC-005 / ADR-043 — Hierarchical test repository organisation. Mirrors
+// the backend TestCaseFolderRequest / Response and the move/copy/reorder
+// request shapes.
+export interface TestCaseFolderResponse {
+  id: string;
+  projectIdentifier: string;
+  parentFolderId: string | null;
+  title: string;
+  description: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TestCaseFolderRequest {
+  parentFolderId?: string | null;
+  title: string;
+  description?: string | null;
+  sortOrder?: number | null;
+}
+
+export interface UpdateTestCaseFolderRequest {
+  title?: string;
+  description?: string | null;
+  clearDescription?: boolean;
+}
+
+export interface MoveTestCaseFolderRequest {
+  parentFolderId: string | null;
+  sortOrder?: number | null;
+}
+
+export interface ReorderTestCaseFoldersRequest {
+  parentFolderId: string | null;
+  orderedFolderIds: string[];
+}
+
+export interface MoveTestCaseRequest {
+  parentFolderId: string | null;
+  sortOrder?: number | null;
+}
+
+export interface CopyTestCaseRequest {
+  newUid: string;
+  parentFolderId?: string | null;
+  sortOrder?: number | null;
+}
+
+export interface ReorderTestCasesRequest {
+  parentFolderId: string | null;
+  orderedTestCaseIds: string[];
+}
+
+export type TestCaseTreeNodeKind = "FOLDER" | "TEST_CASE";
+
+export interface TestCaseTreeLeaf {
+  uid: string;
+  status: TestCaseStatus;
+  type: TestCaseType;
+  priority: TestCasePriority;
+  format: TestCaseFormat;
+}
+
+export interface TestCaseTreeNode {
+  kind: TestCaseTreeNodeKind;
+  id: string;
+  parentFolderId: string | null;
+  title: string;
+  description: string | null;
+  sortOrder: number;
+  // Populated for kind === "TEST_CASE"; null for folders.
+  testCase: TestCaseTreeLeaf | null;
+  // Folder nodes carry nested children (folders first by sortOrder, then
+  // test cases). Test-case nodes carry an empty children array.
+  children: TestCaseTreeNode[];
 }
 export type GraphEntityType =
   | "REQUIREMENT"
