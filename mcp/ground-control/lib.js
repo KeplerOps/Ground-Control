@@ -558,6 +558,17 @@ const TO_CAMEL = {
   new_uid: "newUid",
   ordered_folder_ids: "orderedFolderIds",
   ordered_test_case_ids: "orderedTestCaseIds",
+  // TC-006 / ADR-044 — TestPlanRequest / UpdateTestPlanRequest fields.
+  // Same rationale as the TC-001 entries above: omitting these would let
+  // `gc_test_plan` forward snake-case names that Jackson drops on the
+  // backend DTO.
+  start_date: "startDate",
+  end_date: "endDate",
+  clear_product: "clearProduct",
+  clear_version: "clearVersion",
+  clear_build: "clearBuild",
+  clear_start_date: "clearStartDate",
+  clear_end_date: "clearEndDate",
   // GC-V001 finding adapter — backend FindingRequest / UpdateFindingRequest
   // use these camelCase field names. Mapping is needed so `gc_finding` reaches
   // backend Bean Validation with the right field names (issue #279).
@@ -7711,6 +7722,44 @@ export async function copyTestCase(id, data, project) {
 
 export async function reorderTestCases(data, project) {
   await request("PUT", "/api/v1/test-cases/reorder", { body: data, params: { project } });
+}
+
+// TC-006 / ADR-044 — TestPlan aggregate. Top-level planning container; flat
+// (no hierarchy). Reads (list, get, getByUid) may also route through gc_query
+// against the TestPlan entity, consistent with the other test-management
+// wrappers.
+
+export const TEST_PLAN_STATUSES = ["DRAFT", "ACTIVE", "IN_PROGRESS", "COMPLETED", "ARCHIVED"];
+
+export async function createTestPlan(data, project) {
+  return request("POST", "/api/v1/test-plans", { body: data, params: { project } });
+}
+
+export async function listTestPlans(project) {
+  return request("GET", "/api/v1/test-plans", { params: { project } });
+}
+
+export async function getTestPlan(id, project) {
+  return request("GET", `/api/v1/test-plans/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function getTestPlanByUid(uid, project) {
+  return request("GET", `/api/v1/test-plans/uid/${encodeURIComponent(uid)}`, { params: { project } });
+}
+
+export async function updateTestPlan(id, data, project) {
+  return request("PUT", `/api/v1/test-plans/${encodeURIComponent(id)}`, { body: data, params: { project } });
+}
+
+export async function deleteTestPlan(id, project) {
+  await request("DELETE", `/api/v1/test-plans/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function transitionTestPlanStatus(id, status, project) {
+  return request("PUT", `/api/v1/test-plans/${encodeURIComponent(id)}/status`, {
+    body: { status },
+    params: { project },
+  });
 }
 
 export async function createControl(data, project) {

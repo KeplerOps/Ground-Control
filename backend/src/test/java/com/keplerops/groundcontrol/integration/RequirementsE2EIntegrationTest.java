@@ -485,6 +485,8 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "084", // V084: create test_case_folder (TC-005 / ADR-043)
                         "085", // V085: create test_case_folder_audit
                         "086", // V086: add test_case.parent_folder_id + sort_order
-                        "087"); // V087: add test_case_audit.parent_folder_id + sort_order
+                        "087", // V087: add test_case_audit.parent_folder_id + sort_order
+                        "088", // V088: create test_plan (TC-006 / ADR-044)
+                        "089"); // V089: create test_plan_audit
     }
 }

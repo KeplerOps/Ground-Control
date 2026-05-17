@@ -153,6 +153,9 @@ import {
   createTestCaseFolder, updateTestCaseFolder, deleteTestCaseFolder,
   moveTestCaseFolder, reorderTestCaseFolders,
   moveTestCase, copyTestCase, reorderTestCases,
+  // ---- test plans (TC-006 / ADR-044) ----
+  createTestPlan, updateTestPlan, deleteTestPlan, transitionTestPlanStatus,
+  TEST_PLAN_STATUSES,
   // ---- enums ----
   STATUSES, REQUIREMENT_TYPES, PRIORITIES, RELATION_TYPES,
   ARTIFACT_TYPES, LINK_TYPES, CHANGE_CATEGORIES, CONFIDENCE_LEVELS,
@@ -1841,6 +1844,92 @@ server.tool(
             args.project,
           );
           return ok("Reordered");
+        }
+        default: return err(new Error(`Unknown action: ${args.action}`));
+      }
+    } catch (e) { return err(e); }
+  },
+);
+
+// gc_test_plan: TC-006 / ADR-044. Top-level planning aggregate at
+// /api/v1/test-plans. Plans are flat (no hierarchy) and carry release
+// coordinates (product / version / build) plus a planned schedule
+// (start_date / end_date). Reads (list, get, get-by-uid) route through
+// gc_query.
+const TEST_PLAN_ACTIONS = ["create", "update", "delete", "transition"];
+
+server.tool(
+  "gc_test_plan",
+  `Test plan operations (TC-006 / ADR-044). ` +
+    `Actions: ${TEST_PLAN_ACTIONS.join(", ")}. ` +
+    `Reads (list, get, get-by-uid) route through gc_query.`,
+  {
+    action: z.enum(TEST_PLAN_ACTIONS),
+    id: z.string().uuid().optional(),
+    project: z.string().optional(),
+    uid: z.string().optional(),
+    name: z.string().optional(),
+    description: z.string().optional(),
+    product: z.string().optional(),
+    version: z.string().optional(),
+    build: z.string().optional(),
+    status: z.enum(TEST_PLAN_STATUSES).optional(),
+    // Dates accepted as ISO-8601 strings (YYYY-MM-DD); Jackson binds them to
+    // LocalDate on the backend.
+    start_date: z.string().optional(),
+    end_date: z.string().optional(),
+    // Partial-update clear flags. Sending clear_*: true overrides any non-null
+    // value for the same field in the same request body.
+    clear_description: z.boolean().optional(),
+    clear_product: z.boolean().optional(),
+    clear_version: z.boolean().optional(),
+    clear_build: z.boolean().optional(),
+    clear_start_date: z.boolean().optional(),
+    clear_end_date: z.boolean().optional(),
+  },
+  async (args) => {
+    try {
+      const TEST_PLAN_CREATE_FIELDS = [
+        "uid", "name", "description", "product", "version", "build",
+        "start_date", "end_date",
+      ];
+      const TEST_PLAN_UPDATE_FIELDS = [
+        "name", "description", "product", "version", "build",
+        "start_date", "end_date",
+        "clear_description", "clear_product", "clear_version", "clear_build",
+        "clear_start_date", "clear_end_date",
+      ];
+      switch (args.action) {
+        case "create": {
+          reqArg(args, "uid", "create");
+          reqArg(args, "name", "create");
+          return ok(JSON.stringify(
+            await createTestPlan(pick(args, TEST_PLAN_CREATE_FIELDS), args.project),
+            null,
+            2,
+          ));
+        }
+        case "update": {
+          reqArg(args, "id", "update");
+          return ok(JSON.stringify(
+            await updateTestPlan(args.id, pick(args, TEST_PLAN_UPDATE_FIELDS), args.project),
+            null,
+            2,
+          ));
+        }
+        case "delete": {
+          reqArg(args, "id", "delete");
+          await deleteTestPlan(args.id, args.project);
+          return ok("Deleted");
+        }
+        case "transition": {
+          reqArg(args, "id", "transition");
+          reqArg(args, "status", "transition");
+          return ok(JSON.stringify(
+            await transitionTestPlanStatus(args.id, args.status, args.project),
+            null,
+            2,
+          ));
         }
         default: return err(new Error(`Unknown action: ${args.action}`));
       }

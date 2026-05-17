@@ -50,7 +50,7 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         "040", "041", "042", "043", "044", "045", "046", "047", "048", "049", "050", "051", "052",
                         "053", "054", "055", "056", "057", "058", "059", "060", "061", "062", "063", "064", "065",
                         "066", "067", "068", "069", "070", "071", "072", "073", "074", "075", "076", "077", "078",
-                        "079", "080", "081", "082", "083", "084", "085", "086", "087");
+                        "079", "080", "081", "082", "083", "084", "085", "086", "087", "088", "089");
     }
 
     @Test
@@ -497,6 +497,102 @@ class MigrationSmokeTest extends BaseIntegrationTest {
         entityManager
                 .createNativeQuery("SELECT 1 FROM pg_indexes WHERE tablename = 'test_case_folder'"
                         + " AND indexname = 'uq_test_case_folder_title_under_parent'")
+                .getSingleResult();
+        // V088-V089 test_plan + audit (TC-006 / ADR-044). Same column-existence
+        // probe rationale as the older audit-table assertions: ddl-auto:
+        // validate doesn't see audit shadow tables, so the columns most likely
+        // to silently regress are pinned via information_schema. project_id is
+        // intentionally absent from test_plan_audit (@NotAudited on
+        // TestPlan.project), mirroring the test_case_folder_audit shape.
+        entityManager.createNativeQuery("SELECT 1 FROM test_plan LIMIT 1").getResultList();
+        entityManager.createNativeQuery("SELECT 1 FROM test_plan_audit LIMIT 1").getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan'"
+                        + " AND column_name = 'uid' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan'"
+                        + " AND column_name = 'name' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan'"
+                        + " AND column_name = 'product'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan'"
+                        + " AND column_name = 'version'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan'"
+                        + " AND column_name = 'build'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan'"
+                        + " AND column_name = 'status' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan'"
+                        + " AND column_name = 'start_date'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan'"
+                        + " AND column_name = 'end_date'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan_audit'"
+                        + " AND column_name = 'uid'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan_audit'"
+                        + " AND column_name = 'name'")
+                .getSingleResult();
+        // Nullable payload columns on the audit shadow. A V089 copy-paste
+        // regression that dropped any of these would surface as an Envers
+        // flush failure on the first plan mutation rather than as a
+        // targeted schema-smoke failure (test-quality cycle 1).
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan_audit'"
+                        + " AND column_name = 'description'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan_audit'"
+                        + " AND column_name = 'product'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan_audit'"
+                        + " AND column_name = 'version'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan_audit'"
+                        + " AND column_name = 'build'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan_audit'"
+                        + " AND column_name = 'status'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan_audit'"
+                        + " AND column_name = 'start_date'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan_audit'"
+                        + " AND column_name = 'end_date'")
+                .getSingleResult();
+        // BaseEntity timestamps on the audit shadow — AuditRetentionJob ages
+        // plan revisions out via these columns.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan_audit'"
+                        + " AND column_name = 'created_at'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_plan_audit'"
+                        + " AND column_name = 'updated_at'")
+                .getSingleResult();
+        // (project_id, uid) uniqueness backs the project-scoped UID invariant.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_plan'"
+                        + " AND constraint_name = 'uq_test_plan_project_uid'")
                 .getSingleResult();
     }
 }
