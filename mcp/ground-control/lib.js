@@ -488,6 +488,17 @@ const TO_CAMEL = {
   clear_criticality: "clearCriticality",
   clear_business_context: "clearBusinessContext",
   clear_scope_designation: "clearScopeDesignation",
+  // GC-M011 — asset subtype + metadata + subtype-schema registry. Without
+  // these the snake_case clear flags would not bind on the backend DTO and
+  // recursive camelization would mutate user-defined metadata / schema keys
+  // (codex pre-push review #722).
+  clear_subtype: "clearSubtype",
+  clear_metadata: "clearMetadata",
+  schema_version: "schemaVersion",
+  schema_body: "schemaBody",
+  schema_description: "description",
+  clear_schema_description: "clearDescription",
+  clear_schema_body: "clearSchemaBody",
   member_uids: "memberUids",
   root_uids: "rootUids",
   target_type: "targetType",
@@ -632,12 +643,30 @@ const TO_CAMEL = {
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
 
+// Keys whose values are free-form user-defined data — recursive camelization
+// would mutate caller-defined inner keys and change the persisted contract.
+// Example: `metadata: { cloud_account_id: "123" }` must be persisted with the
+// inner key `cloud_account_id`, not `cloudAccountId`. See codex pre-push
+// review on #722.
+const OPAQUE_VALUE_KEYS = new Set([
+  "metadata",
+  "schemaBody",
+  "schema_body",
+]);
+
+function copyShallow(value) {
+  if (value === null || value === undefined || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.slice();
+  return { ...value };
+}
+
 export function toCamelCase(obj) {
   if (obj === null || obj === undefined || typeof obj !== "object") return obj;
   if (Array.isArray(obj)) return obj.map(toCamelCase);
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
-    out[TO_CAMEL[k] || k] = toCamelCase(v);
+    const renamed = TO_CAMEL[k] || k;
+    out[renamed] = OPAQUE_VALUE_KEYS.has(k) || OPAQUE_VALUE_KEYS.has(renamed) ? copyShallow(v) : toCamelCase(v);
   }
   return out;
 }
@@ -647,7 +676,13 @@ export function toSnakeCase(obj) {
   if (Array.isArray(obj)) return obj.map(toSnakeCase);
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
-    out[TO_SNAKE[k] || k] = toSnakeCase(v);
+    const renamed = TO_SNAKE[k] || k;
+    // Symmetric to toCamelCase: free-form user-defined maps (metadata,
+    // schemaBody) must reach the caller verbatim. Without this guard,
+    // response normalization would rewrite an inner key like `assetType`
+    // (a project-defined metadata field) into `asset_type`, mutating the
+    // persisted contract round-trip. See codex over-cap finding 5 on #722.
+    out[renamed] = OPAQUE_VALUE_KEYS.has(k) || OPAQUE_VALUE_KEYS.has(renamed) ? copyShallow(v) : toSnakeCase(v);
   }
   return out;
 }
@@ -7103,8 +7138,10 @@ export async function createAsset(data, project) {
   return request("POST", "/api/v1/assets", { body: data, params: { project } });
 }
 
-export async function listAssets({ project, type } = {}) {
-  return request("GET", "/api/v1/assets", { params: { project, type } });
+export async function listAssets({ project, type, owner, steward, environment, criticality, scope, subtype } = {}) {
+  return request("GET", "/api/v1/assets", {
+    params: { project, type, owner, steward, environment, criticality, scope, subtype },
+  });
 }
 
 export async function getAsset(id, project) {
@@ -7265,6 +7302,42 @@ export async function deleteObservation(assetId, observationId, project) {
 
 export async function listLatestObservations(assetId, project) {
   return request("GET", `/api/v1/assets/${encodeURIComponent(assetId)}/observations/latest`, {
+    params: { project },
+  });
+}
+
+// GC-M011: subtype-schema registry actions on the asset API.
+export async function registerAssetSubtypeSchema(data, project) {
+  return request("POST", "/api/v1/assets/subtype-schemas", { body: data, params: { project } });
+}
+
+export async function listAssetSubtypeSchemas({ project, assetType, subtype } = {}) {
+  return request("GET", "/api/v1/assets/subtype-schemas", {
+    params: { project, assetType, subtype },
+  });
+}
+
+export async function getAssetSubtypeSchema(id, project) {
+  return request("GET", `/api/v1/assets/subtype-schemas/${encodeURIComponent(id)}`, {
+    params: { project },
+  });
+}
+
+export async function getActiveAssetSubtypeSchema(assetType, subtype, project) {
+  return request("GET", "/api/v1/assets/subtype-schemas/active", {
+    params: { project, assetType, subtype },
+  });
+}
+
+export async function updateAssetSubtypeSchema(id, data, project) {
+  return request("PUT", `/api/v1/assets/subtype-schemas/${encodeURIComponent(id)}`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function deprecateAssetSubtypeSchema(id, project) {
+  return request("POST", `/api/v1/assets/subtype-schemas/${encodeURIComponent(id)}/deprecate`, {
     params: { project },
   });
 }

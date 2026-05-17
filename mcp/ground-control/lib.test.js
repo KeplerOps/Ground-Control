@@ -212,6 +212,78 @@ describe("toCamelCase", () => {
     assert.equal(toCamelCase(42), 42);
     assert.deepEqual(toCamelCase({ already_camel: 1 }), { already_camel: 1 });
   });
+
+  it("rewrites the asset GC-M011 clear flags onto backend camelCase shape", () => {
+    const out = toCamelCase({ clear_subtype: true, clear_metadata: false });
+    assert.deepEqual(out, { clearSubtype: true, clearMetadata: false });
+  });
+
+  it("treats the asset metadata bag as opaque — inner keys are preserved verbatim", () => {
+    // GC-M011: project-defined metadata keys must reach the backend
+    // verbatim. Recursive camelization would rewrite e.g.
+    // `cloud_account_id` → `cloudAccountId` and change the persisted
+    // contract.
+    const out = toCamelCase({
+      subtype: "aws_ec2",
+      metadata: { cloud_account_id: "123", asset_type: "ignored-by-rewrite" },
+    });
+    assert.deepEqual(out, {
+      subtype: "aws_ec2",
+      metadata: { cloud_account_id: "123", asset_type: "ignored-by-rewrite" },
+    });
+  });
+
+  it("treats the subtype-schema body as opaque — declared field keys are preserved", () => {
+    // GC-M011: declared field names inside `schemaBody.fields` are part of
+    // the registered contract and must not be rewritten by the MCP
+    // camelizer.
+    const out = toCamelCase({
+      schema_body: {
+        fields: { cloud_account_id: { type: "STRING" }, asset_type: { type: "STRING" } },
+        allowAdditional: false,
+      },
+    });
+    assert.deepEqual(out, {
+      schemaBody: {
+        fields: { cloud_account_id: { type: "STRING" }, asset_type: { type: "STRING" } },
+        allowAdditional: false,
+      },
+    });
+  });
+});
+
+describe("toSnakeCase opaque-value-key guard (GC-M011)", () => {
+  it("treats response-side asset metadata as opaque — inner camelCase keys are preserved", () => {
+    // Codex over-cap finding 5: response normalization must not rewrite
+    // known API keys that collide with user-defined metadata keys such
+    // as `assetType`, `assetUid`, or `dueDate`. Those are part of the
+    // persisted subtype contract and must round-trip verbatim.
+    const out = toSnakeCase({
+      metadata: { assetType: "carried-through", regionId: "us-west-2" },
+    });
+    assert.deepEqual(out, {
+      metadata: { assetType: "carried-through", regionId: "us-west-2" },
+    });
+  });
+
+  it("treats response-side subtype-schema body as opaque", () => {
+    // The outer `schemaBody` key is renamed to `schema_body` by the
+    // standard TO_SNAKE mapping (envelope rename); the inner contents are
+    // preserved verbatim because the OPAQUE_VALUE_KEYS guard stops
+    // recursive walking once the matching key is hit.
+    const out = toSnakeCase({
+      schemaBody: {
+        fields: { assetUid: { type: "STRING" }, dueDate: { type: "STRING" } },
+        allowAdditional: false,
+      },
+    });
+    assert.deepEqual(out, {
+      schema_body: {
+        fields: { assetUid: { type: "STRING" }, dueDate: { type: "STRING" } },
+        allowAdditional: false,
+      },
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

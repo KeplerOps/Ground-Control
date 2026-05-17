@@ -165,8 +165,9 @@ class AssetControllerTest {
 
     @Test
     void listSupportsOwnershipCriticalityScopeFilters() throws Exception {
-        // GC-M012: list endpoint routes through listByProjectAndFilters when
-        // any of the new filter query parameters is supplied.
+        // GC-M012 + GC-M011: list endpoint routes through listByProjectAndFilters
+        // when any of the filter query parameters is supplied, including the
+        // GC-M011 `subtype` facet.
         when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
         when(assetService.listByProjectAndFilters(
                         PROJECT_ID,
@@ -175,7 +176,8 @@ class AssetControllerTest {
                         null,
                         com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment.PRODUCTION,
                         com.keplerops.groundcontrol.domain.assets.state.AssetCriticality.CRITICAL,
-                        com.keplerops.groundcontrol.domain.assets.state.AssetScope.IN_SCOPE))
+                        com.keplerops.groundcontrol.domain.assets.state.AssetScope.IN_SCOPE,
+                        "aws_ec2"))
                 .thenReturn(List.of(makeAsset()));
 
         mockMvc.perform(get("/api/v1/assets")
@@ -183,7 +185,21 @@ class AssetControllerTest {
                         .param("owner", "alice@example.com")
                         .param("environment", "PRODUCTION")
                         .param("criticality", "CRITICAL")
-                        .param("scope", "IN_SCOPE"))
+                        .param("scope", "IN_SCOPE")
+                        .param("subtype", "aws_ec2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)));
+    }
+
+    @Test
+    void listSupportsSubtypeAloneFilter() throws Exception {
+        // GC-M011: subtype alone is a valid filter facet on the canonical
+        // list path; routes through listByProjectAndFilters(... subtype).
+        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(assetService.listByProjectAndFilters(PROJECT_ID, null, null, null, null, null, null, "aws_ec2"))
+                .thenReturn(List.of(makeAsset()));
+
+        mockMvc.perform(get("/api/v1/assets").param("project", "ground-control").param("subtype", "aws_ec2"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)));
     }
@@ -270,6 +286,100 @@ class AssetControllerTest {
         org.assertj.core.api.Assertions.assertThat(cmd.clearOwner()).isFalse();
         org.assertj.core.api.Assertions.assertThat(cmd.clearCriticality()).isFalse();
         org.assertj.core.api.Assertions.assertThat(cmd.clearScopeDesignation()).isFalse();
+    }
+
+    @Test
+    void createCarriesSubtypeAndMetadata() throws Exception {
+        // GC-M011: subtype + metadata land on CreateAssetCommand and serialize
+        // through the response. ArgumentCaptor proves the controller wire-up,
+        // not just that the mock returns a plausible response.
+        var enriched = makeAsset();
+        enriched.setSubtype("aws_ec2");
+        enriched.setMetadata(java.util.Map.of("cloud_account_id", "123456", "region", "us-west-2"));
+        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(assetService.create(any())).thenReturn(enriched);
+
+        mockMvc.perform(
+                        post("/api/v1/assets")
+                                .param("project", "ground-control")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                                        {
+                                          "uid":"ASSET-EC2",
+                                          "name":"EC2 worker",
+                                          "assetType":"WORKLOAD",
+                                          "subtype":"aws_ec2",
+                                          "metadata":{"cloud_account_id":"123456","region":"us-west-2"}
+                                        }
+                                        """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.subtype", is("aws_ec2")))
+                .andExpect(jsonPath("$.metadata.cloud_account_id", is("123456")))
+                .andExpect(jsonPath("$.metadata.region", is("us-west-2")));
+
+        var captor = ArgumentCaptor.forClass(CreateAssetCommand.class);
+        verify(assetService).create(captor.capture());
+        var cmd = captor.getValue();
+        org.assertj.core.api.Assertions.assertThat(cmd.subtype()).isEqualTo("aws_ec2");
+        org.assertj.core.api.Assertions.assertThat(cmd.metadata())
+                .containsEntry("cloud_account_id", "123456")
+                .containsEntry("region", "us-west-2");
+    }
+
+    @Test
+    void updateMapsSubtypeAndMetadataClearFlags() throws Exception {
+        // GC-M011: PUT body's subtype/metadata + clearSubtype/clearMetadata
+        // land on UpdateAssetCommand. The captor proves the new wire entries
+        // aren't dropped; a transposition (e.g. clearSubtype wired to
+        // clearMetadata) fails the test.
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(assetService.update(eq(PROJECT_ID), eq(ASSET_ID), any())).thenReturn(makeAsset());
+
+        mockMvc.perform(
+                        put("/api/v1/assets/{id}", ASSET_ID)
+                                .param("project", "ground-control")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                                        {
+                                          "subtype":"service_principal",
+                                          "metadata":{"client_id":"abc"},
+                                          "clearMetadata":false,
+                                          "clearSubtype":false
+                                        }
+                                        """))
+                .andExpect(status().isOk());
+
+        var captor = ArgumentCaptor.forClass(UpdateAssetCommand.class);
+        verify(assetService).update(eq(PROJECT_ID), eq(ASSET_ID), captor.capture());
+        var cmd = captor.getValue();
+        org.assertj.core.api.Assertions.assertThat(cmd.subtype()).isEqualTo("service_principal");
+        org.assertj.core.api.Assertions.assertThat(cmd.metadata()).containsEntry("client_id", "abc");
+        org.assertj.core.api.Assertions.assertThat(cmd.clearSubtype()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(cmd.clearMetadata()).isFalse();
+    }
+
+    @Test
+    void updateClearsSubtypeAndMetadata() throws Exception {
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(assetService.update(eq(PROJECT_ID), eq(ASSET_ID), any())).thenReturn(makeAsset());
+
+        mockMvc.perform(
+                        put("/api/v1/assets/{id}", ASSET_ID)
+                                .param("project", "ground-control")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                                        {"clearSubtype":true,"clearMetadata":true}
+                                        """))
+                .andExpect(status().isOk());
+
+        var captor = ArgumentCaptor.forClass(UpdateAssetCommand.class);
+        verify(assetService).update(eq(PROJECT_ID), eq(ASSET_ID), captor.capture());
+        var cmd = captor.getValue();
+        org.assertj.core.api.Assertions.assertThat(cmd.clearSubtype()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(cmd.clearMetadata()).isTrue();
     }
 
     @Test

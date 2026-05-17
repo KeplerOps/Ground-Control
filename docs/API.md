@@ -419,7 +419,7 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
 | POST | `/assets?project=` | AssetRequest | 201 | Create asset |
-| GET | `/assets?project=&type=&owner=&steward=&environment=&criticality=&scope=` | — | 200 | List assets (any combination of filters is optional) |
+| GET | `/assets?project=&type=&owner=&steward=&environment=&criticality=&scope=&subtype=` | — | 200 | List assets (any combination of filters is optional; `subtype` is exact-match per the GC-M011 subtype catalog) |
 | GET | `/assets/{id}` | — | 200 | Get asset by UUID |
 | GET | `/assets/uid/{uid}?project=` | — | 200 | Get asset by UID |
 | PUT | `/assets/{id}` | UpdateAssetRequest | 200 | Update asset (partial) |
@@ -439,11 +439,18 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
   "environment": "PRODUCTION",
   "criticality": "CRITICAL",
   "businessContext": "Primary system of record for billing; PCI-DSS in scope.",
-  "scopeDesignation": "IN_SCOPE"
+  "scopeDesignation": "IN_SCOPE",
+  "subtype": "rds_postgres",
+  "metadata": {
+    "cloud_account_id": "1234567890",
+    "region": "us-west-2"
+  }
 }
 ```
 
 `owner`, `steward`, and `businessContext` are free-text labels (≤ 200 chars on `owner`/`steward`; `businessContext` is `TEXT`). All six GC-M012 metadata fields are optional on `AssetRequest` and on `UpdateAssetRequest`. On the update path, `null` / absent means "leave field unchanged" (mirrors the existing `name`/`description`/`assetType` null-means-unchanged semantics). To reset a previously-designated metadata field back to NULL ("not designated"), send the paired clear flag — `clearOwner`, `clearSteward`, `clearEnvironment`, `clearCriticality`, `clearBusinessContext`, or `clearScopeDesignation` — as `true`. The clear flag wins over a same-payload assignment so the wire semantics stay unambiguous (the assign loses). This mirrors the `clearRootCauseAnalysis` / `clearOwner` / `clearDueDate` pattern on `UpdateFindingRequest`.
+
+GC-M011 fields (`subtype`, `metadata`) follow the same null-means-unchanged / `clearSubtype` / `clearMetadata` convention on the update path. `subtype` is a narrower, project-defined classification under `assetType` (≤ 100 chars). `metadata` is a bounded key→scalar map (≤ 50 keys, key ≤ 100 chars, string value ≤ 4096 chars, scalar values only — strings / numbers / booleans / null). When a matching ACTIVE `AssetSubtypeSchema` (project + assetType + subtype) is registered, the validator additionally enforces the schema's field types, required fields, and bounds; otherwise only the universal bounds apply. `metadata` replacement is atomic — non-null `metadata` in `UpdateAssetRequest` replaces the entire map.
 
 Asset types: `APPLICATION`, `SERVICE`, `SYSTEM`, `DATABASE`, `NETWORK`, `HOST`, `CONTAINER`, `IDENTITY`, `DATA_STORE`, `ENDPOINT`, `INTEGRATION`, `WORKLOAD`, `THIRD_PARTY`, `BOUNDARY`, `OTHER`
 
@@ -454,6 +461,41 @@ Asset environment (GC-M012): `PRODUCTION`, `STAGING`, `DEVELOPMENT`, `TEST`, `NO
 Asset scope designation (GC-M012): `IN_SCOPE`, `OUT_OF_SCOPE`. Two-state explicit; the absence of either (NULL) means "not yet designated" — distinct from `archivedAt` (lifecycle), `quality_gate.scopeStatus`, control `implementationScope`, and risk `assetScopeSummary`.
 
 List filters route through `OperationalAssetRepository.findByProjectIdAndArchivedAtIsNullAndFilters` so any combination of `type` / `owner` / `steward` / `environment` / `criticality` / `scope` query parameters is honored in a single JPQL pass; risk, control, audit, and reporting workflows consume this same surface rather than inventing per-workflow lookups.
+
+### Asset Subtype Schemas (GC-M011 schema layering)
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/assets/subtype-schemas?project=` | AssetSubtypeSchemaRequest | 201 | Register a new ACTIVE schema (auto-deprecates the prior ACTIVE entry for the same `(assetType, subtype)`) |
+| GET | `/assets/subtype-schemas?project=&assetType=&subtype=` | — | 200 | List schemas; valid combinations are: neither (list all in project), `assetType` alone (list for that asset type), or both `assetType` + `subtype` (list for that exact pair). `subtype` alone without `assetType` is rejected with `asset_subtype_schema_filter_invalid` because the same subtype string may legitimately exist under different asset-type buckets |
+| GET | `/assets/subtype-schemas/active?project=&assetType=&subtype=` | — | 200 | Get the single ACTIVE schema for an `(assetType, subtype)` |
+| GET | `/assets/subtype-schemas/{id}` | — | 200 | Get schema by UUID |
+| PUT | `/assets/subtype-schemas/{id}` | UpdateAssetSubtypeSchemaRequest | 200 | Replace description / schema body (atomic) |
+| POST | `/assets/subtype-schemas/{id}/deprecate` | — | 200 | Mark schema DEPRECATED |
+
+**AssetSubtypeSchemaRequest:**
+
+```json
+{
+  "assetType": "WORKLOAD",
+  "subtype": "aws_ec2",
+  "schemaVersion": "v1",
+  "description": "AWS EC2 instance subtype schema",
+  "schemaBody": {
+    "fields": {
+      "cloud_account_id": {"type": "STRING", "required": true, "maxLength": 32},
+      "region": {"type": "ENUM", "required": true, "values": ["us-east-1", "us-west-2", "eu-west-1"]},
+      "instance_count": {"type": "INTEGER", "minimum": 0, "maximum": 1000},
+      "encrypted": {"type": "BOOLEAN"}
+    },
+    "allowAdditional": false
+  }
+}
+```
+
+Schema field types: `STRING`, `INTEGER`, `NUMBER`, `BOOLEAN`, `ENUM`. `required` defaults to `false`. `maxLength` applies to `STRING` only; `minimum` / `maximum` apply to `INTEGER` / `NUMBER` only; `values` is the case-sensitive allowed list for `ENUM`. `allowAdditional: false` (default) rejects metadata keys not declared in `fields`.
+
+Validation errors return HTTP `422` with the canonical `ErrorResponse` envelope and an `errorCode` of `asset_metadata_invalid`; the `detail` map identifies the offending field, the reason (`type_mismatch`, `required_field_missing`, `unknown_field`, `string_too_long`, `below_minimum`, `above_maximum`, `enum_value_not_allowed`, etc.), and the expected / actual values.
 
 ### Asset Relations
 

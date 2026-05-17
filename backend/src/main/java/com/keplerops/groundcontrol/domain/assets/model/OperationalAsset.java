@@ -6,7 +6,9 @@ import com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment;
 import com.keplerops.groundcontrol.domain.assets.state.AssetScope;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.shared.persistence.JacksonTextCollectionConverters;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -16,6 +18,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
+import java.util.Map;
 import org.hibernate.envers.Audited;
 import org.hibernate.envers.NotAudited;
 
@@ -62,6 +65,18 @@ public class OperationalAsset extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "scope_designation", length = 20)
     private AssetScope scopeDesignation;
+
+    // GC-M011: narrower classification under AssetType. Free-form,
+    // project-defined; a registered AssetSubtypeSchema may formalize the
+    // (project, assetType, subtype) contract.
+    @Column(length = 100)
+    private String subtype;
+
+    // GC-M011: subtype-specific metadata bag. Bounded by AssetSubtypeValidator;
+    // schema-validated when a matching ACTIVE AssetSubtypeSchema exists.
+    @Convert(converter = JacksonTextCollectionConverters.StringObjectMapConverter.class)
+    @Column(columnDefinition = "TEXT")
+    private Map<String, Object> metadata;
 
     @Column(name = "archived_at")
     private Instant archivedAt;
@@ -164,6 +179,22 @@ public class OperationalAsset extends BaseEntity {
 
     public void setScopeDesignation(AssetScope scopeDesignation) {
         this.scopeDesignation = scopeDesignation;
+    }
+
+    public String getSubtype() {
+        return subtype;
+    }
+
+    public void setSubtype(String subtype) {
+        this.subtype = subtype;
+    }
+
+    public Map<String, Object> getMetadata() {
+        return metadata;
+    }
+
+    public void setMetadata(Map<String, Object> metadata) {
+        this.metadata = metadata;
     }
 
     @Override

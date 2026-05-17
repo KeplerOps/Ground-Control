@@ -105,6 +105,8 @@ import {
   createAssetLink, getAssetLinks, deleteAssetLink, getAssetLinksByTarget,
   createAssetExternalId, getAssetExternalIds, updateAssetExternalId,
   deleteAssetExternalId, findAssetByExternalId,
+  registerAssetSubtypeSchema, listAssetSubtypeSchemas, getAssetSubtypeSchema,
+  getActiveAssetSubtypeSchema, updateAssetSubtypeSchema, deprecateAssetSubtypeSchema,
   // ---- risk domain ----
   createObservation, listObservations, getObservation, updateObservation,
   deleteObservation, listLatestObservations,
@@ -1220,6 +1222,9 @@ const ASSET_ACTIONS = [
   "relation_create", "relation_delete", "detect_cycles", "impact_analysis", "extract_subgraph",
   "link_create", "link_delete",
   "external_id_create", "external_id_update", "external_id_delete",
+  // GC-M011 subtype-schema registry actions.
+  "subtype_schema_create", "subtype_schema_update", "subtype_schema_deprecate",
+  "subtype_schema_get", "subtype_schema_get_active", "subtype_schema_list",
 ];
 
 server.tool(
@@ -1253,6 +1258,21 @@ server.tool(
     clear_criticality: z.boolean().optional(),
     clear_business_context: z.boolean().optional(),
     clear_scope_designation: z.boolean().optional(),
+    // GC-M011: subtype discriminator + extensible metadata bag.
+    subtype: z.string().optional(),
+    metadata: z.record(z.any()).optional(),
+    clear_subtype: z.boolean().optional(),
+    clear_metadata: z.boolean().optional(),
+    // GC-M011: subtype-schema registry parameters. Schema body is an
+    // any-shape object so callers can mint registry entries without the
+    // MCP enforcing the validator's wire shape — the backend validator is
+    // the authority.
+    schema_id: z.string().uuid().optional(),
+    schema_version: z.string().optional(),
+    schema_body: z.record(z.any()).optional(),
+    schema_description: z.string().optional(),
+    clear_schema_description: z.boolean().optional(),
+    clear_schema_body: z.boolean().optional(),
     parent_id: z.string().uuid().nullable().optional(),
     // relations
     source_id: z.string().uuid().optional(),
@@ -1275,6 +1295,10 @@ server.tool(
   async (args) => {
     try {
       const ASSET_FIELDS = [
+        // `uid` is @NotBlank on the backend AssetRequest; without it on the
+        // forwarded field list, the create path drops the caller-supplied
+        // uid and the backend rejects the body (codex cycle-3 finding 1).
+        "uid",
         "name",
         "description",
         "asset_type",
@@ -1292,12 +1316,17 @@ server.tool(
         "clear_criticality",
         "clear_business_context",
         "clear_scope_designation",
+        // GC-M011 subtype + metadata + clear flags.
+        "subtype",
+        "metadata",
+        "clear_subtype",
+        "clear_metadata",
       ];
       const RELATION_FIELDS = ["source_id", "target_id", "relation_type"];
       const EXT_ID_FIELDS = ["namespace", "external_id"];
       switch (args.action) {
         case "create": {
-          reqArg(args, "name", "create"); reqArg(args, "asset_type", "create");
+          reqArg(args, "uid", "create"); reqArg(args, "name", "create"); reqArg(args, "asset_type", "create");
           return ok(JSON.stringify(await createAsset(pick(args, ASSET_FIELDS), args.project), null, 2));
         }
         case "update": {
@@ -1362,6 +1391,63 @@ server.tool(
           reqArg(args, "asset_id", "external_id_delete"); reqArg(args, "external_id_record_id", "external_id_delete");
           await deleteAssetExternalId(args.asset_id, args.external_id_record_id, args.project);
           return ok("Deleted");
+        }
+        case "subtype_schema_create": {
+          reqArg(args, "asset_type", "subtype_schema_create");
+          reqArg(args, "subtype", "subtype_schema_create");
+          reqArg(args, "schema_version", "subtype_schema_create");
+          // schema_body is required at the MCP boundary too — the backend
+          // rejects ACTIVE registry rows without a non-empty `fields` map
+          // (AssetService.registerSubtypeSchema invokes validateSchemaBody
+          // with requireFields=true). Failing fast here surfaces the
+          // contract instead of round-tripping a 422 (codex cycle-3 #1).
+          reqArg(args, "schema_body", "subtype_schema_create");
+          const body = {
+            assetType: args.asset_type,
+            subtype: args.subtype,
+            schemaVersion: args.schema_version,
+            description: args.schema_description,
+            schemaBody: args.schema_body,
+          };
+          return ok(JSON.stringify(await registerAssetSubtypeSchema(body, args.project), null, 2));
+        }
+        case "subtype_schema_update": {
+          reqArg(args, "schema_id", "subtype_schema_update");
+          const body = {
+            description: args.schema_description,
+            schemaBody: args.schema_body,
+            clearDescription: args.clear_schema_description,
+            clearSchemaBody: args.clear_schema_body,
+          };
+          return ok(JSON.stringify(await updateAssetSubtypeSchema(args.schema_id, body, args.project), null, 2));
+        }
+        case "subtype_schema_deprecate": {
+          reqArg(args, "schema_id", "subtype_schema_deprecate");
+          return ok(JSON.stringify(await deprecateAssetSubtypeSchema(args.schema_id, args.project), null, 2));
+        }
+        case "subtype_schema_get": {
+          reqArg(args, "schema_id", "subtype_schema_get");
+          return ok(JSON.stringify(await getAssetSubtypeSchema(args.schema_id, args.project), null, 2));
+        }
+        case "subtype_schema_get_active": {
+          reqArg(args, "asset_type", "subtype_schema_get_active");
+          reqArg(args, "subtype", "subtype_schema_get_active");
+          return ok(JSON.stringify(
+            await getActiveAssetSubtypeSchema(args.asset_type, args.subtype, args.project),
+            null,
+            2,
+          ));
+        }
+        case "subtype_schema_list": {
+          return ok(JSON.stringify(
+            await listAssetSubtypeSchemas({
+              project: args.project,
+              assetType: args.asset_type,
+              subtype: args.subtype,
+            }),
+            null,
+            2,
+          ));
         }
         default: return err(new Error(`Unknown action: ${args.action}`));
       }

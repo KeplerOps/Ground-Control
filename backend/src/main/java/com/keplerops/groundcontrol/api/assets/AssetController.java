@@ -61,7 +61,9 @@ public class AssetController {
                 request.environment(),
                 request.criticality(),
                 request.businessContext(),
-                request.scopeDesignation());
+                request.scopeDesignation(),
+                request.subtype(),
+                request.metadata());
         return AssetResponse.from(assetService.create(command));
     }
 
@@ -73,17 +75,19 @@ public class AssetController {
             @RequestParam(required = false) String steward,
             @RequestParam(required = false) AssetEnvironment environment,
             @RequestParam(required = false) AssetCriticality criticality,
-            @RequestParam(required = false) AssetScope scope) {
+            @RequestParam(required = false) AssetScope scope,
+            @RequestParam(required = false) String subtype) {
         var projectId = projectService.resolveProjectId(project);
         boolean anyFilter = type != null
                 || owner != null
                 || steward != null
                 || environment != null
                 || criticality != null
-                || scope != null;
+                || scope != null
+                || subtype != null;
         if (anyFilter) {
             return assetService
-                    .listByProjectAndFilters(projectId, type, owner, steward, environment, criticality, scope)
+                    .listByProjectAndFilters(projectId, type, owner, steward, environment, criticality, scope, subtype)
                     .stream()
                     .map(AssetResponse::from)
                     .toList();
@@ -121,12 +125,16 @@ public class AssetController {
                 request.criticality(),
                 request.businessContext(),
                 request.scopeDesignation(),
+                request.subtype(),
+                request.metadata(),
                 request.clearOwner(),
                 request.clearSteward(),
                 request.clearEnvironment(),
                 request.clearCriticality(),
                 request.clearBusinessContext(),
-                request.clearScopeDesignation());
+                request.clearScopeDesignation(),
+                request.clearSubtype(),
+                request.clearMetadata());
         return AssetResponse.from(assetService.update(projectId, id, command));
     }
 
