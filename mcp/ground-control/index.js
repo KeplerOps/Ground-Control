@@ -144,6 +144,8 @@ import {
   // ---- test cases (TC-001 / ADR-040) ----
   createTestCase, updateTestCase, deleteTestCase, transitionTestCaseStatus,
   TEST_CASE_STATUSES, TEST_CASE_TYPES, TEST_CASE_PRIORITIES,
+  // ---- test case steps (TC-002 / ADR-041) ----
+  createTestCaseStep, updateTestCaseStep, deleteTestCaseStep,
   // ---- enums ----
   STATUSES, REQUIREMENT_TYPES, PRIORITIES, RELATION_TYPES,
   ARTIFACT_TYPES, LINK_TYPES, CHANGE_CATEGORIES, CONFIDENCE_LEVELS,
@@ -1468,14 +1470,19 @@ server.tool(
   },
 );
 
-// gc_test_case: TC-001 / ADR-040. Reusable test-definition aggregate at
-// /api/v1/test-cases. Reads (list, get, get-by-uid) route through gc_query.
-const TEST_CASE_ACTIONS = ["create", "update", "delete", "transition"];
+// gc_test_case: TC-001 / ADR-040 + TC-002 / ADR-041. Reusable test-definition
+// aggregate at /api/v1/test-cases and its ordered child step aggregate at
+// /api/v1/test-cases/{id}/steps. Reads (list, get, get-by-uid, step-list,
+// step-get) route through gc_query.
+const TEST_CASE_ACTIONS = [
+  "create", "update", "delete", "transition",
+  "step-create", "step-update", "step-delete",
+];
 
 server.tool(
   "gc_test_case",
-  `Test case operations (TC-001 / ADR-040). Actions: ${TEST_CASE_ACTIONS.join(", ")}. ` +
-    `Reads (list, get, get-by-uid) route through gc_query.`,
+  `Test case operations (TC-001 / ADR-040 + TC-002 / ADR-041). Actions: ${TEST_CASE_ACTIONS.join(", ")}. ` +
+    `Reads (list, get, get-by-uid, step-list, step-get) route through gc_query.`,
   {
     action: z.enum(TEST_CASE_ACTIONS),
     id: z.string().uuid().optional(),
@@ -1496,6 +1503,17 @@ server.tool(
     clear_preconditions: z.boolean().optional(),
     clear_postconditions: z.boolean().optional(),
     clear_estimated_duration: z.boolean().optional(),
+    // TC-002 step actions. test_case_id is the parent test case; step_id is the
+    // step itself (step-update / step-delete). step_number is the per-test-case
+    // ordering value. action / expected_result / actual_result are the step's
+    // rich-text fields (CommonMark Markdown by convention per ADR-041).
+    test_case_id: z.string().uuid().optional(),
+    step_id: z.string().uuid().optional(),
+    step_number: z.number().int().positive().optional(),
+    step_action: z.string().optional(),
+    expected_result: z.string().optional(),
+    actual_result: z.string().nullable().optional(),
+    clear_actual_result: z.boolean().optional(),
   },
   async (args) => {
     try {
@@ -1505,6 +1523,19 @@ server.tool(
         "clear_description", "clear_preconditions", "clear_postconditions",
         "clear_estimated_duration",
       ];
+      const STEP_FIELDS = [
+        "step_number", "expected_result", "actual_result", "clear_actual_result",
+      ];
+      // Map step_action → action so the MCP arg shape (which uses step_action
+      // to avoid clashing with the existing action discriminator) lines up with
+      // the backend's TestCaseStepRequest.action / .expectedResult / .actualResult.
+      const stepBody = (extra) => {
+        const body = pick(args, STEP_FIELDS);
+        if (extra && extra.includeAction && args.step_action !== undefined) {
+          body.action = args.step_action;
+        }
+        return body;
+      };
       switch (args.action) {
         case "create": {
           reqArg(args, "uid", "create");
@@ -1534,6 +1565,37 @@ server.tool(
             null,
             2,
           ));
+        }
+        case "step-create": {
+          reqArg(args, "test_case_id", "step-create");
+          reqArg(args, "step_number", "step-create");
+          reqArg(args, "step_action", "step-create");
+          reqArg(args, "expected_result", "step-create");
+          return ok(JSON.stringify(
+            await createTestCaseStep(args.test_case_id, stepBody({ includeAction: true }), args.project),
+            null,
+            2,
+          ));
+        }
+        case "step-update": {
+          reqArg(args, "test_case_id", "step-update");
+          reqArg(args, "step_id", "step-update");
+          return ok(JSON.stringify(
+            await updateTestCaseStep(
+              args.test_case_id,
+              args.step_id,
+              stepBody({ includeAction: true }),
+              args.project,
+            ),
+            null,
+            2,
+          ));
+        }
+        case "step-delete": {
+          reqArg(args, "test_case_id", "step-delete");
+          reqArg(args, "step_id", "step-delete");
+          await deleteTestCaseStep(args.test_case_id, args.step_id, args.project);
+          return ok("Deleted");
         }
         default: return err(new Error(`Unknown action: ${args.action}`));
       }

@@ -1005,6 +1005,35 @@ layer with HTTP 422.
 Rich-text fields (`description`, `preconditions`, `postconditions`) are stored as plain text
 and rendered as Markdown by clients; no HTML sanitizer is wired through this surface.
 
+### Test Case Steps (TC-002 / ADR-041)
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/test-cases/{testCaseId}/steps` | TestCaseStepRequest | 201 | Create a step in a test case |
+| GET | `/test-cases/{testCaseId}/steps` | — | 200 | List steps ordered by `stepNumber` ascending |
+| GET | `/test-cases/{testCaseId}/steps/{stepId}` | — | 200 | Get one step |
+| PUT | `/test-cases/{testCaseId}/steps/{stepId}` | UpdateTestCaseStepRequest | 200 | Update step fields (null = no change) |
+| DELETE | `/test-cases/{testCaseId}/steps/{stepId}` | — | 204 | Delete a step |
+
+Steps are an ordered child collection of a test case. Each step carries a `stepNumber` (unique
+within its test case, positive), an `action` (what to do), an `expectedResult` (what should
+happen), and an optional `actualResult` (what actually happened on the latest authored pass).
+Rich-text fields use the same CommonMark Markdown convention as the parent test case;
+inline images use the `![alt](url)` syntax with no backend-side fetching, sanitisation, or
+binary storage (see ADR-041 §Rich text and inline images).
+
+**TestCaseStepRequest fields:** `stepNumber` (required positive `Integer`), `action` (required,
+max 10000), `expectedResult` (required, max 10000), `actualResult` (optional, max 10000).
+
+**UpdateTestCaseStepRequest fields:** `stepNumber`, `action`, `expectedResult`, `actualResult`
+— all optional with null-means-no-change — plus `clearActualResult: true` to wipe the
+`actualResult` to null (same partial-update convention as `UpdateTestCaseRequest`).
+
+Duplicate `stepNumber` within a test case returns HTTP 409. Non-positive `stepNumber` and
+oversize rich-text fields return HTTP 422. A step request against a test case that is not in
+the resolved project returns HTTP 404. Deleting the parent test case cascade-deletes its
+steps service-side so Envers captures each step's delete revision.
+
 ## Request / Response Format
 
 JSON. Error responses use a nested envelope:

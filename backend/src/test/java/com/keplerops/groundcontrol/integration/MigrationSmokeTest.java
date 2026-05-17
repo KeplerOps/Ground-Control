@@ -49,7 +49,7 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         "027", "028", "029", "030", "031", "032", "033", "034", "035", "036", "037", "038", "039",
                         "040", "041", "042", "043", "044", "045", "046", "047", "048", "049", "050", "051", "052",
                         "053", "054", "055", "056", "057", "058", "059", "060", "061", "062", "063", "064", "065",
-                        "066", "067", "068", "069", "070", "071", "072");
+                        "066", "067", "068", "069", "070", "071", "072", "073", "074", "075");
     }
 
     @Test
@@ -296,6 +296,55 @@ class MigrationSmokeTest extends BaseIntegrationTest {
         entityManager
                 .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_audit'"
                         + " AND column_name = 'priority'")
+                .getSingleResult();
+        // V073-V074 test_case_step + audit (TC-002 / ADR-041). Same rationale
+        // as the test_case_audit probes above — ddl-auto: validate doesn't see
+        // the audit shadow tables, so verify the structural shape by
+        // information_schema for the columns that would silently regress.
+        entityManager.createNativeQuery("SELECT 1 FROM test_case_step LIMIT 1").getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM test_case_step_audit LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_step_audit'"
+                        + " AND column_name = 'step_number'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_step_audit'"
+                        + " AND column_name = 'action'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_step_audit'"
+                        + " AND column_name = 'expected_result'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_step_audit'"
+                        + " AND column_name = 'actual_result'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_step'"
+                        + " AND column_name = 'step_number' AND is_nullable = 'NO'")
+                .getSingleResult();
+        // BaseEntity timestamps are @Audited, so every _audit table for an
+        // entity that extends BaseEntity MUST carry created_at / updated_at
+        // columns. The TC-001 V072 omission is fixed by V075; pin the
+        // post-V075 shape on both audit tables so a future drift surfaces
+        // here rather than as a flush-time Envers failure in production.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_audit'"
+                        + " AND column_name = 'created_at'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_audit'"
+                        + " AND column_name = 'updated_at'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_step_audit'"
+                        + " AND column_name = 'created_at'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_step_audit'"
+                        + " AND column_name = 'updated_at'")
                 .getSingleResult();
     }
 }
