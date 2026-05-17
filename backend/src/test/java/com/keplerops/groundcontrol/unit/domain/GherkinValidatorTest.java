@@ -7,6 +7,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.testcases.service.GherkinValidator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * Clause-by-clause coverage for TC-004:
@@ -23,56 +25,79 @@ class GherkinValidatorTest {
 
     private final GherkinValidator validator = new GherkinValidator();
 
-    @Test
-    void acceptsGivenWhenThenScenario() {
-        var src =
-                """
-                Feature: Sign in
+    private static final String GIVEN_WHEN_THEN =
+            """
+            Feature: Sign in
 
-                  Scenario: Successful sign-in
-                    Given the user is on the sign-in page
-                    When they submit valid credentials
-                    Then they are redirected to the dashboard
-                """;
+              Scenario: Successful sign-in
+                Given the user is on the sign-in page
+                When they submit valid credentials
+                Then they are redirected to the dashboard
+            """;
 
-        assertThatCode(() -> validator.validate(src)).doesNotThrowAnyException();
-    }
+    private static final String AND_BUT_CONTINUATION =
+            """
+            Feature: Sign in
 
-    @Test
-    void acceptsAndButContinuationKeywords() {
-        var src =
-                """
-                Feature: Sign in
+              Scenario: Locked account
+                Given the user is on the sign-in page
+                And their account is locked
+                When they submit valid credentials
+                But the lock has not expired
+                Then they see the locked-account message
+            """;
 
-                  Scenario: Locked account
-                    Given the user is on the sign-in page
-                    And their account is locked
-                    When they submit valid credentials
-                    But the lock has not expired
-                    Then they see the locked-account message
-                """;
+    private static final String SCENARIO_OUTLINE_WITH_EXAMPLES =
+            """
+            Feature: Sign in
 
-        assertThatCode(() -> validator.validate(src)).doesNotThrowAnyException();
-    }
+              Scenario Outline: Reject invalid passwords
+                Given the user is on the sign-in page
+                When they submit "<email>" / "<password>"
+                Then they see the message "<message>"
 
-    @Test
-    void acceptsScenarioOutlineWithExamplesTable() {
-        var src =
-                """
-                Feature: Sign in
+                Examples:
+                  | email          | password   | message              |
+                  | a@example.com  | short      | password too short   |
+                  | b@example.com  |            | password is required |
+                  | c@example.com  | wrong-pass | invalid credentials  |
+            """;
 
-                  Scenario Outline: Reject invalid passwords
-                    Given the user is on the sign-in page
-                    When they submit "<email>" / "<password>"
-                    Then they see the message "<message>"
+    private static final String RULE_NESTED_SCENARIO =
+            """
+            Feature: Sign in
 
-                    Examples:
-                      | email          | password   | message              |
-                      | a@example.com  | short      | password too short   |
-                      | b@example.com  |            | password is required |
-                      | c@example.com  | wrong-pass | invalid credentials  |
-                """;
+              Rule: every sign-in path
 
+                Scenario: rule-nested scenario
+                  Given the user is on the sign-in page
+                  When they submit valid credentials
+                  Then they are redirected to the dashboard
+            """;
+
+    /**
+     * Covers TC-004 clauses 1-4: Given/When/Then, And/But continuation, Scenario
+     * Outline + Examples, and Rule-nested scenarios all parse and validate
+     * without throwing. Per Sonar rule java:S5961, the four originally-separate
+     * "accepts" tests are consolidated here — the test name still identifies
+     * which clause each input exercises.
+     */
+    @ParameterizedTest(name = "accepts {0}")
+    @CsvSource({
+        "given-when-then,GIVEN_WHEN_THEN",
+        "and-but-continuation,AND_BUT_CONTINUATION",
+        "scenario-outline-with-examples,SCENARIO_OUTLINE_WITH_EXAMPLES",
+        "rule-nested-scenario,RULE_NESTED_SCENARIO",
+    })
+    void acceptsValidGherkinShape(String label, String inputName) {
+        String src =
+                switch (inputName) {
+                    case "GIVEN_WHEN_THEN" -> GIVEN_WHEN_THEN;
+                    case "AND_BUT_CONTINUATION" -> AND_BUT_CONTINUATION;
+                    case "SCENARIO_OUTLINE_WITH_EXAMPLES" -> SCENARIO_OUTLINE_WITH_EXAMPLES;
+                    case "RULE_NESTED_SCENARIO" -> RULE_NESTED_SCENARIO;
+                    default -> throw new IllegalArgumentException(inputName);
+                };
         assertThatCode(() -> validator.validate(src)).doesNotThrowAnyException();
     }
 
@@ -219,7 +244,8 @@ class GherkinValidatorTest {
             body.append("    Given step ").append(i).append("\n\n");
         }
 
-        assertThatThrownBy(() -> validator.validate(body.toString()))
+        var src = body.toString();
+        assertThatThrownBy(() -> validator.validate(src))
                 .isInstanceOf(DomainValidationException.class)
                 .satisfies(ex -> assertThat(((DomainValidationException) ex).getDetail())
                         .containsEntry("maxScenarios", String.valueOf(GherkinValidator.MAX_SCENARIOS)));
@@ -245,23 +271,6 @@ class GherkinValidatorTest {
                 .isInstanceOf(DomainValidationException.class)
                 .satisfies(ex ->
                         assertThat(((DomainValidationException) ex).getDetail()).containsEntry("keyword", "Examples"));
-    }
-
-    @Test
-    void acceptsValidScenariosNestedInsideRuleBlocks() {
-        var src =
-                """
-                Feature: Sign in
-
-                  Rule: every sign-in path
-
-                    Scenario: rule-nested scenario
-                      Given the user is on the sign-in page
-                      When they submit valid credentials
-                      Then they are redirected to the dashboard
-                """;
-
-        assertThatCode(() -> validator.validate(src)).doesNotThrowAnyException();
     }
 
     @Test

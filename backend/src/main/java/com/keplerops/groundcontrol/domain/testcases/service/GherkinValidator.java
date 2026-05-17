@@ -12,7 +12,6 @@ import io.cucumber.messages.types.RuleChild;
 import io.cucumber.messages.types.Scenario;
 import io.cucumber.messages.types.Source;
 import io.cucumber.messages.types.SourceMediaType;
-import io.cucumber.messages.types.Step;
 import io.cucumber.messages.types.TableCell;
 import io.cucumber.messages.types.TableRow;
 import java.util.ArrayList;
@@ -48,6 +47,17 @@ public class GherkinValidator {
     private static final String CODE = "invalid_gherkin_source";
     private static final String VIRTUAL_URI = "test-case.feature";
 
+    // Detail-map keys (extracted to constants so the error-envelope contract
+    // is stable and Sonar's duplicate-literal rule stays quiet).
+    private static final String DETAIL_FIELD = "field";
+    private static final String DETAIL_LINE = "line";
+    private static final String DETAIL_COLUMN = "column";
+    private static final String DETAIL_KEYWORD = "keyword";
+    private static final String FIELD_SOURCE = "source";
+    private static final String FIELD_EXAMPLES = "examples";
+    private static final String FIELD_SCENARIO = "scenario";
+    private static final String KEYWORD_EXAMPLES = "Examples";
+
     // Pickles expand Scenario Outline examples into per-row execution targets
     // before validation runs — pure waste for a validation-only seam. Disable
     // them so the parser stops after producing the GherkinDocument we read.
@@ -56,13 +66,14 @@ public class GherkinValidator {
 
     public void validate(String source) {
         if (source == null || source.isBlank()) {
-            throw new DomainValidationException("Gherkin source must not be blank", CODE, Map.of("field", "source"));
+            throw new DomainValidationException(
+                    "Gherkin source must not be blank", CODE, Map.of(DETAIL_FIELD, FIELD_SOURCE));
         }
         if (source.length() > MAX_SOURCE_LENGTH) {
             throw new DomainValidationException(
                     "Gherkin source exceeds maximum length",
                     CODE,
-                    Map.of("field", "source", "maxLength", String.valueOf(MAX_SOURCE_LENGTH)));
+                    Map.of(DETAIL_FIELD, FIELD_SOURCE, "maxLength", String.valueOf(MAX_SOURCE_LENGTH)));
         }
         var envelopes = parseEnvelopes(source);
         rejectIfParseErrors(envelopes);
@@ -71,7 +82,7 @@ public class GherkinValidator {
                 .orElseThrow(() -> new DomainValidationException(
                         "Gherkin source must declare a Feature",
                         CODE,
-                        Map.of("field", "source", "keyword", "Feature")));
+                        Map.of(DETAIL_FIELD, FIELD_SOURCE, DETAIL_KEYWORD, "Feature")));
         validateFeature(feature);
     }
 
@@ -89,10 +100,10 @@ public class GherkinValidator {
         if (firstError.isPresent()) {
             var err = firstError.get();
             Map<String, String> details = new LinkedHashMap<>();
-            details.put("field", "source");
+            details.put(DETAIL_FIELD, FIELD_SOURCE);
             err.getSource().getLocation().ifPresent(loc -> {
-                details.put("line", String.valueOf(loc.getLine()));
-                loc.getColumn().ifPresent(col -> details.put("column", String.valueOf(col)));
+                details.put(DETAIL_LINE, String.valueOf(loc.getLine()));
+                loc.getColumn().ifPresent(col -> details.put(DETAIL_COLUMN, String.valueOf(col)));
             });
             // err.getMessage() carries the parser's diagnostic, which can echo
             // user-controlled tokens from the offending line. The preflight
@@ -109,7 +120,7 @@ public class GherkinValidator {
                 .map(Optional::get)
                 .findFirst()
                 .orElseThrow(() -> new DomainValidationException(
-                        "Gherkin source produced no document", CODE, Map.of("field", "source")));
+                        "Gherkin source produced no document", CODE, Map.of(DETAIL_FIELD, FIELD_SOURCE)));
     }
 
     private void validateFeature(Feature feature) {
@@ -121,13 +132,13 @@ public class GherkinValidator {
             throw new DomainValidationException(
                     "Gherkin source exceeds maximum scenario count",
                     CODE,
-                    Map.of("field", "scenarios", "maxScenarios", String.valueOf(MAX_SCENARIOS)));
+                    Map.of(DETAIL_FIELD, "scenarios", "maxScenarios", String.valueOf(MAX_SCENARIOS)));
         }
         if (scenarios.isEmpty()) {
             throw new DomainValidationException(
                     "Gherkin source must contain at least one Scenario or Scenario Outline",
                     CODE,
-                    Map.of("field", "source", "keyword", "Scenario"));
+                    Map.of(DETAIL_FIELD, FIELD_SOURCE, DETAIL_KEYWORD, "Scenario"));
         }
         for (Scenario scenario : scenarios) {
             validateScenario(scenario);
@@ -148,31 +159,35 @@ public class GherkinValidator {
     }
 
     private void validateScenario(Scenario scenario) {
-        List<Step> steps = scenario.getSteps();
-        if (steps == null || steps.isEmpty()) {
+        // Parser guarantees non-null lists for steps / examples — only check
+        // emptiness. (Sonar previously flagged the redundant null-guards.)
+        if (scenario.getSteps().isEmpty()) {
             throw new DomainValidationException(
                     "Scenario must contain at least one step",
                     CODE,
                     Map.of(
-                            "field", "scenario",
-                            "line", String.valueOf(scenario.getLocation().getLine()),
-                            "keyword", "Steps"));
+                            DETAIL_FIELD,
+                            FIELD_SCENARIO,
+                            DETAIL_LINE,
+                            String.valueOf(scenario.getLocation().getLine()),
+                            DETAIL_KEYWORD,
+                            "Steps"));
         }
         // The Gherkin grammar treats "Scenario" and "Scenario Outline" as the
         // same syntactic node, distinguished only by the keyword text and the
         // presence of Examples. If the author wrote "Scenario Outline" they
         // must supply an Examples block — otherwise the scenario is degenerate
-        // (placeholders, if any, would never be substituted).
-        boolean keywordSaysOutline =
-                scenario.getKeyword() != null && scenario.getKeyword().trim().equalsIgnoreCase("Scenario Outline");
-        if (keywordSaysOutline && scenario.getExamples().isEmpty()) {
+        // (placeholders, if any, would never be substituted). Parser populates
+        // keyword for every authored scenario, so no null guard needed.
+        if (scenario.getKeyword().trim().equalsIgnoreCase("Scenario Outline")
+                && scenario.getExamples().isEmpty()) {
             throw new DomainValidationException(
                     "Scenario Outline must include at least one Examples block",
                     CODE,
                     Map.of(
-                            "field", "scenario",
-                            "line", String.valueOf(scenario.getLocation().getLine()),
-                            "keyword", "Examples"));
+                            DETAIL_FIELD, FIELD_SCENARIO,
+                            DETAIL_LINE, String.valueOf(scenario.getLocation().getLine()),
+                            DETAIL_KEYWORD, KEYWORD_EXAMPLES));
         }
         for (Examples examples : scenario.getExamples()) {
             validateExamples(scenario, examples);
@@ -180,22 +195,23 @@ public class GherkinValidator {
     }
 
     private void validateExamples(Scenario scenario, Examples examples) {
+        // Parser returns a non-null body list; only header may be Optional.
         var header = examples.getTableHeader();
         List<TableRow> body = examples.getTableBody();
-        if (header.isEmpty() || body == null || body.isEmpty()) {
+        if (header.isEmpty() || body.isEmpty()) {
             throw new DomainValidationException(
                     "Examples table must have a header and at least one data row",
                     CODE,
                     Map.of(
-                            "field", "examples",
-                            "line", String.valueOf(scenario.getLocation().getLine()),
-                            "keyword", "Examples"));
+                            DETAIL_FIELD, FIELD_EXAMPLES,
+                            DETAIL_LINE, String.valueOf(scenario.getLocation().getLine()),
+                            DETAIL_KEYWORD, KEYWORD_EXAMPLES));
         }
         if (body.size() > MAX_EXAMPLES_ROWS) {
             throw new DomainValidationException(
                     "Examples table exceeds maximum row count",
                     CODE,
-                    Map.of("field", "examples", "maxRows", String.valueOf(MAX_EXAMPLES_ROWS)));
+                    Map.of(DETAIL_FIELD, FIELD_EXAMPLES, "maxRows", String.valueOf(MAX_EXAMPLES_ROWS)));
         }
         // The header row holds the parameter names whose identity ADR-042
         // requires to be preserved; the same cell-length cap that applies to
@@ -209,12 +225,17 @@ public class GherkinValidator {
     }
 
     private void validateCells(TableRow row) {
+        // Parser populates cell value for every TableCell it emits.
         for (TableCell cell : row.getCells()) {
-            if (cell.getValue() != null && cell.getValue().length() > MAX_EXAMPLES_CELL_LENGTH) {
+            if (cell.getValue().length() > MAX_EXAMPLES_CELL_LENGTH) {
                 throw new DomainValidationException(
                         "Examples cell exceeds maximum length",
                         CODE,
-                        Map.of("field", "examples", "maxCellLength", String.valueOf(MAX_EXAMPLES_CELL_LENGTH)));
+                        Map.of(
+                                DETAIL_FIELD,
+                                FIELD_EXAMPLES,
+                                "maxCellLength",
+                                String.valueOf(MAX_EXAMPLES_CELL_LENGTH)));
             }
         }
     }

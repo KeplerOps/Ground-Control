@@ -75,8 +75,11 @@ dependencies {
 
     // Gherkin parser (TC-004 / ADR-042). Pure parser library — no Cucumber
     // runtime, no glue execution, no remote fetch. Pulls io.cucumber:messages
-    // transitively.
-    implementation("io.cucumber:gherkin:39.1.0")
+    // transitively. Version pinned via a property so a future bump can be
+    // co-located with the rationale comment instead of inlined into the
+    // dependency string.
+    val gherkinVersion = "39.1.0"
+    implementation("io.cucumber:gherkin:$gherkinVersion")
 
     // Error Prone
     errorprone("com.google.errorprone:error_prone_core:2.36.0")

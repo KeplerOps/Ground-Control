@@ -97,8 +97,9 @@ class TestCaseGherkinServiceTest {
         void rejectsCreateWhenFormatIsStepBased() {
             var id = stepTestCase.getId();
             when(testCaseRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.of(stepTestCase));
+            var command = new CreateTestCaseGherkinCommand(projectId, id, VALID_SOURCE);
 
-            assertThatThrownBy(() -> service.create(new CreateTestCaseGherkinCommand(projectId, id, VALID_SOURCE)))
+            assertThatThrownBy(() -> service.create(command))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("GHERKIN");
         }
@@ -108,18 +109,18 @@ class TestCaseGherkinServiceTest {
             var id = gherkinTestCase.getId();
             when(testCaseRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.of(gherkinTestCase));
             when(gherkinRepository.existsByTestCaseId(id)).thenReturn(true);
+            var command = new CreateTestCaseGherkinCommand(projectId, id, VALID_SOURCE);
 
-            assertThatThrownBy(() -> service.create(new CreateTestCaseGherkinCommand(projectId, id, VALID_SOURCE)))
-                    .isInstanceOf(ConflictException.class);
+            assertThatThrownBy(() -> service.create(command)).isInstanceOf(ConflictException.class);
         }
 
         @Test
         void rejectsCreateWhenParentNotInProject() {
             var id = UUID.randomUUID();
             when(testCaseRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.empty());
+            var command = new CreateTestCaseGherkinCommand(projectId, id, VALID_SOURCE);
 
-            assertThatThrownBy(() -> service.create(new CreateTestCaseGherkinCommand(projectId, id, VALID_SOURCE)))
-                    .isInstanceOf(NotFoundException.class);
+            assertThatThrownBy(() -> service.create(command)).isInstanceOf(NotFoundException.class);
         }
 
         @Test
@@ -131,9 +132,9 @@ class TestCaseGherkinServiceTest {
                             new DomainValidationException("bad", "invalid_gherkin_source", java.util.Map.of()))
                     .when(validator)
                     .validate("garbage");
+            var command = new CreateTestCaseGherkinCommand(projectId, id, "garbage");
 
-            assertThatThrownBy(() -> service.create(new CreateTestCaseGherkinCommand(projectId, id, "garbage")))
-                    .isInstanceOf(DomainValidationException.class);
+            assertThatThrownBy(() -> service.create(command)).isInstanceOf(DomainValidationException.class);
             verify(gherkinRepository, org.mockito.Mockito.never()).save(any(TestCaseGherkin.class));
         }
     }
@@ -161,9 +162,9 @@ class TestCaseGherkinServiceTest {
             var id = gherkinTestCase.getId();
             when(testCaseRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.of(gherkinTestCase));
             when(gherkinRepository.findByTestCaseId(id)).thenReturn(Optional.empty());
+            var command = new UpdateTestCaseGherkinCommand(VALID_SOURCE);
 
-            assertThatThrownBy(() -> service.update(projectId, id, new UpdateTestCaseGherkinCommand(VALID_SOURCE)))
-                    .isInstanceOf(NotFoundException.class);
+            assertThatThrownBy(() -> service.update(projectId, id, command)).isInstanceOf(NotFoundException.class);
         }
     }
 
