@@ -36,6 +36,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 public class AssetService {
 
+    // Constants for repeated detail-map / field-name literals (Sonar S1192).
+    private static final String FIELD_SUBTYPE = "subtype";
+    private static final String DETAIL_REASON = "reason";
+    private static final String DETAIL_FIELD = "field";
+    private static final String DETAIL_LIMIT = "limit";
+
     private final OperationalAssetRepository assetRepository;
     private final AssetRelationRepository relationRepository;
     private final AssetLinkRepository linkRepository;
@@ -77,7 +83,7 @@ public class AssetService {
         bounded("name", command.name(), OperationalAssetBounds.NAME);
         bounded("owner", command.owner(), OperationalAssetBounds.OWNER);
         bounded("steward", command.steward(), OperationalAssetBounds.STEWARD);
-        bounded("subtype", command.subtype(), OperationalAssetBounds.SUBTYPE);
+        bounded(FIELD_SUBTYPE, command.subtype(), OperationalAssetBounds.SUBTYPE);
 
         var project = projectRepository
                 .findById(command.projectId())
@@ -143,7 +149,7 @@ public class AssetService {
             throw new DomainValidationException(
                     "Asset " + field + " exceeds maximum length of " + max + " characters",
                     "asset_field_invalid",
-                    Map.of("reason", "field_too_long", "field", field, "limit", max));
+                    Map.of(DETAIL_REASON, "field_too_long", DETAIL_FIELD, field, DETAIL_LIMIT, max));
         }
     }
 
@@ -185,6 +191,7 @@ public class AssetService {
         return assetRepository.findByProjectIdAndArchivedAtIsNull(projectId);
     }
 
+    @SuppressWarnings("java:S107") // JPA @Query needs each @Param explicit; reflected on the public method
     @Transactional(readOnly = true)
     public List<OperationalAsset> listByProjectAndFilters(
             UUID projectId,
@@ -199,6 +206,11 @@ public class AssetService {
                 projectId, assetType, owner, steward, environment, criticality, scopeDesignation, subtype);
     }
 
+    /**
+     * @deprecated GC-M011 added the {@code subtype} filter facet. Callers
+     *     should adopt the 8-arg overload so the subtype query parameter is
+     *     honored. Retained for source compatibility with pre-GC-M011 callers.
+     */
     @Deprecated(forRemoval = false)
     @Transactional(readOnly = true)
     public List<OperationalAsset> listByProjectAndFilters(
@@ -209,7 +221,11 @@ public class AssetService {
             com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment environment,
             com.keplerops.groundcontrol.domain.assets.state.AssetCriticality criticality,
             com.keplerops.groundcontrol.domain.assets.state.AssetScope scopeDesignation) {
-        return listByProjectAndFilters(
+        // Call the repository directly rather than self-invoking the new
+        // overload via `this.` — the @Transactional proxy would be bypassed
+        // and Sonar S6809 flags the pattern. The repository call is itself
+        // already covered by the class-level @Transactional.
+        return assetRepository.findByProjectIdAndArchivedAtIsNullAndFilters(
                 projectId, assetType, owner, steward, environment, criticality, scopeDesignation, null);
     }
 
@@ -768,7 +784,7 @@ public class AssetService {
     }
 
     public AssetSubtypeSchema updateSubtypeSchema(UUID projectId, UUID id, UpdateAssetSubtypeSchemaCommand command) {
-        var schema = getSubtypeSchema(projectId, id);
+        var schema = loadSubtypeSchema(projectId, id);
         boolean active = schema.getStatus() == AssetSubtypeSchemaStatus.ACTIVE;
         // ACTIVE rows MUST keep an enforceable schema body. Reject
         // clearSchemaBody on ACTIVE rows so callers cannot null out the
@@ -788,7 +804,7 @@ public class AssetService {
     }
 
     public AssetSubtypeSchema deprecateSubtypeSchema(UUID projectId, UUID id) {
-        var schema = getSubtypeSchema(projectId, id);
+        var schema = loadSubtypeSchema(projectId, id);
         if (schema.getStatus() != AssetSubtypeSchemaStatus.DEPRECATED) {
             schema.deprecate();
             subtypeSchemaRepository.save(schema);
@@ -798,6 +814,16 @@ public class AssetService {
 
     @Transactional(readOnly = true)
     public AssetSubtypeSchema getSubtypeSchema(UUID projectId, UUID id) {
+        return loadSubtypeSchema(projectId, id);
+    }
+
+    /**
+     * Internal lookup shared with the {@code update*} / {@code deprecate*}
+     * paths. Bypassing the {@code public getSubtypeSchema} method avoids the
+     * Sonar S6809 self-invocation pattern (calling a {@code @Transactional}
+     * method via {@code this} skips the proxy).
+     */
+    private AssetSubtypeSchema loadSubtypeSchema(UUID projectId, UUID id) {
         return subtypeSchemaRepository
                 .findByIdAndProjectId(id, projectId)
                 .orElseThrow(() -> new NotFoundException("Asset subtype schema not found: " + id));

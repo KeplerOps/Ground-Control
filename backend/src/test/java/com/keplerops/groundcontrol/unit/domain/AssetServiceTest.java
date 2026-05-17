@@ -1990,8 +1990,9 @@ class AssetServiceTest {
                     .thenReturn(Optional.of(schema));
 
             var command = new UpdateAssetSubtypeSchemaCommand(null, null, false, /* clearSchemaBody */ true);
+            var schemaId = schema.getId();
 
-            assertThatThrownBy(() -> assetService.updateSubtypeSchema(projectId, schema.getId(), command))
+            assertThatThrownBy(() -> assetService.updateSubtypeSchema(projectId, schemaId, command))
                     .isInstanceOf(DomainValidationException.class)
                     .extracting(e -> ((DomainValidationException) e).getErrorCode())
                     .isEqualTo("asset_subtype_schema_active_body_required");

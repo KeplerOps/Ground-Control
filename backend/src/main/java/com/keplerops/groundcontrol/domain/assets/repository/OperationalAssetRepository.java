@@ -39,6 +39,7 @@ public interface OperationalAssetRepository extends JpaRepository<OperationalAss
      * match the free-form string shape; subtype is case-sensitive because the
      * subtype catalog (AssetSubtypeSchema) keys off the exact string.
      */
+    @SuppressWarnings("java:S107") // JPA @Query requires each filter as an explicit @Param binding.
     @Query(
             """
             SELECT a FROM OperationalAsset a

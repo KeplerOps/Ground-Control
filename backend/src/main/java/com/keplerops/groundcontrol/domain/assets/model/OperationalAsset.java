@@ -66,14 +66,19 @@ public class OperationalAsset extends BaseEntity {
     @Column(name = "scope_designation", length = 20)
     private AssetScope scopeDesignation;
 
-    // GC-M011: narrower classification under AssetType. Free-form,
-    // project-defined; a registered AssetSubtypeSchema may formalize the
-    // (project, assetType, subtype) contract.
+    /**
+     * GC-M011 narrower classification under {@link AssetType}. Free-form,
+     * project-defined; a registered {@code AssetSubtypeSchema} may formalize
+     * the {@code (project, assetType, subtype)} contract.
+     */
     @Column(length = 100)
     private String subtype;
 
-    // GC-M011: subtype-specific metadata bag. Bounded by AssetSubtypeValidator;
-    // schema-validated when a matching ACTIVE AssetSubtypeSchema exists.
+    /**
+     * GC-M011 subtype-specific metadata bag. Bounded by
+     * {@code AssetSubtypeValidator}; schema-validated when a matching ACTIVE
+     * {@code AssetSubtypeSchema} exists.
+     */
     @Convert(converter = JacksonTextCollectionConverters.StringObjectMapConverter.class)
     @Column(columnDefinition = "TEXT")
     private Map<String, Object> metadata;
