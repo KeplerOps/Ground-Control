@@ -175,9 +175,8 @@ public class TestCaseFolderService {
 
     @Transactional(readOnly = true)
     public List<TestCaseTreeNode> getTree(UUID projectId) {
-        // Single-batch fetch per entity type so the tree assembly is O(n)
-        // without recursive repository calls. SectionService.getTree shape;
-        // adapted for two entity kinds.
+        // One batch fetch per entity type keeps the assembly O(n) and
+        // avoids per-folder repository round-trips.
         var folders = folderRepository.findByProjectIdOrderBySortOrder(projectId);
         var testCases = testCaseRepository.findAllByProjectIdOrderBySortOrder(projectId);
 
