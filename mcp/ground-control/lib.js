@@ -7570,6 +7570,52 @@ export async function deleteFindingLink(findingId, linkId, project) {
 }
 
 // ---------------------------------------------------------------------------
+// Evidence Artifact API functions (GC-M016 / ADR-044)
+// ---------------------------------------------------------------------------
+
+export const EVIDENCE_TYPES = [
+  "OBSERVATION_SUMMARY",
+  "CONTROL_TEST_SUMMARY",
+  "ASSURANCE_CONCLUSION",
+  "VERIFICATION_SUMMARY",
+  "ATTESTATION",
+  "MIXED",
+];
+export const EVIDENCE_SOURCE_KINDS = [
+  "OBSERVATION",
+  "CONTROL_TEST",
+  "CONTROL_EFFECTIVENESS_ASSESSMENT",
+  "VERIFICATION_RESULT",
+  "RISK_ASSESSMENT_RESULT",
+  "FINDING",
+  "ATTESTATION",
+  "EXTERNAL",
+];
+// ASSURANCE_LEVELS is exported from the VerificationResult section below
+// (search for "AssuranceLevel"); gc-evidence.js imports it from there.
+
+export async function createEvidenceArtifact(data, project) {
+  return request("POST", "/api/v1/evidence-artifacts", { body: data, params: { project } });
+}
+
+export async function listEvidenceArtifacts({ project, evidenceType, includeSuperseded } = {}) {
+  return request("GET", "/api/v1/evidence-artifacts", {
+    params: { project, evidenceType, includeSuperseded },
+  });
+}
+
+export async function getEvidenceArtifact(id, project) {
+  return request("GET", `/api/v1/evidence-artifacts/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function supersedeEvidenceArtifact(id, data, project) {
+  return request("POST", `/api/v1/evidence-artifacts/${encodeURIComponent(id)}/supersede`, {
+    body: data,
+    params: { project },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Control API functions
 // ---------------------------------------------------------------------------
 

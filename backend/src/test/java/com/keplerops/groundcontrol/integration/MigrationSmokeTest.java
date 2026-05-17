@@ -50,7 +50,7 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         "040", "041", "042", "043", "044", "045", "046", "047", "048", "049", "050", "051", "052",
                         "053", "054", "055", "056", "057", "058", "059", "060", "061", "062", "063", "064", "065",
                         "066", "067", "068", "069", "070", "071", "072", "073", "074", "075", "076", "077", "078",
-                        "079", "080", "081", "082", "083", "084", "085", "086", "087", "088", "089");
+                        "079", "080", "081", "082", "083", "084", "085", "086", "087", "088", "089", "090", "091");
     }
 
     @Test
@@ -593,6 +593,47 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                 .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
                         + " WHERE table_name = 'test_plan'"
                         + " AND constraint_name = 'uq_test_plan_project_uid'")
+                .getSingleResult();
+        // V090/V091: evidence_artifact + audit (GC-M016 / ADR-045). The supersede
+        // mechanism is enforced in EvidenceArtifactService, not at the schema
+        // level; the audit table carries the BaseEntity timestamps so
+        // AuditRetentionJob can age rows out.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM evidence_artifact LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM evidence_artifact_audit LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'evidence_artifact'"
+                        + " AND column_name = 'superseded_by_artifact_id'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'evidence_artifact'"
+                        + " AND column_name = 'derived_at' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'evidence_artifact'"
+                        + " AND column_name = 'evidence_type' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery(
+                        "SELECT 1 FROM information_schema.columns WHERE table_name = 'evidence_artifact_audit'"
+                                + " AND column_name = 'superseded_by_artifact_id'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery(
+                        "SELECT 1 FROM information_schema.columns WHERE table_name = 'evidence_artifact_audit'"
+                                + " AND column_name = 'created_at'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery(
+                        "SELECT 1 FROM information_schema.columns WHERE table_name = 'evidence_artifact_audit'"
+                                + " AND column_name = 'updated_at'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM pg_indexes WHERE tablename = 'evidence_artifact'"
+                        + " AND indexname = 'uq_evidence_artifact_project_uid'")
                 .getSingleResult();
     }
 }

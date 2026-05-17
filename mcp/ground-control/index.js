@@ -199,6 +199,11 @@ import {
   GC_FINDING_DESCRIPTION,
 } from "./gc-finding.js";
 import {
+  gcEvidenceZodShape,
+  gcEvidenceToolHandler,
+  GC_EVIDENCE_DESCRIPTION,
+} from "./gc-evidence.js";
+import {
   gcRiskScenarioZodShape,
   gcRiskScenarioToolHandler,
   GC_RISK_SCENARIO_DESCRIPTION,
@@ -1543,6 +1548,20 @@ server.tool(
     try {
       const result = await gcFindingToolHandler(args);
       return result === null ? ok("Deleted") : ok(JSON.stringify(result, null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+// gc_evidence: GC-M016 / ADR-044. Append-only — create / supersede only;
+// reads (list, get) route through gc_query at /api/v1/evidence-artifacts.
+server.tool(
+  "gc_evidence",
+  GC_EVIDENCE_DESCRIPTION,
+  gcEvidenceZodShape,
+  async (args) => {
+    try {
+      const result = await gcEvidenceToolHandler(args);
+      return ok(JSON.stringify(result, null, 2));
     } catch (e) { return err(e); }
   },
 );

@@ -48,7 +48,8 @@ public class AuditRetentionJob {
             "test_case_gherkin_audit",
             "asset_subtype_schema_audit",
             "test_case_folder_audit",
-            "test_plan_audit");
+            "test_plan_audit",
+            "evidence_artifact_audit");
 
     private final AuditRetentionProperties properties;
     private final EntityManager entityManager;

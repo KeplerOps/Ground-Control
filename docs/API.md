@@ -1010,6 +1010,45 @@ the existing list wholesale; pass `null` to leave it unchanged or an empty list 
 keep AGE materialization safe. `ControlTest` deletion is rejected with HTTP 409
 `control_test_referenced` while any assessment still references the test.
 
+### Evidence Artifacts (GC-M016 / ADR-044)
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/evidence-artifacts` | EvidenceArtifactRequest | 201 | Create a new summarized-evidence artifact |
+| GET | `/evidence-artifacts` | — | 200 | List artifacts (optional `evidenceType`, `includeSuperseded` filters) |
+| GET | `/evidence-artifacts/{id}` | — | 200 | Get an artifact by UUID |
+| POST | `/evidence-artifacts/{id}/supersede` | EvidenceArtifactRequest | 201 | Create a new artifact and link the prior one as superseded |
+
+The aggregate is append-only: there is no PUT and no DELETE. The only post-create
+mutation is `/supersede`, which writes the prior artifact's
+`supersededByArtifactId` exactly once. Subsequent supersede attempts on an
+already-superseded prior return HTTP 409 `evidence_artifact_already_superseded`.
+
+**EvidenceArtifactRequest fields:** `uid` (required, max 50), `title` (required,
+max 200), `summary` (required TEXT, max 8000), `evidenceType` (required, one of
+`OBSERVATION_SUMMARY`, `CONTROL_TEST_SUMMARY`, `ASSURANCE_CONCLUSION`,
+`VERIFICATION_SUMMARY`, `ATTESTATION`, `MIXED`), `derivationMethod` (required, max
+200 — method/profile identifier), `derivedAt` (required Instant), `assuranceLevel`
+(optional, one of `L0`-`L3`), `confidence` (optional, max 50), `notes` (optional
+TEXT, max 4000), `sources` (required non-empty list, max 100). Each source
+carries `sourceKind` (one of `OBSERVATION`, `CONTROL_TEST`,
+`CONTROL_EFFECTIVENESS_ASSESSMENT`, `VERIFICATION_RESULT`,
+`RISK_ASSESSMENT_RESULT`, `FINDING`, `ATTESTATION`, `EXTERNAL`), exactly one of
+`sourceEntityId` (UUID, for internal kinds) or `sourceIdentifier` (string, for
+external kinds `ATTESTATION` / `EXTERNAL`), and an optional `role` (free text).
+
+The service validates internal sources project-scoped via the corresponding
+repository (`evidence_source_target_not_found` 422 when the UUID does not
+resolve); external sources require only a non-blank `sourceIdentifier`.
+`derivedBy` is taken from the authenticated actor at create time and is not
+caller-supplied.
+
+The list endpoint excludes superseded artifacts by default; pass
+`includeSuperseded=true` to include them. The graph projection emits one
+`HAS_SOURCE` edge per internal-kind source pointing at the existing graph node
+for the source entity, and a `SUPERSEDED_BY` edge from a prior artifact to its
+replacement once supersede has run.
+
 ### Test Cases (TC-001 / ADR-040)
 
 | Method | Path | Body | Status | Purpose |

@@ -39,6 +39,9 @@ public interface ObservationRepository extends JpaRepository<Observation, UUID> 
     boolean existsByAssetIdAndCategoryAndObservationKeyAndObservedAt(
             UUID assetId, ObservationCategory category, String observationKey, java.time.Instant observedAt);
 
+    @Query("SELECT (COUNT(o) > 0) FROM Observation o WHERE o.id = :id AND o.asset.project.id = :projectId")
+    boolean existsByIdAndProjectId(@Param("id") UUID id, @Param("projectId") UUID projectId);
+
     @Query("SELECT o FROM Observation o JOIN FETCH o.asset WHERE o.asset.id = :assetId "
             + "AND (o.expiresAt IS NULL OR o.expiresAt > :now) "
             + "AND o.observedAt = (SELECT MAX(o2.observedAt) FROM Observation o2 "

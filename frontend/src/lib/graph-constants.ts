@@ -34,6 +34,7 @@ export const ENTITY_TYPE_COLORS: Record<string, string> = {
   RISK_ASSESSMENT_RESULT: "#a855f7",
   TREATMENT_PLAN: "#eab308",
   METHODOLOGY_PROFILE: "#14b8a6",
+  EVIDENCE_ARTIFACT: "#38bdf8",
 };
 
 export const PRIORITY_COLORS: Record<string, string> = {

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  ENTITY_TYPE_COLORS,
   PRIORITY_COLORS,
   SERIES_COLORS,
   STATUS_COLORS,
   WAVE_COLORS,
   getColorMap,
+  getEntityTypeColor,
   getNodeColor,
   getSeries,
 } from "./graph-constants";
@@ -51,6 +53,18 @@ describe("getNodeColor", () => {
       wave: 0,
     };
     expect(getNodeColor(unknown, "priority")).toBe("#6c7ee1");
+  });
+});
+
+describe("ENTITY_TYPE_COLORS", () => {
+  it("includes EVIDENCE_ARTIFACT (GC-M016 / ADR-044)", () => {
+    // Locks in the frontend mirror for the backend GraphEntityType.EVIDENCE_ARTIFACT
+    // node so the graph visualization does not fall through to the generic gray
+    // entity color.
+    expect(ENTITY_TYPE_COLORS.EVIDENCE_ARTIFACT).toBeDefined();
+    expect(getEntityTypeColor("EVIDENCE_ARTIFACT")).toBe(
+      ENTITY_TYPE_COLORS.EVIDENCE_ARTIFACT,
+    );
   });
 });
 
