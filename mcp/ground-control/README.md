@@ -164,7 +164,7 @@ under the `workflow` catalog, so it is always available.
   `/api/v1/relations`, `/api/v1/requirements`,
   `/api/v1/risk-assessment-results`, `/api/v1/risk-register-records`,
   `/api/v1/risk-scenarios`, `/api/v1/sections`, `/api/v1/test-cases`,
-  `/api/v1/threat-models`, `/api/v1/timeline`, `/api/v1/traceability`,
+  `/api/v1/test-plans`, `/api/v1/threat-models`, `/api/v1/timeline`, `/api/v1/traceability`,
   `/api/v1/treatment-plans`, `/api/v1/verification-results`. A drift-catch test
   (`gc-query.test.js`) compares this list against the implementation
   constant on every test run, so the README is the documentation surface

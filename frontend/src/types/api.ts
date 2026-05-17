@@ -247,6 +247,72 @@ export interface TestCaseTreeNode {
   // test cases). Test-case nodes carry an empty children array.
   children: TestCaseTreeNode[];
 }
+
+// TC-006 / ADR-044 — Top-level planning aggregate. Mirrors backend
+// TestPlanResponse / TestPlanRequest / UpdateTestPlanRequest /
+// TestPlanStatusTransitionRequest field-for-field; enum is single-sourced
+// per ADR-034.
+export type TestPlanStatus =
+  | "DRAFT"
+  | "ACTIVE"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "ARCHIVED";
+export const TEST_PLAN_STATUSES: TestPlanStatus[] = [
+  "DRAFT",
+  "ACTIVE",
+  "IN_PROGRESS",
+  "COMPLETED",
+  "ARCHIVED",
+];
+
+export interface TestPlanResponse {
+  id: string;
+  projectIdentifier: string;
+  uid: string;
+  name: string;
+  description: string | null;
+  product: string | null;
+  version: string | null;
+  build: string | null;
+  status: TestPlanStatus;
+  // ISO-8601 date strings (YYYY-MM-DD); LocalDate on the backend.
+  startDate: string | null;
+  endDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TestPlanRequest {
+  uid: string;
+  name: string;
+  description?: string | null;
+  product?: string | null;
+  version?: string | null;
+  build?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+}
+
+export interface UpdateTestPlanRequest {
+  name?: string;
+  description?: string | null;
+  product?: string | null;
+  version?: string | null;
+  build?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  clearDescription?: boolean;
+  clearProduct?: boolean;
+  clearVersion?: boolean;
+  clearBuild?: boolean;
+  clearStartDate?: boolean;
+  clearEndDate?: boolean;
+}
+
+export interface TestPlanStatusTransitionRequest {
+  status: TestPlanStatus;
+}
 export type GraphEntityType =
   | "REQUIREMENT"
   | "OPERATIONAL_ASSET"

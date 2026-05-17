@@ -1182,6 +1182,46 @@ is "not found" in the requesting project's scope). Deleting a non-empty folder r
 with a message naming the contents class. Reordering with a non-matching id set returns HTTP 409.
 Copying with a colliding `newUid` returns HTTP 409.
 
+### Test Plans (TC-006 / ADR-044)
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/test-plans` | TestPlanRequest | 201 | Create a project-scoped test plan |
+| GET | `/test-plans` | — | 200 | List test plans in a project (ordered by `createdAt DESC`) |
+| GET | `/test-plans/{id}` | — | 200 | Get a test plan by UUID |
+| GET | `/test-plans/uid/{uid}` | — | 200 | Get a test plan by project-scoped UID |
+| PUT | `/test-plans/{id}` | UpdateTestPlanRequest | 200 | Update mutable fields (null = no change; `clearXxx: true` = clear) |
+| PUT | `/test-plans/{id}/status` | TestPlanStatusTransitionRequest | 200 | Transition the lifecycle status |
+| DELETE | `/test-plans/{id}` | — | 204 | Delete the test plan |
+
+A `TestPlan` is the top-level planning container for a testing effort. It is project-scoped,
+flat (plans do not nest), and carries scope metadata (name, description), release coordinates
+(product, version, build) as bounded scalar text, a lifecycle status, and planned start / end
+dates. The aggregate's stable UUID primary key is the seam future `TestRun` rows will FK to
+in order to group multiple runs under a single plan; no JSON array of run IDs lives on the
+plan itself. See ADR-044.
+
+**TestPlanRequest fields:** `uid` (required, max 50, unique per project), `name` (required,
+max 200), `description` (optional, max 8192), `product` (optional, max 200), `version`
+(optional, max 100), `build` (optional, max 100), `startDate` (optional, ISO-8601 date),
+`endDate` (optional, ISO-8601 date; must be `>= startDate` when both are set).
+
+**UpdateTestPlanRequest fields:** `name`, `description`, `product`, `version`, `build`,
+`startDate`, `endDate` — all optional with null-means-no-change — plus
+`clearDescription`, `clearProduct`, `clearVersion`, `clearBuild`, `clearStartDate`,
+`clearEndDate` flags to wipe the matching field to null (same partial-update convention as
+`UpdateTestCaseRequest`). `uid` is create-only.
+
+**TestPlanStatusTransitionRequest fields:** `status` (required, `TestPlanStatus` enum:
+`DRAFT`, `ACTIVE`, `IN_PROGRESS`, `COMPLETED`, `ARCHIVED`). Valid transitions:
+`DRAFT → ACTIVE | ARCHIVED`, `ACTIVE → IN_PROGRESS | COMPLETED | ARCHIVED`,
+`IN_PROGRESS → ACTIVE | COMPLETED | ARCHIVED`, `COMPLETED → ACTIVE | ARCHIVED`,
+with `ARCHIVED` terminal. The `IN_PROGRESS → ACTIVE` and `COMPLETED → ACTIVE` arcs exist
+so a team can pause a run window or re-open a completed plan to fold in late-arriving runs.
+Invalid transitions surface as HTTP 422 `invalid_status_transition`. Duplicate UID within a
+project returns HTTP 409. An inverted `startDate` / `endDate` pair surfaces as HTTP 422
+`invalid_test_plan_schedule`.
+
 ## Request / Response Format
 
 JSON. Error responses use a nested envelope:
