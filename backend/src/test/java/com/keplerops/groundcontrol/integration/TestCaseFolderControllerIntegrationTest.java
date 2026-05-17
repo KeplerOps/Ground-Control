@@ -207,10 +207,8 @@ class TestCaseFolderControllerIntegrationTest extends BaseIntegrationTest {
                         .content(objectMapper.writeValueAsString(tc)))
                 .andExpect(status().isCreated());
 
-        // Folder-first-then-test-case ordering (ADR-043) is the contract;
-        // assert child kind + title at each position so a regression
-        // mixing kinds or inverting the order is caught here, not just
-        // by count (test-quality cycle 1).
+        // Assert child kind and title at each position so any inversion of
+        // the documented folders-before-test-cases ordering fails the test.
         mockMvc.perform(get("/api/v1/test-cases/tree").param("project", "ground-control"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].kind", is("FOLDER")))

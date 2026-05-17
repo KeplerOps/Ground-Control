@@ -116,13 +116,11 @@ public class TestCaseFolderService {
         }
         folder.setParent(newParent);
         // Same-container moves with an omitted sortOrder preserve the
-        // folder's current placement so idempotent move calls do not
-        // rebalance siblings or produce audit revisions. Explicit
-        // sortOrder uses insertion semantics — siblings shift to make
-        // room (codex cycle-2 finding).
-        if (sameContainer && command.sortOrder() == null) {
-            // No-op on sort_order; keep current value.
-        } else {
+        // folder's current placement (idempotent move = no rebalance, no
+        // audit revision). Explicit sortOrder uses insertion semantics —
+        // target siblings shift to make room.
+        boolean preserveCurrentSortOrder = sameContainer && command.sortOrder() == null;
+        if (!preserveCurrentSortOrder) {
             folder.setSortOrder(placeFolderInContainer(projectId, newParentId, folder.getId(), command.sortOrder()));
         }
         folder = folderRepository.save(folder);
@@ -253,47 +251,70 @@ public class TestCaseFolderService {
             List<TestCaseFolder> rootFolders,
             Map<UUID, List<TestCaseFolder>> childFoldersByParent,
             Map<UUID, List<TestCase>> testCasesByParent) {
+        List<TestCaseFolder> postOrder = collectPostOrder(rootFolders, childFoldersByParent);
+        Map<UUID, TestCaseTreeNode> folderNodesById = new HashMap<>();
+        for (TestCaseFolder folder : postOrder) {
+            folderNodesById.put(
+                    folder.getId(),
+                    materialiseFolderNode(folder, childFoldersByParent, testCasesByParent, folderNodesById));
+        }
+        return folderNodesById;
+    }
+
+    private List<TestCaseFolder> collectPostOrder(
+            List<TestCaseFolder> rootFolders, Map<UUID, List<TestCaseFolder>> childFoldersByParent) {
         List<TestCaseFolder> postOrder = new ArrayList<>();
         HashSet<UUID> visited = new HashSet<>();
         Deque<StackFrame> stack = new ArrayDeque<>();
         for (TestCaseFolder root : rootFolders) {
             stack.push(new StackFrame(root));
             while (!stack.isEmpty()) {
-                StackFrame frame = stack.peek();
-                if (frame.expanded) {
-                    stack.pop();
-                    postOrder.add(frame.folder);
-                    continue;
-                }
-                if (!visited.add(frame.folder.getId())) {
-                    // Already visited (shouldn't happen with a valid
-                    // tree, but defend against malformed graphs).
-                    stack.pop();
-                    continue;
-                }
-                frame.expanded = true;
-                List<TestCaseFolder> children = childFoldersByParent.getOrDefault(frame.folder.getId(), List.of());
-                // Push in reverse so left-to-right child order pops first.
-                for (int i = children.size() - 1; i >= 0; i--) {
-                    stack.push(new StackFrame(children.get(i)));
-                }
+                visitNext(stack, postOrder, visited, childFoldersByParent);
             }
         }
+        return postOrder;
+    }
 
-        Map<UUID, TestCaseTreeNode> folderNodesById = new HashMap<>();
-        for (TestCaseFolder folder : postOrder) {
-            List<TestCaseFolder> childFolders = childFoldersByParent.getOrDefault(folder.getId(), List.of());
-            List<TestCase> childTestCases = testCasesByParent.getOrDefault(folder.getId(), List.of());
-            List<TestCaseTreeNode> children = new ArrayList<>(childFolders.size() + childTestCases.size());
-            for (TestCaseFolder child : childFolders) {
-                children.add(folderNodesById.get(child.getId()));
-            }
-            for (TestCase testCase : childTestCases) {
-                children.add(TestCaseTreeNode.testCase(testCase));
-            }
-            folderNodesById.put(folder.getId(), TestCaseTreeNode.folder(folder, children));
+    private void visitNext(
+            Deque<StackFrame> stack,
+            List<TestCaseFolder> postOrder,
+            HashSet<UUID> visited,
+            Map<UUID, List<TestCaseFolder>> childFoldersByParent) {
+        StackFrame frame = stack.peek();
+        if (frame.expanded) {
+            stack.pop();
+            postOrder.add(frame.folder);
+            return;
         }
-        return folderNodesById;
+        if (!visited.add(frame.folder.getId())) {
+            // Already-visited node — only possible on a malformed graph
+            // that slipped past cycle protection. Drop the duplicate frame.
+            stack.pop();
+            return;
+        }
+        frame.expanded = true;
+        List<TestCaseFolder> children = childFoldersByParent.getOrDefault(frame.folder.getId(), List.of());
+        // Push in reverse so left-to-right child order pops first.
+        for (int i = children.size() - 1; i >= 0; i--) {
+            stack.push(new StackFrame(children.get(i)));
+        }
+    }
+
+    private TestCaseTreeNode materialiseFolderNode(
+            TestCaseFolder folder,
+            Map<UUID, List<TestCaseFolder>> childFoldersByParent,
+            Map<UUID, List<TestCase>> testCasesByParent,
+            Map<UUID, TestCaseTreeNode> folderNodesById) {
+        List<TestCaseFolder> childFolders = childFoldersByParent.getOrDefault(folder.getId(), List.of());
+        List<TestCase> childTestCases = testCasesByParent.getOrDefault(folder.getId(), List.of());
+        List<TestCaseTreeNode> children = new ArrayList<>(childFolders.size() + childTestCases.size());
+        for (TestCaseFolder child : childFolders) {
+            children.add(folderNodesById.get(child.getId()));
+        }
+        for (TestCase testCase : childTestCases) {
+            children.add(TestCaseTreeNode.testCase(testCase));
+        }
+        return TestCaseTreeNode.folder(folder, children);
     }
 
     /** Stack frame used by the iterative post-order traversal in {@link #buildFolderNodesIteratively}. */

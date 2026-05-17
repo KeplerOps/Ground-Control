@@ -158,8 +158,8 @@ class TestCaseFolderServiceTest {
             when(folderRepository.existsRootByProjectIdAndTitle(projectId, "Smoke"))
                     .thenReturn(true);
 
-            assertThatThrownBy(() ->
-                            folderService.create(new CreateTestCaseFolderCommand(projectId, null, "Smoke", null, null)))
+            var command = new CreateTestCaseFolderCommand(projectId, null, "Smoke", null, null);
+            assertThatThrownBy(() -> folderService.create(command))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("already exists");
         }
@@ -171,9 +171,8 @@ class TestCaseFolderServiceTest {
             when(folderRepository.findByIdAndProjectId(unknownParent, projectId))
                     .thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> folderService.create(
-                            new CreateTestCaseFolderCommand(projectId, unknownParent, "Smoke", null, null)))
-                    .isInstanceOf(NotFoundException.class);
+            var command = new CreateTestCaseFolderCommand(projectId, unknownParent, "Smoke", null, null);
+            assertThatThrownBy(() -> folderService.create(command)).isInstanceOf(NotFoundException.class);
         }
     }
 
@@ -204,8 +203,9 @@ class TestCaseFolderServiceTest {
             when(folderRepository.existsRootByProjectIdAndTitle(projectId, "Taken"))
                     .thenReturn(true);
 
-            assertThatThrownBy(() -> folderService.update(
-                            projectId, existing.getId(), new UpdateTestCaseFolderCommand("Taken", null, false)))
+            var command = new UpdateTestCaseFolderCommand("Taken", null, false);
+            UUID existingId = existing.getId();
+            assertThatThrownBy(() -> folderService.update(projectId, existingId, command))
                     .isInstanceOf(ConflictException.class);
         }
 
@@ -266,11 +266,11 @@ class TestCaseFolderServiceTest {
         @Test
         void rejectsMoveUnderSelf() {
             var source = folder("Login", null, 0);
-            when(folderRepository.findByIdAndProjectId(source.getId(), projectId))
-                    .thenReturn(Optional.of(source));
+            UUID sourceId = source.getId();
+            when(folderRepository.findByIdAndProjectId(sourceId, projectId)).thenReturn(Optional.of(source));
 
-            assertThatThrownBy(() -> folderService.move(
-                            projectId, source.getId(), new MoveTestCaseFolderCommand(source.getId(), null)))
+            var command = new MoveTestCaseFolderCommand(sourceId, null);
+            assertThatThrownBy(() -> folderService.move(projectId, sourceId, command))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("itself");
         }
@@ -280,12 +280,14 @@ class TestCaseFolderServiceTest {
             var root = folder("Root", null, 0);
             var middle = folder("Middle", root, 0);
             var leaf = folder("Leaf", middle, 0);
-            when(folderRepository.findByIdAndProjectId(root.getId(), projectId)).thenReturn(Optional.of(root));
-            when(folderRepository.findByIdAndProjectId(leaf.getId(), projectId)).thenReturn(Optional.of(leaf));
+            UUID rootId = root.getId();
+            UUID leafId = leaf.getId();
+            when(folderRepository.findByIdAndProjectId(rootId, projectId)).thenReturn(Optional.of(root));
+            when(folderRepository.findByIdAndProjectId(leafId, projectId)).thenReturn(Optional.of(leaf));
 
-            // Move root under leaf (cycle: leaf → middle → root → ... )
-            assertThatThrownBy(() -> folderService.move(
-                            projectId, root.getId(), new MoveTestCaseFolderCommand(leaf.getId(), null)))
+            // Move root under leaf — cycle: leaf -> middle -> root.
+            var command = new MoveTestCaseFolderCommand(leafId, null);
+            assertThatThrownBy(() -> folderService.move(projectId, rootId, command))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("descendants");
         }
@@ -293,13 +295,13 @@ class TestCaseFolderServiceTest {
         @Test
         void rejectsMoveToUnknownFolder() {
             var source = folder("Login", null, 0);
+            UUID sourceId = source.getId();
             UUID unknown = UUID.randomUUID();
-            when(folderRepository.findByIdAndProjectId(source.getId(), projectId))
-                    .thenReturn(Optional.of(source));
+            when(folderRepository.findByIdAndProjectId(sourceId, projectId)).thenReturn(Optional.of(source));
             when(folderRepository.findByIdAndProjectId(unknown, projectId)).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() ->
-                            folderService.move(projectId, source.getId(), new MoveTestCaseFolderCommand(unknown, null)))
+            var command = new MoveTestCaseFolderCommand(unknown, null);
+            assertThatThrownBy(() -> folderService.move(projectId, sourceId, command))
                     .isInstanceOf(NotFoundException.class);
         }
 
@@ -308,14 +310,15 @@ class TestCaseFolderServiceTest {
             var source = folder("Login", null, 0);
             var dest = folder("Dest", null, 1);
             var existingChild = folder("Login", dest, 0); // same title under target
-            when(folderRepository.findByIdAndProjectId(source.getId(), projectId))
-                    .thenReturn(Optional.of(source));
-            when(folderRepository.findByIdAndProjectId(dest.getId(), projectId)).thenReturn(Optional.of(dest));
-            when(folderRepository.findByProjectIdAndParentIdOrderBySortOrder(projectId, dest.getId()))
+            UUID sourceId = source.getId();
+            UUID destId = dest.getId();
+            when(folderRepository.findByIdAndProjectId(sourceId, projectId)).thenReturn(Optional.of(source));
+            when(folderRepository.findByIdAndProjectId(destId, projectId)).thenReturn(Optional.of(dest));
+            when(folderRepository.findByProjectIdAndParentIdOrderBySortOrder(projectId, destId))
                     .thenReturn(List.of(existingChild));
 
-            assertThatThrownBy(() -> folderService.move(
-                            projectId, source.getId(), new MoveTestCaseFolderCommand(dest.getId(), null)))
+            var command = new MoveTestCaseFolderCommand(destId, null);
+            assertThatThrownBy(() -> folderService.move(projectId, sourceId, command))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("already exists");
         }
@@ -394,9 +397,8 @@ class TestCaseFolderServiceTest {
             when(folderRepository.findRootByProjectIdOrderBySortOrder(projectId))
                     .thenReturn(List.of(a, b));
 
-            assertThatThrownBy(() -> folderService.reorder(
-                            projectId, new ReorderTestCaseFoldersCommand(null, List.of(a.getId()))))
-                    .isInstanceOf(ConflictException.class);
+            var command = new ReorderTestCaseFoldersCommand(null, List.of(a.getId()));
+            assertThatThrownBy(() -> folderService.reorder(projectId, command)).isInstanceOf(ConflictException.class);
         }
 
         @Test
@@ -406,22 +408,21 @@ class TestCaseFolderServiceTest {
             when(folderRepository.findRootByProjectIdOrderBySortOrder(projectId))
                     .thenReturn(List.of(a, b));
 
-            assertThatThrownBy(() -> folderService.reorder(
-                            projectId, new ReorderTestCaseFoldersCommand(null, List.of(a.getId(), a.getId()))))
+            var command = new ReorderTestCaseFoldersCommand(null, List.of(a.getId(), a.getId()));
+            assertThatThrownBy(() -> folderService.reorder(projectId, command))
                     .isInstanceOf(com.keplerops.groundcontrol.domain.exception.DomainValidationException.class);
         }
 
         @Test
         void rejectsCrossProjectOrMissingParent() {
-            // Codex cycle-1 finding: when parentFolderId is supplied, the
-            // target must exist in the requesting project — otherwise
-            // reorder silently returns 204 against an empty sibling set.
+            // When parentFolderId is supplied, the target must exist in
+            // the requesting project — otherwise reorder would silently
+            // return 204 against an empty sibling set.
             UUID unknown = UUID.randomUUID();
             when(folderRepository.findByIdAndProjectId(unknown, projectId)).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() ->
-                            folderService.reorder(projectId, new ReorderTestCaseFoldersCommand(unknown, List.of())))
-                    .isInstanceOf(NotFoundException.class);
+            var command = new ReorderTestCaseFoldersCommand(unknown, List.of());
+            assertThatThrownBy(() -> folderService.reorder(projectId, command)).isInstanceOf(NotFoundException.class);
         }
     }
 
@@ -443,10 +444,11 @@ class TestCaseFolderServiceTest {
         @Test
         void rejectsDeletionWithSubfolder() {
             var f = folder("Parent", null, 0);
-            when(folderRepository.findByIdAndProjectId(f.getId(), projectId)).thenReturn(Optional.of(f));
-            when(folderRepository.countByParentId(f.getId())).thenReturn(1L);
+            UUID fid = f.getId();
+            when(folderRepository.findByIdAndProjectId(fid, projectId)).thenReturn(Optional.of(f));
+            when(folderRepository.countByParentId(fid)).thenReturn(1L);
 
-            assertThatThrownBy(() -> folderService.delete(projectId, f.getId()))
+            assertThatThrownBy(() -> folderService.delete(projectId, fid))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("subfolders");
             verify(folderRepository, never()).delete(any(TestCaseFolder.class));
@@ -455,11 +457,12 @@ class TestCaseFolderServiceTest {
         @Test
         void rejectsDeletionWithTestCases() {
             var f = folder("Bucket", null, 0);
-            when(folderRepository.findByIdAndProjectId(f.getId(), projectId)).thenReturn(Optional.of(f));
-            when(folderRepository.countByParentId(f.getId())).thenReturn(0L);
-            when(testCaseRepository.countByParentFolderId(f.getId())).thenReturn(3L);
+            UUID fid = f.getId();
+            when(folderRepository.findByIdAndProjectId(fid, projectId)).thenReturn(Optional.of(f));
+            when(folderRepository.countByParentId(fid)).thenReturn(0L);
+            when(testCaseRepository.countByParentFolderId(fid)).thenReturn(3L);
 
-            assertThatThrownBy(() -> folderService.delete(projectId, f.getId()))
+            assertThatThrownBy(() -> folderService.delete(projectId, fid))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("test cases");
         }

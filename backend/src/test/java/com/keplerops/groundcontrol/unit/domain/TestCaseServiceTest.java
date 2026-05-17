@@ -445,8 +445,9 @@ class TestCaseServiceTest {
             when(folderRepository.findByIdAndProjectId(unknownFolder, projectId))
                     .thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> testCaseService.move(
-                            projectId, existing.getId(), new MoveTestCaseCommand(unknownFolder, null)))
+            var command = new MoveTestCaseCommand(unknownFolder, null);
+            UUID existingId = existing.getId();
+            assertThatThrownBy(() -> testCaseService.move(projectId, existingId, command))
                     .isInstanceOf(NotFoundException.class);
         }
     }
@@ -481,8 +482,9 @@ class TestCaseServiceTest {
             when(testCaseRepository.existsByProjectIdAndUid(projectId, "TC-002"))
                     .thenReturn(true);
 
-            assertThatThrownBy(() -> testCaseService.copy(
-                            projectId, source.getId(), new CopyTestCaseCommand("TC-002", null, null)))
+            var command = new CopyTestCaseCommand("TC-002", null, null);
+            UUID sourceId = source.getId();
+            assertThatThrownBy(() -> testCaseService.copy(projectId, sourceId, command))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("TC-002");
         }
@@ -493,8 +495,9 @@ class TestCaseServiceTest {
             when(testCaseRepository.findByIdAndProjectId(source.getId(), projectId))
                     .thenReturn(Optional.of(source));
 
-            assertThatThrownBy(() ->
-                            testCaseService.copy(projectId, source.getId(), new CopyTestCaseCommand("  ", null, null)))
+            var command = new CopyTestCaseCommand("  ", null, null);
+            UUID sourceId = source.getId();
+            assertThatThrownBy(() -> testCaseService.copy(projectId, sourceId, command))
                     .isInstanceOf(ConflictException.class);
         }
 
@@ -573,8 +576,8 @@ class TestCaseServiceTest {
             when(folderRepository.findByIdAndProjectId(unknownFolder, projectId))
                     .thenReturn(Optional.empty());
 
-            assertThatThrownBy(() ->
-                            testCaseService.reorder(projectId, new ReorderTestCasesCommand(unknownFolder, List.of())))
+            var command = new ReorderTestCasesCommand(unknownFolder, List.of());
+            assertThatThrownBy(() -> testCaseService.reorder(projectId, command))
                     .isInstanceOf(NotFoundException.class);
         }
     }

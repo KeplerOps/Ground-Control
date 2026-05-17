@@ -7,8 +7,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.function.ObjIntConsumer;
 
 /**
  * TC-005 / ADR-043 — Shared sibling reorder algorithm.
@@ -37,7 +37,7 @@ final class SiblingOrderingHelper {
             List<UUID> orderedIds,
             List<T> currentSiblings,
             Function<T, UUID> idOf,
-            BiConsumer<T, Integer> setOrder) {
+            ObjIntConsumer<T> setOrder) {
         if (orderedIds == null) {
             throw new DomainValidationException(
                     "Ordered " + entityLabel + " id list is required", "invalid_reorder", Map.of());

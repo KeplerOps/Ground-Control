@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class TestCaseService {
 
     private static final Logger log = LoggerFactory.getLogger(TestCaseService.class);
+    private static final String FOLDER_NOT_FOUND_PREFIX = "Test case folder not found: ";
 
     private final TestCaseRepository testCaseRepository;
     private final TestCaseFolderRepository folderRepository;
@@ -50,8 +51,7 @@ public class TestCaseService {
         if (command.parentFolderId() != null) {
             parentFolder = folderRepository
                     .findByIdAndProjectId(command.parentFolderId(), project.getId())
-                    .orElseThrow(
-                            () -> new NotFoundException("Test case folder not found: " + command.parentFolderId()));
+                    .orElseThrow(() -> new NotFoundException(FOLDER_NOT_FOUND_PREFIX + command.parentFolderId()));
         }
         var format = command.format() != null ? command.format() : TestCaseFormat.STEP_BASED;
         var testCase =
@@ -163,8 +163,7 @@ public class TestCaseService {
         if (command.parentFolderId() != null) {
             targetFolder = folderRepository
                     .findByIdAndProjectId(command.parentFolderId(), projectId)
-                    .orElseThrow(
-                            () -> new NotFoundException("Test case folder not found: " + command.parentFolderId()));
+                    .orElseThrow(() -> new NotFoundException(FOLDER_NOT_FOUND_PREFIX + command.parentFolderId()));
         }
         UUID currentParentId =
                 testCase.getParentFolder() != null ? testCase.getParentFolder().getId() : null;
@@ -215,8 +214,7 @@ public class TestCaseService {
         if (command.parentFolderId() != null) {
             targetFolder = folderRepository
                     .findByIdAndProjectId(command.parentFolderId(), projectId)
-                    .orElseThrow(
-                            () -> new NotFoundException("Test case folder not found: " + command.parentFolderId()));
+                    .orElseThrow(() -> new NotFoundException(FOLDER_NOT_FOUND_PREFIX + command.parentFolderId()));
         }
         var copy = new TestCase(
                 source.getProject(),
@@ -263,7 +261,7 @@ public class TestCaseService {
             // Containment guard before touching siblings: a missing or
             // cross-project target must surface as 404 rather than being
             // silently no-op'd by an empty current-sibling set.
-            throw new NotFoundException("Test case folder not found: " + command.parentFolderId());
+            throw new NotFoundException(FOLDER_NOT_FOUND_PREFIX + command.parentFolderId());
         }
         var siblings = command.parentFolderId() == null
                 ? testCaseRepository.findRootByProjectIdOrderBySortOrder(projectId)

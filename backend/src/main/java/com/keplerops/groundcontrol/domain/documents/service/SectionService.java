@@ -136,55 +136,70 @@ public class SectionService {
      */
     private List<SectionTreeNode> buildIterativeForest(
             List<Section> all, List<Section> roots, Map<UUID, List<Section>> childrenByParentId) {
+        List<Section> postOrder = collectPostOrder(all, roots, childrenByParentId);
+        Map<UUID, SectionTreeNode> nodesById = new HashMap<>();
+        for (Section section : postOrder) {
+            nodesById.put(section.getId(), materialiseNode(section, childrenByParentId, nodesById));
+        }
+        List<SectionTreeNode> result = new ArrayList<>(roots.size());
+        for (Section root : roots) {
+            result.add(nodesById.get(root.getId()));
+        }
+        return result;
+    }
+
+    private List<Section> collectPostOrder(
+            List<Section> all, List<Section> roots, Map<UUID, List<Section>> childrenByParentId) {
         List<Section> postOrder = new ArrayList<>(all.size());
         HashSet<UUID> visited = new HashSet<>();
         Deque<SectionStackFrame> stack = new ArrayDeque<>();
         for (Section root : roots) {
             stack.push(new SectionStackFrame(root));
             while (!stack.isEmpty()) {
-                SectionStackFrame frame = stack.peek();
-                if (frame.expanded) {
-                    stack.pop();
-                    postOrder.add(frame.section);
-                    continue;
-                }
-                if (!visited.add(frame.section.getId())) {
-                    stack.pop();
-                    continue;
-                }
-                frame.expanded = true;
-                List<Section> children = childrenByParentId.getOrDefault(frame.section.getId(), List.of());
-                for (int i = children.size() - 1; i >= 0; i--) {
-                    stack.push(new SectionStackFrame(children.get(i)));
-                }
+                visitNext(stack, postOrder, visited, childrenByParentId);
             }
         }
+        return postOrder;
+    }
 
-        Map<UUID, SectionTreeNode> nodesById = new HashMap<>();
-        for (Section section : postOrder) {
-            var childSections = childrenByParentId.getOrDefault(section.getId(), List.of());
-            List<SectionTreeNode> children = new ArrayList<>(childSections.size());
-            for (Section child : childSections) {
-                children.add(nodesById.get(child.getId()));
-            }
-            nodesById.put(
-                    section.getId(),
-                    new SectionTreeNode(
-                            section.getId(),
-                            section.getParent() != null ? section.getParent().getId() : null,
-                            section.getTitle(),
-                            section.getDescription(),
-                            section.getSortOrder(),
-                            section.getCreatedAt(),
-                            section.getUpdatedAt(),
-                            children));
+    private void visitNext(
+            Deque<SectionStackFrame> stack,
+            List<Section> postOrder,
+            HashSet<UUID> visited,
+            Map<UUID, List<Section>> childrenByParentId) {
+        SectionStackFrame frame = stack.peek();
+        if (frame.expanded) {
+            stack.pop();
+            postOrder.add(frame.section);
+            return;
         }
+        if (!visited.add(frame.section.getId())) {
+            stack.pop();
+            return;
+        }
+        frame.expanded = true;
+        List<Section> children = childrenByParentId.getOrDefault(frame.section.getId(), List.of());
+        for (int i = children.size() - 1; i >= 0; i--) {
+            stack.push(new SectionStackFrame(children.get(i)));
+        }
+    }
 
-        List<SectionTreeNode> result = new ArrayList<>(roots.size());
-        for (Section root : roots) {
-            result.add(nodesById.get(root.getId()));
+    private SectionTreeNode materialiseNode(
+            Section section, Map<UUID, List<Section>> childrenByParentId, Map<UUID, SectionTreeNode> nodesById) {
+        var childSections = childrenByParentId.getOrDefault(section.getId(), List.of());
+        List<SectionTreeNode> children = new ArrayList<>(childSections.size());
+        for (Section child : childSections) {
+            children.add(nodesById.get(child.getId()));
         }
-        return result;
+        return new SectionTreeNode(
+                section.getId(),
+                section.getParent() != null ? section.getParent().getId() : null,
+                section.getTitle(),
+                section.getDescription(),
+                section.getSortOrder(),
+                section.getCreatedAt(),
+                section.getUpdatedAt(),
+                children);
     }
 
     /** Stack frame used by the iterative post-order traversal in {@link #buildIterativeForest}. */
