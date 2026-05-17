@@ -129,8 +129,7 @@ class EvidenceArtifactControllerTest {
     @Test
     void listFiltersByEvidenceType() throws Exception {
         when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
-        when(service.listByProject(eq(PROJECT_ID), eq(EvidenceType.ATTESTATION), eq(false)))
-                .thenReturn(List.of(makeArtifact()));
+        when(service.listByProject(PROJECT_ID, EvidenceType.ATTESTATION, false)).thenReturn(List.of(makeArtifact()));
 
         mockMvc.perform(get("/api/v1/evidence-artifacts")
                         .param("project", "ground-control")
@@ -144,7 +143,7 @@ class EvidenceArtifactControllerTest {
     @Test
     void listIncludeSupersededTrue() throws Exception {
         when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
-        when(service.listByProject(eq(PROJECT_ID), eq(null), eq(true))).thenReturn(List.of(makeArtifact()));
+        when(service.listByProject(PROJECT_ID, null, true)).thenReturn(List.of(makeArtifact()));
 
         mockMvc.perform(get("/api/v1/evidence-artifacts")
                         .param("project", "ground-control")

@@ -52,6 +52,13 @@ public class EvidenceArtifactService {
     private static final String FIELD = "field";
     private static final String SOURCES = "sources";
     private static final String SOURCE_INDEX = "sourceIndex";
+    private static final String SOURCE_KIND_SUFFIX = "].sourceKind";
+    private static final String SOURCE_ENTITY_ID_SUFFIX = "].sourceEntityId";
+    private static final String SOURCE_IDENTIFIER_SUFFIX = "].sourceIdentifier";
+
+    private static String sourcesFieldPath(int index, String suffix) {
+        return "sources[" + index + suffix;
+    }
 
     private final EvidenceArtifactRepository repository;
     private final ProjectService projectService;
@@ -135,16 +142,10 @@ public class EvidenceArtifactService {
                     Map.of(FIELD, "projectId"));
         }
         var replacement = create(command);
-        // Conditional update: only write `supersededByArtifactId` when it is still
-        // NULL. Two concurrent supersedes against the same prior both pass the
-        // earlier null-check, but only one observes a non-zero update count;
-        // the loser surfaces the same conflict the first call would have seen.
-        // This is the supersede-once invariant for ADR-045 against concurrent
-        // writers (codex finding cycle 1 / issue #725).
+        // Conditional update enforces the supersede-once invariant under concurrent writers (ADR-045).
         int updated = repository.markSupersededIfUnset(prior.getId(), projectId, replacement.getId());
         if (updated == 0) {
-            // Re-read so the conflict envelope reflects the winning replacement's UUID
-            // rather than the stale in-memory copy.
+            // Re-read so the conflict envelope reflects the winning replacement, not the stale in-memory copy.
             var refreshed = findOrThrow(projectId, priorId);
             throw alreadySupersededConflict(refreshed);
         }
@@ -206,10 +207,9 @@ public class EvidenceArtifactService {
                         Map.of(FIELD, SOURCES, SOURCE_INDEX, i));
             }
             if (ref.sourceKind() == null) {
+                var path = sourcesFieldPath(i, SOURCE_KIND_SUFFIX);
                 throw new DomainValidationException(
-                        "sources[" + i + "].sourceKind must not be null",
-                        VALIDATION_ERROR,
-                        Map.of(FIELD, "sources[" + i + "].sourceKind", SOURCE_INDEX, i));
+                        path + " must not be null", VALIDATION_ERROR, Map.of(FIELD, path, SOURCE_INDEX, i));
             }
             validateOneSource(projectId, i, ref);
             out.add(ref);
@@ -221,30 +221,29 @@ public class EvidenceArtifactService {
         var kind = ref.sourceKind();
         var entityId = ref.sourceEntityId();
         var identifier = ref.sourceIdentifier();
+        var entityIdPath = sourcesFieldPath(index, SOURCE_ENTITY_ID_SUFFIX);
+        var identifierPath = sourcesFieldPath(index, SOURCE_IDENTIFIER_SUFFIX);
         if (kind.isInternal()) {
             if (entityId == null) {
                 throw new DomainValidationException(
-                        "sources[" + index + "].sourceEntityId is required for internal source kind " + kind,
+                        entityIdPath + " is required for internal source kind " + kind,
                         VALIDATION_ERROR,
-                        Map.of(FIELD, "sources[" + index + "].sourceEntityId", SOURCE_INDEX, index));
+                        Map.of(FIELD, entityIdPath, SOURCE_INDEX, index));
             }
             if (identifier != null) {
                 throw new DomainValidationException(
-                        "sources[" + index + "].sourceIdentifier must be null for internal source kind " + kind,
+                        identifierPath + " must be null for internal source kind " + kind,
                         VALIDATION_ERROR,
-                        Map.of(FIELD, "sources[" + index + "].sourceIdentifier", SOURCE_INDEX, index));
+                        Map.of(FIELD, identifierPath, SOURCE_INDEX, index));
             }
             if (!internalSourceExists(projectId, kind, entityId)) {
                 Map<String, Serializable> detail = new LinkedHashMap<>();
-                detail.put(FIELD, "sources[" + index + "].sourceEntityId");
+                detail.put(FIELD, entityIdPath);
                 detail.put(SOURCE_INDEX, index);
                 detail.put("sourceKind", kind.name());
                 detail.put("sourceEntityId", entityId.toString());
-                // Reference miss against an internal source is a validation failure (the caller
-                // sent us a UUID that doesn't resolve in this project), not a "your evidence
-                // artifact was not found" 404; throwing NotFoundException here would collide
-                // with the GET-by-id semantics. DomainValidationException carries the same
-                // structured detail and maps to 400 via GlobalExceptionHandler.
+                // Validation failure (the caller's UUID does not resolve in this project),
+                // not a 404 on the artifact itself.
                 throw new DomainValidationException(
                         "EvidenceSourceRef target not found in this project: " + kind + "/" + entityId,
                         "evidence_source_target_not_found",
@@ -253,15 +252,15 @@ public class EvidenceArtifactService {
         } else {
             if (entityId != null) {
                 throw new DomainValidationException(
-                        "sources[" + index + "].sourceEntityId must be null for external source kind " + kind,
+                        entityIdPath + " must be null for external source kind " + kind,
                         VALIDATION_ERROR,
-                        Map.of(FIELD, "sources[" + index + "].sourceEntityId", SOURCE_INDEX, index));
+                        Map.of(FIELD, entityIdPath, SOURCE_INDEX, index));
             }
             if (identifier == null || identifier.isBlank()) {
                 throw new DomainValidationException(
-                        "sources[" + index + "].sourceIdentifier is required for external source kind " + kind,
+                        identifierPath + " is required for external source kind " + kind,
                         VALIDATION_ERROR,
-                        Map.of(FIELD, "sources[" + index + "].sourceIdentifier", SOURCE_INDEX, index));
+                        Map.of(FIELD, identifierPath, SOURCE_INDEX, index));
             }
         }
     }

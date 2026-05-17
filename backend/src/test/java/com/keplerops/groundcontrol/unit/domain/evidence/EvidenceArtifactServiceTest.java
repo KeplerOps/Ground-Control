@@ -142,7 +142,8 @@ class EvidenceArtifactServiceTest {
 
             var sources =
                     List.of(new EvidenceSourceRef(EvidenceSourceKind.ATTESTATION, null, "vendor-soc2-2026", null));
-            assertThatThrownBy(() -> service.create(happyCommandWithSources(sources)))
+            var command = happyCommandWithSources(sources);
+            assertThatThrownBy(() -> service.create(command))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("EVD-0001");
             verify(repository, never()).save(any());
@@ -153,7 +154,8 @@ class EvidenceArtifactServiceTest {
             when(projectService.getById(projectId)).thenReturn(project);
             when(repository.existsByProjectIdAndUid(projectId, "EVD-0001")).thenReturn(false);
 
-            assertThatThrownBy(() -> service.create(happyCommandWithSources(List.of())))
+            var command = happyCommandWithSources(List.of());
+            assertThatThrownBy(() -> service.create(command))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("at least one source");
             verify(repository, never()).save(any());
@@ -165,7 +167,8 @@ class EvidenceArtifactServiceTest {
             when(repository.existsByProjectIdAndUid(projectId, "EVD-0001")).thenReturn(false);
 
             var sources = List.of(new EvidenceSourceRef(EvidenceSourceKind.OBSERVATION, null, null, null));
-            assertThatThrownBy(() -> service.create(happyCommandWithSources(sources)))
+            var command = happyCommandWithSources(sources);
+            assertThatThrownBy(() -> service.create(command))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("sourceEntityId is required");
         }
@@ -177,7 +180,8 @@ class EvidenceArtifactServiceTest {
 
             var sources = List.of(
                     new EvidenceSourceRef(EvidenceSourceKind.OBSERVATION, UUID.randomUUID(), "stray-identifier", null));
-            assertThatThrownBy(() -> service.create(happyCommandWithSources(sources)))
+            var command = happyCommandWithSources(sources);
+            assertThatThrownBy(() -> service.create(command))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("sourceIdentifier must be null for internal source kind");
         }
@@ -188,7 +192,8 @@ class EvidenceArtifactServiceTest {
             when(repository.existsByProjectIdAndUid(projectId, "EVD-0001")).thenReturn(false);
 
             var sources = List.of(new EvidenceSourceRef(EvidenceSourceKind.EXTERNAL, null, "", null));
-            assertThatThrownBy(() -> service.create(happyCommandWithSources(sources)))
+            var command = happyCommandWithSources(sources);
+            assertThatThrownBy(() -> service.create(command))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("sourceIdentifier is required");
         }
@@ -199,7 +204,8 @@ class EvidenceArtifactServiceTest {
             when(repository.existsByProjectIdAndUid(projectId, "EVD-0001")).thenReturn(false);
 
             var sources = List.of(new EvidenceSourceRef(EvidenceSourceKind.EXTERNAL, UUID.randomUUID(), "ident", null));
-            assertThatThrownBy(() -> service.create(happyCommandWithSources(sources)))
+            var command = happyCommandWithSources(sources);
+            assertThatThrownBy(() -> service.create(command))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("sourceEntityId must be null for external source kind");
         }
@@ -213,7 +219,8 @@ class EvidenceArtifactServiceTest {
                     .thenReturn(false);
 
             var sources = List.of(new EvidenceSourceRef(EvidenceSourceKind.OBSERVATION, missingId, null, null));
-            assertThatThrownBy(() -> service.create(happyCommandWithSources(sources)))
+            var command = happyCommandWithSources(sources);
+            assertThatThrownBy(() -> service.create(command))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("OBSERVATION/" + missingId);
         }
@@ -399,7 +406,8 @@ class EvidenceArtifactServiceTest {
 
             var sources =
                     List.of(new EvidenceSourceRef(EvidenceSourceKind.ATTESTATION, null, "vendor-soc2-2026", null));
-            assertThatThrownBy(() -> service.supersede(projectId, priorId, happyCommandWithSources(sources)))
+            var command = happyCommandWithSources(sources);
+            assertThatThrownBy(() -> service.supersede(projectId, priorId, command))
                     .isInstanceOf(NotFoundException.class)
                     .hasMessageContaining("not found");
         }

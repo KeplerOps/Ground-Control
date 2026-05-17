@@ -73,18 +73,17 @@ class EvidenceArtifactGraphProjectionContributorTest {
 
         var edges = contributor.contributeEdges(projectId);
 
-        assertThat(edges).hasSize(3);
-        assertThat(edges).allMatch(e -> e.edgeType().equals("HAS_SOURCE"));
+        // Node-id assertions guard against a regression in toSourceEdge that
+        // swapped the source/target sides or used the wrong UUID. Every edge
+        // originates at the artifact and points at the right source node.
+        var expectedArtifactNodeId = GraphIds.nodeId(GraphEntityType.EVIDENCE_ARTIFACT, artifactId);
         assertThat(edges)
+                .hasSize(3)
+                .allMatch(e -> e.edgeType().equals("HAS_SOURCE"))
+                .allMatch(e -> e.sourceId().equals(expectedArtifactNodeId))
                 .extracting(e -> e.targetEntityType())
                 .containsExactlyInAnyOrder(
                         GraphEntityType.OBSERVATION, GraphEntityType.CONTROL_TEST, GraphEntityType.FINDING);
-        // Node-id assertions guard against a regression in toSourceEdge that
-        // swapped the source/target sides or used the wrong UUID. The
-        // observation edge must originate at the artifact and point at the
-        // observation node.
-        var expectedArtifactNodeId = GraphIds.nodeId(GraphEntityType.EVIDENCE_ARTIFACT, artifactId);
-        assertThat(edges).allMatch(e -> e.sourceId().equals(expectedArtifactNodeId));
         assertThat(edges)
                 .extracting(e -> e.targetId())
                 .containsExactlyInAnyOrder(
