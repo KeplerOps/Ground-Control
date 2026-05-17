@@ -6,6 +6,7 @@ import com.keplerops.groundcontrol.domain.assets.state.AssetScope;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import java.util.Map;
 
 public record AssetRequest(
         @NotBlank @Size(max = 50) String uid,
@@ -17,4 +18,6 @@ public record AssetRequest(
         AssetEnvironment environment,
         AssetCriticality criticality,
         String businessContext,
-        AssetScope scopeDesignation) {}
+        AssetScope scopeDesignation,
+        @Size(max = 100) String subtype,
+        Map<String, Object> metadata) {}

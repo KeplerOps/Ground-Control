@@ -3,14 +3,18 @@ package com.keplerops.groundcontrol.domain.assets.service;
 import com.keplerops.groundcontrol.domain.assets.model.AssetExternalId;
 import com.keplerops.groundcontrol.domain.assets.model.AssetLink;
 import com.keplerops.groundcontrol.domain.assets.model.AssetRelation;
+import com.keplerops.groundcontrol.domain.assets.model.AssetSubtypeSchema;
 import com.keplerops.groundcontrol.domain.assets.model.OperationalAsset;
 import com.keplerops.groundcontrol.domain.assets.repository.AssetExternalIdRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.AssetLinkRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.AssetRelationRepository;
+import com.keplerops.groundcontrol.domain.assets.repository.AssetSubtypeSchemaRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.OperationalAssetRepository;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
+import com.keplerops.groundcontrol.domain.assets.state.AssetSubtypeSchemaStatus;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
+import com.keplerops.groundcontrol.domain.assets.validation.AssetSubtypeValidator;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
@@ -39,6 +43,8 @@ public class AssetService {
     private final FindingLinkRepository findingLinkRepository;
     private final ProjectRepository projectRepository;
     private final GraphTargetResolverService graphTargetResolverService;
+    private final AssetSubtypeSchemaRepository subtypeSchemaRepository;
+    private final AssetSubtypeValidator subtypeValidator;
 
     public AssetService(
             OperationalAssetRepository assetRepository,
@@ -47,7 +53,9 @@ public class AssetService {
             AssetExternalIdRepository externalIdRepository,
             FindingLinkRepository findingLinkRepository,
             ProjectRepository projectRepository,
-            GraphTargetResolverService graphTargetResolverService) {
+            GraphTargetResolverService graphTargetResolverService,
+            AssetSubtypeSchemaRepository subtypeSchemaRepository,
+            AssetSubtypeValidator subtypeValidator) {
         this.assetRepository = assetRepository;
         this.relationRepository = relationRepository;
         this.linkRepository = linkRepository;
@@ -55,9 +63,22 @@ public class AssetService {
         this.findingLinkRepository = findingLinkRepository;
         this.projectRepository = projectRepository;
         this.graphTargetResolverService = graphTargetResolverService;
+        this.subtypeSchemaRepository = subtypeSchemaRepository;
+        this.subtypeValidator = subtypeValidator;
     }
 
     public OperationalAsset create(CreateAssetCommand command) {
+        // Enforce bounded-string contracts at the service boundary rather
+        // than relying on DTO `@Size` annotations. Non-controller callers
+        // (or any other entry point that bypasses Bean Validation) would
+        // otherwise leak a 500 from a VARCHAR overflow at save time
+        // (codex cycle-4 finding 1). Cheap-fail before the project lookup.
+        bounded("uid", command.uid(), OperationalAssetBounds.UID);
+        bounded("name", command.name(), OperationalAssetBounds.NAME);
+        bounded("owner", command.owner(), OperationalAssetBounds.OWNER);
+        bounded("steward", command.steward(), OperationalAssetBounds.STEWARD);
+        bounded("subtype", command.subtype(), OperationalAssetBounds.SUBTYPE);
+
         var project = projectRepository
                 .findById(command.projectId())
                 .orElseThrow(() -> new NotFoundException("Project not found: " + command.projectId()));
@@ -92,7 +113,38 @@ public class AssetService {
         if (command.scopeDesignation() != null) {
             asset.setScopeDesignation(command.scopeDesignation());
         }
+        if (command.subtype() != null) {
+            asset.setSubtype(command.subtype());
+        }
+        if (command.metadata() != null) {
+            asset.setMetadata(command.metadata());
+        }
+        validateAssetMetadata(asset);
         return assetRepository.save(asset);
+    }
+
+    /**
+     * Max-length contracts for bounded {@code OperationalAsset} string fields.
+     * Mirror the {@code @Column(length=...)} declarations on the entity and
+     * the {@code @Size} declarations on the API DTOs; enforced at the
+     * service layer so callers cannot bypass the contract by going around
+     * Bean Validation (codex cycle-4 finding 1).
+     */
+    private static final class OperationalAssetBounds {
+        static final int UID = 50;
+        static final int NAME = 200;
+        static final int OWNER = 200;
+        static final int STEWARD = 200;
+        static final int SUBTYPE = 100;
+    }
+
+    private void bounded(String field, String value, int max) {
+        if (value != null && value.length() > max) {
+            throw new DomainValidationException(
+                    "Asset " + field + " exceeds maximum length of " + max + " characters",
+                    "asset_field_invalid",
+                    Map.of("reason", "field_too_long", "field", field, "limit", max));
+        }
     }
 
     public OperationalAsset update(UUID projectId, UUID id, UpdateAssetCommand command) {
@@ -141,9 +193,24 @@ public class AssetService {
             String steward,
             com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment environment,
             com.keplerops.groundcontrol.domain.assets.state.AssetCriticality criticality,
-            com.keplerops.groundcontrol.domain.assets.state.AssetScope scopeDesignation) {
+            com.keplerops.groundcontrol.domain.assets.state.AssetScope scopeDesignation,
+            String subtype) {
         return assetRepository.findByProjectIdAndArchivedAtIsNullAndFilters(
-                projectId, assetType, owner, steward, environment, criticality, scopeDesignation);
+                projectId, assetType, owner, steward, environment, criticality, scopeDesignation, subtype);
+    }
+
+    @Deprecated(forRemoval = false)
+    @Transactional(readOnly = true)
+    public List<OperationalAsset> listByProjectAndFilters(
+            UUID projectId,
+            AssetType assetType,
+            String owner,
+            String steward,
+            com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment environment,
+            com.keplerops.groundcontrol.domain.assets.state.AssetCriticality criticality,
+            com.keplerops.groundcontrol.domain.assets.state.AssetScope scopeDesignation) {
+        return listByProjectAndFilters(
+                projectId, assetType, owner, steward, environment, criticality, scopeDesignation, null);
     }
 
     @Transactional(readOnly = true)
@@ -558,8 +625,22 @@ public class AssetService {
     }
 
     private void applyAssetUpdates(OperationalAsset asset, UpdateAssetCommand command) {
+        // Service-layer bounded-string checks (mirror create-path enforcement).
+        // Non-controller callers must hit the same envelope as DTO-validated ones.
+        bounded("name", command.name(), OperationalAssetBounds.NAME);
+        if (!command.clearOwner()) {
+            bounded("owner", command.owner(), OperationalAssetBounds.OWNER);
+        }
+        if (!command.clearSteward()) {
+            bounded("steward", command.steward(), OperationalAssetBounds.STEWARD);
+        }
+        if (!command.clearSubtype()) {
+            bounded("subtype", command.subtype(), OperationalAssetBounds.SUBTYPE);
+        }
         applyCoreFieldUpdates(asset, command);
         applyMetadataUpdates(asset, command);
+        applySubtypeUpdates(asset, command);
+        validateAssetMetadata(asset);
     }
 
     private void applyCoreFieldUpdates(OperationalAsset asset, UpdateAssetCommand command) {
@@ -595,6 +676,177 @@ public class AssetService {
             setter.accept(null);
         } else if (newValue != null) {
             setter.accept(newValue);
+        }
+    }
+
+    private void applySubtypeUpdates(OperationalAsset asset, UpdateAssetCommand command) {
+        applyClearOrSet(command.clearSubtype(), command.subtype(), asset::setSubtype);
+        applyClearOrSet(command.clearMetadata(), command.metadata(), asset::setMetadata);
+    }
+
+    private void validateAssetMetadata(OperationalAsset asset) {
+        String subtype = asset.getSubtype();
+        if (subtype != null && subtype.isBlank()) {
+            // The schema registry rejects blank subtype keys (validateSubtype
+            // SchemaPayload); accepting blank subtypes on assets would create
+            // a second invalid namespace that can never match a registered
+            // schema (codex over-cap finding 4 on #722). Reject in the same
+            // direction.
+            throw new DomainValidationException(
+                    "Asset subtype must not be blank", "asset_subtype_invalid", Map.of("reason", "blank_subtype"));
+        }
+        if (subtype == null) {
+            // No subtype: bounds only on metadata; schemas key off subtype.
+            subtypeValidator.validateMetadataBounds(asset.getMetadata());
+            return;
+        }
+        var activeSchema = subtypeSchemaRepository
+                .findByProjectIdAndAssetTypeAndSubtypeAndStatus(
+                        asset.getProject().getId(),
+                        asset.getAssetType(),
+                        asset.getSubtype(),
+                        AssetSubtypeSchemaStatus.ACTIVE)
+                .orElse(null);
+        if (activeSchema == null) {
+            subtypeValidator.validateMetadataBounds(asset.getMetadata());
+            return;
+        }
+        subtypeValidator.validateAgainstSchema(asset.getMetadata(), activeSchema.getSchemaBody());
+    }
+
+    // --- Subtype schema registry (GC-M011) ---
+
+    public AssetSubtypeSchema registerSubtypeSchema(CreateAssetSubtypeSchemaCommand command) {
+        validateSubtypeSchemaPayload(command.assetType(), command.subtype(), command.schemaVersion());
+        // Validate schema-body shape BEFORE deprecating the prior ACTIVE row,
+        // so a malformed body cannot leave the registry without an ACTIVE
+        // entry. ACTIVE registry rows MUST declare at least one field — an
+        // empty schema body advertises "schema layering" while enforcing
+        // nothing (codex over-cap finding on #722).
+        subtypeValidator.validateSchemaBody(command.schemaBody(), /* requireFields */ true);
+        var project = projectRepository
+                .findById(command.projectId())
+                .orElseThrow(() -> new NotFoundException("Project not found: " + command.projectId()));
+        if (subtypeSchemaRepository.existsByProjectIdAndAssetTypeAndSubtypeAndSchemaVersion(
+                command.projectId(), command.assetType(), command.subtype(), command.schemaVersion())) {
+            throw new ConflictException("Subtype schema version " + command.schemaVersion() + " already exists for "
+                    + command.assetType() + ":" + command.subtype());
+        }
+        subtypeSchemaRepository
+                .findByProjectIdAndAssetTypeAndSubtypeAndStatus(
+                        command.projectId(), command.assetType(), command.subtype(), AssetSubtypeSchemaStatus.ACTIVE)
+                .ifPresent(existing -> {
+                    existing.deprecate();
+                    // Flush the deprecation UPDATE before issuing the new
+                    // ACTIVE INSERT — Hibernate's default action ordering
+                    // flushes INSERTs before UPDATEs in the same session,
+                    // which would trip uk_asset_subtype_schema_active (the
+                    // partial unique index from V075) against the
+                    // still-ACTIVE prior row.
+                    subtypeSchemaRepository.saveAndFlush(existing);
+                });
+        var schema = new AssetSubtypeSchema(
+                project, command.assetType(), command.subtype(), command.schemaVersion(), command.schemaBody());
+        if (command.description() != null) {
+            schema.setDescription(command.description());
+        }
+        try {
+            return subtypeSchemaRepository.saveAndFlush(schema);
+        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+            // The partial unique index on (project, asset_type, subtype) WHERE
+            // status='ACTIVE' (V075) is the safety net for a concurrent race
+            // past the service-layer existence check. Translate to a Conflict
+            // so callers see the existing error envelope rather than a 500.
+            throw new ConflictException(
+                    "Concurrent registration: another ACTIVE schema for " + command.assetType() + ":"
+                            + command.subtype() + " was committed first",
+                    "asset_subtype_schema_active_conflict",
+                    Map.of(
+                            "assetType", command.assetType().name(),
+                            "subtype", command.subtype()));
+        }
+    }
+
+    public AssetSubtypeSchema updateSubtypeSchema(UUID projectId, UUID id, UpdateAssetSubtypeSchemaCommand command) {
+        var schema = getSubtypeSchema(projectId, id);
+        boolean active = schema.getStatus() == AssetSubtypeSchemaStatus.ACTIVE;
+        // ACTIVE rows MUST keep an enforceable schema body. Reject
+        // clearSchemaBody on ACTIVE rows so callers cannot null out the
+        // contract via update; deprecate the row first if that's the intent.
+        if (command.clearSchemaBody() && active) {
+            throw new DomainValidationException(
+                    "Cannot clear schemaBody on an ACTIVE subtype schema; deprecate first",
+                    "asset_subtype_schema_active_body_required",
+                    Map.of("reason", "schema_body_required"));
+        }
+        if (!command.clearSchemaBody() && command.schemaBody() != null) {
+            subtypeValidator.validateSchemaBody(command.schemaBody(), /* requireFields */ active);
+        }
+        applyClearOrSet(command.clearDescription(), command.description(), schema::setDescription);
+        applyClearOrSet(command.clearSchemaBody(), command.schemaBody(), schema::setSchemaBody);
+        return subtypeSchemaRepository.save(schema);
+    }
+
+    public AssetSubtypeSchema deprecateSubtypeSchema(UUID projectId, UUID id) {
+        var schema = getSubtypeSchema(projectId, id);
+        if (schema.getStatus() != AssetSubtypeSchemaStatus.DEPRECATED) {
+            schema.deprecate();
+            subtypeSchemaRepository.save(schema);
+        }
+        return schema;
+    }
+
+    @Transactional(readOnly = true)
+    public AssetSubtypeSchema getSubtypeSchema(UUID projectId, UUID id) {
+        return subtypeSchemaRepository
+                .findByIdAndProjectId(id, projectId)
+                .orElseThrow(() -> new NotFoundException("Asset subtype schema not found: " + id));
+    }
+
+    @Transactional(readOnly = true)
+    public AssetSubtypeSchema getActiveSubtypeSchema(UUID projectId, AssetType assetType, String subtype) {
+        return subtypeSchemaRepository
+                .findByProjectIdAndAssetTypeAndSubtypeAndStatus(
+                        projectId, assetType, subtype, AssetSubtypeSchemaStatus.ACTIVE)
+                .orElseThrow(() -> new NotFoundException("No active subtype schema for " + assetType + ":" + subtype));
+    }
+
+    @Transactional(readOnly = true)
+    public List<AssetSubtypeSchema> listSubtypeSchemas(UUID projectId, AssetType assetType, String subtype) {
+        if (assetType == null && subtype == null) {
+            return subtypeSchemaRepository.findByProjectId(projectId);
+        }
+        if (assetType != null && subtype == null) {
+            return subtypeSchemaRepository.findByProjectIdAndAssetType(projectId, assetType);
+        }
+        if (assetType == null) {
+            // Subtype without assetType is ambiguous: same subtype string may
+            // legitimately exist under different AssetType buckets. Require
+            // both or neither — saves callers a silent merge that loses the
+            // top-level classification distinction.
+            throw new DomainValidationException(
+                    "Listing by subtype requires assetType",
+                    "asset_subtype_schema_filter_invalid",
+                    Map.of("reason", "subtype_without_asset_type"));
+        }
+        return subtypeSchemaRepository.findByProjectIdAndAssetTypeAndSubtype(projectId, assetType, subtype);
+    }
+
+    private void validateSubtypeSchemaPayload(AssetType assetType, String subtype, String schemaVersion) {
+        if (assetType == null) {
+            throw new DomainValidationException("assetType is required");
+        }
+        if (subtype == null || subtype.isBlank()) {
+            throw new DomainValidationException("subtype must not be blank");
+        }
+        if (subtype.length() > 100) {
+            throw new DomainValidationException("subtype must not exceed 100 characters");
+        }
+        if (schemaVersion == null || schemaVersion.isBlank()) {
+            throw new DomainValidationException("schemaVersion must not be blank");
+        }
+        if (schemaVersion.length() > 50) {
+            throw new DomainValidationException("schemaVersion must not exceed 50 characters");
         }
     }
 

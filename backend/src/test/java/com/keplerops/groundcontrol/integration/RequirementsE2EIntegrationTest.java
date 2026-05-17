@@ -471,12 +471,16 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "070", // V070: operational_asset_audit parity for GC-M012
                         "071", // V071: test_case (TC-001 / ADR-040)
                         "072", // V072: test_case_audit
-                        "073", // V073: test_case_step (TC-002 / ADR-041)
+                        "073", // V073: test_case_step (TC-002)
                         "074", // V074: test_case_step_audit
                         "075", // V075: forward-fix V072 missing timestamp columns on test_case_audit
-                        "076", // V076: add test_case.format discriminator (TC-004 / ADR-042)
+                        "076", // V076: add test_case.format discriminator (TC-004)
                         "077", // V077: add test_case_audit.format parity column
                         "078", // V078: create test_case_gherkin
-                        "079"); // V079: create test_case_gherkin_audit
+                        "079", // V079: create test_case_gherkin_audit
+                        "080", // V080: operational_asset subtype + metadata (GC-M011)
+                        "081", // V081: operational_asset_audit parity for GC-M011
+                        "082", // V082: asset_subtype_schema (GC-M011 registry)
+                        "083"); // V083: asset_subtype_schema_audit
     }
 }

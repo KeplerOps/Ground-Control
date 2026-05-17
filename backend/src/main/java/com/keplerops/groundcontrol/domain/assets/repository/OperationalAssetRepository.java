@@ -30,12 +30,14 @@ public interface OperationalAssetRepository extends JpaRepository<OperationalAss
     List<UUID> findIdsByProjectIdAndArchivedAtIsNull(@Param("projectId") UUID projectId);
 
     /**
-     * GC-M012: single filtered project-scoped query for active assets. Any
-     * combination of asset-type, owner, steward, environment, criticality, and
-     * scope-designation predicates may be null; nulls disable that predicate
-     * (IS NULL guard), so risk/control/audit/reporting callers share one query
-     * surface instead of inventing per-workflow lookups. Owner/steward
-     * comparison is case-insensitive to match the free-form string shape.
+     * GC-M012 + GC-M011: single filtered project-scoped query for active
+     * assets. Any combination of asset-type, owner, steward, environment,
+     * criticality, scope-designation, and subtype predicates may be null;
+     * nulls disable that predicate (IS NULL guard), so risk / control / audit
+     * / reporting callers share one query surface instead of inventing
+     * per-workflow lookups. Owner / steward comparison is case-insensitive to
+     * match the free-form string shape; subtype is case-sensitive because the
+     * subtype catalog (AssetSubtypeSchema) keys off the exact string.
      */
     @Query(
             """
@@ -48,6 +50,7 @@ public interface OperationalAssetRepository extends JpaRepository<OperationalAss
               AND (:environment IS NULL OR a.environment = :environment)
               AND (:criticality IS NULL OR a.criticality = :criticality)
               AND (:scopeDesignation IS NULL OR a.scopeDesignation = :scopeDesignation)
+              AND (:subtype IS NULL OR a.subtype = :subtype)
             """)
     List<OperationalAsset> findByProjectIdAndArchivedAtIsNullAndFilters(
             @Param("projectId") UUID projectId,
@@ -56,5 +59,6 @@ public interface OperationalAssetRepository extends JpaRepository<OperationalAss
             @Param("steward") String steward,
             @Param("environment") AssetEnvironment environment,
             @Param("criticality") AssetCriticality criticality,
-            @Param("scopeDesignation") AssetScope scopeDesignation);
+            @Param("scopeDesignation") AssetScope scopeDesignation,
+            @Param("subtype") String subtype);
 }

@@ -10,26 +10,32 @@ import static org.mockito.Mockito.when;
 import com.keplerops.groundcontrol.domain.assets.model.AssetExternalId;
 import com.keplerops.groundcontrol.domain.assets.model.AssetLink;
 import com.keplerops.groundcontrol.domain.assets.model.AssetRelation;
+import com.keplerops.groundcontrol.domain.assets.model.AssetSubtypeSchema;
 import com.keplerops.groundcontrol.domain.assets.model.OperationalAsset;
 import com.keplerops.groundcontrol.domain.assets.repository.AssetExternalIdRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.AssetLinkRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.AssetRelationRepository;
+import com.keplerops.groundcontrol.domain.assets.repository.AssetSubtypeSchemaRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.OperationalAssetRepository;
 import com.keplerops.groundcontrol.domain.assets.service.AssetService;
 import com.keplerops.groundcontrol.domain.assets.service.CreateAssetCommand;
 import com.keplerops.groundcontrol.domain.assets.service.CreateAssetExternalIdCommand;
 import com.keplerops.groundcontrol.domain.assets.service.CreateAssetLinkCommand;
 import com.keplerops.groundcontrol.domain.assets.service.CreateAssetRelationCommand;
+import com.keplerops.groundcontrol.domain.assets.service.CreateAssetSubtypeSchemaCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetExternalIdCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetRelationCommand;
+import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetSubtypeSchemaCommand;
 import com.keplerops.groundcontrol.domain.assets.state.AssetCriticality;
 import com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetScope;
+import com.keplerops.groundcontrol.domain.assets.state.AssetSubtypeSchemaStatus;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
+import com.keplerops.groundcontrol.domain.assets.validation.AssetSubtypeValidator;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
@@ -38,6 +44,7 @@ import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.repository.ProjectRepository;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,6 +78,13 @@ class AssetServiceTest {
 
     @Mock
     private GraphTargetResolverService graphTargetResolverService;
+
+    @Mock
+    private AssetSubtypeSchemaRepository subtypeSchemaRepository;
+
+    @org.mockito.Spy
+    @SuppressWarnings("UnusedVariable") // Injected into AssetService via @InjectMocks; errorprone misses the wire.
+    private AssetSubtypeValidator subtypeValidator = new AssetSubtypeValidator();
 
     @InjectMocks
     private AssetService assetService;
@@ -421,7 +435,8 @@ class AssetServiceTest {
                             "platform-sre",
                             AssetEnvironment.PRODUCTION,
                             AssetCriticality.CRITICAL,
-                            AssetScope.IN_SCOPE))
+                            AssetScope.IN_SCOPE,
+                            null))
                     .thenReturn(List.of(match));
 
             var results = assetService.listByProjectAndFilters(
@@ -431,7 +446,8 @@ class AssetServiceTest {
                     "platform-sre",
                     AssetEnvironment.PRODUCTION,
                     AssetCriticality.CRITICAL,
-                    AssetScope.IN_SCOPE);
+                    AssetScope.IN_SCOPE,
+                    null);
 
             assertThat(results).containsExactly(match);
         }
@@ -442,10 +458,26 @@ class AssetServiceTest {
             // controller can fall through cleanly when no filter param hits.
             var match = createAsset("ASSET-A", "A");
             when(assetRepository.findByProjectIdAndArchivedAtIsNullAndFilters(
-                            projectId, null, null, null, null, null, null))
+                            projectId, null, null, null, null, null, null, null))
                     .thenReturn(List.of(match));
 
-            var results = assetService.listByProjectAndFilters(projectId, null, null, null, null, null, null);
+            var results = assetService.listByProjectAndFilters(projectId, null, null, null, null, null, null, null);
+
+            assertThat(results).containsExactly(match);
+        }
+
+        @Test
+        void filtersBySubtype() {
+            // GC-M011: subtype is a queryable facet on the same single-query
+            // surface, so callers can list "all aws_ec2 workloads" without a
+            // project-wide scan.
+            var match = createAsset("ASSET-101", "EC2 worker");
+            when(assetRepository.findByProjectIdAndArchivedAtIsNullAndFilters(
+                            projectId, AssetType.WORKLOAD, null, null, null, null, null, "aws_ec2"))
+                    .thenReturn(List.of(match));
+
+            var results = assetService.listByProjectAndFilters(
+                    projectId, AssetType.WORKLOAD, null, null, null, null, null, "aws_ec2");
 
             assertThat(results).containsExactly(match);
         }
@@ -1028,8 +1060,25 @@ class AssetServiceTest {
         void deleteWithProjectIdSucceeds() {
             var asset = createAsset("ASSET-001", "Test");
             when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            // Explicit stubs for the inbound-finding-link guard and the
+            // outbound-link sweep — without them the test relied on Mockito
+            // defaults and could pass even if a refactor accidentally
+            // removed the guard from the project-aware path (test-quality
+            // review finding on #722).
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.ASSET,
+                            asset.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(linkRepository.findByAssetId(asset.getId())).thenReturn(java.util.List.of());
 
             assetService.delete(projectId, asset.getId());
+
+            verify(findingLinkRepository)
+                    .findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.ASSET,
+                            asset.getId(),
+                            projectId);
             verify(assetRepository).delete(asset);
         }
     }
@@ -1564,6 +1613,433 @@ class AssetServiceTest {
 
             assertThatThrownBy(() -> assetService.deleteExternalId(projectId, UUID.randomUUID(), extIdId))
                     .isInstanceOf(NotFoundException.class);
+        }
+    }
+
+    @Nested
+    class SubtypeAndMetadata {
+
+        @Test
+        void createCarriesSubtypeAndMetadata() {
+            var metadata = new java.util.LinkedHashMap<String, Object>();
+            metadata.put("cloud_account_id", "123456");
+            metadata.put("region", "us-west-2");
+            var command = new CreateAssetCommand(
+                    projectId,
+                    "ASSET-101",
+                    "EC2 worker",
+                    null,
+                    AssetType.WORKLOAD,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    "aws_ec2",
+                    metadata);
+            when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+            when(assetRepository.existsByProjectIdAndUidIgnoreCase(projectId, "ASSET-101"))
+                    .thenReturn(false);
+            when(subtypeSchemaRepository.findByProjectIdAndAssetTypeAndSubtypeAndStatus(
+                            projectId, AssetType.WORKLOAD, "aws_ec2", AssetSubtypeSchemaStatus.ACTIVE))
+                    .thenReturn(Optional.empty());
+            when(assetRepository.save(any())).thenAnswer(inv -> {
+                var saved = inv.getArgument(0, OperationalAsset.class);
+                setField(saved, "id", UUID.randomUUID());
+                return saved;
+            });
+
+            var result = assetService.create(command);
+
+            assertThat(result.getSubtype()).isEqualTo("aws_ec2");
+            assertThat(result.getMetadata()).containsEntry("cloud_account_id", "123456");
+        }
+
+        @Test
+        void createRejectsMetadataExceedingBounds() {
+            var metadata = new java.util.LinkedHashMap<String, Object>();
+            for (int i = 0; i < AssetSubtypeValidator.MAX_METADATA_KEYS + 1; i++) {
+                metadata.put("k" + i, "v");
+            }
+            var command = new CreateAssetCommand(
+                    projectId,
+                    "ASSET-102",
+                    "Asset",
+                    null,
+                    AssetType.SERVICE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    metadata);
+            when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+            when(assetRepository.existsByProjectIdAndUidIgnoreCase(projectId, "ASSET-102"))
+                    .thenReturn(false);
+
+            assertThatThrownBy(() -> assetService.create(command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
+                    .isEqualTo("too_many_keys");
+        }
+
+        @Test
+        void createEnforcesActiveSchema() {
+            Map<String, Object> schemaBody = Map.of(
+                    "fields",
+                    Map.of(
+                            "cloud_account_id",
+                            Map.of("type", "STRING", "required", true, "maxLength", 50),
+                            "region",
+                            Map.of("type", "STRING", "required", true)));
+            var schema = new AssetSubtypeSchema(project, AssetType.WORKLOAD, "aws_ec2", "v1", schemaBody);
+            setField(schema, "id", UUID.randomUUID());
+
+            // Missing required "region" must be rejected.
+            var command = new CreateAssetCommand(
+                    projectId,
+                    "ASSET-103",
+                    "EC2 worker",
+                    null,
+                    AssetType.WORKLOAD,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    "aws_ec2",
+                    Map.of("cloud_account_id", "123"));
+            when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+            when(assetRepository.existsByProjectIdAndUidIgnoreCase(projectId, "ASSET-103"))
+                    .thenReturn(false);
+            when(subtypeSchemaRepository.findByProjectIdAndAssetTypeAndSubtypeAndStatus(
+                            projectId, AssetType.WORKLOAD, "aws_ec2", AssetSubtypeSchemaStatus.ACTIVE))
+                    .thenReturn(Optional.of(schema));
+
+            assertThatThrownBy(() -> assetService.create(command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
+                    .isEqualTo("required_field_missing");
+        }
+
+        @Test
+        void createRejectsOversizedSubtypeAtServiceBoundary() {
+            // Codex cycle-4 finding 1: bounded asset string fields must be
+            // enforced at the service layer so non-controller callers can't
+            // trip a 500 from a VARCHAR overflow.
+            String oversize = "x".repeat(101);
+            var command = new CreateAssetCommand(
+                    projectId,
+                    "ASSET-106",
+                    "Asset",
+                    null,
+                    AssetType.SERVICE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    oversize,
+                    null);
+
+            assertThatThrownBy(() -> assetService.create(command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .extracting(e -> ((DomainValidationException) e).getErrorCode())
+                    .isEqualTo("asset_field_invalid");
+        }
+
+        @Test
+        void createRejectsBlankSubtype() {
+            // Codex over-cap finding 4: blank/whitespace subtype creates a
+            // second invalid namespace that can never match a registered
+            // schema. The schema registry rejects blank subtype keys; assets
+            // must use the same rule.
+            var command = new CreateAssetCommand(
+                    projectId,
+                    "ASSET-105",
+                    "Asset",
+                    null,
+                    AssetType.SERVICE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    "   ",
+                    null);
+            when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+            when(assetRepository.existsByProjectIdAndUidIgnoreCase(projectId, "ASSET-105"))
+                    .thenReturn(false);
+
+            assertThatThrownBy(() -> assetService.create(command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .extracting(e -> ((DomainValidationException) e).getErrorCode())
+                    .isEqualTo("asset_subtype_invalid");
+        }
+
+        @Test
+        void updateClearsSubtypeAndMetadataWhenClearFlagsSet() {
+            var asset = createAsset("ASSET-104", "Endpoint");
+            asset.setSubtype("user_account");
+            asset.setMetadata(Map.of("user_id", "u-1"));
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateAssetCommand(
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    /* clearSubtype */ true,
+                    /* clearMetadata */ true);
+
+            var result = assetService.update(projectId, asset.getId(), command);
+
+            assertThat(result.getSubtype()).isNull();
+            assertThat(result.getMetadata()).isNull();
+        }
+    }
+
+    @Nested
+    class SubtypeSchemaRegistry {
+
+        @Test
+        void registerFirstSchemaIsActive() {
+            var command = new CreateAssetSubtypeSchemaCommand(
+                    projectId,
+                    AssetType.IDENTITY,
+                    "service_principal",
+                    "v1",
+                    "Cloud service principals",
+                    Map.of("fields", Map.of("client_id", Map.of("type", "STRING", "required", true))));
+            when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+            when(subtypeSchemaRepository.existsByProjectIdAndAssetTypeAndSubtypeAndSchemaVersion(
+                            projectId, AssetType.IDENTITY, "service_principal", "v1"))
+                    .thenReturn(false);
+            when(subtypeSchemaRepository.findByProjectIdAndAssetTypeAndSubtypeAndStatus(
+                            projectId, AssetType.IDENTITY, "service_principal", AssetSubtypeSchemaStatus.ACTIVE))
+                    .thenReturn(Optional.empty());
+            when(subtypeSchemaRepository.saveAndFlush(any())).thenAnswer(inv -> {
+                var saved = inv.getArgument(0, AssetSubtypeSchema.class);
+                setField(saved, "id", UUID.randomUUID());
+                return saved;
+            });
+
+            var result = assetService.registerSubtypeSchema(command);
+
+            assertThat(result.getStatus()).isEqualTo(AssetSubtypeSchemaStatus.ACTIVE);
+            assertThat(result.getSubtype()).isEqualTo("service_principal");
+            assertThat(result.getSchemaVersion()).isEqualTo("v1");
+        }
+
+        @Test
+        void registerSecondActiveDeprecatesPrevious() {
+            var existing = new AssetSubtypeSchema(project, AssetType.IDENTITY, "service_principal", "v1", Map.of());
+            setField(existing, "id", UUID.randomUUID());
+
+            var command = new CreateAssetSubtypeSchemaCommand(
+                    projectId,
+                    AssetType.IDENTITY,
+                    "service_principal",
+                    "v2",
+                    null,
+                    Map.of("fields", Map.of("client_id", Map.of("type", "STRING"))));
+            when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+            when(subtypeSchemaRepository.existsByProjectIdAndAssetTypeAndSubtypeAndSchemaVersion(
+                            projectId, AssetType.IDENTITY, "service_principal", "v2"))
+                    .thenReturn(false);
+            when(subtypeSchemaRepository.findByProjectIdAndAssetTypeAndSubtypeAndStatus(
+                            projectId, AssetType.IDENTITY, "service_principal", AssetSubtypeSchemaStatus.ACTIVE))
+                    .thenReturn(Optional.of(existing));
+            when(subtypeSchemaRepository.saveAndFlush(any())).thenAnswer(inv -> {
+                var saved = inv.getArgument(0, AssetSubtypeSchema.class);
+                if (saved.getId() == null) {
+                    setField(saved, "id", UUID.randomUUID());
+                }
+                return saved;
+            });
+
+            var result = assetService.registerSubtypeSchema(command);
+
+            assertThat(existing.getStatus()).isEqualTo(AssetSubtypeSchemaStatus.DEPRECATED);
+            assertThat(result.getStatus()).isEqualTo(AssetSubtypeSchemaStatus.ACTIVE);
+            // Both writes use saveAndFlush to force ordering: the deprecation
+            // UPDATE must hit the DB before the new ACTIVE INSERT, or the
+            // partial unique index uk_asset_subtype_schema_active fires
+            // against the still-ACTIVE prior row.
+            verify(subtypeSchemaRepository, org.mockito.Mockito.times(2)).saveAndFlush(any());
+        }
+
+        @Test
+        void registerDuplicateVersionConflicts() {
+            var command = new CreateAssetSubtypeSchemaCommand(
+                    projectId,
+                    AssetType.IDENTITY,
+                    "service_principal",
+                    "v1",
+                    null,
+                    Map.of("fields", Map.of("client_id", Map.of("type", "STRING"))));
+            when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+            when(subtypeSchemaRepository.existsByProjectIdAndAssetTypeAndSubtypeAndSchemaVersion(
+                            projectId, AssetType.IDENTITY, "service_principal", "v1"))
+                    .thenReturn(true);
+
+            assertThatThrownBy(() -> assetService.registerSubtypeSchema(command))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessageContaining("already exists");
+        }
+
+        @Test
+        void registerTranslatesDbUniqueViolationToConflict() {
+            // Codex pre-push review: the partial unique index on
+            // (project, asset_type, subtype) WHERE status='ACTIVE' (V075) is
+            // the safety net for a concurrent race past the service-layer
+            // existence check. Spring's DataIntegrityViolationException must
+            // surface as ConflictException rather than HTTP 500.
+            var command = new CreateAssetSubtypeSchemaCommand(
+                    projectId,
+                    AssetType.IDENTITY,
+                    "service_principal",
+                    "v1",
+                    null,
+                    Map.of("fields", Map.of("client_id", Map.of("type", "STRING"))));
+            when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+            when(subtypeSchemaRepository.existsByProjectIdAndAssetTypeAndSubtypeAndSchemaVersion(
+                            projectId, AssetType.IDENTITY, "service_principal", "v1"))
+                    .thenReturn(false);
+            when(subtypeSchemaRepository.findByProjectIdAndAssetTypeAndSubtypeAndStatus(
+                            projectId, AssetType.IDENTITY, "service_principal", AssetSubtypeSchemaStatus.ACTIVE))
+                    .thenReturn(Optional.empty());
+            when(subtypeSchemaRepository.saveAndFlush(any()))
+                    .thenThrow(new org.springframework.dao.DataIntegrityViolationException(
+                            "uk_asset_subtype_schema_active"));
+
+            assertThatThrownBy(() -> assetService.registerSubtypeSchema(command))
+                    .isInstanceOf(ConflictException.class)
+                    .extracting(e -> ((ConflictException) e).getErrorCode())
+                    .isEqualTo("asset_subtype_schema_active_conflict");
+        }
+
+        @Test
+        void registerRejectsMalformedSchemaBody() {
+            // Codex pre-push review: a malformed schema body must be rejected at
+            // the registry boundary so it cannot block subsequent asset writes.
+            var command = new CreateAssetSubtypeSchemaCommand(
+                    projectId, AssetType.IDENTITY, "service_principal", "v1", null, Map.of("fields", "not-a-map"));
+
+            assertThatThrownBy(() -> assetService.registerSubtypeSchema(command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
+                    .isEqualTo("invalid_schema_shape");
+        }
+
+        @Test
+        void registerRejectsBlankSubtype() {
+            var command = new CreateAssetSubtypeSchemaCommand(projectId, AssetType.SERVICE, " ", "v1", null, Map.of());
+
+            assertThatThrownBy(() -> assetService.registerSubtypeSchema(command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("subtype");
+        }
+
+        @Test
+        void deprecateMarksSchemaDeprecated() {
+            var schema = new AssetSubtypeSchema(project, AssetType.SERVICE, "internal_api", "v1", Map.of());
+            setField(schema, "id", UUID.randomUUID());
+            when(subtypeSchemaRepository.findByIdAndProjectId(schema.getId(), projectId))
+                    .thenReturn(Optional.of(schema));
+            when(subtypeSchemaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            assetService.deprecateSubtypeSchema(projectId, schema.getId());
+
+            assertThat(schema.getStatus()).isEqualTo(AssetSubtypeSchemaStatus.DEPRECATED);
+        }
+
+        @Test
+        void updateRejectsClearSchemaBodyOnActiveRow() {
+            // Codex over-cap finding 3: an ACTIVE registry row must keep an
+            // enforceable schema body. Callers must deprecate first if the
+            // intent is to drop the contract entirely.
+            var schema = new AssetSubtypeSchema(
+                    project,
+                    AssetType.SERVICE,
+                    "internal_api",
+                    "v1",
+                    Map.of("fields", Map.of("name", Map.of("type", "STRING"))));
+            setField(schema, "id", UUID.randomUUID());
+            when(subtypeSchemaRepository.findByIdAndProjectId(schema.getId(), projectId))
+                    .thenReturn(Optional.of(schema));
+
+            var command = new UpdateAssetSubtypeSchemaCommand(null, null, false, /* clearSchemaBody */ true);
+
+            assertThatThrownBy(() -> assetService.updateSubtypeSchema(projectId, schema.getId(), command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .extracting(e -> ((DomainValidationException) e).getErrorCode())
+                    .isEqualTo("asset_subtype_schema_active_body_required");
+        }
+
+        @Test
+        void updateReplacesSchemaBody() {
+            var schema = new AssetSubtypeSchema(project, AssetType.SERVICE, "internal_api", "v1", Map.of());
+            setField(schema, "id", UUID.randomUUID());
+            when(subtypeSchemaRepository.findByIdAndProjectId(schema.getId(), projectId))
+                    .thenReturn(Optional.of(schema));
+            when(subtypeSchemaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateAssetSubtypeSchemaCommand(
+                    "New description", Map.of("fields", Map.of("name", Map.of("type", "STRING"))), false, false);
+
+            var result = assetService.updateSubtypeSchema(projectId, schema.getId(), command);
+
+            assertThat(result.getDescription()).isEqualTo("New description");
+            assertThat(result.getSchemaBody()).containsKey("fields");
+        }
+
+        @Test
+        void getActiveThrowsWhenAbsent() {
+            when(subtypeSchemaRepository.findByProjectIdAndAssetTypeAndSubtypeAndStatus(
+                            projectId, AssetType.SERVICE, "missing", AssetSubtypeSchemaStatus.ACTIVE))
+                    .thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> assetService.getActiveSubtypeSchema(projectId, AssetType.SERVICE, "missing"))
+                    .isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void listByProjectOnlyReturnsAllProjectSchemas() {
+            var s1 = new AssetSubtypeSchema(project, AssetType.SERVICE, "api", "v1", Map.of());
+            var s2 = new AssetSubtypeSchema(project, AssetType.IDENTITY, "user_account", "v1", Map.of());
+            when(subtypeSchemaRepository.findByProjectId(projectId)).thenReturn(List.of(s1, s2));
+
+            var result = assetService.listSubtypeSchemas(projectId, null, null);
+
+            assertThat(result).hasSize(2);
+        }
+
+        @Test
+        void listRejectsSubtypeWithoutAssetType() {
+            assertThatThrownBy(() -> assetService.listSubtypeSchemas(projectId, null, "rogue"))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("assetType");
         }
     }
 }

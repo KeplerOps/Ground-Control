@@ -61,6 +61,11 @@ public class AssetGraphProjectionContributor implements GraphProjectionContribut
                             asset.getScopeDesignation() == null
                                     ? null
                                     : asset.getScopeDesignation().name());
+                    // GC-M011: subtype is a queryable graph facet alongside
+                    // assetType. Metadata is intentionally NOT projected —
+                    // free-form, high-cardinality, and may carry per-record
+                    // detail unsafe for graph-wide indexing.
+                    properties.put("subtype", asset.getSubtype());
                     properties.put("archivedAt", asset.getArchivedAt());
                     return new GraphNode(
                             GraphIds.nodeId(GraphEntityType.OPERATIONAL_ASSET, asset.getId()),
