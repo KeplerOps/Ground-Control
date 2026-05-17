@@ -5,6 +5,7 @@ import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.testcases.model.TestCase;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseRepository;
+import com.keplerops.groundcontrol.domain.testcases.state.TestCaseFormat;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseStatus;
 import java.util.List;
 import java.util.UUID;
@@ -22,14 +23,17 @@ public class TestCaseService {
     private final TestCaseRepository testCaseRepository;
     private final ProjectService projectService;
     private final TestCaseStepService testCaseStepService;
+    private final TestCaseGherkinService testCaseGherkinService;
 
     public TestCaseService(
             TestCaseRepository testCaseRepository,
             ProjectService projectService,
-            TestCaseStepService testCaseStepService) {
+            TestCaseStepService testCaseStepService,
+            TestCaseGherkinService testCaseGherkinService) {
         this.testCaseRepository = testCaseRepository;
         this.projectService = projectService;
         this.testCaseStepService = testCaseStepService;
+        this.testCaseGherkinService = testCaseGherkinService;
     }
 
     public TestCase create(CreateTestCaseCommand command) {
@@ -37,17 +41,20 @@ public class TestCaseService {
         if (testCaseRepository.existsByProjectIdAndUid(project.getId(), command.uid())) {
             throw new ConflictException("Test case with UID " + command.uid() + " already exists in this project");
         }
-        var testCase = new TestCase(project, command.uid(), command.title(), command.type(), command.priority());
+        var format = command.format() != null ? command.format() : TestCaseFormat.STEP_BASED;
+        var testCase =
+                new TestCase(project, command.uid(), command.title(), command.type(), command.priority(), format);
         testCase.setDescription(command.description());
         testCase.setPreconditions(command.preconditions());
         testCase.setPostconditions(command.postconditions());
         testCase.setEstimatedDurationSeconds(command.estimatedDurationSeconds());
         testCase = testCaseRepository.save(testCase);
         log.info(
-                "test_case_created: uid={} project={} type={} priority={}",
+                "test_case_created: uid={} project={} type={} format={} priority={}",
                 testCase.getUid(),
                 project.getIdentifier(),
                 testCase.getType(),
+                testCase.getFormat(),
                 testCase.getPriority());
         return testCase;
     }
@@ -115,7 +122,10 @@ public class TestCaseService {
 
     public void delete(UUID projectId, UUID id) {
         var testCase = findOrThrow(projectId, id);
+        // Cascade authored children through Hibernate so Envers captures the
+        // deletes. Mirrors ADR-041 §Cascade on parent deletion.
         testCaseStepService.deleteAllByTestCase(id);
+        testCaseGherkinService.cascadeDeleteByTestCase(id);
         testCaseRepository.delete(testCase);
         log.info("test_case_deleted: uid={} id={}", testCase.getUid(), id);
     }

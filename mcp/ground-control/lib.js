@@ -531,6 +531,11 @@ const TO_CAMEL = {
   expected_result: "expectedResult",
   actual_result: "actualResult",
   clear_actual_result: "clearActualResult",
+  // TC-004 / ADR-042 — TestCaseGherkinRequest field. `gherkin_source` is the
+  // MCP arg name (chosen to namespace away from other "source" args on
+  // gc_test_case); it maps to the backend's `source` body field via the
+  // step-style explicit body construction in index.js, not via this table.
+  // The `format` MCP arg is already snake-free, so no entry needed here.
   // GC-V001 finding adapter — backend FindingRequest / UpdateFindingRequest
   // use these camelCase field names. Mapping is needed so `gc_finding` reaches
   // backend Bean Validation with the right field names (issue #279).
@@ -7487,6 +7492,8 @@ export const CONTROL_LINK_TYPES = [
 export const TEST_CASE_STATUSES = ["DRAFT", "APPROVED", "DEPRECATED", "ARCHIVED"];
 export const TEST_CASE_TYPES = ["MANUAL", "AUTOMATED", "HYBRID"];
 export const TEST_CASE_PRIORITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
+// TC-004 / ADR-042 — authored test-case format axis.
+export const TEST_CASE_FORMATS = ["STEP_BASED", "GHERKIN"];
 
 export async function createTestCase(data, project) {
   return request("POST", "/api/v1/test-cases", { body: data, params: { project } });
@@ -7543,6 +7550,37 @@ export async function deleteTestCaseStep(testCaseId, stepId, project) {
     `/api/v1/test-cases/${encodeURIComponent(testCaseId)}/steps/${encodeURIComponent(stepId)}`,
     { params: { project } },
   );
+}
+
+// TC-004 / ADR-042 — BDD/Gherkin authored content for a test case. One
+// document per parent; backend enforces format=GHERKIN before any of these
+// will accept a write. Reads route through gc_query against the
+// TestCaseGherkin entity.
+
+export async function createTestCaseGherkin(testCaseId, data, project) {
+  return request("POST", `/api/v1/test-cases/${encodeURIComponent(testCaseId)}/gherkin`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function getTestCaseGherkin(testCaseId, project) {
+  return request("GET", `/api/v1/test-cases/${encodeURIComponent(testCaseId)}/gherkin`, {
+    params: { project },
+  });
+}
+
+export async function updateTestCaseGherkin(testCaseId, data, project) {
+  return request("PUT", `/api/v1/test-cases/${encodeURIComponent(testCaseId)}/gherkin`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function deleteTestCaseGherkin(testCaseId, project) {
+  await request("DELETE", `/api/v1/test-cases/${encodeURIComponent(testCaseId)}/gherkin`, {
+    params: { project },
+  });
 }
 
 export async function createControl(data, project) {

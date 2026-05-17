@@ -1,6 +1,7 @@
 package com.keplerops.groundcontrol.unit.api;
 
 import static com.keplerops.groundcontrol.TestUtil.setField;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
@@ -15,10 +16,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.keplerops.groundcontrol.api.testcases.TestCaseController;
+import com.keplerops.groundcontrol.api.testcases.TestCaseRequest;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.testcases.model.TestCase;
+import com.keplerops.groundcontrol.domain.testcases.service.CreateTestCaseCommand;
 import com.keplerops.groundcontrol.domain.testcases.service.TestCaseService;
+import com.keplerops.groundcontrol.domain.testcases.state.TestCaseFormat;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCasePriority;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseStatus;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseType;
@@ -207,6 +211,88 @@ class TestCaseControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status", is("APPROVED")));
+    }
+
+    @Test
+    void createForwardsFormatField() throws Exception {
+        // TC-004 / ADR-042 — the format axis round-trips through the controller
+        // body. Capture the command actually handed to the service so we can
+        // assert the field landed in the correct slot.
+        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
+        var captor = org.mockito.ArgumentCaptor.forClass(CreateTestCaseCommand.class);
+        when(testCaseService.create(captor.capture())).thenReturn(makeTestCase());
+
+        mockMvc.perform(
+                        post("/api/v1/test-cases")
+                                .param("project", "ground-control")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                                {
+                                  "uid": "TC-G01",
+                                  "title": "Sign in",
+                                  "type": "MANUAL",
+                                  "priority": "HIGH",
+                                  "format": "GHERKIN"
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        assertThat(captor.getValue().format()).isEqualTo(TestCaseFormat.GHERKIN);
+    }
+
+    @Test
+    void createDefaultsFormatToStepBasedWhenAbsent() throws Exception {
+        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
+        var captor = org.mockito.ArgumentCaptor.forClass(CreateTestCaseCommand.class);
+        when(testCaseService.create(captor.capture())).thenReturn(makeTestCase());
+
+        mockMvc.perform(
+                        post("/api/v1/test-cases")
+                                .param("project", "ground-control")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                                {
+                                  "uid": "TC-001",
+                                  "title": "x",
+                                  "type": "MANUAL",
+                                  "priority": "HIGH"
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        // Null on the wire → the service will default to STEP_BASED, but the
+        // controller's job is to forward null faithfully. Assert that contract
+        // here.
+        assertThat(captor.getValue().format()).isNull();
+    }
+
+    @Test
+    void responseSurfacesFormat() throws Exception {
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(testCaseService.getById(PROJECT_ID, TEST_CASE_ID)).thenReturn(makeTestCase());
+
+        mockMvc.perform(get("/api/v1/test-cases/{id}", TEST_CASE_ID).param("project", "ground-control"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.format", is("STEP_BASED")));
+    }
+
+    @Test
+    void requestDtoRecordExposesFormatAccessor() {
+        // Static guard: a refactor that removes the format() accessor from
+        // TestCaseRequest would break the controller binding silently.
+        var request = new TestCaseRequest(
+                "TC-001",
+                "x",
+                TestCaseType.MANUAL,
+                TestCasePriority.HIGH,
+                TestCaseFormat.GHERKIN,
+                null,
+                null,
+                null,
+                null);
+        assertThat(request.format()).isEqualTo(TestCaseFormat.GHERKIN);
     }
 
     @Test

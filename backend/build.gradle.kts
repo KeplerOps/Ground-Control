@@ -73,6 +73,11 @@ dependencies {
     // Export: PDF
     implementation("com.github.librepdf:openpdf:2.0.3")
 
+    // Gherkin parser (TC-004 / ADR-042). Pure parser library — no Cucumber
+    // runtime, no glue execution, no remote fetch. Pulls io.cucumber:messages
+    // transitively.
+    implementation("io.cucumber:gherkin:39.1.0")
+
     // Error Prone
     errorprone("com.google.errorprone:error_prone_core:2.36.0")
 

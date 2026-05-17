@@ -145,6 +145,31 @@ export interface UpdateTestCaseStepRequest {
   actualResult?: string | null;
   clearActualResult?: boolean;
 }
+
+// TC-004 / ADR-042 — authored test-case format axis. Mirrors backend
+// TestCaseFormat.java. Set on test-case create and immutable thereafter.
+export type TestCaseFormat = "STEP_BASED" | "GHERKIN";
+export const TEST_CASE_FORMATS: TestCaseFormat[] = ["STEP_BASED", "GHERKIN"];
+
+// Mirrors backend TestCaseGherkinResponse / TestCaseGherkinRequest. The
+// backend stores .feature source verbatim; clients render with a Gherkin-aware
+// syntax highlighter at their discretion (no HTML sink is wired through this
+// surface, per ADR-042 §Rendering).
+export interface TestCaseGherkinResponse {
+  id: string;
+  testCaseId: string;
+  source: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TestCaseGherkinRequest {
+  source: string;
+}
+
+export interface UpdateTestCaseGherkinRequest {
+  source: string;
+}
 export type GraphEntityType =
   | "REQUIREMENT"
   | "OPERATIONAL_ASSET"

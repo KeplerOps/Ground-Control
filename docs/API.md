@@ -988,6 +988,8 @@ project-scoped link patterns. See ADR-040.
 **TestCaseRequest fields:** `uid` (required, max 50, unique per project), `title` (required,
 max 200), `type` (required, `TestCaseType` enum: `MANUAL`, `AUTOMATED`, `HYBRID`),
 `priority` (required, `TestCasePriority` enum: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`),
+`format` (optional, `TestCaseFormat` enum: `STEP_BASED`, `GHERKIN`; defaults to `STEP_BASED`
+and is immutable after create — see TC-004 / ADR-042),
 `description` (optional TEXT, Markdown by convention), `preconditions` (optional TEXT),
 `postconditions` (optional TEXT), `estimatedDurationSeconds` (optional non-negative `Long`).
 
@@ -1033,6 +1035,49 @@ Duplicate `stepNumber` within a test case returns HTTP 409. Non-positive `stepNu
 oversize rich-text fields return HTTP 422. A step request against a test case that is not in
 the resolved project returns HTTP 404. Deleting the parent test case cascade-deletes its
 steps service-side so Envers captures each step's delete revision.
+
+A step request against a parent test case whose `format` is not `STEP_BASED` (e.g. a
+Gherkin test case) returns HTTP 409 with a message identifying the actual format — steps
+and Gherkin source are mutually exclusive authored formats (TC-004 / ADR-042).
+
+### Test Case BDD/Gherkin Format (TC-004 / ADR-042)
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/test-cases/{testCaseId}/gherkin` | TestCaseGherkinRequest | 201 | Attach Gherkin source to a `GHERKIN`-format test case |
+| GET | `/test-cases/{testCaseId}/gherkin` | — | 200 | Retrieve the Gherkin source |
+| PUT | `/test-cases/{testCaseId}/gherkin` | UpdateTestCaseGherkinRequest | 200 | Replace the Gherkin source |
+| DELETE | `/test-cases/{testCaseId}/gherkin` | — | 204 | Remove the Gherkin source |
+
+Gherkin support is a singleton sub-resource: each test case carries at most one Gherkin
+document (UNIQUE on `test_case_id` at the schema layer; HTTP 409 from POST when one already
+exists). The canonical authored `.feature` source is stored verbatim as TEXT; the backend
+parses it for validation only and never executes glue, expands `Examples` rows into runtime
+tests, evaluates expressions, fetches remote includes, or runs Cucumber hooks.
+
+**TestCaseGherkinRequest fields:** `source` (required, max 102400 chars, must parse as
+Gherkin with at least one `Feature` and at least one `Scenario`/`Scenario Outline`).
+
+**UpdateTestCaseGherkinRequest fields:** `source` (required, same constraints — full
+replacement, no null-means-no-change semantic because the resource is a single field).
+
+**Format gating.** Both POST and PUT require the parent test case's `format` to be
+`GHERKIN`; otherwise the request is rejected with HTTP 422 `invalid_test_case_format`.
+A `GHERKIN`-format test case may not have step rows; conversely, a `STEP_BASED` test case
+may not have a Gherkin document (TC-004 / ADR-042 §Format axis).
+
+**Validation limits.** The parsed Gherkin is bounded server-side:
+- max 50 scenarios per feature,
+- max 200 data rows per `Examples` table,
+- max 4000 characters per `Examples` cell.
+
+Parser failures, oversize source, missing scenarios, or `Scenario Outline` without
+`Examples` return HTTP 422 with code `invalid_gherkin_source`. Error details carry
+line / column / keyword / field metadata only — never the source text, parser stack
+traces, file paths, or `Examples` cell content.
+
+Deleting the parent test case cascade-deletes the Gherkin document service-side so
+Envers captures the delete revision (mirrors the step-cascade pattern in ADR-041).
 
 ## Request / Response Format
 

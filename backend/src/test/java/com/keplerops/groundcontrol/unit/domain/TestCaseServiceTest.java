@@ -15,9 +15,11 @@ import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.testcases.model.TestCase;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseRepository;
 import com.keplerops.groundcontrol.domain.testcases.service.CreateTestCaseCommand;
+import com.keplerops.groundcontrol.domain.testcases.service.TestCaseGherkinService;
 import com.keplerops.groundcontrol.domain.testcases.service.TestCaseService;
 import com.keplerops.groundcontrol.domain.testcases.service.TestCaseStepService;
 import com.keplerops.groundcontrol.domain.testcases.service.UpdateTestCaseCommand;
+import com.keplerops.groundcontrol.domain.testcases.state.TestCaseFormat;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCasePriority;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseStatus;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseType;
@@ -43,6 +45,9 @@ class TestCaseServiceTest {
 
     @Mock
     private TestCaseStepService testCaseStepService;
+
+    @Mock
+    private TestCaseGherkinService testCaseGherkinService;
 
     @InjectMocks
     private TestCaseService testCaseService;
@@ -83,6 +88,7 @@ class TestCaseServiceTest {
                     "Login flow",
                     TestCaseType.MANUAL,
                     TestCasePriority.HIGH,
+                    null,
                     "# desc",
                     "pre",
                     "post",
@@ -98,6 +104,30 @@ class TestCaseServiceTest {
             assertThat(result.getPostconditions()).isEqualTo("post");
             assertThat(result.getEstimatedDurationSeconds()).isEqualTo(300L);
             assertThat(result.getStatus()).isEqualTo(TestCaseStatus.DRAFT);
+            assertThat(result.getFormat()).isEqualTo(TestCaseFormat.STEP_BASED);
+        }
+
+        @Test
+        void createsGherkinFormatTestCaseWhenSpecified() {
+            when(projectService.getById(projectId)).thenReturn(project);
+            when(testCaseRepository.existsByProjectIdAndUid(projectId, "TC-G01"))
+                    .thenReturn(false);
+            when(testCaseRepository.save(any(TestCase.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new CreateTestCaseCommand(
+                    projectId,
+                    "TC-G01",
+                    "Sign in",
+                    TestCaseType.MANUAL,
+                    TestCasePriority.HIGH,
+                    TestCaseFormat.GHERKIN,
+                    null,
+                    null,
+                    null,
+                    null);
+            var result = testCaseService.create(command);
+
+            assertThat(result.getFormat()).isEqualTo(TestCaseFormat.GHERKIN);
         }
 
         @Test
@@ -107,7 +137,16 @@ class TestCaseServiceTest {
                     .thenReturn(true);
 
             var command = new CreateTestCaseCommand(
-                    projectId, "TC-001", "Title", TestCaseType.MANUAL, TestCasePriority.LOW, null, null, null, null);
+                    projectId,
+                    "TC-001",
+                    "Title",
+                    TestCaseType.MANUAL,
+                    TestCasePriority.LOW,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null);
 
             assertThatThrownBy(() -> testCaseService.create(command))
                     .isInstanceOf(ConflictException.class)
@@ -121,7 +160,16 @@ class TestCaseServiceTest {
                     .thenReturn(false);
 
             var command = new CreateTestCaseCommand(
-                    projectId, "TC-001", "Title", TestCaseType.MANUAL, TestCasePriority.LOW, null, null, null, -5L);
+                    projectId,
+                    "TC-001",
+                    "Title",
+                    TestCaseType.MANUAL,
+                    TestCasePriority.LOW,
+                    null,
+                    null,
+                    null,
+                    null,
+                    -5L);
 
             assertThatThrownBy(() -> testCaseService.create(command))
                     .isInstanceOf(DomainValidationException.class)
@@ -313,18 +361,20 @@ class TestCaseServiceTest {
 
         @Test
         void cascadesToDeleteSteps() {
-            // Steps must be deleted via the step service (so Envers records each
-            // step delete) BEFORE the test case row goes away. A future change
-            // that replaced this with a DB-level CASCADE would silently lose
-            // the per-step audit trail, so the test pins the order of calls.
+            // Steps and Gherkin must be deleted via their services (so Envers
+            // records each child delete) BEFORE the test case row goes away.
+            // A future change that replaced this with a DB-level CASCADE would
+            // silently lose the per-child audit trail, so the test pins the
+            // order of calls.
             var existing = makeTestCase();
             var id = existing.getId();
             when(testCaseRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.of(existing));
 
             testCaseService.delete(projectId, id);
 
-            var order = org.mockito.Mockito.inOrder(testCaseStepService, testCaseRepository);
+            var order = org.mockito.Mockito.inOrder(testCaseStepService, testCaseGherkinService, testCaseRepository);
             order.verify(testCaseStepService).deleteAllByTestCase(id);
+            order.verify(testCaseGherkinService).cascadeDeleteByTestCase(id);
             order.verify(testCaseRepository).delete(existing);
         }
 

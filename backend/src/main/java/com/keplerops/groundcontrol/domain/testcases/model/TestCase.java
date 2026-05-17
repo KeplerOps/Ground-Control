@@ -3,6 +3,7 @@ package com.keplerops.groundcontrol.domain.testcases.model;
 import com.keplerops.groundcontrol.domain.BaseEntity;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.domain.testcases.state.TestCaseFormat;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCasePriority;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseStatus;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseType;
@@ -56,6 +57,17 @@ public class TestCase extends BaseEntity {
     @Column(nullable = false, length = 20)
     private TestCaseType type;
 
+    /**
+     * Authored format axis (ADR-042). Set on create and immutable thereafter:
+     * once a parent has chosen a format, switching would orphan its children
+     * (steps for {@code STEP_BASED}, Gherkin source for {@code GHERKIN}) and
+     * break the format-vs-children invariant the services enforce. Existing
+     * pre-TC-004 rows back-fill to {@code STEP_BASED} via V076's DEFAULT.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private TestCaseFormat format = TestCaseFormat.STEP_BASED;
+
     @Column(name = "estimated_duration_seconds")
     private Long estimatedDurationSeconds;
 
@@ -64,6 +76,16 @@ public class TestCase extends BaseEntity {
     }
 
     public TestCase(Project project, String uid, String title, TestCaseType type, TestCasePriority priority) {
+        this(project, uid, title, type, priority, TestCaseFormat.STEP_BASED);
+    }
+
+    public TestCase(
+            Project project,
+            String uid,
+            String title,
+            TestCaseType type,
+            TestCasePriority priority,
+            TestCaseFormat format) {
         if (project == null) {
             throw new DomainValidationException("Project must not be null", "invalid_test_case", Map.of());
         }
@@ -79,11 +101,15 @@ public class TestCase extends BaseEntity {
         if (priority == null) {
             throw new DomainValidationException("Priority must not be null", "invalid_test_case", Map.of());
         }
+        if (format == null) {
+            throw new DomainValidationException("Format must not be null", "invalid_test_case", Map.of());
+        }
         this.project = project;
         this.uid = uid;
         this.title = title;
         this.type = type;
         this.priority = priority;
+        this.format = format;
     }
 
     public void transitionStatus(TestCaseStatus newStatus) {
@@ -163,6 +189,10 @@ public class TestCase extends BaseEntity {
             throw new DomainValidationException("Type must not be null", "invalid_test_case", Map.of());
         }
         this.type = type;
+    }
+
+    public TestCaseFormat getFormat() {
+        return format;
     }
 
     public Long getEstimatedDurationSeconds() {

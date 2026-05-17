@@ -473,6 +473,10 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "072", // V072: test_case_audit
                         "073", // V073: test_case_step (TC-002 / ADR-041)
                         "074", // V074: test_case_step_audit
-                        "075"); // V075: forward-fix V072 missing timestamp columns on test_case_audit
+                        "075", // V075: forward-fix V072 missing timestamp columns on test_case_audit
+                        "076", // V076: add test_case.format discriminator (TC-004 / ADR-042)
+                        "077", // V077: add test_case_audit.format parity column
+                        "078", // V078: create test_case_gherkin
+                        "079"); // V079: create test_case_gherkin_audit
     }
 }
