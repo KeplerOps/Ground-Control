@@ -17,6 +17,7 @@ import com.keplerops.groundcontrol.domain.assets.state.AssetLinkType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.assets.state.ObservationCategory;
+import com.keplerops.groundcontrol.domain.graph.model.GraphEdge;
 import com.keplerops.groundcontrol.domain.graph.model.GraphEntityType;
 import com.keplerops.groundcontrol.domain.graph.model.GraphIds;
 import com.keplerops.groundcontrol.domain.graph.service.AssetGraphProjectionContributor;
@@ -108,7 +109,7 @@ class AssetGraphProjectionContributorTest {
         assertThat(edges)
                 .filteredOn(edge -> edge.edgeType().equals("ASSOCIATED"))
                 .singleElement()
-                .extracting(edge -> edge.targetId())
+                .extracting(GraphEdge::targetId)
                 .isEqualTo(GraphIds.nodeId(GraphEntityType.RISK_SCENARIO, internalLink.getTargetEntityId()));
     }
 

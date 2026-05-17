@@ -175,18 +175,21 @@ class AssetSubtypeValidatorTest {
         void integerRangeEnforced() {
             Map<String, Object> fields = Map.of("count", Map.of("type", "INTEGER", "minimum", 0, "maximum", 10));
             Map<String, Object> schema = Map.of("fields", fields);
+            Map<String, Object> belowMin = Map.of("count", -1);
+            Map<String, Object> aboveMax = Map.of("count", 11);
+            Map<String, Object> within = Map.of("count", 5);
 
-            assertThatThrownBy(() -> validator.validateAgainstSchema(Map.of("count", -1), schema))
+            assertThatThrownBy(() -> validator.validateAgainstSchema(belowMin, schema))
                     .isInstanceOf(DomainValidationException.class)
                     .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
                     .isEqualTo("below_minimum");
 
-            assertThatThrownBy(() -> validator.validateAgainstSchema(Map.of("count", 11), schema))
+            assertThatThrownBy(() -> validator.validateAgainstSchema(aboveMax, schema))
                     .isInstanceOf(DomainValidationException.class)
                     .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
                     .isEqualTo("above_maximum");
 
-            assertThatCode(() -> validator.validateAgainstSchema(Map.of("count", 5), schema))
+            assertThatCode(() -> validator.validateAgainstSchema(within, schema))
                     .doesNotThrowAnyException();
         }
 
@@ -194,8 +197,9 @@ class AssetSubtypeValidatorTest {
         void integerRejectsFractionalValue() {
             Map<String, Object> fields = Map.of("count", Map.of("type", "INTEGER"));
             Map<String, Object> schema = Map.of("fields", fields);
+            Map<String, Object> metadata = Map.of("count", 3.14d);
 
-            assertThatThrownBy(() -> validator.validateAgainstSchema(Map.of("count", 3.14d), schema))
+            assertThatThrownBy(() -> validator.validateAgainstSchema(metadata, schema))
                     .isInstanceOf(DomainValidationException.class)
                     .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
                     .isEqualTo("type_mismatch");
@@ -217,11 +221,13 @@ class AssetSubtypeValidatorTest {
             Map<String, Object> fields =
                     Map.of("tier", Map.of("type", "ENUM", "values", List.of("BRONZE", "SILVER", "GOLD")));
             Map<String, Object> schema = Map.of("fields", fields);
+            Map<String, Object> allowed = Map.of("tier", "SILVER");
+            Map<String, Object> disallowed = Map.of("tier", "platinum");
 
-            assertThatCode(() -> validator.validateAgainstSchema(Map.of("tier", "SILVER"), schema))
+            assertThatCode(() -> validator.validateAgainstSchema(allowed, schema))
                     .doesNotThrowAnyException();
 
-            assertThatThrownBy(() -> validator.validateAgainstSchema(Map.of("tier", "platinum"), schema))
+            assertThatThrownBy(() -> validator.validateAgainstSchema(disallowed, schema))
                     .isInstanceOf(DomainValidationException.class)
                     .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
                     .isEqualTo("enum_value_not_allowed");
@@ -231,11 +237,12 @@ class AssetSubtypeValidatorTest {
         void booleanType() {
             Map<String, Object> fields = Map.of("encrypted", Map.of("type", "BOOLEAN", "required", Boolean.TRUE));
             Map<String, Object> schema = Map.of("fields", fields);
+            Map<String, Object> bool = Map.of("encrypted", Boolean.TRUE);
+            Map<String, Object> string = Map.of("encrypted", "yes");
 
-            assertThatCode(() -> validator.validateAgainstSchema(Map.of("encrypted", Boolean.TRUE), schema))
-                    .doesNotThrowAnyException();
+            assertThatCode(() -> validator.validateAgainstSchema(bool, schema)).doesNotThrowAnyException();
 
-            assertThatThrownBy(() -> validator.validateAgainstSchema(Map.of("encrypted", "yes"), schema))
+            assertThatThrownBy(() -> validator.validateAgainstSchema(string, schema))
                     .isInstanceOf(DomainValidationException.class)
                     .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
                     .isEqualTo("type_mismatch");
@@ -244,8 +251,9 @@ class AssetSubtypeValidatorTest {
         @Test
         void invalidSchemaShapeRejectedWithStableCode() {
             Map<String, Object> schema = Map.of("fields", "not-a-map");
+            Map<String, Object> metadata = Map.of("k", "v");
 
-            assertThatThrownBy(() -> validator.validateAgainstSchema(Map.of("k", "v"), schema))
+            assertThatThrownBy(() -> validator.validateAgainstSchema(metadata, schema))
                     .isInstanceOf(DomainValidationException.class)
                     .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
                     .isEqualTo("invalid_schema_shape");
@@ -272,8 +280,9 @@ class AssetSubtypeValidatorTest {
             Map<String, Object> schema = new LinkedHashMap<>();
             schema.put("fields", Map.of());
             schema.put("allowAdditional", "yes");
+            Map<String, Object> metadata = Map.of();
 
-            assertThatThrownBy(() -> validator.validateAgainstSchema(Map.of(), schema))
+            assertThatThrownBy(() -> validator.validateAgainstSchema(metadata, schema))
                     .isInstanceOf(DomainValidationException.class)
                     .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
                     .isEqualTo("invalid_schema_shape");
@@ -283,8 +292,9 @@ class AssetSubtypeValidatorTest {
         void rejectsNonBooleanRequired() {
             Map<String, Object> fields = Map.of("name", Map.of("type", "STRING", "required", "yes"));
             Map<String, Object> schema = Map.of("fields", fields);
+            Map<String, Object> metadata = Map.of("name", "x");
 
-            assertThatThrownBy(() -> validator.validateAgainstSchema(Map.of("name", "x"), schema))
+            assertThatThrownBy(() -> validator.validateAgainstSchema(metadata, schema))
                     .isInstanceOf(DomainValidationException.class)
                     .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
                     .isEqualTo("invalid_schema_shape");
@@ -294,8 +304,9 @@ class AssetSubtypeValidatorTest {
         void rejectsNonNumericMinimum() {
             Map<String, Object> fields = Map.of("count", Map.of("type", "INTEGER", "minimum", "zero"));
             Map<String, Object> schema = Map.of("fields", fields);
+            Map<String, Object> metadata = Map.of("count", 1);
 
-            assertThatThrownBy(() -> validator.validateAgainstSchema(Map.of("count", 1), schema))
+            assertThatThrownBy(() -> validator.validateAgainstSchema(metadata, schema))
                     .isInstanceOf(DomainValidationException.class)
                     .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
                     .isEqualTo("invalid_schema_shape");
@@ -305,8 +316,9 @@ class AssetSubtypeValidatorTest {
         void rejectsNegativeMaxLength() {
             Map<String, Object> fields = Map.of("name", Map.of("type", "STRING", "maxLength", -1));
             Map<String, Object> schema = Map.of("fields", fields);
+            Map<String, Object> metadata = Map.of("name", "x");
 
-            assertThatThrownBy(() -> validator.validateAgainstSchema(Map.of("name", "x"), schema))
+            assertThatThrownBy(() -> validator.validateAgainstSchema(metadata, schema))
                     .isInstanceOf(DomainValidationException.class)
                     .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
                     .isEqualTo("invalid_schema_shape");
@@ -316,8 +328,9 @@ class AssetSubtypeValidatorTest {
         void rejectsNonStringEnumValues() {
             Map<String, Object> fields = Map.of("tier", Map.of("type", "ENUM", "values", List.of("OK", 42)));
             Map<String, Object> schema = Map.of("fields", fields);
+            Map<String, Object> metadata = Map.of("tier", "OK");
 
-            assertThatThrownBy(() -> validator.validateAgainstSchema(Map.of("tier", "OK"), schema))
+            assertThatThrownBy(() -> validator.validateAgainstSchema(metadata, schema))
                     .isInstanceOf(DomainValidationException.class)
                     .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
                     .isEqualTo("invalid_schema_shape");
@@ -327,8 +340,9 @@ class AssetSubtypeValidatorTest {
         void rejectsEmptyEnumValues() {
             Map<String, Object> fields = Map.of("tier", Map.of("type", "ENUM", "values", List.of()));
             Map<String, Object> schema = Map.of("fields", fields);
+            Map<String, Object> metadata = Map.of("tier", "x");
 
-            assertThatThrownBy(() -> validator.validateAgainstSchema(Map.of("tier", "x"), schema))
+            assertThatThrownBy(() -> validator.validateAgainstSchema(metadata, schema))
                     .isInstanceOf(DomainValidationException.class)
                     .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
                     .isEqualTo("invalid_schema_shape");
@@ -477,58 +491,46 @@ class AssetSubtypeValidatorTest {
                     .isEqualTo("invalid_schema_shape");
         }
 
-        @Test
-        void rejectsPresentNullRequired() {
-            // Codex cycle-5 finding 1: a present-null keyword must NOT be
-            // silently treated as absent — that would let a malformed schema
-            // weaken its own contract.
-            Map<String, Object> def = new LinkedHashMap<>();
-            def.put("type", "STRING");
-            def.put("required", null);
-            Map<String, Object> body = Map.of("fields", Map.of("name", def));
-
+        /**
+         * Codex cycle-5 finding 1: a present-null keyword must NOT be silently
+         * treated as absent — that would let a malformed schema weaken its
+         * own contract. Parameterized to cover all four keyword categories
+         * (per Sonar S5976; was four separate tests).
+         */
+        @org.junit.jupiter.params.ParameterizedTest(name = "present-null {0} rejected")
+        @org.junit.jupiter.params.provider.MethodSource("presentNullKeywords")
+        void rejectsPresentNullKeyword(String keyword, Map<String, Object> body) {
             assertThatThrownBy(() -> validator.validateSchemaBody(body, true))
                     .isInstanceOf(DomainValidationException.class)
                     .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
                     .isEqualTo("invalid_schema_shape");
         }
 
-        @Test
-        void rejectsPresentNullAllowAdditional() {
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("fields", Map.of("name", Map.of("type", "STRING")));
-            body.put("allowAdditional", null);
+        static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> presentNullKeywords() {
+            Map<String, Object> requiredNull = new LinkedHashMap<>();
+            requiredNull.put("type", "STRING");
+            requiredNull.put("required", null);
 
-            assertThatThrownBy(() -> validator.validateSchemaBody(body, true))
-                    .isInstanceOf(DomainValidationException.class)
-                    .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
-                    .isEqualTo("invalid_schema_shape");
-        }
+            Map<String, Object> allowAdditionalNull = new LinkedHashMap<>();
+            allowAdditionalNull.put("fields", Map.of("name", Map.of("type", "STRING")));
+            allowAdditionalNull.put("allowAdditional", null);
 
-        @Test
-        void rejectsPresentNullMaxLength() {
-            Map<String, Object> def = new LinkedHashMap<>();
-            def.put("type", "STRING");
-            def.put("maxLength", null);
-            Map<String, Object> body = Map.of("fields", Map.of("name", def));
+            Map<String, Object> maxLengthNull = new LinkedHashMap<>();
+            maxLengthNull.put("type", "STRING");
+            maxLengthNull.put("maxLength", null);
 
-            assertThatThrownBy(() -> validator.validateSchemaBody(body, true))
-                    .isInstanceOf(DomainValidationException.class)
-                    .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
-                    .isEqualTo("invalid_schema_shape");
-        }
+            Map<String, Object> minimumNull = new LinkedHashMap<>();
+            minimumNull.put("type", "INTEGER");
+            minimumNull.put("minimum", null);
 
-        @Test
-        void rejectsPresentNullMinimum() {
-            Map<String, Object> def = new LinkedHashMap<>();
-            def.put("type", "INTEGER");
-            def.put("minimum", null);
-            Map<String, Object> body = Map.of("fields", Map.of("count", def));
-
-            assertThatThrownBy(() -> validator.validateSchemaBody(body, true))
-                    .isInstanceOf(DomainValidationException.class)
-                    .extracting(e -> ((DomainValidationException) e).getDetail().get("reason"))
-                    .isEqualTo("invalid_schema_shape");
+            return java.util.stream.Stream.of(
+                    org.junit.jupiter.params.provider.Arguments.of(
+                            "required", Map.of("fields", Map.of("name", requiredNull))),
+                    org.junit.jupiter.params.provider.Arguments.of("allowAdditional", allowAdditionalNull),
+                    org.junit.jupiter.params.provider.Arguments.of(
+                            "maxLength", Map.of("fields", Map.of("name", maxLengthNull))),
+                    org.junit.jupiter.params.provider.Arguments.of(
+                            "minimum", Map.of("fields", Map.of("count", minimumNull))));
         }
 
         @Test
