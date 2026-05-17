@@ -86,66 +86,53 @@ public class TestPlanService {
         if (command.name() != null) {
             plan.setName(command.name());
         }
-        if (command.clearDescription()) {
-            plan.setDescription(null);
-        } else if (command.description() != null) {
-            plan.setDescription(command.description());
-        }
-        if (command.clearProduct()) {
-            plan.setProduct(null);
-        } else if (command.product() != null) {
-            plan.setProduct(command.product());
-        }
-        if (command.clearVersion()) {
-            plan.setVersion(null);
-        } else if (command.version() != null) {
-            plan.setVersion(command.version());
-        }
-        if (command.clearBuild()) {
-            plan.setBuild(null);
-        } else if (command.build() != null) {
-            plan.setBuild(command.build());
-        }
-        // Validate the *final* start/end pair once, then assign both. The
-        // entity setters each compare against the stored counterpart, so
-        // setting them one at a time would reject a valid whole-window
-        // shift (codex pre-push cycle 1 class finding): existing 6/1–6/30,
-        // new 7/1–7/31 would trip when the new start (7/1) is compared to
-        // the still-old end (6/30). Compute the target pair from the
-        // current state + clear flags + new values, validate it once, then
-        // null both fields and reassign so the setters' per-field checks
-        // see a clean state.
-        LocalDate targetStartDate;
-        if (command.clearStartDate()) {
-            targetStartDate = null;
-        } else if (command.startDate() != null) {
-            targetStartDate = command.startDate();
-        } else {
-            targetStartDate = plan.getStartDate();
-        }
-        LocalDate targetEndDate;
-        if (command.clearEndDate()) {
-            targetEndDate = null;
-        } else if (command.endDate() != null) {
-            targetEndDate = command.endDate();
-        } else {
-            targetEndDate = plan.getEndDate();
-        }
-        if (targetStartDate != null && targetEndDate != null && targetStartDate.isAfter(targetEndDate)) {
+        plan.setDescription(resolveNullable(command.clearDescription(), command.description(), plan.getDescription()));
+        plan.setProduct(resolveNullable(command.clearProduct(), command.product(), plan.getProduct()));
+        plan.setVersion(resolveNullable(command.clearVersion(), command.version(), plan.getVersion()));
+        plan.setBuild(resolveNullable(command.clearBuild(), command.build(), plan.getBuild()));
+        applyScheduleUpdate(plan, command);
+        plan = testPlanRepository.save(plan);
+        log.info("test_plan_updated: id={} uid={}", plan.getId(), plan.getUid());
+        return plan;
+    }
+
+    /**
+     * Reconcile the target start/end pair once and apply it atomically. The
+     * entity setters each compare against the stored counterpart, so setting
+     * them one at a time would reject a valid whole-window shift (codex
+     * pre-push cycle 1 class finding): existing 6/1–6/30, new 7/1–7/31
+     * would trip when the new start (7/1) is compared to the still-old
+     * end (6/30). Computing the final pair from current state + clear flags
+     * + new values, validating once, then clearing and reassigning lets
+     * the per-field setters see a clean state.
+     */
+    private static void applyScheduleUpdate(TestPlan plan, UpdateTestPlanCommand command) {
+        LocalDate targetStart = resolveNullable(command.clearStartDate(), command.startDate(), plan.getStartDate());
+        LocalDate targetEnd = resolveNullable(command.clearEndDate(), command.endDate(), plan.getEndDate());
+        if (targetStart != null && targetEnd != null && targetStart.isAfter(targetEnd)) {
             throw new DomainValidationException(
                     "End date must be on or after start date",
                     "invalid_test_plan_schedule",
-                    Map.of("start", targetStartDate.toString(), "end", targetEndDate.toString()));
+                    Map.of("start", targetStart.toString(), "end", targetEnd.toString()));
         }
         // Clear both before reassigning so the setters' transient-pair
         // checks see (null, null) instead of stale state.
         plan.setStartDate(null);
         plan.setEndDate(null);
-        plan.setStartDate(targetStartDate);
-        plan.setEndDate(targetEndDate);
-        plan = testPlanRepository.save(plan);
-        log.info("test_plan_updated: id={} uid={}", plan.getId(), plan.getUid());
-        return plan;
+        plan.setStartDate(targetStart);
+        plan.setEndDate(targetEnd);
+    }
+
+    /**
+     * Apply the partial-update contract to a nullable field: {@code clear=true}
+     * wins (wipes to null), otherwise a non-null {@code incoming} value
+     * replaces the current state, otherwise the current state is preserved.
+     */
+    private static <T> T resolveNullable(boolean clear, T incoming, T current) {
+        if (clear) {
+            return null;
+        }
+        return incoming != null ? incoming : current;
     }
 
     public TestPlan transitionStatus(UUID projectId, UUID id, TestPlanStatus newStatus) {

@@ -121,7 +121,8 @@ class TestPlanTest {
     void setEndDateBeforeStartDateIsRejected() {
         var plan = new TestPlan(project(), "TP-001", "Plan");
         plan.setStartDate(LocalDate.of(2026, 6, 10));
-        assertThatThrownBy(() -> plan.setEndDate(LocalDate.of(2026, 6, 1)))
+        var endBeforeStart = LocalDate.of(2026, 6, 1);
+        assertThatThrownBy(() -> plan.setEndDate(endBeforeStart))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("End date");
     }
@@ -130,7 +131,8 @@ class TestPlanTest {
     void setStartDateAfterEndDateIsRejected() {
         var plan = new TestPlan(project(), "TP-001", "Plan");
         plan.setEndDate(LocalDate.of(2026, 6, 10));
-        assertThatThrownBy(() -> plan.setStartDate(LocalDate.of(2026, 6, 20)))
+        var startAfterEnd = LocalDate.of(2026, 6, 20);
+        assertThatThrownBy(() -> plan.setStartDate(startAfterEnd))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("Start date");
     }

@@ -97,8 +97,8 @@ class TestPlanServiceTest {
             when(testPlanRepository.existsByProjectIdAndUid(projectId, "TP-001"))
                     .thenReturn(true);
 
-            assertThatThrownBy(() -> testPlanService.create(
-                            new CreateTestPlanCommand(projectId, "TP-001", "Plan", null, null, null, null, null, null)))
+            var command = new CreateTestPlanCommand(projectId, "TP-001", "Plan", null, null, null, null, null, null);
+            assertThatThrownBy(() -> testPlanService.create(command))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("TP-001");
             verify(testPlanRepository, never()).save(any());
@@ -110,17 +110,17 @@ class TestPlanServiceTest {
             when(testPlanRepository.existsByProjectIdAndUid(projectId, "TP-001"))
                     .thenReturn(false);
 
-            assertThatThrownBy(() -> testPlanService.create(new CreateTestPlanCommand(
-                            projectId,
-                            "TP-001",
-                            "Plan",
-                            null,
-                            null,
-                            null,
-                            null,
-                            LocalDate.of(2026, 6, 30),
-                            LocalDate.of(2026, 6, 1))))
-                    .isInstanceOf(DomainValidationException.class);
+            var command = new CreateTestPlanCommand(
+                    projectId,
+                    "TP-001",
+                    "Plan",
+                    null,
+                    null,
+                    null,
+                    null,
+                    LocalDate.of(2026, 6, 30),
+                    LocalDate.of(2026, 6, 1));
+            assertThatThrownBy(() -> testPlanService.create(command)).isInstanceOf(DomainValidationException.class);
             verify(testPlanRepository, never()).save(any());
         }
     }
@@ -239,12 +239,9 @@ class TestPlanServiceTest {
             var missingId = UUID.randomUUID();
             when(testPlanRepository.findByIdAndProjectId(missingId, projectId)).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> testPlanService.update(
-                            projectId,
-                            missingId,
-                            new UpdateTestPlanCommand(
-                                    "Renamed", null, null, null, null, null, null, false, false, false, false, false,
-                                    false)))
+            var command = new UpdateTestPlanCommand(
+                    "Renamed", null, null, null, null, null, null, false, false, false, false, false, false);
+            assertThatThrownBy(() -> testPlanService.update(projectId, missingId, command))
                     .isInstanceOf(NotFoundException.class);
         }
 
@@ -330,23 +327,22 @@ class TestPlanServiceTest {
             when(testPlanRepository.findByIdAndProjectId(existing.getId(), projectId))
                     .thenReturn(Optional.of(existing));
 
-            assertThatThrownBy(() -> testPlanService.update(
-                            projectId,
-                            existing.getId(),
-                            new UpdateTestPlanCommand(
-                                    null,
-                                    null,
-                                    null,
-                                    null,
-                                    null,
-                                    LocalDate.of(2026, 7, 15),
-                                    null,
-                                    false,
-                                    false,
-                                    false,
-                                    false,
-                                    false,
-                                    false)))
+            var planId = existing.getId();
+            var command = new UpdateTestPlanCommand(
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    LocalDate.of(2026, 7, 15),
+                    null,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false);
+            assertThatThrownBy(() -> testPlanService.update(projectId, planId, command))
                     .isInstanceOf(DomainValidationException.class);
             verify(testPlanRepository, never()).save(any());
         }
@@ -373,8 +369,8 @@ class TestPlanServiceTest {
             when(testPlanRepository.findByIdAndProjectId(existing.getId(), projectId))
                     .thenReturn(Optional.of(existing));
 
-            assertThatThrownBy(() ->
-                            testPlanService.transitionStatus(projectId, existing.getId(), TestPlanStatus.COMPLETED))
+            var planId = existing.getId();
+            assertThatThrownBy(() -> testPlanService.transitionStatus(projectId, planId, TestPlanStatus.COMPLETED))
                     .isInstanceOf(DomainValidationException.class);
             verify(testPlanRepository, never()).save(any());
         }
