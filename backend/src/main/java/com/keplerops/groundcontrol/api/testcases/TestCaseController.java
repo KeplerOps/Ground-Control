@@ -1,7 +1,10 @@
 package com.keplerops.groundcontrol.api.testcases;
 
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
+import com.keplerops.groundcontrol.domain.testcases.service.CopyTestCaseCommand;
 import com.keplerops.groundcontrol.domain.testcases.service.CreateTestCaseCommand;
+import com.keplerops.groundcontrol.domain.testcases.service.MoveTestCaseCommand;
+import com.keplerops.groundcontrol.domain.testcases.service.ReorderTestCasesCommand;
 import com.keplerops.groundcontrol.domain.testcases.service.TestCaseService;
 import com.keplerops.groundcontrol.domain.testcases.service.UpdateTestCaseCommand;
 import jakarta.validation.Valid;
@@ -46,7 +49,9 @@ public class TestCaseController {
                 request.description(),
                 request.preconditions(),
                 request.postconditions(),
-                request.estimatedDurationSeconds())));
+                request.estimatedDurationSeconds(),
+                request.parentFolderId(),
+                request.sortOrder())));
     }
 
     @GetMapping
@@ -106,5 +111,37 @@ public class TestCaseController {
             @RequestParam(required = false) String project) {
         var projectId = projectService.requireProjectId(project);
         return TestCaseResponse.from(testCaseService.transitionStatus(projectId, id, request.status()));
+    }
+
+    @PutMapping("/{id}/move")
+    public TestCaseResponse move(
+            @PathVariable UUID id,
+            @Valid @RequestBody MoveTestCaseRequest request,
+            @RequestParam(required = false) String project) {
+        var projectId = projectService.requireProjectId(project);
+        return TestCaseResponse.from(testCaseService.move(
+                projectId, id, new MoveTestCaseCommand(request.parentFolderId(), request.sortOrder())));
+    }
+
+    @PostMapping("/{id}/copy")
+    @ResponseStatus(HttpStatus.CREATED)
+    public TestCaseResponse copy(
+            @PathVariable UUID id,
+            @Valid @RequestBody CopyTestCaseRequest request,
+            @RequestParam(required = false) String project) {
+        var projectId = projectService.requireProjectId(project);
+        return TestCaseResponse.from(testCaseService.copy(
+                projectId,
+                id,
+                new CopyTestCaseCommand(request.newUid(), request.parentFolderId(), request.sortOrder())));
+    }
+
+    @PutMapping("/reorder")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void reorder(
+            @Valid @RequestBody ReorderTestCasesRequest request, @RequestParam(required = false) String project) {
+        var projectId = projectService.requireProjectId(project);
+        testCaseService.reorder(
+                projectId, new ReorderTestCasesCommand(request.parentFolderId(), request.orderedTestCaseIds()));
     }
 }

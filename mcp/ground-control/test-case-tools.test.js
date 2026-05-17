@@ -18,18 +18,26 @@ import {
   TEST_CASE_PRIORITIES,
   TEST_CASE_STATUSES,
   TEST_CASE_TYPES,
+  copyTestCase,
   createTestCase,
+  createTestCaseFolder,
   createTestCaseGherkin,
   createTestCaseStep,
   deleteTestCase,
+  deleteTestCaseFolder,
   deleteTestCaseGherkin,
   deleteTestCaseStep,
   getTestCase,
   getTestCaseByUid,
   getTestCaseGherkin,
   listTestCases,
+  moveTestCase,
+  moveTestCaseFolder,
+  reorderTestCaseFolders,
+  reorderTestCases,
   transitionTestCaseStatus,
   updateTestCase,
+  updateTestCaseFolder,
   updateTestCaseGherkin,
   updateTestCaseStep,
 } from "./lib.js";
@@ -526,5 +534,142 @@ describe("Error envelope propagation", () => {
       () => transitionTestCaseStatus(TEST_CASE_ID, "DRAFT", "ground-control"),
       (e) => e instanceof RequestError && e.status === 422 && e.code === "invalid_status_transition",
     );
+  });
+});
+
+// TC-005 / ADR-043 — folder + move/copy/reorder wrappers.
+describe("TestCaseFolder wrappers (gc_test_case TC-005)", () => {
+  const FOLDER_ID = "33333333-3333-3333-3333-333333333333";
+  const NEW_FOLDER_ID = "44444444-4444-4444-4444-444444444444";
+
+  it("createTestCaseFolder POSTs /api/v1/test-cases/folders with camelCase body", async () => {
+    setNextResponse({ body: { id: FOLDER_ID, title: "Smoke", parentFolderId: null, sortOrder: 0 } });
+    await createTestCaseFolder(
+      { title: "Smoke", description: "set", parentFolderId: null, sortOrder: 0 },
+      "ground-control",
+    );
+    const call = fetchCalls[0];
+    const url = parseUrl(call);
+    assert.equal(call.opts.method, "POST");
+    assert.equal(url.pathname, "/api/v1/test-cases/folders");
+    assert.equal(url.searchParams.get("project"), "ground-control");
+    assert.deepEqual(JSON.parse(call.opts.body), {
+      title: "Smoke",
+      description: "set",
+      parentFolderId: null,
+      sortOrder: 0,
+    });
+  });
+
+  it("updateTestCaseFolder PUTs /api/v1/test-cases/folders/{id}", async () => {
+    setNextResponse({ body: { id: FOLDER_ID, title: "Renamed" } });
+    await updateTestCaseFolder(FOLDER_ID, { title: "Renamed" }, "ground-control");
+    const call = fetchCalls[0];
+    const url = parseUrl(call);
+    assert.equal(call.opts.method, "PUT");
+    assert.equal(url.pathname, `/api/v1/test-cases/folders/${FOLDER_ID}`);
+    // Project param + JSON body: parity with TC-001 updateTestCase test —
+    // catches a regression that drops the body or sends wrong field names
+    // (test-quality cycle 2).
+    assert.equal(url.searchParams.get("project"), "ground-control");
+    assert.deepEqual(JSON.parse(call.opts.body), { title: "Renamed" });
+  });
+
+  it("deleteTestCaseFolder DELETEs /api/v1/test-cases/folders/{id}", async () => {
+    setNextResponse({ ok: true, status: 204 });
+    await deleteTestCaseFolder(FOLDER_ID, "ground-control");
+    const call = fetchCalls[0];
+    const url = parseUrl(call);
+    assert.equal(call.opts.method, "DELETE");
+    assert.equal(url.pathname, `/api/v1/test-cases/folders/${FOLDER_ID}`);
+    assert.equal(url.searchParams.get("project"), "ground-control");
+  });
+
+  it("moveTestCaseFolder PUTs /api/v1/test-cases/folders/{id}/move", async () => {
+    setNextResponse({ body: { id: FOLDER_ID, parentFolderId: NEW_FOLDER_ID, sortOrder: 2 } });
+    await moveTestCaseFolder(
+      FOLDER_ID,
+      { parentFolderId: NEW_FOLDER_ID, sortOrder: 2 },
+      "ground-control",
+    );
+    const call = fetchCalls[0];
+    const url = parseUrl(call);
+    assert.equal(call.opts.method, "PUT");
+    assert.equal(url.pathname, `/api/v1/test-cases/folders/${FOLDER_ID}/move`);
+    assert.equal(url.searchParams.get("project"), "ground-control");
+    assert.deepEqual(JSON.parse(call.opts.body), {
+      parentFolderId: NEW_FOLDER_ID,
+      sortOrder: 2,
+    });
+  });
+
+  it("reorderTestCaseFolders PUTs /api/v1/test-cases/folders/reorder", async () => {
+    setNextResponse({ ok: true, status: 204 });
+    await reorderTestCaseFolders(
+      { parentFolderId: null, orderedFolderIds: [FOLDER_ID, NEW_FOLDER_ID] },
+      "ground-control",
+    );
+    const call = fetchCalls[0];
+    const url = parseUrl(call);
+    assert.equal(call.opts.method, "PUT");
+    assert.equal(url.pathname, "/api/v1/test-cases/folders/reorder");
+    assert.equal(url.searchParams.get("project"), "ground-control");
+    assert.deepEqual(JSON.parse(call.opts.body), {
+      parentFolderId: null,
+      orderedFolderIds: [FOLDER_ID, NEW_FOLDER_ID],
+    });
+  });
+});
+
+describe("TestCase move/copy/reorder wrappers (gc_test_case TC-005)", () => {
+  it("moveTestCase PUTs /api/v1/test-cases/{id}/move", async () => {
+    setNextResponse({ body: { id: TEST_CASE_ID } });
+    await moveTestCase(
+      TEST_CASE_ID,
+      { parentFolderId: null, sortOrder: 0 },
+      "ground-control",
+    );
+    const call = fetchCalls[0];
+    const url = parseUrl(call);
+    assert.equal(call.opts.method, "PUT");
+    assert.equal(url.pathname, `/api/v1/test-cases/${TEST_CASE_ID}/move`);
+    assert.equal(url.searchParams.get("project"), "ground-control");
+    assert.deepEqual(JSON.parse(call.opts.body), { parentFolderId: null, sortOrder: 0 });
+  });
+
+  it("copyTestCase POSTs /api/v1/test-cases/{id}/copy with newUid", async () => {
+    setNextResponse({ body: { id: "99999999-9999-9999-9999-999999999999", uid: "TC-002" } });
+    await copyTestCase(
+      TEST_CASE_ID,
+      { newUid: "TC-002", parentFolderId: null, sortOrder: null },
+      "ground-control",
+    );
+    const call = fetchCalls[0];
+    const url = parseUrl(call);
+    assert.equal(call.opts.method, "POST");
+    assert.equal(url.pathname, `/api/v1/test-cases/${TEST_CASE_ID}/copy`);
+    assert.equal(url.searchParams.get("project"), "ground-control");
+    assert.deepEqual(JSON.parse(call.opts.body), {
+      newUid: "TC-002",
+      parentFolderId: null,
+      sortOrder: null,
+    });
+  });
+
+  it("reorderTestCases PUTs /api/v1/test-cases/reorder", async () => {
+    setNextResponse({ ok: true, status: 204 });
+    await reorderTestCases(
+      { parentFolderId: null, orderedTestCaseIds: [TEST_CASE_ID] },
+      "ground-control",
+    );
+    const call = fetchCalls[0];
+    const url = parseUrl(call);
+    assert.equal(call.opts.method, "PUT");
+    assert.equal(url.pathname, "/api/v1/test-cases/reorder");
+    assert.equal(url.searchParams.get("project"), "ground-control");
+    assert.deepEqual(JSON.parse(call.opts.body), {
+      parentFolderId: null,
+      orderedTestCaseIds: [TEST_CASE_ID],
+    });
   });
 });

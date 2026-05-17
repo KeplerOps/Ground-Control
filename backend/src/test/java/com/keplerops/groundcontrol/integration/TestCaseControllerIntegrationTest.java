@@ -2,6 +2,7 @@ package com.keplerops.groundcontrol.integration;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -129,5 +130,92 @@ class TestCaseControllerIntegrationTest extends BaseIntegrationTest {
         // Subsequent GET returns 404
         mockMvc.perform(get("/api/v1/test-cases/{id}", testCaseId).param("project", "ground-control"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void move_copy_reorder_roundTrip() throws Exception {
+        // Create a folder to place the test case into.
+        Map<String, Object> folderReq = new LinkedHashMap<>();
+        folderReq.put("title", "Hierarchy bucket");
+        var folderResult = mockMvc.perform(post("/api/v1/test-cases/folders")
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(folderReq)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String folderId = objectMapper
+                .readTree(folderResult.getResponse().getContentAsString())
+                .get("id")
+                .asText();
+
+        // Create source test case at the root.
+        var srcResult = mockMvc.perform(post("/api/v1/test-cases")
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(validRequest("TC-MV-001"))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String srcId = objectMapper
+                .readTree(srcResult.getResponse().getContentAsString())
+                .get("id")
+                .asText();
+
+        // Move into folder.
+        Map<String, Object> moveBody = new LinkedHashMap<>();
+        moveBody.put("parentFolderId", folderId);
+        mockMvc.perform(put("/api/v1/test-cases/{id}/move", srcId)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(moveBody)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.parentFolderId", is(folderId)));
+
+        // Copy into the same folder under a new UID. Per the move/copy
+        // parity convention, callers pass the desired parentFolderId
+        // explicitly; null or omitted means project root.
+        Map<String, Object> copyBody = new LinkedHashMap<>();
+        copyBody.put("newUid", "TC-MV-001-COPY");
+        copyBody.put("parentFolderId", folderId);
+        mockMvc.perform(post("/api/v1/test-cases/{id}/copy", srcId)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(copyBody)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.uid", is("TC-MV-001-COPY")))
+                .andExpect(jsonPath("$.status", is("DRAFT")))
+                .andExpect(jsonPath("$.parentFolderId", is(folderId)));
+
+        // Copy to root by passing parentFolderId = null explicitly.
+        Map<String, Object> copyToRootBody = new LinkedHashMap<>();
+        copyToRootBody.put("newUid", "TC-MV-001-ROOT");
+        copyToRootBody.put("parentFolderId", null);
+        mockMvc.perform(post("/api/v1/test-cases/{id}/copy", srcId)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(copyToRootBody)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.parentFolderId", is(nullValue())));
+
+        // Copy with the existing source UID is rejected.
+        Map<String, Object> dupBody = new LinkedHashMap<>();
+        dupBody.put("newUid", "TC-MV-001");
+        mockMvc.perform(post("/api/v1/test-cases/{id}/copy", srcId)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(dupBody)))
+                .andExpect(status().isConflict());
+
+        // Move back to root — assert parentFolderId actually nulled out
+        // (test-quality cycle 2): a regression where 200 OK comes back
+        // but the test case stays in its folder is otherwise invisible
+        // because this is the last step.
+        Map<String, Object> rootMove = new LinkedHashMap<>();
+        rootMove.put("parentFolderId", null);
+        mockMvc.perform(put("/api/v1/test-cases/{id}/move", srcId)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(rootMove)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.parentFolderId", is(nullValue())));
     }
 }

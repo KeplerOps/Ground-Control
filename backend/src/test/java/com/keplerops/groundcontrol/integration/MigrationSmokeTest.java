@@ -50,7 +50,7 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         "040", "041", "042", "043", "044", "045", "046", "047", "048", "049", "050", "051", "052",
                         "053", "054", "055", "056", "057", "058", "059", "060", "061", "062", "063", "064", "065",
                         "066", "067", "068", "069", "070", "071", "072", "073", "074", "075", "076", "077", "078",
-                        "079", "080", "081", "082", "083");
+                        "079", "080", "081", "082", "083", "084", "085", "086", "087");
     }
 
     @Test
@@ -394,7 +394,7 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         + " WHERE table_name = 'test_case_gherkin'"
                         + " AND constraint_name = 'uq_test_case_gherkin_test_case'")
                 .getSingleResult();
-        // V080 / V081 GC-M011 subtype + metadata column-existence probes.
+        // GC-M011 V080 / V081 subtype + metadata column-existence probes.
         org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
                         .createNativeQuery("SELECT subtype, metadata FROM operational_asset LIMIT 1")
                         .getResultList())
@@ -403,7 +403,7 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         .createNativeQuery("SELECT subtype, metadata FROM operational_asset_audit LIMIT 1")
                         .getResultList())
                 .doesNotThrowAnyException();
-        // V082 / V083 asset_subtype_schema + audit table presence.
+        // GC-M011 V082 / V083 asset_subtype_schema + audit table presence.
         entityManager
                 .createNativeQuery("SELECT 1 FROM asset_subtype_schema LIMIT 1")
                 .getResultList();
@@ -429,6 +429,74 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                 .createNativeQuery(
                         "SELECT 1 FROM information_schema.columns WHERE table_name = 'asset_subtype_schema_audit'"
                                 + " AND column_name = 'updated_at'")
+                .getSingleResult();
+        // V084-V087 test_case_folder + audit + test_case placement columns
+        // (TC-005 / ADR-043). Same column-existence probe rationale as the
+        // older audit-table assertions: ddl-auto: validate doesn't see audit
+        // shadow tables, and ALTER TABLE silent regressions on the parent
+        // would otherwise pass.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM test_case_folder LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM test_case_folder_audit LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_folder'"
+                        + " AND column_name = 'parent_id'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_folder'"
+                        + " AND column_name = 'sort_order' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery(
+                        "SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_folder_audit'"
+                                + " AND column_name = 'parent_id'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery(
+                        "SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_folder_audit'"
+                                + " AND column_name = 'sort_order'")
+                .getSingleResult();
+        // BaseEntity timestamps on the test_case_folder_audit shadow — required by
+        // AuditRetentionJob.purgeOldAuditRecords to age out folder revisions.
+        entityManager
+                .createNativeQuery(
+                        "SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_folder_audit'"
+                                + " AND column_name = 'created_at'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery(
+                        "SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_folder_audit'"
+                                + " AND column_name = 'updated_at'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case'"
+                        + " AND column_name = 'parent_folder_id'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case'"
+                        + " AND column_name = 'sort_order' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_audit'"
+                        + " AND column_name = 'parent_folder_id'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_case_audit'"
+                        + " AND column_name = 'sort_order'")
+                .getSingleResult();
+        // Partial unique indexes on (project_id, title) WHERE parent IS NULL
+        // and (project_id, parent_id, title) WHERE parent IS NOT NULL back
+        // the sibling-title uniqueness invariant.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM pg_indexes WHERE tablename = 'test_case_folder'"
+                        + " AND indexname = 'uq_test_case_folder_title_root'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM pg_indexes WHERE tablename = 'test_case_folder'"
+                        + " AND indexname = 'uq_test_case_folder_title_under_parent'")
                 .getSingleResult();
     }
 }

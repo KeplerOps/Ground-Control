@@ -5,7 +5,11 @@ import com.keplerops.groundcontrol.domain.documents.repository.DocumentRepositor
 import com.keplerops.groundcontrol.domain.documents.repository.SectionRepository;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -105,7 +109,13 @@ public class SectionService {
             }
         }
 
-        return roots.stream().map(r -> buildNode(r, childrenByParentId)).toList();
+        // Iterative bottom-up assembly: a recursive descent on a deeply
+        // nested section tree would risk StackOverflowError. Materialise
+        // nodes in descending-depth order so each parent finds its
+        // children's SectionTreeNode instances already built (codex
+        // cycle-1 class finding category — same shape as
+        // TestCaseFolderService.getTree).
+        return buildIterativeForest(all, roots, childrenByParentId);
     }
 
     public void delete(UUID id) {
@@ -115,17 +125,76 @@ public class SectionService {
         log.info("section_deleted: id={} title={}", section.getId(), section.getTitle());
     }
 
-    private SectionTreeNode buildNode(Section section, Map<UUID, List<Section>> childrenByParentId) {
-        var children = childrenByParentId.getOrDefault(section.getId(), List.of());
-        return new SectionTreeNode(
-                section.getId(),
-                section.getParent() != null ? section.getParent().getId() : null,
-                section.getTitle(),
-                section.getDescription(),
-                section.getSortOrder(),
-                section.getCreatedAt(),
-                section.getUpdatedAt(),
-                children.stream().map(c -> buildNode(c, childrenByParentId)).toList());
+    /**
+     * Iterative O(n) section tree assembly (codex cycle-2 finding).
+     * Walks the children map from each root via an explicit stack to
+     * produce a post-order visit list, then materialises SectionTreeNode
+     * instances in that order so each parent finds its children's nodes
+     * already built. Each section is touched twice (push + pop); no
+     * per-node parent walk is performed, so a linear chain stays linear
+     * rather than quadratic.
+     */
+    private List<SectionTreeNode> buildIterativeForest(
+            List<Section> all, List<Section> roots, Map<UUID, List<Section>> childrenByParentId) {
+        List<Section> postOrder = new ArrayList<>(all.size());
+        HashSet<UUID> visited = new HashSet<>();
+        Deque<SectionStackFrame> stack = new ArrayDeque<>();
+        for (Section root : roots) {
+            stack.push(new SectionStackFrame(root));
+            while (!stack.isEmpty()) {
+                SectionStackFrame frame = stack.peek();
+                if (frame.expanded) {
+                    stack.pop();
+                    postOrder.add(frame.section);
+                    continue;
+                }
+                if (!visited.add(frame.section.getId())) {
+                    stack.pop();
+                    continue;
+                }
+                frame.expanded = true;
+                List<Section> children = childrenByParentId.getOrDefault(frame.section.getId(), List.of());
+                for (int i = children.size() - 1; i >= 0; i--) {
+                    stack.push(new SectionStackFrame(children.get(i)));
+                }
+            }
+        }
+
+        Map<UUID, SectionTreeNode> nodesById = new HashMap<>();
+        for (Section section : postOrder) {
+            var childSections = childrenByParentId.getOrDefault(section.getId(), List.of());
+            List<SectionTreeNode> children = new ArrayList<>(childSections.size());
+            for (Section child : childSections) {
+                children.add(nodesById.get(child.getId()));
+            }
+            nodesById.put(
+                    section.getId(),
+                    new SectionTreeNode(
+                            section.getId(),
+                            section.getParent() != null ? section.getParent().getId() : null,
+                            section.getTitle(),
+                            section.getDescription(),
+                            section.getSortOrder(),
+                            section.getCreatedAt(),
+                            section.getUpdatedAt(),
+                            children));
+        }
+
+        List<SectionTreeNode> result = new ArrayList<>(roots.size());
+        for (Section root : roots) {
+            result.add(nodesById.get(root.getId()));
+        }
+        return result;
+    }
+
+    /** Stack frame used by the iterative post-order traversal in {@link #buildIterativeForest}. */
+    private static final class SectionStackFrame {
+        final Section section;
+        boolean expanded;
+
+        SectionStackFrame(Section section) {
+            this.section = section;
+        }
     }
 
     private void checkTitleUniqueness(UUID documentId, UUID parentId, String title) {

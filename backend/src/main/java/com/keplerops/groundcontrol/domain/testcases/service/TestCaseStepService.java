@@ -2,6 +2,7 @@ package com.keplerops.groundcontrol.domain.testcases.service;
 
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.testcases.model.TestCase;
 import com.keplerops.groundcontrol.domain.testcases.model.TestCaseStep;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseStepRepository;
@@ -102,6 +103,34 @@ public class TestCaseStepService {
             log.info("test_case_steps_deleted: test_case={} count={}", testCaseId, deleted);
         }
         return deleted;
+    }
+
+    /**
+     * TC-005 / ADR-043 — Clone every step from {@code sourceTestCaseId} onto
+     * {@code target}. Used by {@link TestCaseService#copy} so a STEP_BASED
+     * copy carries its authored children. The clones go through Hibernate so
+     * Envers captures them as inserts on the target. Returns the number of
+     * cloned rows.
+     */
+    public int copyStepsToTestCase(UUID sourceTestCaseId, TestCase target) {
+        if (target.getFormat() != TestCaseFormat.STEP_BASED) {
+            return 0;
+        }
+        var sourceSteps = stepRepository.findByTestCaseIdOrderByStepNumberAsc(sourceTestCaseId);
+        int count = 0;
+        for (TestCaseStep source : sourceSteps) {
+            var clone =
+                    new TestCaseStep(target, source.getStepNumber(), source.getAction(), source.getExpectedResult());
+            // Actual result is run-time evidence (ADR-041); copying a definition
+            // should leave the new test case's actual result blank.
+            clone.setActualResult(null);
+            stepRepository.save(clone);
+            count++;
+        }
+        if (count > 0) {
+            log.info("test_case_steps_copied: source={} target={} count={}", sourceTestCaseId, target.getId(), count);
+        }
+        return count;
     }
 
     private TestCaseStep findStepOrThrow(UUID projectId, UUID testCaseId, UUID stepId) {

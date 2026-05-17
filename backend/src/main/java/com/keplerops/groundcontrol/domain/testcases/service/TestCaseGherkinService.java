@@ -97,6 +97,26 @@ public class TestCaseGherkinService {
         return deleted;
     }
 
+    /**
+     * TC-005 / ADR-043 — Clone the source's Gherkin source onto {@code target}.
+     * Returns 1 when a Gherkin row was cloned, 0 when the source had no
+     * Gherkin content or the target is not in GHERKIN format. Goes through
+     * Hibernate so Envers captures the insert on the target.
+     */
+    public int copyGherkinToTestCase(UUID sourceTestCaseId, TestCase target) {
+        if (target.getFormat() != TestCaseFormat.GHERKIN) {
+            return 0;
+        }
+        var sourceGherkin = gherkinRepository.findByTestCaseId(sourceTestCaseId).orElse(null);
+        if (sourceGherkin == null) {
+            return 0;
+        }
+        var clone = gherkinRepository.save(new TestCaseGherkin(target, sourceGherkin.getSource()));
+        log.info(
+                "test_case_gherkin_copied: source={} target={} id={}", sourceTestCaseId, target.getId(), clone.getId());
+        return 1;
+    }
+
     private TestCaseGherkin findOrThrow(TestCase testCase) {
         return gherkinRepository
                 .findByTestCaseId(testCase.getId())

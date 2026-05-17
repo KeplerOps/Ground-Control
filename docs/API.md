@@ -1121,6 +1121,67 @@ traces, file paths, or `Examples` cell content.
 Deleting the parent test case cascade-deletes the Gherkin document service-side so
 Envers captures the delete revision (mirrors the step-cascade pattern in ADR-041).
 
+### Test Case Hierarchical Organization (TC-005 / ADR-043)
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/test-cases/folders` | TestCaseFolderRequest | 201 | Create a folder under a project (root) or under another folder |
+| GET | `/test-cases/folders` | — | 200 | List folders in a project (ordered by `sortOrder`) |
+| GET | `/test-cases/folders/{id}` | — | 200 | Get a folder by id |
+| PUT | `/test-cases/folders/{id}` | UpdateTestCaseFolderRequest | 200 | Rename / re-describe a folder |
+| DELETE | `/test-cases/folders/{id}` | — | 204 | Delete an **empty** folder (subfolders / test cases must be moved or deleted first) |
+| PUT | `/test-cases/folders/{id}/move` | MoveTestCaseFolderRequest | 200 | Move a folder to a new container (cycle / cross-project rejected) |
+| PUT | `/test-cases/folders/reorder` | ReorderTestCaseFoldersRequest | 204 | Bulk reorder folders within one container |
+| PUT | `/test-cases/{id}/move` | MoveTestCaseRequest | 200 | Move a test case into a folder (or to the project root) |
+| POST | `/test-cases/{id}/copy` | CopyTestCaseRequest | 201 | Copy a test case, cloning steps / Gherkin source |
+| PUT | `/test-cases/reorder` | ReorderTestCasesRequest | 204 | Bulk reorder test cases within one container |
+| GET | `/test-cases/tree` | — | 200 | Nested tree of folders and test cases for the project |
+
+A `TestCaseFolder` is the test-repository organisation aggregate. It is project-scoped, self-referencing
+(nullable `parent`), `@Audited`, container-locally ordered by `sortOrder`, and uniquely titled per
+container. `TestCase.parentFolderId` (nullable; null ⇒ project root) and `TestCase.sortOrder` carry the
+placement. See ADR-043.
+
+**TestCaseFolderRequest fields:** `title` (required, max 200), `description` (optional TEXT),
+`parentFolderId` (optional UUID; omit / null = root), `sortOrder` (optional non-negative `Integer`;
+omit / null = append at end of container).
+
+**UpdateTestCaseFolderRequest fields:** `title`, `description` (all optional, null-means-no-change),
+plus `clearDescription: true` to wipe `description` to null (same partial-update convention as
+`UpdateTestCaseRequest`).
+
+**MoveTestCaseFolderRequest / MoveTestCaseRequest fields:** `parentFolderId` (required; null = root),
+`sortOrder` (optional non-negative; omit = append).
+
+**ReorderTestCaseFoldersRequest / ReorderTestCasesRequest fields:** `parentFolderId` (required; null
+= root), `orderedFolderIds` / `orderedTestCaseIds` (required, must contain exactly the current
+siblings — partial reorders are rejected with HTTP 409).
+
+**CopyTestCaseRequest fields:** `newUid` (required, max 50, must not collide with an existing UID in
+the same project), `parentFolderId` (explicit target — same convention as `MoveTestCaseRequest`:
+`null` or omitted = project root, UUID = that folder), `sortOrder` (optional; defaults to max+1 in
+the target container). Callers that want to clone in place must pass the source's `parentFolderId`
+explicitly. The copy clones every immutable definition field (title, description, preconditions,
+postconditions, priority, type, format, estimatedDurationSeconds), resets `status` to `DRAFT`,
+and clones authored children via their owning services (`TestCaseStepService.copyStepsToTestCase`,
+`TestCaseGherkinService.copyGherkinToTestCase`). Step `actualResult` is **not** copied — it is
+run-time evidence, not part of the definition.
+
+**TestCaseFolderResponse fields:** `id`, `projectIdentifier`, `parentFolderId`, `title`,
+`description`, `sortOrder`, `createdAt`, `updatedAt`.
+
+**Tree response.** `GET /test-cases/tree` returns an array of `TestCaseTreeNode`. Each node carries
+`kind` (`FOLDER` or `TEST_CASE`), `id`, `parentFolderId`, `title`, `description`, `sortOrder`,
+`testCase` (populated only for `TEST_CASE` kind: `{uid, status, type, priority, format}`), and
+`children` (folders first by `sortOrder`, then test cases by `sortOrder`; leaves carry an empty
+array).
+
+**Error envelope.** Duplicate sibling title returns HTTP 409 `conflict`. Moving a folder under
+itself or any descendant returns HTTP 409. Cross-project moves / copies return HTTP 404 (the target
+is "not found" in the requesting project's scope). Deleting a non-empty folder returns HTTP 409
+with a message naming the contents class. Reordering with a non-matching id set returns HTTP 409.
+Copying with a colliding `newUid` returns HTTP 409.
+
 ## Request / Response Format
 
 JSON. Error responses use a nested envelope:
