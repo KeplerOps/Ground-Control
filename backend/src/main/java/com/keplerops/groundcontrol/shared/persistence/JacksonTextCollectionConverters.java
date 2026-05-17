@@ -3,6 +3,7 @@ package com.keplerops.groundcontrol.shared.persistence;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.keplerops.groundcontrol.domain.evidence.model.EvidenceSourceRef;
 import com.keplerops.groundcontrol.domain.packregistry.model.PackDependency;
 import com.keplerops.groundcontrol.domain.packregistry.model.RegisteredControlPackEntry;
 import com.keplerops.groundcontrol.domain.packregistry.model.TrustPolicyRule;
@@ -105,6 +106,14 @@ public final class JacksonTextCollectionConverters {
     public static class StringSetConverter extends AbstractJsonTextConverter<Set<String>> {
 
         public StringSetConverter() {
+            super(new TypeReference<>() {});
+        }
+    }
+
+    @Converter
+    public static class EvidenceSourceRefListConverter extends AbstractJsonTextConverter<List<EvidenceSourceRef>> {
+
+        public EvidenceSourceRefListConverter() {
             super(new TypeReference<>() {});
         }
     }
