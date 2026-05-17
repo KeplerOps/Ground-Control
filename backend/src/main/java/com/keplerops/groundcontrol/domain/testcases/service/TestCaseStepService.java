@@ -5,6 +5,7 @@ import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.testcases.model.TestCaseStep;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseStepRepository;
+import com.keplerops.groundcontrol.domain.testcases.state.TestCaseFormat;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -30,6 +31,10 @@ public class TestCaseStepService {
         var testCase = testCaseRepository
                 .findByIdAndProjectId(command.testCaseId(), command.projectId())
                 .orElseThrow(() -> new NotFoundException("Test case not found: " + command.testCaseId()));
+        if (testCase.getFormat() != TestCaseFormat.STEP_BASED) {
+            throw new ConflictException("Test case " + testCase.getUid() + " has format " + testCase.getFormat()
+                    + "; steps can only be added to STEP_BASED test cases");
+        }
         if (stepRepository.existsByTestCaseIdAndStepNumber(testCase.getId(), command.stepNumber())) {
             throw new ConflictException(
                     "Step number " + command.stepNumber() + " already exists in test case " + testCase.getUid());

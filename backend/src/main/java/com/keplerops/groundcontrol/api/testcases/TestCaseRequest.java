@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.api.testcases;
 
+import com.keplerops.groundcontrol.domain.testcases.state.TestCaseFormat;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCasePriority;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseType;
 import jakarta.validation.constraints.NotBlank;
@@ -12,6 +13,10 @@ public record TestCaseRequest(
         @NotBlank @Size(max = 200) String title,
         @NotNull TestCaseType type,
         @NotNull TestCasePriority priority,
+        // Authored format axis (TC-004 / ADR-042). Optional on the wire so
+        // existing clients keep working — the service defaults to STEP_BASED
+        // when null.
+        TestCaseFormat format,
         String description,
         String preconditions,
         String postconditions,

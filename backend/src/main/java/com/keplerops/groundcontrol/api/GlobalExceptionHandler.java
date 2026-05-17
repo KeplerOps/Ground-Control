@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -164,6 +165,35 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleConstraintViolation(jakarta.validation.ConstraintViolationException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ErrorResponse.of("validation_error", ex.getMessage()));
+    }
+
+    /**
+     * Translate database-level integrity violations into the conflict envelope.
+     *
+     * <p>Services across the domain layer pair preflight {@code existsBy…}
+     * checks with database UNIQUE constraints (e.g. {@code (project_id, uid)}
+     * on test cases, {@code (test_case_id, step_number)} on test case steps,
+     * {@code (test_case_id)} on test case Gherkin). The preflight check is
+     * informative for the non-concurrent case; under concurrent writes two
+     * requests can both pass the {@code existsBy} check and only the database
+     * UNIQUE constraint rejects the loser. Without this handler the loser
+     * surfaces as a generic 500, hiding the legitimate race condition behind
+     * an "internal_error" envelope.
+     *
+     * <p>The message body intentionally omits the constraint name and the
+     * conflicting payload: constraint names are an implementation detail and
+     * the original request body may contain user-controlled tokens. Clients
+     * see a stable, machine-readable code (`resource_conflict`) and a generic
+     * message; the per-route service-level handlers stay responsible for the
+     * richer, domain-aware 409 envelopes when they win the preflight race.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+        log.warn("Data integrity violation translated to 409", ex);
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of(
+                        "resource_conflict",
+                        "Resource conflict — the requested write violates a uniqueness invariant"));
     }
 
     @ExceptionHandler(NoResourceFoundException.class)

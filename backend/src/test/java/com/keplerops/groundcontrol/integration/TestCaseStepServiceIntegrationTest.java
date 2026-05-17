@@ -69,6 +69,7 @@ class TestCaseStepServiceIntegrationTest extends BaseIntegrationTest {
                 null,
                 null,
                 null,
+                null,
                 null));
         TestTransaction.flagForCommit();
         TestTransaction.end();

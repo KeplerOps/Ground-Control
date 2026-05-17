@@ -42,6 +42,7 @@ public class TestCaseController {
                 request.title(),
                 request.type(),
                 request.priority(),
+                request.format(),
                 request.description(),
                 request.preconditions(),
                 request.postconditions(),

@@ -232,6 +232,28 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody().error().detail()).containsEntry("field", "title");
     }
 
+    @Test
+    void handleDataIntegrityViolation_returns409ResourceConflict() {
+        // Multiple services pair preflight existsBy checks with database UNIQUE
+        // constraints; under concurrent writes only the DB constraint catches
+        // the loser. Without this handler the loser surfaced as a generic 500
+        // and the legitimate race was hidden behind "internal_error". The
+        // translation must NOT echo the constraint name or the conflicting
+        // payload — constraint names are an implementation detail and the
+        // original request may contain user-controlled tokens.
+        var ex = new org.springframework.dao.DataIntegrityViolationException(
+                "could not execute statement; constraint [uq_test_case_gherkin_test_case]");
+
+        var response = handler.handleDataIntegrityViolation(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error().code()).isEqualTo("resource_conflict");
+        // Stable, generic message — no constraint name leak.
+        assertThat(response.getBody().error().message()).doesNotContain("uq_test_case_gherkin_test_case");
+        assertThat(response.getBody().error().message()).doesNotContain("constraint");
+    }
+
     private record TreatmentPlanStatusRequest(TreatmentPlanStatus status) {}
 
     private record NestedTreatmentPlanStatusRequest(TreatmentPlanStatusRequest outer) {}

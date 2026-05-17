@@ -14,18 +14,23 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   RequestError,
+  TEST_CASE_FORMATS,
   TEST_CASE_PRIORITIES,
   TEST_CASE_STATUSES,
   TEST_CASE_TYPES,
   createTestCase,
+  createTestCaseGherkin,
   createTestCaseStep,
   deleteTestCase,
+  deleteTestCaseGherkin,
   deleteTestCaseStep,
   getTestCase,
   getTestCaseByUid,
+  getTestCaseGherkin,
   listTestCases,
   transitionTestCaseStatus,
   updateTestCase,
+  updateTestCaseGherkin,
   updateTestCaseStep,
 } from "./lib.js";
 
@@ -80,6 +85,10 @@ describe("TestCase enum mirrors", () => {
   it("exposes the four priority severities in order (matches TestCasePriority.java)", () => {
     assert.deepEqual([...TEST_CASE_PRIORITIES], ["CRITICAL", "HIGH", "MEDIUM", "LOW"]);
   });
+
+  it("exposes both authored formats in order (matches TestCaseFormat.java, TC-004 / ADR-042)", () => {
+    assert.deepEqual([...TEST_CASE_FORMATS], ["STEP_BASED", "GHERKIN"]);
+  });
 });
 
 describe("createTestCase (gc_test_case action=create)", () => {
@@ -122,6 +131,43 @@ describe("createTestCase (gc_test_case action=create)", () => {
       estimatedDurationSeconds: 300,
     });
     assert.equal(result.id, TEST_CASE_ID);
+  });
+});
+
+describe("createTestCase format axis (TC-004 / ADR-042)", () => {
+  it("forwards format as a top-level body field (no snake mapping needed)", async () => {
+    setNextResponse({ body: { id: TEST_CASE_ID, uid: "TC-G01", format: "GHERKIN" } });
+
+    await createTestCase(
+      {
+        uid: "TC-G01",
+        title: "Sign in",
+        type: "MANUAL",
+        priority: "HIGH",
+        format: "GHERKIN",
+      },
+      "ground-control",
+    );
+
+    const body = JSON.parse(fetchCalls[0].opts.body);
+    assert.equal(body.format, "GHERKIN");
+  });
+
+  it("omits format when caller doesn't set one (service-side default kicks in)", async () => {
+    setNextResponse({ body: { id: TEST_CASE_ID, uid: "TC-001", format: "STEP_BASED" } });
+
+    await createTestCase(
+      {
+        uid: "TC-001",
+        title: "Step-based",
+        type: "MANUAL",
+        priority: "HIGH",
+      },
+      "ground-control",
+    );
+
+    const body = JSON.parse(fetchCalls[0].opts.body);
+    assert.ok(!("format" in body), "format must be absent so server applies STEP_BASED default");
   });
 });
 
@@ -292,6 +338,87 @@ describe("deleteTestCaseStep (gc_test_case action=step-delete)", () => {
   });
 });
 
+describe("createTestCaseGherkin (gc_test_case action=gherkin-create)", () => {
+  const SOURCE = "Feature: Sign in\n\n  Scenario: ok\n    Given a user\n    Then they sign in\n";
+
+  it("POSTs /api/v1/test-cases/{tc}/gherkin with {source}", async () => {
+    setNextResponse({
+      body: {
+        id: "33333333-3333-3333-3333-333333333333",
+        testCaseId: TEST_CASE_ID,
+        source: SOURCE,
+      },
+    });
+
+    const result = await createTestCaseGherkin(TEST_CASE_ID, { source: SOURCE }, "ground-control");
+
+    assert.equal(fetchCalls.length, 1);
+    const { url, opts } = fetchCalls[0];
+    const parsed = new URL(url);
+    assert.equal(opts.method, "POST");
+    assert.equal(parsed.pathname, `/api/v1/test-cases/${TEST_CASE_ID}/gherkin`);
+    assert.equal(parsed.searchParams.get("project"), "ground-control");
+    // Body shape mirrors backend TestCaseGherkinRequest — single field, no
+    // camel translation needed. A regression that wrapped this in
+    // `{ gherkin_source: ... }` (the MCP arg name) would have Jackson reject
+    // the body.
+    assert.deepEqual(JSON.parse(opts.body), { source: SOURCE });
+    assert.equal(result.testCaseId, TEST_CASE_ID);
+  });
+});
+
+describe("updateTestCaseGherkin (gc_test_case action=gherkin-update)", () => {
+  const SOURCE = "Feature: Sign in\n\n  Scenario: updated\n    Given a user\n    Then they sign in\n";
+
+  it("PUTs /api/v1/test-cases/{tc}/gherkin with {source} and round-trips the body", async () => {
+    setNextResponse({ body: { id: "x", testCaseId: TEST_CASE_ID, source: SOURCE } });
+
+    const result = await updateTestCaseGherkin(TEST_CASE_ID, { source: SOURCE }, "ground-control");
+
+    const { url, opts } = fetchCalls[0];
+    const parsed = new URL(url);
+    assert.equal(opts.method, "PUT");
+    assert.equal(parsed.pathname, `/api/v1/test-cases/${TEST_CASE_ID}/gherkin`);
+    assert.equal(parsed.searchParams.get("project"), "ground-control");
+    assert.deepEqual(JSON.parse(opts.body), { source: SOURCE });
+    // Return value pass-through — guards against a `request()` regression that
+    // returned null for PUT paths, the same shape every other write test in
+    // this file pins.
+    assert.equal(result.testCaseId, TEST_CASE_ID);
+    assert.equal(result.source, SOURCE);
+  });
+});
+
+describe("deleteTestCaseGherkin (gc_test_case action=gherkin-delete)", () => {
+  it("DELETEs /api/v1/test-cases/{tc}/gherkin", async () => {
+    setNextResponse({ ok: true, status: 204, body: null });
+
+    await deleteTestCaseGherkin(TEST_CASE_ID, "ground-control");
+
+    const { url, opts } = fetchCalls[0];
+    const parsed = new URL(url);
+    assert.equal(opts.method, "DELETE");
+    assert.equal(parsed.pathname, `/api/v1/test-cases/${TEST_CASE_ID}/gherkin`);
+    assert.equal(parsed.searchParams.get("project"), "ground-control");
+  });
+});
+
+describe("getTestCaseGherkin (gc_test_case read via gc_query)", () => {
+  it("GETs /api/v1/test-cases/{tc}/gherkin and round-trips the body", async () => {
+    const SOURCE = "Feature: read\n  Scenario: r\n    Given x\n";
+    setNextResponse({ body: { id: "y", testCaseId: TEST_CASE_ID, source: SOURCE } });
+
+    const result = await getTestCaseGherkin(TEST_CASE_ID, "ground-control");
+
+    const { url, opts } = fetchCalls[0];
+    const parsed = new URL(url);
+    assert.equal(opts.method, "GET");
+    assert.equal(parsed.pathname, `/api/v1/test-cases/${TEST_CASE_ID}/gherkin`);
+    assert.equal(parsed.searchParams.get("project"), "ground-control");
+    assert.equal(result.source, SOURCE);
+  });
+});
+
 describe("Read paths (gc_query routing)", () => {
   it("listTestCases GETs /api/v1/test-cases with project param and returns the array", async () => {
     setNextResponse({ body: [{ id: TEST_CASE_ID, uid: "TC-001" }] });
@@ -373,7 +500,12 @@ describe("Error envelope propagation", () => {
           { step_number: 1, action: "act", expected_result: "exp" },
           "ground-control",
         ),
-      (e) => e instanceof RequestError && e.status === 409,
+      // Pin the code too: TC-004 adds a second 409 path from the same
+      // adapter (step-create against a GHERKIN parent → format mismatch).
+      // Without the code check this assertion would also pass for the
+      // GHERKIN-parent conflict, hiding a regression where the wrong code
+      // is surfaced to callers branching on e.code.
+      (e) => e instanceof RequestError && e.status === 409 && e.code === "conflict",
     );
   });
 

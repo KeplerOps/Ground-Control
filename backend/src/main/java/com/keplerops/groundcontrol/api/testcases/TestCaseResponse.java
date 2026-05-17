@@ -1,6 +1,7 @@
 package com.keplerops.groundcontrol.api.testcases;
 
 import com.keplerops.groundcontrol.domain.testcases.model.TestCase;
+import com.keplerops.groundcontrol.domain.testcases.state.TestCaseFormat;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCasePriority;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseStatus;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseType;
@@ -18,6 +19,7 @@ public record TestCaseResponse(
         TestCasePriority priority,
         TestCaseStatus status,
         TestCaseType type,
+        TestCaseFormat format,
         Long estimatedDurationSeconds,
         Instant createdAt,
         Instant updatedAt) {
@@ -34,6 +36,7 @@ public record TestCaseResponse(
                 testCase.getPriority(),
                 testCase.getStatus(),
                 testCase.getType(),
+                testCase.getFormat(),
                 testCase.getEstimatedDurationSeconds(),
                 testCase.getCreatedAt(),
                 testCase.getUpdatedAt());

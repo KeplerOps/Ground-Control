@@ -143,7 +143,8 @@ import {
   listAdminUsers, updateAdminUserRole, updateAdminUserEnabled, deleteAdminUser,
   // ---- test cases (TC-001 / ADR-040) ----
   createTestCase, updateTestCase, deleteTestCase, transitionTestCaseStatus,
-  TEST_CASE_STATUSES, TEST_CASE_TYPES, TEST_CASE_PRIORITIES,
+  createTestCaseGherkin, updateTestCaseGherkin, deleteTestCaseGherkin,
+  TEST_CASE_STATUSES, TEST_CASE_TYPES, TEST_CASE_PRIORITIES, TEST_CASE_FORMATS,
   // ---- test case steps (TC-002 / ADR-041) ----
   createTestCaseStep, updateTestCaseStep, deleteTestCaseStep,
   // ---- enums ----
@@ -1470,19 +1471,22 @@ server.tool(
   },
 );
 
-// gc_test_case: TC-001 / ADR-040 + TC-002 / ADR-041. Reusable test-definition
-// aggregate at /api/v1/test-cases and its ordered child step aggregate at
-// /api/v1/test-cases/{id}/steps. Reads (list, get, get-by-uid, step-list,
-// step-get) route through gc_query.
+// gc_test_case: TC-001 / ADR-040 + TC-002 / ADR-041 + TC-004 / ADR-042.
+// Reusable test-definition aggregate at /api/v1/test-cases, its ordered child
+// step aggregate at /api/v1/test-cases/{id}/steps, and the BDD/Gherkin
+// singleton sub-resource at /api/v1/test-cases/{id}/gherkin. Reads (list, get,
+// get-by-uid, step-list, step-get, gherkin-get) route through gc_query.
 const TEST_CASE_ACTIONS = [
   "create", "update", "delete", "transition",
   "step-create", "step-update", "step-delete",
+  "gherkin-create", "gherkin-update", "gherkin-delete",
 ];
 
 server.tool(
   "gc_test_case",
-  `Test case operations (TC-001 / ADR-040 + TC-002 / ADR-041). Actions: ${TEST_CASE_ACTIONS.join(", ")}. ` +
-    `Reads (list, get, get-by-uid, step-list, step-get) route through gc_query.`,
+  `Test case operations (TC-001 / ADR-040 + TC-002 / ADR-041 + TC-004 / ADR-042). ` +
+    `Actions: ${TEST_CASE_ACTIONS.join(", ")}. ` +
+    `Reads (list, get, get-by-uid, step-list, step-get, gherkin-get) route through gc_query.`,
   {
     action: z.enum(TEST_CASE_ACTIONS),
     id: z.string().uuid().optional(),
@@ -1491,6 +1495,9 @@ server.tool(
     title: z.string().optional(),
     type: z.enum(TEST_CASE_TYPES).optional(),
     priority: z.enum(TEST_CASE_PRIORITIES).optional(),
+    // TC-004 / ADR-042 — authored format axis. Optional on create (defaults to
+    // STEP_BASED server-side). Immutable after create.
+    format: z.enum(TEST_CASE_FORMATS).optional(),
     description: z.string().optional(),
     preconditions: z.string().optional(),
     postconditions: z.string().optional(),
@@ -1514,11 +1521,15 @@ server.tool(
     expected_result: z.string().optional(),
     actual_result: z.string().nullable().optional(),
     clear_actual_result: z.boolean().optional(),
+    // TC-004 Gherkin action body — `gherkin_source` is the MCP arg (namespaced
+    // to avoid clashing with any other "source" field on future test_case
+    // sub-resources); handler maps it to backend body `{ source }`.
+    gherkin_source: z.string().optional(),
   },
   async (args) => {
     try {
       const ENTITY_FIELDS = [
-        "uid", "title", "type", "priority", "description",
+        "uid", "title", "type", "priority", "format", "description",
         "preconditions", "postconditions", "estimated_duration_seconds",
         "clear_description", "clear_preconditions", "clear_postconditions",
         "clear_estimated_duration",
@@ -1595,6 +1606,29 @@ server.tool(
           reqArg(args, "test_case_id", "step-delete");
           reqArg(args, "step_id", "step-delete");
           await deleteTestCaseStep(args.test_case_id, args.step_id, args.project);
+          return ok("Deleted");
+        }
+        case "gherkin-create": {
+          reqArg(args, "test_case_id", "gherkin-create");
+          reqArg(args, "gherkin_source", "gherkin-create");
+          return ok(JSON.stringify(
+            await createTestCaseGherkin(args.test_case_id, { source: args.gherkin_source }, args.project),
+            null,
+            2,
+          ));
+        }
+        case "gherkin-update": {
+          reqArg(args, "test_case_id", "gherkin-update");
+          reqArg(args, "gherkin_source", "gherkin-update");
+          return ok(JSON.stringify(
+            await updateTestCaseGherkin(args.test_case_id, { source: args.gherkin_source }, args.project),
+            null,
+            2,
+          ));
+        }
+        case "gherkin-delete": {
+          reqArg(args, "test_case_id", "gherkin-delete");
+          await deleteTestCaseGherkin(args.test_case_id, args.project);
           return ok("Deleted");
         }
         default: return err(new Error(`Unknown action: ${args.action}`));

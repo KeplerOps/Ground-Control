@@ -18,6 +18,7 @@ import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseStepRepos
 import com.keplerops.groundcontrol.domain.testcases.service.CreateTestCaseStepCommand;
 import com.keplerops.groundcontrol.domain.testcases.service.TestCaseStepService;
 import com.keplerops.groundcontrol.domain.testcases.service.UpdateTestCaseStepCommand;
+import com.keplerops.groundcontrol.domain.testcases.state.TestCaseFormat;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCasePriority;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseType;
 import java.util.List;
@@ -125,6 +126,25 @@ class TestCaseStepServiceTest {
             var command = new CreateTestCaseStepCommand(projectId, testCaseId, 0, "act", "exp", null);
 
             assertThatThrownBy(() -> stepService.create(command)).isInstanceOf(DomainValidationException.class);
+        }
+
+        @Test
+        void rejectsStepOnGherkinFormatTestCase() {
+            // TC-004 / ADR-042 — STEP_BASED and GHERKIN are mutually exclusive
+            // authored formats. Attempting to add a step to a GHERKIN parent
+            // returns HTTP 409 so the client knows the parent's format is the
+            // problem, not the step body.
+            var gherkinTestCase = new TestCase(
+                    project, "TC-G01", "Sign in", TestCaseType.MANUAL, TestCasePriority.HIGH, TestCaseFormat.GHERKIN);
+            setField(gherkinTestCase, "id", testCaseId);
+            when(testCaseRepository.findByIdAndProjectId(testCaseId, projectId))
+                    .thenReturn(Optional.of(gherkinTestCase));
+
+            var command = new CreateTestCaseStepCommand(projectId, testCaseId, 1, "act", "exp", null);
+
+            assertThatThrownBy(() -> stepService.create(command))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessageContaining("GHERKIN");
         }
     }
 
