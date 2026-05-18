@@ -33,21 +33,24 @@ class TestSuiteTest {
 
         @Test
         void rejectsBlankUid() {
-            assertThatThrownBy(() -> new TestSuite(project(), "   ", "name", TestSuitePopulationMode.STATIC))
+            var p = project();
+            assertThatThrownBy(() -> new TestSuite(p, "   ", "name", TestSuitePopulationMode.STATIC))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("UID");
         }
 
         @Test
         void rejectsBlankName() {
-            assertThatThrownBy(() -> new TestSuite(project(), "TS-001", "", TestSuitePopulationMode.STATIC))
+            var p = project();
+            assertThatThrownBy(() -> new TestSuite(p, "TS-001", "", TestSuitePopulationMode.STATIC))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("Name");
         }
 
         @Test
         void rejectsNullPopulationMode() {
-            assertThatThrownBy(() -> new TestSuite(project(), "TS-001", "name", null))
+            var p = project();
+            assertThatThrownBy(() -> new TestSuite(p, "TS-001", "name", null))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("Population mode");
         }
@@ -126,7 +129,8 @@ class TestSuiteTest {
         @Test
         void rejectsCriteriaFolderIdOnRequirementsBasedSuite() {
             var suite = new TestSuite(project(), "TS-002", "n", TestSuitePopulationMode.REQUIREMENTS_BASED);
-            assertThatThrownBy(() -> suite.setCriteriaFolderId(UUID.randomUUID()))
+            UUID folderId = UUID.randomUUID();
+            assertThatThrownBy(() -> suite.setCriteriaFolderId(folderId))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("QUERY_BASED");
         }

@@ -133,14 +133,15 @@ class TestSuiteServiceTest {
             when(projectService.getById(projectId)).thenReturn(project);
             when(testSuiteRepository.existsByProjectIdAndUid(projectId, "TS-S-002"))
                     .thenReturn(false);
+            var cmd = new CreateTestSuiteCommand(
+                    projectId,
+                    "TS-S-002",
+                    "n",
+                    null,
+                    TestSuitePopulationMode.STATIC,
+                    new TestSuiteCriteriaCommand(TestCaseStatus.APPROVED, null, null, null, null, null));
 
-            assertThatThrownBy(() -> testSuiteService.create(new CreateTestSuiteCommand(
-                            projectId,
-                            "TS-S-002",
-                            "n",
-                            null,
-                            TestSuitePopulationMode.STATIC,
-                            new TestSuiteCriteriaCommand(TestCaseStatus.APPROVED, null, null, null, null, null))))
+            assertThatThrownBy(() -> testSuiteService.create(cmd))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("QUERY_BASED");
             verify(testSuiteRepository, never()).save(any());
@@ -151,14 +152,10 @@ class TestSuiteServiceTest {
             when(projectService.getById(projectId)).thenReturn(project);
             when(testSuiteRepository.existsByProjectIdAndUid(projectId, "TS-S-003"))
                     .thenReturn(true);
+            var cmd = new CreateTestSuiteCommand(
+                    projectId, "TS-S-003", "n", null, TestSuitePopulationMode.STATIC, TestSuiteCriteriaCommand.empty());
 
-            assertThatThrownBy(() -> testSuiteService.create(new CreateTestSuiteCommand(
-                            projectId,
-                            "TS-S-003",
-                            "n",
-                            null,
-                            TestSuitePopulationMode.STATIC,
-                            TestSuiteCriteriaCommand.empty())))
+            assertThatThrownBy(() -> testSuiteService.create(cmd))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("TS-S-003");
             verify(testSuiteRepository, never()).save(any());
@@ -189,14 +186,15 @@ class TestSuiteServiceTest {
             when(projectService.getById(projectId)).thenReturn(project);
             when(testSuiteRepository.existsByProjectIdAndUid(projectId, "TS-Q-002"))
                     .thenReturn(false);
+            var cmd = new CreateTestSuiteCommand(
+                    projectId,
+                    "TS-Q-002",
+                    "n",
+                    null,
+                    TestSuitePopulationMode.QUERY_BASED,
+                    TestSuiteCriteriaCommand.empty());
 
-            assertThatThrownBy(() -> testSuiteService.create(new CreateTestSuiteCommand(
-                            projectId,
-                            "TS-Q-002",
-                            "n",
-                            null,
-                            TestSuitePopulationMode.QUERY_BASED,
-                            TestSuiteCriteriaCommand.empty())))
+            assertThatThrownBy(() -> testSuiteService.create(cmd))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("QUERY_BASED");
             verify(testSuiteRepository, never()).save(any());
@@ -216,8 +214,9 @@ class TestSuiteServiceTest {
             when(folderRepository.findById(folderId)).thenReturn(Optional.of(folder));
 
             var criteria = new TestSuiteCriteriaCommand(null, null, null, null, folderId, null);
-            assertThatThrownBy(() -> testSuiteService.create(new CreateTestSuiteCommand(
-                            projectId, "TS-Q-003", "n", null, TestSuitePopulationMode.QUERY_BASED, criteria)))
+            var cmd = new CreateTestSuiteCommand(
+                    projectId, "TS-Q-003", "n", null, TestSuitePopulationMode.QUERY_BASED, criteria);
+            assertThatThrownBy(() -> testSuiteService.create(cmd))
                     .isInstanceOf(NotFoundException.class)
                     .hasMessageContaining(folderId.toString());
         }
@@ -297,26 +296,25 @@ class TestSuiteServiceTest {
             var existing = suite("TS-S-001", TestSuitePopulationMode.STATIC);
             when(testSuiteRepository.findByIdAndProjectId(existing.getId(), projectId))
                     .thenReturn(Optional.of(existing));
+            UUID existingId = existing.getId();
+            var cmd = new UpdateTestSuiteCommand(
+                    null,
+                    null,
+                    TestCaseStatus.APPROVED,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false);
 
-            assertThatThrownBy(() -> testSuiteService.update(
-                            projectId,
-                            existing.getId(),
-                            new UpdateTestSuiteCommand(
-                                    null,
-                                    null,
-                                    TestCaseStatus.APPROVED,
-                                    null,
-                                    null,
-                                    null,
-                                    null,
-                                    null,
-                                    false,
-                                    false,
-                                    false,
-                                    false,
-                                    false,
-                                    false,
-                                    false)))
+            assertThatThrownBy(() -> testSuiteService.update(projectId, existingId, cmd))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("QUERY_BASED");
         }
@@ -327,14 +325,12 @@ class TestSuiteServiceTest {
             existing.setCriteriaStatus(TestCaseStatus.APPROVED);
             when(testSuiteRepository.findByIdAndProjectId(existing.getId(), projectId))
                     .thenReturn(Optional.of(existing));
-
+            UUID existingId = existing.getId();
             // Clearing the only criterion leaves the suite with no rule — rejected.
-            assertThatThrownBy(() -> testSuiteService.update(
-                            projectId,
-                            existing.getId(),
-                            new UpdateTestSuiteCommand(
-                                    null, null, null, null, null, null, null, null, false, true, false, false, false,
-                                    false, false)))
+            var cmd = new UpdateTestSuiteCommand(
+                    null, null, null, null, null, null, null, null, false, true, false, false, false, false, false);
+
+            assertThatThrownBy(() -> testSuiteService.update(projectId, existingId, cmd))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("QUERY_BASED");
         }
@@ -348,9 +344,10 @@ class TestSuiteServiceTest {
             var s = suite("TS-Q-001", TestSuitePopulationMode.QUERY_BASED);
             when(testSuiteRepository.findByIdAndProjectIdForUpdate(s.getId(), projectId))
                     .thenReturn(Optional.of(s));
+            UUID suiteId = s.getId();
+            var cmd = new AddTestSuiteMemberCommand(UUID.randomUUID(), null);
 
-            assertThatThrownBy(() -> testSuiteService.addMember(
-                            projectId, s.getId(), new AddTestSuiteMemberCommand(UUID.randomUUID(), null)))
+            assertThatThrownBy(() -> testSuiteService.addMember(projectId, suiteId, cmd))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("STATIC");
         }
@@ -400,7 +397,7 @@ class TestSuiteServiceTest {
 
             // New member lands at requested slot; existing B / C shift up by 1.
             assertThat(member.getPosition()).isEqualTo(1);
-            assertThat(existingA.getPosition()).isEqualTo(0);
+            assertThat(existingA.getPosition()).isZero();
             assertThat(existingB.getPosition()).isEqualTo(2);
             assertThat(existingC.getPosition()).isEqualTo(3);
         }
@@ -426,7 +423,7 @@ class TestSuiteServiceTest {
             testSuiteService.removeMember(projectId, s.getId(), tcB.getId());
 
             // mC compacts from position 2 → 1; mA stays at 0.
-            assertThat(mA.getPosition()).isEqualTo(0);
+            assertThat(mA.getPosition()).isZero();
             assertThat(mC.getPosition()).isEqualTo(1);
         }
 
@@ -439,9 +436,10 @@ class TestSuiteServiceTest {
             when(testCaseRepository.findByIdAndProjectId(tc.getId(), projectId)).thenReturn(Optional.of(tc));
             when(memberRepository.existsByTestSuiteIdAndTestCaseId(s.getId(), tc.getId()))
                     .thenReturn(true);
+            UUID suiteId = s.getId();
+            var cmd = new AddTestSuiteMemberCommand(tc.getId(), null);
 
-            assertThatThrownBy(() -> testSuiteService.addMember(
-                            projectId, s.getId(), new AddTestSuiteMemberCommand(tc.getId(), null)))
+            assertThatThrownBy(() -> testSuiteService.addMember(projectId, suiteId, cmd))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("TC-001");
         }
@@ -454,9 +452,10 @@ class TestSuiteServiceTest {
                     .thenReturn(Optional.of(s));
             when(testCaseRepository.findByIdAndProjectId(foreignTcId, projectId))
                     .thenReturn(Optional.empty());
+            UUID suiteId = s.getId();
+            var cmd = new AddTestSuiteMemberCommand(foreignTcId, null);
 
-            assertThatThrownBy(() -> testSuiteService.addMember(
-                            projectId, s.getId(), new AddTestSuiteMemberCommand(foreignTcId, null)))
+            assertThatThrownBy(() -> testSuiteService.addMember(projectId, suiteId, cmd))
                     .isInstanceOf(NotFoundException.class)
                     .hasMessageContaining(foreignTcId.toString());
         }
@@ -469,8 +468,9 @@ class TestSuiteServiceTest {
                     .thenReturn(Optional.of(s));
             when(memberRepository.findByTestSuiteIdAndTestCaseId(s.getId(), tcId))
                     .thenReturn(Optional.empty());
+            UUID suiteId = s.getId();
 
-            assertThatThrownBy(() -> testSuiteService.removeMember(projectId, s.getId(), tcId))
+            assertThatThrownBy(() -> testSuiteService.removeMember(projectId, suiteId, tcId))
                     .isInstanceOf(NotFoundException.class);
         }
 
@@ -482,13 +482,13 @@ class TestSuiteServiceTest {
             when(testSuiteRepository.findByIdAndProjectIdForUpdate(s.getId(), projectId))
                     .thenReturn(Optional.of(s));
             when(memberRepository.findByTestSuiteIdOrderByPosition(s.getId())).thenReturn(List.of(memberA));
+            UUID suiteId = s.getId();
+            // Reorder delegates to SiblingOrderingHelper, which surfaces a
+            // set-mismatch as ConflictException (same contract as
+            // test-case / folder reorder).
+            List<UUID> mismatch = List.of(UUID.randomUUID(), UUID.randomUUID());
 
-            // Codex pre-push cycle 2 F4: reorder is delegated to
-            // SiblingOrderingHelper, which surfaces a set-mismatch as
-            // ConflictException (same contract as test-case / folder
-            // reorder).
-            assertThatThrownBy(() -> testSuiteService.reorderMembers(
-                            projectId, s.getId(), List.of(UUID.randomUUID(), UUID.randomUUID())))
+            assertThatThrownBy(() -> testSuiteService.reorderMembers(projectId, suiteId, mismatch))
                     .isInstanceOf(ConflictException.class)
                     .hasMessageContaining("siblings");
         }
@@ -501,8 +501,10 @@ class TestSuiteServiceTest {
         void rejectsAddSourceOnNonRequirementsBasedSuite() {
             var s = suite("TS-S-001", TestSuitePopulationMode.STATIC);
             when(testSuiteRepository.findByIdAndProjectId(s.getId(), projectId)).thenReturn(Optional.of(s));
+            UUID suiteId = s.getId();
+            UUID reqId = UUID.randomUUID();
 
-            assertThatThrownBy(() -> testSuiteService.addSourceRequirement(projectId, s.getId(), UUID.randomUUID()))
+            assertThatThrownBy(() -> testSuiteService.addSourceRequirement(projectId, suiteId, reqId))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("REQUIREMENTS_BASED");
         }
@@ -530,8 +532,9 @@ class TestSuiteServiceTest {
             when(testSuiteRepository.findByIdAndProjectId(s.getId(), projectId)).thenReturn(Optional.of(s));
             when(requirementRepository.findByIdAndProjectId(foreignReqId, projectId))
                     .thenReturn(Optional.empty());
+            UUID suiteId = s.getId();
 
-            assertThatThrownBy(() -> testSuiteService.addSourceRequirement(projectId, s.getId(), foreignReqId))
+            assertThatThrownBy(() -> testSuiteService.addSourceRequirement(projectId, suiteId, foreignReqId))
                     .isInstanceOf(NotFoundException.class);
         }
     }

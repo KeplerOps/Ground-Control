@@ -6,7 +6,6 @@ import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.requirements.model.Requirement;
 import com.keplerops.groundcontrol.domain.requirements.repository.RequirementRepository;
-import com.keplerops.groundcontrol.domain.requirements.repository.TraceabilityLinkRepository;
 import com.keplerops.groundcontrol.domain.requirements.state.ArtifactType;
 import com.keplerops.groundcontrol.domain.requirements.state.LinkType;
 import com.keplerops.groundcontrol.domain.testcases.model.TestCase;
@@ -69,13 +68,14 @@ public class TestSuiteService {
      */
     static final int MAX_RESOLVED_TEST_CASES = 500;
 
+    private static final String SUITE_NOT_FOUND = "Test suite not found: ";
+
     private final TestSuiteRepository testSuiteRepository;
     private final TestSuiteMemberRepository memberRepository;
     private final TestSuiteSourceRequirementRepository sourceRepository;
     private final TestCaseRepository testCaseRepository;
     private final TestCaseFolderRepository folderRepository;
     private final RequirementRepository requirementRepository;
-    private final TraceabilityLinkRepository traceabilityLinkRepository;
     private final ProjectService projectService;
 
     public TestSuiteService(
@@ -85,7 +85,6 @@ public class TestSuiteService {
             TestCaseRepository testCaseRepository,
             TestCaseFolderRepository folderRepository,
             RequirementRepository requirementRepository,
-            TraceabilityLinkRepository traceabilityLinkRepository,
             ProjectService projectService) {
         this.testSuiteRepository = testSuiteRepository;
         this.memberRepository = memberRepository;
@@ -93,7 +92,6 @@ public class TestSuiteService {
         this.testCaseRepository = testCaseRepository;
         this.folderRepository = folderRepository;
         this.requirementRepository = requirementRepository;
-        this.traceabilityLinkRepository = traceabilityLinkRepository;
         this.projectService = projectService;
     }
 
@@ -133,7 +131,7 @@ public class TestSuiteService {
     public TestSuite getByUid(UUID projectId, String uid) {
         return testSuiteRepository
                 .findByProjectIdAndUid(projectId, uid)
-                .orElseThrow(() -> new NotFoundException("Test suite not found: " + uid));
+                .orElseThrow(() -> new NotFoundException(SUITE_NOT_FOUND + uid));
     }
 
     @Transactional(readOnly = true)
@@ -185,11 +183,6 @@ public class TestSuiteService {
     // ------------------------------------------------------------------
 
     public TestSuiteMember addMember(UUID projectId, UUID suiteId, AddTestSuiteMemberCommand command) {
-        // Codex pre-push cycle 2: lock the suite row so concurrent
-        // append/insert/remove calls serialize per-suite. Without the lock,
-        // two callers reading the same size() can both insert at the same
-        // position; the DEFERRABLE UNIQUE constraint backs us up on the SQL
-        // side, but failing fast on the lock keeps the error model clean.
         var suite = requireSuiteForMutation(projectId, suiteId, "addMember");
         if (command.testCaseId() == null) {
             throw new DomainValidationException("test_case_id must not be null", "invalid_test_suite_member", Map.of());
@@ -200,11 +193,8 @@ public class TestSuiteService {
         if (memberRepository.existsByTestSuiteIdAndTestCaseId(suite.getId(), testCase.getId())) {
             throw new ConflictException("Test case " + testCase.getUid() + " is already a member of this suite");
         }
-        // Codex pre-push cycle 1 F4: positions stay contiguous and
-        // duplicate-free. Append by default; when an explicit position is
-        // given, shift the tail of existing members so the insertion slot
-        // opens cleanly. The shifts run in descending order so the unique
-        // (suite, position) constraint never sees a collision even while
+        // Shifts run in descending position order so the DEFERRABLE
+        // UNIQUE(suite, position) constraint never sees a collision while
         // checked at commit time.
         var current = memberRepository.findByTestSuiteIdOrderByPosition(suite.getId());
         int target;
@@ -235,11 +225,9 @@ public class TestSuiteService {
                 .findByTestSuiteIdAndTestCaseId(suite.getId(), testCaseId)
                 .orElseThrow(() -> new NotFoundException(
                         "Test case " + testCaseId + " is not a member of suite " + suite.getId()));
-        // Codex pre-push cycle 1 F4: compact the remaining positions so the
-        // contiguous 0..N-1 invariant survives mid-list deletes. The
-        // compaction runs in ascending order — each row moves into the slot
-        // just vacated by its predecessor — so the unique constraint never
-        // sees a collision.
+        // Compaction runs in ascending position order so each row moves
+        // into the slot just vacated by its predecessor; the DEFERRABLE
+        // UNIQUE(suite, position) constraint never sees a collision.
         var remaining = memberRepository.findByTestSuiteIdOrderByPosition(suite.getId());
         memberRepository.delete(member);
         int position = 0;
@@ -259,12 +247,6 @@ public class TestSuiteService {
     public List<TestSuiteMember> reorderMembers(UUID projectId, UUID suiteId, List<UUID> orderedTestCaseIds) {
         var suite = requireSuiteForMutation(projectId, suiteId, "reorderMembers");
         var current = memberRepository.findByTestSuiteIdOrderByPosition(suite.getId());
-        // Codex pre-push cycle 2: reuse SiblingOrderingHelper so this
-        // reorder shares the exact-set validation contract with
-        // TestCaseFolderService / TestCaseService. The helper rejects
-        // null/duplicates/missing ids with DomainValidationException and
-        // mismatched-set with ConflictException — the controller maps
-        // both onto the same error envelope.
         SiblingOrderingHelper.applyOrdering(
                 "test suite member",
                 orderedTestCaseIds,
@@ -291,7 +273,7 @@ public class TestSuiteService {
     private TestSuite requireSuiteForMutation(UUID projectId, UUID suiteId, String operation) {
         var suite = testSuiteRepository
                 .findByIdAndProjectIdForUpdate(suiteId, projectId)
-                .orElseThrow(() -> new NotFoundException("Test suite not found: " + suiteId));
+                .orElseThrow(() -> new NotFoundException(SUITE_NOT_FOUND + suiteId));
         if (suite.getPopulationMode() != TestSuitePopulationMode.STATIC) {
             throw new DomainValidationException(
                     operation + " is only valid for STATIC suites",
@@ -368,9 +350,6 @@ public class TestSuiteService {
     }
 
     private List<TestCase> resolveStatic(TestSuite suite) {
-        // Codex pre-push cycle 1 F3: push the cap into the database so the
-        // resolve path cannot accidentally page in tens of thousands of
-        // members before the in-memory limit kicks in.
         Pageable cap = PageRequest.of(0, MAX_RESOLVED_TEST_CASES);
         return memberRepository.findByTestSuiteIdOrderByPosition(suite.getId(), cap).stream()
                 .map(TestSuiteMember::getTestCase)
@@ -386,15 +365,12 @@ public class TestSuiteService {
                 .map(TestSuiteSourceRequirement::getRequirement)
                 .map(Requirement::getId)
                 .toList();
-        // Codex pre-push cycle 3: the cap must consume only live test
-        // cases, not raw artifact identifiers. A single filter+join+sort+
-        // limit query joins TraceabilityLink to TestCase by uid in the
-        // same project, so stale identifiers (deleted or foreign-project
-        // test case UIDs) drop out before the limit applies. Result is up
-        // to MAX_RESOLVED_TEST_CASES live, project-scoped, UID-sorted
-        // cases — the prior in-memory union of "identifier set ∩ live
+        // A single filter+join+sort+limit query joins TraceabilityLink to
+        // TestCase by uid in the same project, so stale identifiers
+        // (deleted or foreign-project UIDs) drop out before the cap
+        // applies. The prior in-memory union of "identifier set ∩ live
         // test cases" could silently truncate live matches when stale
-        // identifiers occupied the first 500 slots.
+        // identifiers occupied the first MAX_RESOLVED_TEST_CASES slots.
         return testCaseRepository.findLinkedTestCasesForRequirements(
                 suite.getProject().getId(),
                 requirementIds,
@@ -419,10 +395,10 @@ public class TestSuiteService {
             spec = spec.and(TestCaseSpecifications.hasFormat(suite.getCriteriaFormat()));
         }
         if (suite.getCriteriaFolderId() != null) {
-            // Codex pre-push cycle 1 F2: folder criteria resolve to the
-            // named folder AND all descendants per ADR-047. Expand the
-            // subtree first so the predicate is an IN over the full set;
-            // a single-id equality would silently omit nested cases.
+            // ADR-047: folder criteria resolve to the named folder AND
+            // every descendant. Expand the subtree first so the predicate
+            // is an IN over the full set; a single-id equality would
+            // silently omit nested cases.
             var subtree = collectFolderSubtreeIds(suite.getProject().getId(), suite.getCriteriaFolderId());
             spec = spec.and(TestCaseSpecifications.inFolderTree(subtree));
         }
@@ -430,9 +406,6 @@ public class TestSuiteService {
                 && !suite.getCriteriaTextSearch().isBlank()) {
             spec = spec.and(TestCaseSpecifications.searchTitleOrDescription(suite.getCriteriaTextSearch()));
         }
-        // Codex pre-push cycle 1 F3: push the cap into the database via
-        // Pageable so the query plan can use LIMIT instead of loading every
-        // matching row before discarding the tail.
         Pageable cap = PageRequest.of(0, MAX_RESOLVED_TEST_CASES, Sort.by(Sort.Order.asc("uid")));
         return testCaseRepository.findAll(spec, cap).getContent();
     }
@@ -474,7 +447,7 @@ public class TestSuiteService {
     private TestSuite requireSuiteInProject(UUID projectId, UUID id) {
         return testSuiteRepository
                 .findByIdAndProjectId(id, projectId)
-                .orElseThrow(() -> new NotFoundException("Test suite not found: " + id));
+                .orElseThrow(() -> new NotFoundException(SUITE_NOT_FOUND + id));
     }
 
     private TestSuite requireSuiteInMode(
