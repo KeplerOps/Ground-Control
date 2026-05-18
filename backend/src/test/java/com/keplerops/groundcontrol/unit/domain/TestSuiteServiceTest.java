@@ -4,6 +4,7 @@ import static com.keplerops.groundcontrol.TestUtil.setField;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -70,6 +71,9 @@ class TestSuiteServiceTest {
 
     @Mock
     private RequirementRepository requirementRepository;
+
+    @Mock
+    private com.keplerops.groundcontrol.domain.testcases.repository.TestRunRepository testRunRepository;
 
     @Mock
     private ProjectService projectService;
@@ -708,6 +712,23 @@ class TestSuiteServiceTest {
             verify(memberRepository).deleteAll(List.of(member));
             verify(sourceRepository).deleteAll(List.of());
             verify(testSuiteRepository).delete(s);
+        }
+
+        @Test
+        void deleteRejectsConflictWhenTestRunsReferenceTheSuite() {
+            // TC-008 / ADR-049: TestRun rows FK to this suite; the existence
+            // check raises ConflictException before children are touched so
+            // the operation is atomic.
+            var s = suite("TS-RUN-001", TestSuitePopulationMode.STATIC);
+            when(testSuiteRepository.findByIdAndProjectId(s.getId(), projectId)).thenReturn(Optional.of(s));
+            when(testRunRepository.existsByTestSuiteId(s.getId())).thenReturn(true);
+
+            assertThatThrownBy(() -> testSuiteService.delete(projectId, s.getId()))
+                    .isInstanceOf(com.keplerops.groundcontrol.domain.exception.ConflictException.class)
+                    .hasMessageContaining("associated test runs");
+            verify(memberRepository, never()).deleteAll(anyList());
+            verify(sourceRepository, never()).deleteAll(anyList());
+            verify(testSuiteRepository, never()).delete(any(TestSuite.class));
         }
 
         @Test

@@ -7,6 +7,7 @@ import com.keplerops.groundcontrol.domain.testcases.model.TestCase;
 import com.keplerops.groundcontrol.domain.testcases.model.TestCaseFolder;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseFolderRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseRepository;
+import com.keplerops.groundcontrol.domain.testcases.repository.TestRunCaseResultRepository;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseFormat;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseStatus;
 import java.util.List;
@@ -25,6 +26,7 @@ public class TestCaseService {
 
     private final TestCaseRepository testCaseRepository;
     private final TestCaseFolderRepository folderRepository;
+    private final TestRunCaseResultRepository testRunCaseResultRepository;
     private final ProjectService projectService;
     private final TestCaseStepService testCaseStepService;
     private final TestCaseGherkinService testCaseGherkinService;
@@ -32,11 +34,13 @@ public class TestCaseService {
     public TestCaseService(
             TestCaseRepository testCaseRepository,
             TestCaseFolderRepository folderRepository,
+            TestRunCaseResultRepository testRunCaseResultRepository,
             ProjectService projectService,
             TestCaseStepService testCaseStepService,
             TestCaseGherkinService testCaseGherkinService) {
         this.testCaseRepository = testCaseRepository;
         this.folderRepository = folderRepository;
+        this.testRunCaseResultRepository = testRunCaseResultRepository;
         this.projectService = projectService;
         this.testCaseStepService = testCaseStepService;
         this.testCaseGherkinService = testCaseGherkinService;
@@ -143,6 +147,15 @@ public class TestCaseService {
 
     public void delete(UUID projectId, UUID id) {
         var testCase = findOrThrow(projectId, id);
+        // TC-008 / ADR-049: TestRunCaseResult rows carry a NOT NULL FK to
+        // this test case (snapshotted execution evidence on a TestRun). Reject
+        // deletion with a domain-aware conflict — execution history is
+        // append-only and a parent delete that would orphan it is a user
+        // decision (archive the runs first, or keep the test case).
+        if (testRunCaseResultRepository.existsByTestCaseId(id)) {
+            throw new ConflictException("Test case " + testCase.getUid()
+                    + " has associated test-run results; archive or delete those runs first");
+        }
         // Cascade authored children through Hibernate so Envers captures the
         // deletes. Mirrors ADR-041 §Cascade on parent deletion.
         testCaseStepService.deleteAllByTestCase(id);

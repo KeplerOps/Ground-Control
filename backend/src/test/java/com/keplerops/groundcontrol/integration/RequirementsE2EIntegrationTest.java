@@ -502,6 +502,12 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "101", // V101: create audit_audit
                         "102", // V102: create audit_link
                         "103", // V103: create audit_link_audit
-                        "104"); // V104: migrate legacy EVIDENCE links to EXTERNAL (GC-L006)
+                        "104", // V104: migrate legacy EVIDENCE links to EXTERNAL (GC-L006)
+                        "110", // V110: create test_run (TC-008 / ADR-049)
+                        "111", // V111: create test_run_audit
+                        "112", // V112: create test_run_tester_assignment
+                        "113", // V113: create test_run_tester_assignment_audit
+                        "114", // V114: create test_run_case_result
+                        "115"); // V115: create test_run_case_result_audit
     }
 }

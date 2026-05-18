@@ -54,7 +54,10 @@ public class AuditRetentionJob {
             "test_suite_member_audit",
             "test_suite_source_requirement_audit",
             "audit_audit",
-            "audit_link_audit");
+            "audit_link_audit",
+            "test_run_audit",
+            "test_run_tester_assignment_audit",
+            "test_run_case_result_audit");
 
     private final AuditRetentionProperties properties;
     private final EntityManager entityManager;
