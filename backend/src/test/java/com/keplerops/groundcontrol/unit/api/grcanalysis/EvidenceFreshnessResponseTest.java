@@ -13,51 +13,52 @@ import org.junit.jupiter.api.Test;
 /**
  * Pure mapping test for the EvidenceFreshness API DTO. Builds a fully
  * populated domain result and asserts that every nested record's {@code from()}
- * preserves every field on the wire.
+ * preserves every field on the wire. Split into one test per nested record so
+ * each method stays under the Sonar S5961 assertion threshold (25) without
+ * losing the field-level coverage.
  */
 class EvidenceFreshnessResponseTest {
 
-    @Test
-    void from_mapsAllFieldsAcrossEveryNestedRecord() {
-        UUID artifactId = UUID.randomUUID();
-        UUID supersededById = UUID.randomUUID();
-        UUID observationId = UUID.randomUUID();
-        UUID assetId = UUID.randomUUID();
-        UUID controlTestId = UUID.randomUUID();
-        UUID controlId = UUID.randomUUID();
-        UUID inputsAssetId = UUID.randomUUID();
-        UUID inputsControlId = UUID.randomUUID();
-        Instant asOf = Instant.parse("2026-05-18T00:00:00Z");
-        Instant derivedAt = asOf.minusSeconds(86400L * 7);
-        Instant observedAt = asOf.minusSeconds(86400L * 3);
-        Instant expiresAt = asOf.plusSeconds(86400L * 30);
-        LocalDate testDate = LocalDate.of(2026, 4, 12);
+    private static final Instant AS_OF = Instant.parse("2026-05-18T00:00:00Z");
+    private static final Instant DERIVED_AT = AS_OF.minusSeconds(86400L * 7);
+    private static final Instant OBSERVED_AT = AS_OF.minusSeconds(86400L * 3);
+    private static final Instant EXPIRES_AT = AS_OF.plusSeconds(86400L * 30);
+    private static final LocalDate TEST_DATE = LocalDate.of(2026, 4, 12);
+    private static final UUID ARTIFACT_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    private static final UUID SUPERSEDED_BY_ID = UUID.fromString("11111111-1111-1111-1111-111111111112");
+    private static final UUID OBSERVATION_ID = UUID.fromString("22222222-2222-2222-2222-222222222221");
+    private static final UUID ASSET_ID = UUID.fromString("22222222-2222-2222-2222-222222222222");
+    private static final UUID CONTROL_TEST_ID = UUID.fromString("33333333-3333-3333-3333-333333333331");
+    private static final UUID CONTROL_ID = UUID.fromString("33333333-3333-3333-3333-333333333332");
+    private static final UUID INPUTS_ASSET_ID = UUID.fromString("44444444-4444-4444-4444-444444444441");
+    private static final UUID INPUTS_CONTROL_ID = UUID.fromString("44444444-4444-4444-4444-444444444442");
 
-        EvidenceFreshnessResult.Inputs inputs =
-                new EvidenceFreshnessResult.Inputs("ground-control", asOf, 90, true, inputsAssetId, inputsControlId);
+    private static EvidenceFreshnessResult populatedResult() {
+        EvidenceFreshnessResult.Inputs inputs = new EvidenceFreshnessResult.Inputs(
+                "ground-control", AS_OF, 90, true, INPUTS_ASSET_ID, INPUTS_CONTROL_ID);
         EvidenceFreshnessResult.EvidenceArtifactFreshnessItem artifact =
                 new EvidenceFreshnessResult.EvidenceArtifactFreshnessItem(
-                        artifactId, "EVD-1", "Artifact title", derivedAt, 7L, "FRESH", supersededById);
+                        ARTIFACT_ID, "EVD-1", "Artifact title", DERIVED_AT, 7L, "FRESH", SUPERSEDED_BY_ID);
         EvidenceFreshnessResult.ObservationFreshnessItem observation =
                 new EvidenceFreshnessResult.ObservationFreshnessItem(
-                        observationId,
-                        assetId,
+                        OBSERVATION_ID,
+                        ASSET_ID,
                         "ASSET-1",
                         "CONFIGURATION",
                         "patch-level",
-                        observedAt,
-                        expiresAt,
+                        OBSERVED_AT,
+                        EXPIRES_AT,
                         3L,
                         "FRESH");
         EvidenceFreshnessResult.ControlTestFreshnessItem controlTest =
                 new EvidenceFreshnessResult.ControlTestFreshnessItem(
-                        controlTestId, "CT-1", controlId, "CTRL-1", testDate, 36L, "FRESH");
+                        CONTROL_TEST_ID, "CT-1", CONTROL_ID, "CTRL-1", TEST_DATE, 36L, "FRESH");
         EvidenceFreshnessResult.EvidenceFreshnessCounts counts =
                 new EvidenceFreshnessResult.EvidenceFreshnessCounts(2, 1, 1, 3, 3);
-        EvidenceFreshnessResult result = new EvidenceFreshnessResult(
+        return new EvidenceFreshnessResult(
                 "evidence_freshness",
                 "ground-control",
-                asOf,
+                AS_OF,
                 "evidence-freshness-projection-v1",
                 inputs,
                 List.of(artifact),
@@ -65,56 +66,84 @@ class EvidenceFreshnessResponseTest {
                 List.of(controlTest),
                 counts,
                 List.of("limitation-a", "limitation-b"));
+    }
 
-        EvidenceFreshnessResponse response = EvidenceFreshnessResponse.from(result);
+    @Test
+    void from_topLevel_mapsAnalysisKindProjectAsOfDerivationMethod() {
+        EvidenceFreshnessResponse response = EvidenceFreshnessResponse.from(populatedResult());
 
         assertThat(response.analysisKind()).isEqualTo("evidence_freshness");
         assertThat(response.project()).isEqualTo("ground-control");
-        assertThat(response.asOf()).isEqualTo(asOf);
+        assertThat(response.asOf()).isEqualTo(AS_OF);
         assertThat(response.derivationMethod()).isEqualTo("evidence-freshness-projection-v1");
+    }
 
-        EvidenceFreshnessResponse.Inputs mappedInputs = response.inputs();
+    @Test
+    void from_inputs_mapsEveryField() {
+        EvidenceFreshnessResponse.Inputs mappedInputs =
+                EvidenceFreshnessResponse.from(populatedResult()).inputs();
+
         assertThat(mappedInputs.project()).isEqualTo("ground-control");
-        assertThat(mappedInputs.asOf()).isEqualTo(asOf);
+        assertThat(mappedInputs.asOf()).isEqualTo(AS_OF);
         assertThat(mappedInputs.freshnessWindowDays()).isEqualTo(90);
         assertThat(mappedInputs.includeSuperseded()).isTrue();
-        assertThat(mappedInputs.assetId()).isEqualTo(inputsAssetId);
-        assertThat(mappedInputs.controlId()).isEqualTo(inputsControlId);
+        assertThat(mappedInputs.assetId()).isEqualTo(INPUTS_ASSET_ID);
+        assertThat(mappedInputs.controlId()).isEqualTo(INPUTS_CONTROL_ID);
+    }
+
+    @Test
+    void from_evidenceArtifactItem_mapsEveryField() {
+        EvidenceFreshnessResponse response = EvidenceFreshnessResponse.from(populatedResult());
 
         assertThat(response.evidenceArtifacts()).hasSize(1);
         EvidenceFreshnessResponse.EvidenceArtifactFreshnessItem mappedArtifact =
                 response.evidenceArtifacts().get(0);
-        assertThat(mappedArtifact.id()).isEqualTo(artifactId);
+        assertThat(mappedArtifact.id()).isEqualTo(ARTIFACT_ID);
         assertThat(mappedArtifact.uid()).isEqualTo("EVD-1");
         assertThat(mappedArtifact.title()).isEqualTo("Artifact title");
-        assertThat(mappedArtifact.derivedAt()).isEqualTo(derivedAt);
+        assertThat(mappedArtifact.derivedAt()).isEqualTo(DERIVED_AT);
         assertThat(mappedArtifact.ageDays()).isEqualTo(7L);
         assertThat(mappedArtifact.state()).isEqualTo("FRESH");
-        assertThat(mappedArtifact.supersededByArtifactId()).isEqualTo(supersededById);
+        assertThat(mappedArtifact.supersededByArtifactId()).isEqualTo(SUPERSEDED_BY_ID);
+    }
+
+    @Test
+    void from_observationItem_mapsEveryField() {
+        EvidenceFreshnessResponse response = EvidenceFreshnessResponse.from(populatedResult());
 
         assertThat(response.observations()).hasSize(1);
         EvidenceFreshnessResponse.ObservationFreshnessItem mappedObservation =
                 response.observations().get(0);
-        assertThat(mappedObservation.id()).isEqualTo(observationId);
-        assertThat(mappedObservation.assetId()).isEqualTo(assetId);
+        assertThat(mappedObservation.id()).isEqualTo(OBSERVATION_ID);
+        assertThat(mappedObservation.assetId()).isEqualTo(ASSET_ID);
         assertThat(mappedObservation.assetUid()).isEqualTo("ASSET-1");
         assertThat(mappedObservation.category()).isEqualTo("CONFIGURATION");
         assertThat(mappedObservation.observationKey()).isEqualTo("patch-level");
-        assertThat(mappedObservation.observedAt()).isEqualTo(observedAt);
-        assertThat(mappedObservation.expiresAt()).isEqualTo(expiresAt);
+        assertThat(mappedObservation.observedAt()).isEqualTo(OBSERVED_AT);
+        assertThat(mappedObservation.expiresAt()).isEqualTo(EXPIRES_AT);
         assertThat(mappedObservation.ageDays()).isEqualTo(3L);
         assertThat(mappedObservation.state()).isEqualTo("FRESH");
+    }
+
+    @Test
+    void from_controlTestItem_mapsEveryField() {
+        EvidenceFreshnessResponse response = EvidenceFreshnessResponse.from(populatedResult());
 
         assertThat(response.controlTests()).hasSize(1);
         EvidenceFreshnessResponse.ControlTestFreshnessItem mappedTest =
                 response.controlTests().get(0);
-        assertThat(mappedTest.id()).isEqualTo(controlTestId);
+        assertThat(mappedTest.id()).isEqualTo(CONTROL_TEST_ID);
         assertThat(mappedTest.uid()).isEqualTo("CT-1");
-        assertThat(mappedTest.controlId()).isEqualTo(controlId);
+        assertThat(mappedTest.controlId()).isEqualTo(CONTROL_ID);
         assertThat(mappedTest.controlUid()).isEqualTo("CTRL-1");
-        assertThat(mappedTest.testDate()).isEqualTo(testDate);
+        assertThat(mappedTest.testDate()).isEqualTo(TEST_DATE);
         assertThat(mappedTest.ageDays()).isEqualTo(36L);
         assertThat(mappedTest.state()).isEqualTo("FRESH");
+    }
+
+    @Test
+    void from_countsAndLimitations_mapEveryField() {
+        EvidenceFreshnessResponse response = EvidenceFreshnessResponse.from(populatedResult());
 
         EvidenceFreshnessResponse.EvidenceFreshnessCounts mappedCounts = response.counts();
         assertThat(mappedCounts.fresh()).isEqualTo(2);
@@ -122,19 +151,17 @@ class EvidenceFreshnessResponseTest {
         assertThat(mappedCounts.expired()).isEqualTo(1);
         assertThat(mappedCounts.superseded()).isEqualTo(3);
         assertThat(mappedCounts.currentlyValid()).isEqualTo(3);
-
         assertThat(response.limitations()).containsExactly("limitation-a", "limitation-b");
     }
 
     @Test
     void from_emptyListsAndZeroCounts_mapCleanly() {
-        Instant asOf = Instant.parse("2026-05-18T00:00:00Z");
         EvidenceFreshnessResult result = new EvidenceFreshnessResult(
                 "evidence_freshness",
                 "ground-control",
-                asOf,
+                AS_OF,
                 "evidence-freshness-projection-v1",
-                new EvidenceFreshnessResult.Inputs("ground-control", asOf, 90, false, null, null),
+                new EvidenceFreshnessResult.Inputs("ground-control", AS_OF, 90, false, null, null),
                 List.of(),
                 List.of(),
                 List.of(),
