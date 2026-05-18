@@ -6,6 +6,7 @@ import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.testcases.model.TestPlan;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestPlanRepository;
+import com.keplerops.groundcontrol.domain.testcases.repository.TestRunRepository;
 import com.keplerops.groundcontrol.domain.testcases.state.TestPlanStatus;
 import java.time.LocalDate;
 import java.util.List;
@@ -32,10 +33,13 @@ public class TestPlanService {
     private static final Logger log = LoggerFactory.getLogger(TestPlanService.class);
 
     private final TestPlanRepository testPlanRepository;
+    private final TestRunRepository testRunRepository;
     private final ProjectService projectService;
 
-    public TestPlanService(TestPlanRepository testPlanRepository, ProjectService projectService) {
+    public TestPlanService(
+            TestPlanRepository testPlanRepository, TestRunRepository testRunRepository, ProjectService projectService) {
         this.testPlanRepository = testPlanRepository;
+        this.testRunRepository = testRunRepository;
         this.projectService = projectService;
     }
 
@@ -145,6 +149,14 @@ public class TestPlanService {
 
     public void delete(UUID projectId, UUID id) {
         var plan = requirePlanInProject(projectId, id);
+        // TC-008 / ADR-049: TestRun rows carry a NOT NULL FK to this plan;
+        // reject deletion with a domain-aware conflict so callers receive a
+        // meaningful message instead of a late DataIntegrityViolationException
+        // translated to the generic resource_conflict envelope.
+        if (testRunRepository.existsByTestPlanId(plan.getId())) {
+            throw new ConflictException(
+                    "Test plan " + plan.getUid() + " has associated test runs; archive or delete those first");
+        }
         testPlanRepository.delete(plan);
         log.info("test_plan_deleted: id={} uid={}", plan.getId(), plan.getUid());
     }

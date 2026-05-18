@@ -599,6 +599,24 @@ const TO_CAMEL = {
   clear_criteria_format: "clearCriteriaFormat",
   clear_criteria_folder_id: "clearCriteriaFolderId",
   clear_criteria_text_search: "clearCriteriaTextSearch",
+  // TC-008 / ADR-049 — TestRun / TestRunTesterAssignment / TestRunCaseResult
+  // fields. The `gc_test_run` consolidated tool accepts snake_case args and
+  // forwards them to camelCase backend DTOs; omitting any mapping below would
+  // silently drop the field on the way through Jackson.
+  // The asset-side `clear_environment` mapping above also covers TestRun's
+  // identical clear flag (same key, same camelCase target). The result-row
+  // `status` field is constructed explicitly in index.js's update_result
+  // handler so it bypasses the snake→camel pass without needing a `result_status`
+  // entry here.
+  test_plan_id: "testPlanId",
+  test_run_id: "testRunId",
+  test_case_title: "testCaseTitle",
+  start_at: "startAt",
+  end_at: "endAt",
+  tester_name: "testerName",
+  clear_start_at: "clearStartAt",
+  clear_end_at: "clearEndAt",
+  clear_notes: "clearNotes",
   // GC-V001 finding adapter — backend FindingRequest / UpdateFindingRequest
   // use these camelCase field names. Mapping is needed so `gc_finding` reaches
   // backend Bean Validation with the right field names (issue #279).
@@ -7986,6 +8004,76 @@ export async function removeTestSuiteSourceRequirement(id, requirementId, projec
     "DELETE",
     `/api/v1/test-suites/${encodeURIComponent(id)}/source-requirements/${encodeURIComponent(requirementId)}`,
     { params: { project } },
+  );
+}
+
+// TC-008 / ADR-049 — TestRun aggregate. Execution-time record for one pass
+// through a TestSuite against a TestPlan. Reads (list, get, get-by-uid)
+// route through gc_query.
+
+export const TEST_RUN_STATUSES = ["PLANNED", "IN_PROGRESS", "COMPLETED", "ABORTED", "ARCHIVED"];
+
+export const TEST_RUN_CASE_RESULT_STATUSES = ["NOT_RUN", "PASSED", "FAILED", "BLOCKED", "SKIPPED"];
+
+export async function createTestRun(data, project) {
+  return request("POST", "/api/v1/test-runs", { body: data, params: { project } });
+}
+
+export async function listTestRuns(project) {
+  return request("GET", "/api/v1/test-runs", { params: { project } });
+}
+
+export async function getTestRun(id, project) {
+  return request("GET", `/api/v1/test-runs/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function getTestRunByUid(uid, project) {
+  return request("GET", `/api/v1/test-runs/uid/${encodeURIComponent(uid)}`, { params: { project } });
+}
+
+export async function updateTestRun(id, data, project) {
+  return request("PUT", `/api/v1/test-runs/${encodeURIComponent(id)}`, { body: data, params: { project } });
+}
+
+export async function deleteTestRun(id, project) {
+  await request("DELETE", `/api/v1/test-runs/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function transitionTestRunStatus(id, status, project) {
+  return request("PUT", `/api/v1/test-runs/${encodeURIComponent(id)}/status`, {
+    body: { status },
+    params: { project },
+  });
+}
+
+export async function addTestRunTester(id, testerName, project) {
+  return request("POST", `/api/v1/test-runs/${encodeURIComponent(id)}/testers`, {
+    body: { testerName },
+    params: { project },
+  });
+}
+
+export async function listTestRunTesters(id, project) {
+  return request("GET", `/api/v1/test-runs/${encodeURIComponent(id)}/testers`, { params: { project } });
+}
+
+export async function removeTestRunTester(id, testerName, project) {
+  await request(
+    "DELETE",
+    `/api/v1/test-runs/${encodeURIComponent(id)}/testers/${encodeURIComponent(testerName)}`,
+    { params: { project } },
+  );
+}
+
+export async function listTestRunCaseResults(id, project) {
+  return request("GET", `/api/v1/test-runs/${encodeURIComponent(id)}/results`, { params: { project } });
+}
+
+export async function updateTestRunCaseResult(id, testCaseId, data, project) {
+  return request(
+    "PUT",
+    `/api/v1/test-runs/${encodeURIComponent(id)}/results/${encodeURIComponent(testCaseId)}`,
+    { body: data, params: { project } },
   );
 }
 

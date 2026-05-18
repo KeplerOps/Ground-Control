@@ -1398,6 +1398,75 @@ references return HTTP 404 (project-scoped lookup). Setting criteria on a non-QU
 suite, or clearing the last criterion of a QUERY_BASED suite, returns HTTP 422
 (`invalid_test_suite_mode_field` / `invalid_test_suite_query`).
 
+### Test Runs (TC-008 / ADR-049)
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/test-runs` | TestRunRequest | 201 | Create a project-scoped test run; snapshots the suite's resolved cases as `test_run_case_result` rows |
+| GET | `/test-runs` | — | 200 | List test runs in a project (ordered by `createdAt DESC`) |
+| GET | `/test-runs/{id}` | — | 200 | Get a test run by UUID |
+| GET | `/test-runs/uid/{uid}` | — | 200 | Get a test run by project-scoped UID |
+| PUT | `/test-runs/{id}` | UpdateTestRunRequest | 200 | Update mutable fields (null = no change; `clearXxx: true` = clear) |
+| PUT | `/test-runs/{id}/status` | TestRunStatusTransitionRequest | 200 | Transition the lifecycle status |
+| DELETE | `/test-runs/{id}` | — | 204 | Delete the test run (cascades testers and case-result rows) |
+| POST | `/test-runs/{id}/testers` | AddTestRunTesterRequest | 201 | Assign a tester to the run |
+| GET | `/test-runs/{id}/testers` | — | 200 | List assigned testers |
+| DELETE | `/test-runs/{id}/testers/{testerName}` | — | 204 | Remove a tester |
+| GET | `/test-runs/{id}/results` | — | 200 | List per-case execution results (ordered by `snapshotOrder`) |
+| PUT | `/test-runs/{id}/results/{testCaseId}` | UpdateTestRunCaseResultRequest | 200 | Update the per-case status and optional notes |
+
+A `TestRun` is the execution-time record for one pass through a `TestSuite` against a
+`TestPlan` for a specific environment / version / build window. The aggregate is
+project-scoped, references the driving plan and suite via FKs, and owns its execution
+evidence directly through two child aggregates: `TestRunTesterAssignment` (assigned
+testers) and `TestRunCaseResult` (per-case execution outcomes). See ADR-049.
+
+**Snapshot on create.** When a run is created, the service resolves the suite via
+`TestSuiteService.resolveTestCases` (capped at 500 results) and snapshots the resulting
+cases as `test_run_case_result` rows. The snapshot is the canonical membership of the
+run: subsequent mutations to the source suite (member changes, criteria edits) do **not**
+rewrite the run's case set. Each result row carries `testCaseUid`, `testCaseTitle`, and
+`snapshotOrder` snapshots captured at create time so later edits to the linked `TestCase`
+or its position in the source suite never rewrite historical evidence. `GET /test-runs/{id}/results`
+replays rows in `snapshotOrder` (the resolver's order at create time — author position for
+STATIC suites, UID order otherwise), not by the case's current UID.
+
+**TestRunRequest fields:** `uid` (required, max 50, unique per project), `name` (required,
+max 200), `testPlanId` (required, UUID), `testSuiteId` (required, UUID), `environment`
+(optional, max 100), `version` (optional, max 100), `build` (optional, max 100),
+`startAt` (optional, ISO-8601 timestamp), `endAt` (optional, ISO-8601 timestamp; must be
+`>= startAt` when both are set).
+
+**UpdateTestRunRequest fields:** `name`, `environment`, `version`, `build`, `startAt`,
+`endAt` — all optional with null-means-no-change — plus `clearEnvironment`, `clearVersion`,
+`clearBuild`, `clearStartAt`, `clearEndAt` flags to wipe the matching field to null.
+`uid`, `testPlanId`, and `testSuiteId` are create-only.
+
+**TestRunStatusTransitionRequest fields:** `status` (required, `TestRunStatus` enum:
+`PLANNED`, `IN_PROGRESS`, `COMPLETED`, `ABORTED`, `ARCHIVED`). Valid transitions:
+`PLANNED → IN_PROGRESS | ABORTED | ARCHIVED`,
+`IN_PROGRESS → COMPLETED | ABORTED | ARCHIVED`,
+`COMPLETED → ARCHIVED`, `ABORTED → ARCHIVED`, `ARCHIVED → ∅` (terminal). Unlike
+`TestPlanStatus`, there are no backwards arcs out of `COMPLETED` or `ABORTED`: a run is
+a single execution pass; re-running is a new run. Invalid transitions surface as HTTP 422
+`invalid_status_transition`. Duplicate UID within a project returns HTTP 409. Cross-project
+plan / suite / test-case references return HTTP 404 (concealment).
+
+**AddTestRunTesterRequest fields:** `testerName` (required, max 120, character set
+`[A-Za-z0-9 _.\-'@]+`). Tester names are domain-provenance values, not principals in
+the Spring Security `users` table (ADR-037). The character set is constrained at create
+because `DELETE /test-runs/{id}/testers/{testerName}` addresses the name as a URL path
+segment; URL-reserved characters (slash, question mark, hash, percent, etc.) would be
+non-round-trippable and are rejected with HTTP 422. Duplicate `(runId, testerName)`
+returns HTTP 409.
+
+**UpdateTestRunCaseResultRequest fields:** `status` (required, `TestRunCaseResultStatus`
+enum: `NOT_RUN`, `PASSED`, `FAILED`, `BLOCKED`, `SKIPPED`), `notes` (optional, max 8192),
+`clearNotes` (boolean, wipes notes to null). There is no transition graph for
+per-case result status — a tester may flip a result freely as re-tests, descopes, and
+unblocks happen over the life of a run. Attempting to update a result for a case that
+is not part of the run's snapshot returns HTTP 404.
+
 ## Request / Response Format
 
 JSON. Error responses use a nested envelope:

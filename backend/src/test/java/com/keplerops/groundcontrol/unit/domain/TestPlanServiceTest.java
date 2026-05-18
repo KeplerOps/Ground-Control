@@ -38,6 +38,9 @@ class TestPlanServiceTest {
     private TestPlanRepository testPlanRepository;
 
     @Mock
+    private com.keplerops.groundcontrol.domain.testcases.repository.TestRunRepository testRunRepository;
+
+    @Mock
     private ProjectService projectService;
 
     @InjectMocks
@@ -406,6 +409,22 @@ class TestPlanServiceTest {
 
             assertThatThrownBy(() -> testPlanService.delete(projectId, missingId))
                     .isInstanceOf(NotFoundException.class);
+            verify(testPlanRepository, never()).delete(any(TestPlan.class));
+        }
+
+        @Test
+        void deleteRejectsConflictWhenTestRunsReferenceThePlan() {
+            // TC-008 / ADR-049: existence check raises a domain-aware
+            // ConflictException instead of letting the FK violation surface
+            // as a late DataIntegrityViolationException.
+            var existing = plan("TP-001");
+            when(testPlanRepository.findByIdAndProjectId(existing.getId(), projectId))
+                    .thenReturn(Optional.of(existing));
+            when(testRunRepository.existsByTestPlanId(existing.getId())).thenReturn(true);
+
+            assertThatThrownBy(() -> testPlanService.delete(projectId, existing.getId()))
+                    .isInstanceOf(com.keplerops.groundcontrol.domain.exception.ConflictException.class)
+                    .hasMessageContaining("associated test runs");
             verify(testPlanRepository, never()).delete(any(TestPlan.class));
         }
     }

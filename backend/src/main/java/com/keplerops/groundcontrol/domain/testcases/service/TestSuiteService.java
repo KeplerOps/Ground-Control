@@ -16,6 +16,7 @@ import com.keplerops.groundcontrol.domain.testcases.model.TestSuiteSourceRequire
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseFolderRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseSpecifications;
+import com.keplerops.groundcontrol.domain.testcases.repository.TestRunRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestSuiteMemberRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestSuiteRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestSuiteSourceRequirementRepository;
@@ -76,6 +77,7 @@ public class TestSuiteService {
     private final TestCaseRepository testCaseRepository;
     private final TestCaseFolderRepository folderRepository;
     private final RequirementRepository requirementRepository;
+    private final TestRunRepository testRunRepository;
     private final ProjectService projectService;
 
     public TestSuiteService(
@@ -85,6 +87,7 @@ public class TestSuiteService {
             TestCaseRepository testCaseRepository,
             TestCaseFolderRepository folderRepository,
             RequirementRepository requirementRepository,
+            TestRunRepository testRunRepository,
             ProjectService projectService) {
         this.testSuiteRepository = testSuiteRepository;
         this.memberRepository = memberRepository;
@@ -92,6 +95,7 @@ public class TestSuiteService {
         this.testCaseRepository = testCaseRepository;
         this.folderRepository = folderRepository;
         this.requirementRepository = requirementRepository;
+        this.testRunRepository = testRunRepository;
         this.projectService = projectService;
     }
 
@@ -166,6 +170,14 @@ public class TestSuiteService {
 
     public void delete(UUID projectId, UUID id) {
         var suite = requireSuiteInProject(projectId, id);
+        // TC-008 / ADR-049: TestRun rows carry a NOT NULL FK to this suite;
+        // reject deletion with a domain-aware conflict before touching child
+        // membership rows so the operation is atomic and the caller receives
+        // a meaningful message instead of a late DataIntegrityViolationException.
+        if (testRunRepository.existsByTestSuiteId(suite.getId())) {
+            throw new ConflictException(
+                    "Test suite " + suite.getUid() + " has associated test runs; archive or delete those first");
+        }
         // Load + entity-delete the children so the persistence context stays
         // consistent — a bulk JPQL DELETE would leave stale instances in the
         // PC that point at the about-to-be-removed parent, which Hibernate

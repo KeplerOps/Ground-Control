@@ -407,6 +407,117 @@ export interface AddTestSuiteSourceRequirementRequest {
   requirementId: string;
 }
 
+// TC-008 / ADR-049 — TestRun aggregate. Mirrors the backend Java
+// TestRunResponse / TestRunRequest / UpdateTestRunRequest /
+// TestRunStatusTransitionRequest field-for-field. Both enums are single-sourced
+// in the domain `state/` package per ADR-034 and mirrored here for typed UI
+// access.
+
+export type TestRunStatus = "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "ABORTED" | "ARCHIVED";
+
+export const TEST_RUN_STATUSES: TestRunStatus[] = [
+  "PLANNED",
+  "IN_PROGRESS",
+  "COMPLETED",
+  "ABORTED",
+  "ARCHIVED",
+];
+
+export type TestRunCaseResultStatus = "NOT_RUN" | "PASSED" | "FAILED" | "BLOCKED" | "SKIPPED";
+
+export const TEST_RUN_CASE_RESULT_STATUSES: TestRunCaseResultStatus[] = [
+  "NOT_RUN",
+  "PASSED",
+  "FAILED",
+  "BLOCKED",
+  "SKIPPED",
+];
+
+export interface TestRunResponse {
+  id: string;
+  projectIdentifier: string;
+  uid: string;
+  name: string;
+  testPlanId: string;
+  testPlanUid: string;
+  testSuiteId: string;
+  testSuiteUid: string;
+  // Nullable on the backend (Jackson serializes present-with-null), so the
+  // mirror models `string | null` rather than optional-only — matches the
+  // TestPlanResponse pattern and ADR-034.
+  environment: string | null;
+  version: string | null;
+  build: string | null;
+  status: TestRunStatus;
+  // ISO-8601 timestamp strings; Instant on the backend.
+  startAt: string | null;
+  endAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TestRunRequest {
+  uid: string;
+  name: string;
+  testPlanId: string;
+  testSuiteId: string;
+  environment?: string | null;
+  version?: string | null;
+  build?: string | null;
+  startAt?: string | null;
+  endAt?: string | null;
+}
+
+export interface UpdateTestRunRequest {
+  name?: string;
+  environment?: string | null;
+  version?: string | null;
+  build?: string | null;
+  startAt?: string | null;
+  endAt?: string | null;
+  clearEnvironment?: boolean;
+  clearVersion?: boolean;
+  clearBuild?: boolean;
+  clearStartAt?: boolean;
+  clearEndAt?: boolean;
+}
+
+export interface TestRunStatusTransitionRequest {
+  status: TestRunStatus;
+}
+
+export interface TestRunTesterAssignmentResponse {
+  id: string;
+  testRunId: string;
+  testerName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AddTestRunTesterRequest {
+  testerName: string;
+}
+
+export interface TestRunCaseResultResponse {
+  id: string;
+  testRunId: string;
+  testCaseId: string;
+  testCaseUid: string;
+  testCaseTitle: string;
+  snapshotOrder: number;
+  status: TestRunCaseResultStatus;
+  // Notes are nullable on the backend (TEXT column with no default).
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateTestRunCaseResultRequest {
+  status: TestRunCaseResultStatus;
+  notes?: string | null;
+  clearNotes?: boolean;
+}
+
 export type GraphEntityType =
   | "REQUIREMENT"
   | "OPERATIONAL_ASSET"

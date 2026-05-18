@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -48,6 +49,10 @@ class TestCaseServiceTest {
 
     @Mock
     private TestCaseFolderRepository folderRepository;
+
+    @Mock
+    private com.keplerops.groundcontrol.domain.testcases.repository.TestRunCaseResultRepository
+            testRunCaseResultRepository;
 
     @Mock
     private ProjectService projectService;
@@ -366,6 +371,25 @@ class TestCaseServiceTest {
             testCaseService.delete(projectId, existing.getId());
 
             verify(testCaseRepository).delete(existing);
+        }
+
+        @Test
+        void deleteRejectsConflictWhenRunResultsReferenceTheCase() {
+            // TC-008 / ADR-049: TestRunCaseResult rows FK to this case. The
+            // existence check raises a domain-aware ConflictException before
+            // step/gherkin cascades start, so a parent delete that would
+            // orphan execution evidence is rejected cleanly.
+            var existing = makeTestCase();
+            var id = existing.getId();
+            when(testCaseRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.of(existing));
+            when(testRunCaseResultRepository.existsByTestCaseId(id)).thenReturn(true);
+
+            assertThatThrownBy(() -> testCaseService.delete(projectId, id))
+                    .isInstanceOf(com.keplerops.groundcontrol.domain.exception.ConflictException.class)
+                    .hasMessageContaining("test-run results");
+            verify(testCaseStepService, never()).deleteAllByTestCase(id);
+            verify(testCaseGherkinService, never()).cascadeDeleteByTestCase(id);
+            verify(testCaseRepository, never()).delete(existing);
         }
 
         @Test

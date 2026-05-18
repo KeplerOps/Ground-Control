@@ -51,7 +51,8 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         "053", "054", "055", "056", "057", "058", "059", "060", "061", "062", "063", "064", "065",
                         "066", "067", "068", "069", "070", "071", "072", "073", "074", "075", "076", "077", "078",
                         "079", "080", "081", "082", "083", "084", "085", "086", "087", "088", "089", "090", "091",
-                        "092", "093", "094", "095", "096", "097", "098", "099", "100", "101", "102", "103", "104");
+                        "092", "093", "094", "095", "096", "097", "098", "099", "100", "101", "102", "103", "104",
+                        "110", "111", "112", "113", "114", "115");
     }
 
     @Test
@@ -753,5 +754,102 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                 .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'audit_link'"
                         + " AND column_name = 'target_title' AND is_nullable = 'NO'")
                 .getSingleResult();
+        // V104-V109: test run + tester assignment + per-case result tables
+        // (TC-008 / ADR-049). Pin the column shape so a downstream alter
+        // can't silently drop the snapshot fields or the status backstop.
+        entityManager.createNativeQuery("SELECT 1 FROM test_run LIMIT 1").getResultList();
+        entityManager.createNativeQuery("SELECT 1 FROM test_run_audit LIMIT 1").getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM test_run_tester_assignment LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM test_run_tester_assignment_audit LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM test_run_case_result LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM test_run_case_result_audit LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_run'"
+                        + " AND column_name = 'test_plan_id' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_run'"
+                        + " AND column_name = 'test_suite_id' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'test_run'"
+                        + " AND column_name = 'status' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_run'"
+                        + " AND constraint_name = 'uq_test_run_project_uid'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_run'"
+                        + " AND constraint_name = 'ck_test_run_status'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_run_tester_assignment'"
+                        + " AND constraint_name = 'uq_test_run_tester'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                        + " WHERE table_name = 'test_run_case_result'"
+                        + " AND column_name = 'test_case_uid' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                        + " WHERE table_name = 'test_run_case_result'"
+                        + " AND column_name = 'test_case_title' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                        + " WHERE table_name = 'test_run_case_result'"
+                        + " AND column_name = 'snapshot_order' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_run_case_result'"
+                        + " AND constraint_name = 'uq_test_run_case_result_order'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_run_case_result'"
+                        + " AND constraint_name = 'uq_test_run_case_result'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_run_case_result'"
+                        + " AND constraint_name = 'ck_test_run_case_result_status'")
+                .getSingleResult();
+        // V105 / V107 / V109 audit-shadow column probes. The audit tables are
+        // not Hibernate-managed entities, so ddl-auto: validate does not
+        // inspect them; without explicit column probes, a copy-paste regression
+        // in V105 / V107 / V109 that dropped uid / tester_name / snapshot
+        // columns silently creates wrong-shape shadows that pass at boot but
+        // fail on the first audit revision flush at runtime.
+        org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
+                        .createNativeQuery("SELECT uid, name, status, environment, version, build,"
+                                + " start_at, end_at, created_at, updated_at"
+                                + " FROM test_run_audit LIMIT 1")
+                        .getResultList())
+                .doesNotThrowAnyException();
+        org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
+                        .createNativeQuery("SELECT test_run_id, tester_name, created_at, updated_at"
+                                + " FROM test_run_tester_assignment_audit LIMIT 1")
+                        .getResultList())
+                .doesNotThrowAnyException();
+        org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
+                        .createNativeQuery("SELECT test_run_id, test_case_id, test_case_uid, test_case_title,"
+                                + " snapshot_order, status, notes, created_at, updated_at"
+                                + " FROM test_run_case_result_audit LIMIT 1")
+                        .getResultList())
+                .doesNotThrowAnyException();
     }
 }
