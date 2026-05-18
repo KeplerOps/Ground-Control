@@ -133,7 +133,7 @@ skills' SKILL.md prose, kept unchanged):
 | `gc_threat_model` | create, update, delete, transition, link_* |
 | `gc_control` | create, update, delete, transition, link_* |
 | `gc_risk_governance` | `{entity, action}` over methodology_profile, risk_register_record, risk_assessment_result, treatment_plan, verification_result |
-| `gc_analyze` | cycles, orphans, coverage_gaps, impact, cross_wave, consistency, completeness, status_drift, similarity, work_order |
+| `gc_analyze` | cycles, orphans, coverage_gaps, impact, cross_wave, consistency, completeness, status_drift, similarity, work_order, evidence_freshness, observation_exposure, control_state, vendor_risk_aggregation |
 | `gc_graph` | ancestors, descendants, paths, find_paths, subgraph, visualization, traverse |
 | `gc_baseline` | create, delete, snapshot, compare |
 | `gc_quality_gate` | create, update, delete, evaluate |

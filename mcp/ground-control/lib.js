@@ -1048,6 +1048,47 @@ export async function getWorkOrder(project) {
   return request("GET", "/api/v1/analysis/work-order", { params: { project } });
 }
 
+// GC-L007 — GRC analysis helpers. Backend service: domain/grcanalysis.
+// Controller path: /api/v1/analysis/grc/*. Param names match the controller
+// (camelCase via Spring's @RequestParam binding). Adapter tests in
+// gc-analyze.test.js lock the URL + params shape.
+
+export async function analyzeEvidenceFreshness({
+  project,
+  asOf,
+  freshnessWindowDays,
+  includeSuperseded,
+  assetId,
+  controlId,
+} = {}) {
+  return request("GET", "/api/v1/analysis/grc/evidence-freshness", {
+    params: { project, asOf, freshnessWindowDays, includeSuperseded, assetId, controlId },
+  });
+}
+
+export async function analyzeObservationProjection({
+  project,
+  asOf,
+  mode,
+  assetId,
+  controlId,
+} = {}) {
+  return request("GET", "/api/v1/analysis/grc/observation-projection", {
+    params: { project, asOf, mode, assetId, controlId },
+  });
+}
+
+export async function aggregateVendorRisk({
+  project,
+  asOf,
+  freshnessWindowDays,
+  vendorAssetId,
+} = {}) {
+  return request("GET", "/api/v1/analysis/grc/vendor-risk", {
+    params: { project, asOf, freshnessWindowDays, vendorAssetId },
+  });
+}
+
 // Strict containment predicate. Both arguments MUST already be canonical
 // realpaths — call `realpathSync` on each side before invoking this. Returns
 // true iff `canonicalPath` is strictly inside `canonicalRoot` (rejects the

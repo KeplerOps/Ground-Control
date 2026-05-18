@@ -18,6 +18,18 @@ public interface AssetLinkRepository extends JpaRepository<AssetLink, UUID> {
     @Query("SELECT l FROM AssetLink l JOIN FETCH l.asset WHERE l.asset.project.id = :projectId")
     List<AssetLink> findByProjectId(@Param("projectId") UUID projectId);
 
+    /**
+     * Outbound asset links whose {@code targetTypes} is one of the supplied
+     * types, scoped to the project. Used by vendor-risk aggregation to union
+     * outbound {@code AssetLink} edges from the vendor side with inbound
+     * {@code FindingLink}/{@code ControlLink} edges (GC-L007 finding #5).
+     */
+    @Query("SELECT l FROM AssetLink l JOIN FETCH l.asset WHERE l.asset.project.id = :projectId"
+            + " AND l.targetType IN :targetTypes")
+    List<AssetLink> findByProjectIdAndTargetTypeIn(
+            @Param("projectId") UUID projectId,
+            @Param("targetTypes") java.util.Collection<AssetLinkTargetType> targetTypes);
+
     @Query("SELECT l FROM AssetLink l JOIN FETCH l.asset WHERE l.asset.id = :assetId"
             + " AND l.targetType = :targetType")
     List<AssetLink> findByAssetIdAndTargetType(
