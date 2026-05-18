@@ -927,12 +927,14 @@ FindingLinkType enum), `targetUrl` (optional, max 2000), `targetTitle` (optional
 255).
 
 **Internal target types (require `targetEntityId`, resolved project-scoped):**
-CONTROL, RISK_SCENARIO, ASSET, OBSERVATION.
+CONTROL, RISK_SCENARIO, ASSET, OBSERVATION, AUDIT (promoted from external placeholder
+in GC-U001 / ADR-047; `targetEntityId` must reference a UUID returned by
+`POST /api/v1/audits`).
 
 **External target types (require `targetIdentifier`):** OPERATIONAL_ARTIFACT (generic
 artifact reference, per ADR-011), EVIDENCE (external evidence reference, e.g.
-`s3://evidence/...`), AUDIT (audit identifier), REMEDIATION_PLAN (remediation plan
-identifier), EXTERNAL (catch-all).
+`s3://evidence/...`), REMEDIATION_PLAN (remediation plan identifier), EXTERNAL
+(catch-all).
 
 **Link types:** AFFECTS (finding affects an entity), CAUSED_BY (finding is caused by
 the linked entity), MITIGATED_BY (finding is mitigated by a control or plan),
@@ -945,6 +947,63 @@ VERIFIED_CLOSED. `REMEDIATION_COMPLETE` can transition back to
 `REMEDIATION_IN_PROGRESS` when verification rejects the claimed remediation.
 `VERIFIED_CLOSED` is terminal — reopening a verified-closed finding creates a new
 finding rather than reanimating the closed record.
+
+### Audits (GC-U001)
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/audits` | AuditRequest | 201 | Create audit |
+| GET | `/audits` | — | 200 | List audits for a project |
+| GET | `/audits/{id}` | — | 200 | Get audit by UUID |
+| GET | `/audits/uid/{uid}` | — | 200 | Get audit by UID |
+| PUT | `/audits/{id}` | UpdateAuditRequest | 200 | Update mutable fields |
+| DELETE | `/audits/{id}` | — | 204 | Delete audit (cascades to links) |
+| PUT | `/audits/{id}/status` | `{"status": "IN_PROGRESS"}` | 200 | Transition lifecycle status |
+| POST | `/audits/{id}/links` | AuditLinkRequest | 201 | Create audit link |
+| GET | `/audits/{id}/links` | — | 200 | List links for an audit |
+| DELETE | `/audits/{id}/links/{linkId}` | — | 204 | Delete audit link |
+
+All endpoints accept an optional `project` query parameter (same semantics as other
+aggregate endpoints).
+
+Audits are a separate aggregate from findings, evidence, and the risk-management
+cluster per ADR-047. They capture governed review activities (internal, external,
+regulatory, or special) and own the audit lifecycle. Linked compliance frameworks,
+assets, controls, risk records, evidence, and findings are represented as outbound
+`AuditLink` edges.
+
+**AuditRequest fields:** `uid` (required, max 30), `title` (required, max 200),
+`auditType` (required, enum: INTERNAL, EXTERNAL, REGULATORY, SPECIAL),
+`scopeDescription` (required), `objectives` (optional, list of strings),
+`phases` (optional, list of `AuditPhase` objects with `kind`, `plannedStart`,
+`plannedEnd`, `actualStart`, `actualEnd`), `teamMembers` (optional, list of strings).
+`createdBy` is set server-side from the authenticated actor and is not accepted
+in the request body.
+
+**UpdateAuditRequest fields:** `title`, `auditType`, `scopeDescription`, `objectives`,
+`phases`, `teamMembers`, `clearObjectives` (boolean), `clearPhases`
+(boolean), `clearTeamMembers` (boolean). Only fields present in the request body are
+updated. Clear flags explicitly null the corresponding optional list. `createdBy` is
+fixed at creation time and is not mutable.
+
+**AuditLinkRequest fields:** `targetType` (required, AuditLinkTargetType enum),
+`targetEntityId` (UUID, for internal first-class targets), `targetIdentifier` (string
+max 500, for external / framework targets), `linkType` (required, AuditLinkType enum),
+`targetUrl` (optional, max 2000), `targetTitle` (optional, max 255).
+
+**Internal target types (require `targetEntityId`, resolved project-scoped):**
+ASSET, CONTROL, RISK_SCENARIO, RISK_REGISTER_RECORD, EVIDENCE, FINDING.
+
+**External target types (require `targetIdentifier`):** FRAMEWORK (compliance
+framework reference), EXTERNAL (catch-all for externally managed items).
+
+**Link types:** SCOPES (audit scopes the entity), ASSESSES (audit assesses the
+entity), EVIDENCED_BY (audit is evidenced by the linked artifact), FOLLOWS_UP_ON
+(audit follows up on the linked finding or record), ASSOCIATED (generic association).
+
+**Lifecycle states:** PLANNED → IN_PROGRESS → DRAFT_REPORT → FINAL_REPORT → CLOSED.
+`FINAL_REPORT` can transition back to `DRAFT_REPORT` for rework. `CLOSED` is
+terminal.
 
 ### Control Tests (GC-I012)
 

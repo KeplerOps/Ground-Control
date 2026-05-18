@@ -1,6 +1,8 @@
 package com.keplerops.groundcontrol.domain.riskscenarios.service;
 
 import com.keplerops.groundcontrol.domain.audit.ActorHolder;
+import com.keplerops.groundcontrol.domain.audits.repository.AuditLinkRepository;
+import com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
@@ -30,6 +32,7 @@ public class RiskScenarioService {
     private final RiskScenarioRepository riskScenarioRepository;
     private final RiskScenarioLinkRepository riskScenarioLinkRepository;
     private final FindingLinkRepository findingLinkRepository;
+    private final AuditLinkRepository auditLinkRepository;
     private final ProjectService projectService;
     private final TraceabilityLinkRepository traceabilityLinkRepository;
 
@@ -37,11 +40,13 @@ public class RiskScenarioService {
             RiskScenarioRepository riskScenarioRepository,
             RiskScenarioLinkRepository riskScenarioLinkRepository,
             FindingLinkRepository findingLinkRepository,
+            AuditLinkRepository auditLinkRepository,
             ProjectService projectService,
             TraceabilityLinkRepository traceabilityLinkRepository) {
         this.riskScenarioRepository = riskScenarioRepository;
         this.riskScenarioLinkRepository = riskScenarioLinkRepository;
         this.findingLinkRepository = findingLinkRepository;
+        this.auditLinkRepository = auditLinkRepository;
         this.projectService = projectService;
         this.traceabilityLinkRepository = traceabilityLinkRepository;
     }
@@ -196,6 +201,21 @@ public class RiskScenarioService {
                     "Risk scenario " + scenario.getUid()
                             + " cannot be deleted while inbound FindingLink references exist. Remove the"
                             + " FindingLink references first, then retry.",
+                    "risk_scenario_referenced",
+                    detail);
+        }
+
+        var inboundAuditUids = auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                AuditLinkTargetType.RISK_SCENARIO, id, projectId);
+        if (!inboundAuditUids.isEmpty()) {
+            java.util.Map<String, java.io.Serializable> detail = new java.util.LinkedHashMap<>();
+            detail.put("riskScenarioUid", scenario.getUid());
+            detail.put("auditCount", inboundAuditUids.size());
+            detail.put("auditUids", new java.util.ArrayList<>(inboundAuditUids));
+            throw new ConflictException(
+                    "Risk scenario " + scenario.getUid()
+                            + " cannot be deleted while inbound AuditLink references exist. Remove the"
+                            + " AuditLink references first, then retry.",
                     "risk_scenario_referenced",
                     detail);
         }

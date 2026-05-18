@@ -117,7 +117,11 @@ public class FindingGraphProjectionContributor implements GraphProjectionContrib
                     case RISK_SCENARIO -> GraphEntityType.RISK_SCENARIO;
                     case ASSET -> GraphEntityType.OPERATIONAL_ASSET;
                     case OBSERVATION -> GraphEntityType.OBSERVATION;
-                    case OPERATIONAL_ARTIFACT, EVIDENCE, AUDIT, REMEDIATION_PLAN, EXTERNAL -> null;
+                        // Always emits an edge to the AUDIT node. AuditGraphProjectionContributor
+                        // keeps all audit nodes in the graph regardless of status so this edge
+                        // never dangles.
+                    case AUDIT -> GraphEntityType.AUDIT;
+                    case OPERATIONAL_ARTIFACT, EVIDENCE, REMEDIATION_PLAN, EXTERNAL -> null;
                 };
         if (targetEntityType == null) {
             return null;

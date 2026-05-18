@@ -3,6 +3,8 @@ package com.keplerops.groundcontrol.domain.findings.service;
 import com.keplerops.groundcontrol.domain.assets.repository.AssetLinkRepository;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.audit.ActorHolder;
+import com.keplerops.groundcontrol.domain.audits.repository.AuditLinkRepository;
+import com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType;
 import com.keplerops.groundcontrol.domain.controls.repository.ControlLinkRepository;
 import com.keplerops.groundcontrol.domain.controls.state.ControlLinkTargetType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
@@ -41,6 +43,7 @@ public class FindingService {
     private final ControlLinkRepository controlLinkRepository;
     private final RiskScenarioLinkRepository riskScenarioLinkRepository;
     private final ThreatModelLinkRepository threatModelLinkRepository;
+    private final AuditLinkRepository auditLinkRepository;
 
     public FindingService(
             FindingRepository findingRepository,
@@ -49,7 +52,8 @@ public class FindingService {
             AssetLinkRepository assetLinkRepository,
             ControlLinkRepository controlLinkRepository,
             RiskScenarioLinkRepository riskScenarioLinkRepository,
-            ThreatModelLinkRepository threatModelLinkRepository) {
+            ThreatModelLinkRepository threatModelLinkRepository,
+            AuditLinkRepository auditLinkRepository) {
         this.findingRepository = findingRepository;
         this.findingLinkRepository = findingLinkRepository;
         this.projectService = projectService;
@@ -57,6 +61,7 @@ public class FindingService {
         this.controlLinkRepository = controlLinkRepository;
         this.riskScenarioLinkRepository = riskScenarioLinkRepository;
         this.threatModelLinkRepository = threatModelLinkRepository;
+        this.auditLinkRepository = auditLinkRepository;
     }
 
     public Finding create(CreateFindingCommand command) {
@@ -175,22 +180,30 @@ public class FindingService {
                 RiskScenarioLinkTargetType.FINDING, id, projectId);
         var threatModelUids = threatModelLinkRepository.findThreatModelUidsByTargetTypeAndTargetEntityIdAndProjectId(
                 ThreatModelLinkTargetType.FINDING, id, projectId);
-        if (!assetUids.isEmpty() || !controlUids.isEmpty() || !scenarioUids.isEmpty() || !threatModelUids.isEmpty()) {
+        var auditUids = auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                AuditLinkTargetType.FINDING, id, projectId);
+        if (!assetUids.isEmpty()
+                || !controlUids.isEmpty()
+                || !scenarioUids.isEmpty()
+                || !threatModelUids.isEmpty()
+                || !auditUids.isEmpty()) {
             Map<String, Serializable> detail = new LinkedHashMap<>();
             detail.put("findingUid", finding.getUid());
             detail.put("assetCount", assetUids.size());
             detail.put("controlCount", controlUids.size());
             detail.put("scenarioCount", scenarioUids.size());
             detail.put("threatModelCount", threatModelUids.size());
+            detail.put("auditCount", auditUids.size());
             detail.put("assetUids", new ArrayList<>(assetUids));
             detail.put("controlUids", new ArrayList<>(controlUids));
             detail.put("scenarioUids", new ArrayList<>(scenarioUids));
             detail.put("threatModelUids", new ArrayList<>(threatModelUids));
+            detail.put("auditUids", new ArrayList<>(auditUids));
             throw new ConflictException(
                     "Finding " + finding.getUid()
                             + " cannot be deleted while reverse links exist. Remove the AssetLink,"
-                            + " ControlLink, RiskScenarioLink, and ThreatModelLink references first,"
-                            + " then retry.",
+                            + " ControlLink, RiskScenarioLink, ThreatModelLink, and AuditLink references"
+                            + " first, then retry.",
                     "finding_referenced",
                     detail);
         }

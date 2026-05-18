@@ -64,6 +64,9 @@ class FindingServiceTest {
     private com.keplerops.groundcontrol.domain.threatmodels.repository.ThreatModelLinkRepository
             threatModelLinkRepository;
 
+    @Mock
+    private com.keplerops.groundcontrol.domain.audits.repository.AuditLinkRepository auditLinkRepository;
+
     @InjectMocks
     private FindingService findingService;
 
@@ -488,6 +491,33 @@ class FindingServiceTest {
             assertThat(thrown.getDetail())
                     .containsEntry("controlCount", 1)
                     .containsEntry("controlUids", (java.io.Serializable) List.of("CTRL-1"));
+        }
+
+        @Test
+        void rejectsDeleteWhenAuditLinkReferencesFinding() {
+            var f = makeFinding();
+            when(findingRepository.findByIdAndProjectId(f.getId(), projectId)).thenReturn(Optional.of(f));
+            when(assetLinkRepository.findAssetUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            AssetLinkTargetType.FINDING, f.getId(), projectId))
+                    .thenReturn(List.of());
+            when(controlLinkRepository.findControlUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            ControlLinkTargetType.FINDING, f.getId(), projectId))
+                    .thenReturn(List.of());
+            when(riskScenarioLinkRepository.findRiskScenarioUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            RiskScenarioLinkTargetType.FINDING, f.getId(), projectId))
+                    .thenReturn(List.of());
+            when(auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType.FINDING,
+                            f.getId(),
+                            projectId))
+                    .thenReturn(List.of("AUDIT-001"));
+
+            var fId = f.getId();
+            var thrown = catchThrowableOfType(ConflictException.class, () -> findingService.delete(projectId, fId));
+            assertThat(thrown).isNotNull().extracting("errorCode").isEqualTo("finding_referenced");
+            assertThat(thrown.getDetail())
+                    .containsEntry("auditCount", 1)
+                    .containsEntry("auditUids", (java.io.Serializable) List.of("AUDIT-001"));
         }
 
         @Test

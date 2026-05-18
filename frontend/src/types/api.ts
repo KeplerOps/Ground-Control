@@ -460,6 +460,72 @@ export const KNOWLEDGE_STATES: KnowledgeState[] = [
   "UNKNOWN",
 ];
 
+// GC-U001 / ADR-047 Audit entity enums. Single-sourced from backend
+// AuditStatus, AuditType, AuditPhaseKind, AuditLinkTargetType, AuditLinkType.
+export type AuditType = "INTERNAL" | "EXTERNAL" | "REGULATORY" | "SPECIAL";
+export const AUDIT_TYPES: AuditType[] = [
+  "INTERNAL",
+  "EXTERNAL",
+  "REGULATORY",
+  "SPECIAL",
+];
+
+export type AuditStatus =
+  | "PLANNED"
+  | "IN_PROGRESS"
+  | "DRAFT_REPORT"
+  | "FINAL_REPORT"
+  | "CLOSED";
+export const AUDIT_STATUSES: AuditStatus[] = [
+  "PLANNED",
+  "IN_PROGRESS",
+  "DRAFT_REPORT",
+  "FINAL_REPORT",
+  "CLOSED",
+];
+
+export type AuditPhaseKind = "PLANNING" | "FIELDWORK" | "REPORTING" | "FOLLOWUP";
+export const AUDIT_PHASE_KINDS: AuditPhaseKind[] = [
+  "PLANNING",
+  "FIELDWORK",
+  "REPORTING",
+  "FOLLOWUP",
+];
+
+export type AuditLinkTargetType =
+  | "FRAMEWORK"
+  | "ASSET"
+  | "CONTROL"
+  | "RISK_SCENARIO"
+  | "RISK_REGISTER_RECORD"
+  | "EVIDENCE"
+  | "FINDING"
+  | "EXTERNAL";
+export const AUDIT_LINK_TARGET_TYPES: AuditLinkTargetType[] = [
+  "FRAMEWORK",
+  "ASSET",
+  "CONTROL",
+  "RISK_SCENARIO",
+  "RISK_REGISTER_RECORD",
+  "EVIDENCE",
+  "FINDING",
+  "EXTERNAL",
+];
+
+export type AuditLinkType =
+  | "SCOPES"
+  | "ASSESSES"
+  | "EVIDENCED_BY"
+  | "FOLLOWS_UP_ON"
+  | "ASSOCIATED";
+export const AUDIT_LINK_TYPES: AuditLinkType[] = [
+  "SCOPES",
+  "ASSESSES",
+  "EVIDENCED_BY",
+  "FOLLOWS_UP_ON",
+  "ASSOCIATED",
+];
+
 // Responses
 export interface ProjectResponse {
   id: string;

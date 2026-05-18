@@ -73,8 +73,8 @@ export const GC_FINDING_DESCRIPTION =
   `clear_root_cause_analysis / clear_owner / clear_due_date to explicitly null optional fields. ` +
   `status is consumed only by the transition action (creation defaults to OPEN). ` +
   `link_create requires target_type + link_type; for internal target types ` +
-  `(CONTROL / RISK_SCENARIO / ASSET / OBSERVATION) pass target_entity_id, for external ` +
-  `types (EVIDENCE / AUDIT / REMEDIATION_PLAN / OPERATIONAL_ARTIFACT / EXTERNAL) pass ` +
+  `(CONTROL / RISK_SCENARIO / ASSET / OBSERVATION / AUDIT) pass target_entity_id, for external ` +
+  `types (EVIDENCE / REMEDIATION_PLAN / OPERATIONAL_ARTIFACT / EXTERNAL) pass ` +
   `target_identifier. target_url and target_title are optional. ` +
   `Reads (list, get, links_list) route through gc_query.`;
 

@@ -16,5 +16,7 @@ public enum GraphEntityType {
     VERIFICATION_RESULT,
     THREAT_MODEL,
     FINDING,
-    EVIDENCE_ARTIFACT
+    EVIDENCE_ARTIFACT,
+    AUDIT,
+    AUDIT_LINK
 }

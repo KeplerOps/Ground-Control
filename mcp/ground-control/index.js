@@ -210,6 +210,11 @@ import {
   GC_EVIDENCE_DESCRIPTION,
 } from "./gc-evidence.js";
 import {
+  gcAuditZodShape,
+  gcAuditToolHandler,
+  GC_AUDIT_DESCRIPTION,
+} from "./gc-audit.js";
+import {
   gcRiskScenarioZodShape,
   gcRiskScenarioToolHandler,
   GC_RISK_SCENARIO_DESCRIPTION,
@@ -1563,6 +1568,19 @@ server.tool(
   async (args) => {
     try {
       const result = await gcFindingToolHandler(args);
+      return result === null ? ok("Deleted") : ok(JSON.stringify(result, null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+// gc_audit: GC-U001 / ADR-048. Full lifecycle audit management.
+server.tool(
+  "gc_audit",
+  GC_AUDIT_DESCRIPTION,
+  gcAuditZodShape,
+  async (args) => {
+    try {
+      const result = await gcAuditToolHandler(args);
       return result === null ? ok("Deleted") : ok(JSON.stringify(result, null, 2));
     } catch (e) { return err(e); }
   },

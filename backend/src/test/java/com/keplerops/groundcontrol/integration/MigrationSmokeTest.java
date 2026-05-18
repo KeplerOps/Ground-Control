@@ -51,7 +51,7 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         "053", "054", "055", "056", "057", "058", "059", "060", "061", "062", "063", "064", "065",
                         "066", "067", "068", "069", "070", "071", "072", "073", "074", "075", "076", "077", "078",
                         "079", "080", "081", "082", "083", "084", "085", "086", "087", "088", "089", "090", "091",
-                        "092", "093", "094", "095", "096", "097", "098", "099");
+                        "092", "093", "094", "095", "096", "097", "098", "099", "100", "101", "102", "103");
     }
 
     @Test
@@ -724,6 +724,34 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                 .createNativeQuery("SELECT 1 FROM information_schema.columns"
                         + " WHERE table_name = 'test_suite_source_requirement_audit'"
                         + " AND column_name = 'requirement_id'")
+                .getSingleResult();
+        // V100-V103: audit + audit_link tables (GC-U001 / ADR-048).
+        entityManager.createNativeQuery("SELECT 1 FROM audit LIMIT 1").getResultList();
+        entityManager.createNativeQuery("SELECT 1 FROM audit_audit LIMIT 1").getResultList();
+        entityManager.createNativeQuery("SELECT 1 FROM audit_link LIMIT 1").getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM audit_link_audit LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'audit'"
+                        + " AND column_name = 'scope_description' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'audit'"
+                        + " AND column_name = 'status' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'audit'"
+                        + " AND constraint_name = 'uq_audit_project_uid'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'audit_link'"
+                        + " AND column_name = 'target_url' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'audit_link'"
+                        + " AND column_name = 'target_title' AND is_nullable = 'NO'")
                 .getSingleResult();
     }
 }

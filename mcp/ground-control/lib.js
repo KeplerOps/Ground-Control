@@ -691,6 +691,21 @@ const TO_CAMEL = {
   draft_requirements_scanned: "draftRequirementsScanned",
   minimum_confidence: "minimumConfidence",
   strongest_signal: "strongestSignal",
+  // GC-U001 / ADR-047 — Audit entity. snake_case MCP args → camelCase backend
+  // DTO fields. Missing entries would cause Jackson to silently drop the fields.
+  audit_id: "auditId",
+  audit_type: "auditType",
+  audit_uid: "auditUid",
+  scope_description: "scopeDescription",
+  team_members: "teamMembers",
+  planned_start: "plannedStart",
+  planned_end: "plannedEnd",
+  actual_start: "actualStart",
+  actual_end: "actualEnd",
+  phase_kind: "kind",
+  clear_objectives: "clearObjectives",
+  clear_phases: "clearPhases",
+  clear_team_members: "clearTeamMembers",
 };
 
 const TO_SNAKE = Object.fromEntries(Object.entries(TO_CAMEL).map(([k, v]) => [v, k]));
@@ -7643,6 +7658,71 @@ export async function supersedeEvidenceArtifact(id, data, project) {
     body: data,
     params: { project },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Audit API functions (GC-U001 / ADR-047)
+// ---------------------------------------------------------------------------
+
+export const AUDIT_TYPES = ["INTERNAL", "EXTERNAL", "REGULATORY", "SPECIAL"];
+export const AUDIT_STATUSES = ["PLANNED", "IN_PROGRESS", "DRAFT_REPORT", "FINAL_REPORT", "CLOSED"];
+export const AUDIT_PHASE_KINDS = ["PLANNING", "FIELDWORK", "REPORTING", "FOLLOWUP"];
+export const AUDIT_LINK_TARGET_TYPES = [
+  "FRAMEWORK", "ASSET", "CONTROL", "RISK_SCENARIO", "RISK_REGISTER_RECORD",
+  "EVIDENCE", "FINDING", "EXTERNAL",
+];
+export const AUDIT_LINK_TYPES = ["SCOPES", "ASSESSES", "EVIDENCED_BY", "FOLLOWS_UP_ON", "ASSOCIATED"];
+
+export async function createAudit(data, project) {
+  return request("POST", "/api/v1/audits", { body: data, params: { project } });
+}
+
+export async function listAudits(project) {
+  return request("GET", "/api/v1/audits", { params: { project } });
+}
+
+export async function getAudit(id, project) {
+  return request("GET", `/api/v1/audits/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function getAuditByUid(uid, project) {
+  return request("GET", `/api/v1/audits/uid/${encodeURIComponent(uid)}`, { params: { project } });
+}
+
+export async function updateAudit(id, data, project) {
+  return request("PUT", `/api/v1/audits/${encodeURIComponent(id)}`, { body: data, params: { project } });
+}
+
+export async function deleteAudit(id, project) {
+  await request("DELETE", `/api/v1/audits/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function transitionAuditStatus(id, status, project) {
+  return request("PUT", `/api/v1/audits/${encodeURIComponent(id)}/status`, {
+    body: { status },
+    params: { project },
+  });
+}
+
+export async function createAuditLink(auditId, data, project) {
+  return request("POST", `/api/v1/audits/${encodeURIComponent(auditId)}/links`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function listAuditLinks(auditId, project) {
+  return request("GET", `/api/v1/audits/${encodeURIComponent(auditId)}/links`, {
+    params: { project },
+  });
+}
+
+export async function deleteAuditLink(auditId, linkId, project) {
+  await request(
+    "DELETE",
+    `/api/v1/audits/${encodeURIComponent(auditId)}/links/${encodeURIComponent(linkId)}`,
+    { params: { project } },
+  );
 }
 
 // ---------------------------------------------------------------------------

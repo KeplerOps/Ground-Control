@@ -1,5 +1,7 @@
 package com.keplerops.groundcontrol.domain.controls.service;
 
+import com.keplerops.groundcontrol.domain.audits.repository.AuditLinkRepository;
+import com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType;
 import com.keplerops.groundcontrol.domain.controls.model.Control;
 import com.keplerops.groundcontrol.domain.controls.repository.ControlEffectivenessAssessmentRepository;
 import com.keplerops.groundcontrol.domain.controls.repository.ControlLinkRepository;
@@ -27,12 +29,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class ControlService {
 
     private static final Logger log = LoggerFactory.getLogger(ControlService.class);
+    private static final String DETAIL_CONTROL_UID = "controlUid";
 
     private final ControlRepository controlRepository;
     private final ControlLinkRepository controlLinkRepository;
     private final ControlTestRepository controlTestRepository;
     private final ControlEffectivenessAssessmentRepository effectivenessAssessmentRepository;
     private final FindingLinkRepository findingLinkRepository;
+    private final AuditLinkRepository auditLinkRepository;
     private final ProjectService projectService;
 
     public ControlService(
@@ -41,12 +45,14 @@ public class ControlService {
             ControlTestRepository controlTestRepository,
             ControlEffectivenessAssessmentRepository effectivenessAssessmentRepository,
             FindingLinkRepository findingLinkRepository,
+            AuditLinkRepository auditLinkRepository,
             ProjectService projectService) {
         this.controlRepository = controlRepository;
         this.controlLinkRepository = controlLinkRepository;
         this.controlTestRepository = controlTestRepository;
         this.effectivenessAssessmentRepository = effectivenessAssessmentRepository;
         this.findingLinkRepository = findingLinkRepository;
+        this.auditLinkRepository = auditLinkRepository;
         this.projectService = projectService;
     }
 
@@ -148,13 +154,28 @@ public class ControlService {
                 FindingLinkTargetType.CONTROL, id, projectId);
         if (!inboundFindingUids.isEmpty()) {
             Map<String, Serializable> detail = new LinkedHashMap<>();
-            detail.put("controlUid", control.getUid());
+            detail.put(DETAIL_CONTROL_UID, control.getUid());
             detail.put("findingCount", inboundFindingUids.size());
             detail.put("findingUids", new ArrayList<>(inboundFindingUids));
             throw new ConflictException(
                     "Control " + control.getUid()
                             + " cannot be deleted while inbound FindingLink references exist. Remove the"
                             + " FindingLink references first, then retry.",
+                    "control_referenced",
+                    detail);
+        }
+
+        var inboundAuditUids = auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                AuditLinkTargetType.CONTROL, id, projectId);
+        if (!inboundAuditUids.isEmpty()) {
+            Map<String, Serializable> detail = new LinkedHashMap<>();
+            detail.put(DETAIL_CONTROL_UID, control.getUid());
+            detail.put("auditCount", inboundAuditUids.size());
+            detail.put("auditUids", new ArrayList<>(inboundAuditUids));
+            throw new ConflictException(
+                    "Control " + control.getUid()
+                            + " cannot be deleted while inbound AuditLink references exist. Remove the"
+                            + " AuditLink references first, then retry.",
                     "control_referenced",
                     detail);
         }
@@ -169,7 +190,7 @@ public class ControlService {
         long assessmentCount = effectivenessAssessmentRepository.countByProjectIdAndControlId(projectId, id);
         if (testCount > 0 || assessmentCount > 0) {
             Map<String, Serializable> detail = new LinkedHashMap<>();
-            detail.put("controlUid", control.getUid());
+            detail.put(DETAIL_CONTROL_UID, control.getUid());
             detail.put("controlTestCount", testCount);
             detail.put("controlEffectivenessAssessmentCount", assessmentCount);
             throw new ConflictException(

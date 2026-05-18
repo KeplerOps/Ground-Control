@@ -49,6 +49,9 @@ class ControlServiceTest {
     private com.keplerops.groundcontrol.domain.findings.repository.FindingLinkRepository findingLinkRepository;
 
     @Mock
+    private com.keplerops.groundcontrol.domain.audits.repository.AuditLinkRepository auditLinkRepository;
+
+    @Mock
     private ProjectService projectService;
 
     @InjectMocks
@@ -254,6 +257,37 @@ class ControlServiceTest {
             var inOrder = org.mockito.Mockito.inOrder(controlLinkRepository, controlRepository);
             inOrder.verify(controlLinkRepository).deleteAll(outboundLinks);
             inOrder.verify(controlRepository).delete(control);
+        }
+
+        @Test
+        void rejectsDeleteWhenInboundAuditLinkReferencesControl() {
+            var control = makeControl();
+            when(controlRepository.findByIdAndProjectId(control.getId(), projectId))
+                    .thenReturn(Optional.of(control));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.CONTROL,
+                            control.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType.CONTROL,
+                            control.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of("AUDIT-001"));
+
+            var controlId = control.getId();
+            var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
+                    com.keplerops.groundcontrol.domain.exception.ConflictException.class,
+                    () -> controlService.delete(projectId, controlId));
+            assertThat(thrown)
+                    .isNotNull()
+                    .hasMessageContaining("AuditLink references exist")
+                    .extracting("errorCode")
+                    .isEqualTo("control_referenced");
+            assertThat(thrown.getDetail()).containsEntry("auditCount", 1);
+            org.mockito.Mockito.verifyNoInteractions(controlLinkRepository);
+            org.mockito.Mockito.verify(controlRepository, org.mockito.Mockito.never())
+                    .delete(control);
         }
 
         @Test
