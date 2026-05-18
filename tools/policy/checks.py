@@ -837,6 +837,7 @@ def run_deploy_compose_credential_passthrough(root: Path = REPO_ROOT) -> list[Vi
 FRONTEND_API_TYPES_PATH = "frontend/src/types/api.ts"
 MCP_LIB_PATH = "mcp/ground-control/lib.js"
 _ENUM_STATE_DIR = "backend/src/main/java/com/keplerops/groundcontrol/domain/requirements/state"
+_AUDIT_ENUM_STATE_DIR = "backend/src/main/java/com/keplerops/groundcontrol/domain/audits/state"
 
 # Java enum body: from the opening `{` to whichever comes first — the `;` that
 # terminates the constant list (present when the enum has methods/fields, e.g.
@@ -858,9 +859,14 @@ def _strip_comments(text: str) -> str:
     are removed up to the newline. Used so a value that exists only inside a
     comment — or a value that was commented *out* — is not counted as an active
     enum member by the regex extractors below.
+
+    Line comments are stripped first so that ``/**`` sequences embedded inside a
+    ``//`` comment (e.g. ``// valid for all '/api/v1/**' paths``) are consumed by
+    the line-comment pass and cannot be mistaken for block-comment openers by the
+    subsequent block-comment pass.
     """
-    text = _BLOCK_COMMENT_RE.sub(" ", text)
-    return _LINE_COMMENT_RE.sub("", text)
+    text = _LINE_COMMENT_RE.sub("", text)
+    return _BLOCK_COMMENT_RE.sub(" ", text)
 
 
 @dataclass(frozen=True)
@@ -885,6 +891,10 @@ ENUM_CONTRACT_INVENTORY: tuple[EnumContract, ...] = (
     # SyncStatus has no MCP mirror today; only the api.ts union type carries it.
     EnumContract("SyncStatus", f"{_ENUM_STATE_DIR}/SyncStatus.java", "SyncStatus", None, None),
     EnumContract("ChangeCategory", f"{_ENUM_STATE_DIR}/ChangeCategory.java", "ChangeCategory", "CHANGE_CATEGORIES", "CHANGE_CATEGORIES"),
+    # GC-U001 / ADR-047 audit entity enums. AuditType and AuditStatus are iterated
+    # by UI and exposed by the MCP gc_audit tool.
+    EnumContract("AuditType", f"{_AUDIT_ENUM_STATE_DIR}/AuditType.java", "AuditType", "AUDIT_TYPES", "AUDIT_TYPES"),
+    EnumContract("AuditStatus", f"{_AUDIT_ENUM_STATE_DIR}/AuditStatus.java", "AuditStatus", "AUDIT_STATUSES", "AUDIT_STATUSES"),
 )
 
 

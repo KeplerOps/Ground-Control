@@ -3,8 +3,11 @@ package com.keplerops.groundcontrol.domain.graph.service;
 import com.keplerops.groundcontrol.domain.assets.repository.ObservationRepository;
 import com.keplerops.groundcontrol.domain.assets.repository.OperationalAssetRepository;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
+import com.keplerops.groundcontrol.domain.audits.repository.AuditRepository;
+import com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType;
 import com.keplerops.groundcontrol.domain.controls.repository.ControlRepository;
 import com.keplerops.groundcontrol.domain.controls.state.ControlLinkTargetType;
+import com.keplerops.groundcontrol.domain.evidence.repository.EvidenceArtifactRepository;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.findings.repository.FindingRepository;
 import com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType;
@@ -42,6 +45,8 @@ public class GraphTargetResolverService {
     private static final String LABEL_THREAT_MODEL = "Threat model";
     private static final String LABEL_VERIFICATION_RESULT = "Verification result";
     private static final String LABEL_FINDING = "Finding";
+    private static final String LABEL_AUDIT = "Audit";
+    private static final String LABEL_EVIDENCE = "Evidence";
 
     private final RequirementRepository requirementRepository;
     private final OperationalAssetRepository assetRepository;
@@ -55,6 +60,8 @@ public class GraphTargetResolverService {
     private final ThreatModelRepository threatModelRepository;
     private final VerificationResultRepository verificationResultRepository;
     private final FindingRepository findingRepository;
+    private final AuditRepository auditRepository;
+    private final EvidenceArtifactRepository evidenceArtifactRepository;
 
     public GraphTargetResolverService(
             RequirementRepository requirementRepository,
@@ -68,7 +75,9 @@ public class GraphTargetResolverService {
             ControlRepository controlRepository,
             ThreatModelRepository threatModelRepository,
             VerificationResultRepository verificationResultRepository,
-            FindingRepository findingRepository) {
+            FindingRepository findingRepository,
+            AuditRepository auditRepository,
+            EvidenceArtifactRepository evidenceArtifactRepository) {
         this.requirementRepository = requirementRepository;
         this.assetRepository = assetRepository;
         this.observationRepository = observationRepository;
@@ -81,6 +90,8 @@ public class GraphTargetResolverService {
         this.threatModelRepository = threatModelRepository;
         this.verificationResultRepository = verificationResultRepository;
         this.findingRepository = findingRepository;
+        this.auditRepository = auditRepository;
+        this.evidenceArtifactRepository = evidenceArtifactRepository;
     }
 
     public ValidatedTarget validateAssetTarget(
@@ -126,7 +137,9 @@ public class GraphTargetResolverService {
                     LABEL_THREAT_MODEL);
             case FINDING -> internalTarget(
                     targetEntityId, findingRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_FINDING);
-            case EVIDENCE, AUDIT, ISSUE, CODE, CONFIGURATION, EXTERNAL -> externalTarget(targetIdentifier);
+            case AUDIT -> internalTarget(
+                    targetEntityId, auditRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_AUDIT);
+            case EVIDENCE, ISSUE, CODE, CONFIGURATION, EXTERNAL -> externalTarget(targetIdentifier);
         };
     }
 
@@ -177,7 +190,9 @@ public class GraphTargetResolverService {
                     LABEL_THREAT_MODEL);
             case FINDING -> internalTarget(
                     targetEntityId, findingRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_FINDING);
-            case VULNERABILITY, EVIDENCE, AUDIT_RECORD, EXTERNAL -> externalTarget(targetIdentifier);
+            case AUDIT_RECORD -> internalTarget(
+                    targetEntityId, auditRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_AUDIT);
+            case VULNERABILITY, EVIDENCE, EXTERNAL -> externalTarget(targetIdentifier);
         };
     }
 
@@ -284,7 +299,38 @@ public class GraphTargetResolverService {
                             .findByIdWithAssetAndProjectId(targetEntityId, projectId)
                             .isPresent(),
                     LABEL_OBSERVATION);
-            case OPERATIONAL_ARTIFACT, EVIDENCE, AUDIT, REMEDIATION_PLAN, EXTERNAL -> externalTarget(targetIdentifier);
+            case AUDIT -> internalTarget(
+                    targetEntityId, auditRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_AUDIT);
+            case OPERATIONAL_ARTIFACT, EVIDENCE, REMEDIATION_PLAN, EXTERNAL -> externalTarget(targetIdentifier);
+        };
+    }
+
+    public ValidatedTarget validateAuditTarget(
+            UUID projectId, AuditLinkTargetType targetType, UUID targetEntityId, String targetIdentifier) {
+        return switch (targetType) {
+            case ASSET -> internalTarget(
+                    targetEntityId, assetRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_ASSET);
+            case CONTROL -> internalTarget(
+                    targetEntityId, controlRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_CONTROL);
+            case RISK_SCENARIO -> internalTarget(
+                    targetEntityId,
+                    riskScenarioRepository.existsByIdAndProjectId(targetEntityId, projectId),
+                    LABEL_RISK_SCENARIO);
+            case RISK_REGISTER_RECORD -> internalTarget(
+                    targetEntityId,
+                    riskRegisterRecordRepository
+                            .findByIdAndProjectIdWithScenarios(targetEntityId, projectId)
+                            .isPresent(),
+                    LABEL_RISK_REGISTER_RECORD);
+            case EVIDENCE -> internalTarget(
+                    targetEntityId,
+                    evidenceArtifactRepository
+                            .findByIdAndProjectId(targetEntityId, projectId)
+                            .isPresent(),
+                    LABEL_EVIDENCE);
+            case FINDING -> internalTarget(
+                    targetEntityId, findingRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_FINDING);
+            case FRAMEWORK, EXTERNAL -> externalTarget(targetIdentifier);
         };
     }
 

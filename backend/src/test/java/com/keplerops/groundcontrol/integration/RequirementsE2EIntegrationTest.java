@@ -497,6 +497,10 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "096", // V096: create test_suite_member
                         "097", // V097: create test_suite_member_audit
                         "098", // V098: create test_suite_source_requirement
-                        "099"); // V099: create test_suite_source_requirement_audit
+                        "099", // V099: create test_suite_source_requirement_audit
+                        "100", // V100: create audit (GC-U001 / ADR-048 audit-entity-boundary)
+                        "101", // V101: create audit_audit
+                        "102", // V102: create audit_link
+                        "103"); // V103: create audit_link_audit
     }
 }

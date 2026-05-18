@@ -15,6 +15,8 @@ import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetSubtypeSchemaStatus;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.assets.validation.AssetSubtypeValidator;
+import com.keplerops.groundcontrol.domain.audits.repository.AuditLinkRepository;
+import com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
@@ -47,6 +49,7 @@ public class AssetService {
     private final AssetLinkRepository linkRepository;
     private final AssetExternalIdRepository externalIdRepository;
     private final FindingLinkRepository findingLinkRepository;
+    private final AuditLinkRepository auditLinkRepository;
     private final ProjectRepository projectRepository;
     private final GraphTargetResolverService graphTargetResolverService;
     private final AssetSubtypeSchemaRepository subtypeSchemaRepository;
@@ -58,6 +61,7 @@ public class AssetService {
             AssetLinkRepository linkRepository,
             AssetExternalIdRepository externalIdRepository,
             FindingLinkRepository findingLinkRepository,
+            AuditLinkRepository auditLinkRepository,
             ProjectRepository projectRepository,
             GraphTargetResolverService graphTargetResolverService,
             AssetSubtypeSchemaRepository subtypeSchemaRepository,
@@ -67,6 +71,7 @@ public class AssetService {
         this.linkRepository = linkRepository;
         this.externalIdRepository = externalIdRepository;
         this.findingLinkRepository = findingLinkRepository;
+        this.auditLinkRepository = auditLinkRepository;
         this.projectRepository = projectRepository;
         this.graphTargetResolverService = graphTargetResolverService;
         this.subtypeSchemaRepository = subtypeSchemaRepository;
@@ -328,6 +333,20 @@ public class AssetService {
                     "Asset " + assetUid
                             + " cannot be deleted while inbound FindingLink references exist. Remove the"
                             + " FindingLink references first, then retry.",
+                    "asset_referenced",
+                    detail);
+        }
+        var inboundAuditUids = auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                AuditLinkTargetType.ASSET, assetId, projectId);
+        if (!inboundAuditUids.isEmpty()) {
+            Map<String, Serializable> detail = new LinkedHashMap<>();
+            detail.put("assetUid", assetUid);
+            detail.put("auditCount", inboundAuditUids.size());
+            detail.put("auditUids", new ArrayList<>(inboundAuditUids));
+            throw new ConflictException(
+                    "Asset " + assetUid
+                            + " cannot be deleted while inbound AuditLink references exist. Remove the"
+                            + " AuditLink references first, then retry.",
                     "asset_referenced",
                     detail);
         }

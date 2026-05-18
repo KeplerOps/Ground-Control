@@ -18,6 +18,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   ARTIFACT_TYPES,
+  AUDIT_STATUSES,
+  AUDIT_TYPES,
   CHANGE_CATEGORIES,
   LINK_TYPES,
   PRIORITIES,
@@ -28,10 +30,12 @@ import {
 
 const STATE_DIR =
   "../../../backend/src/main/java/com/keplerops/groundcontrol/domain/requirements/state";
+const AUDIT_STATE_DIR =
+  "../../../backend/src/main/java/com/keplerops/groundcontrol/domain/audits/state";
 
-function javaEnumConstants(enumClassName: string): string[] {
+function javaEnumConstantsIn(stateDir: string, enumClassName: string): string[] {
   const path = fileURLToPath(
-    new URL(`${STATE_DIR}/${enumClassName}.java`, import.meta.url),
+    new URL(`${stateDir}/${enumClassName}.java`, import.meta.url),
   );
   // Strip line and block comments so a commented-out constant is not counted.
   const source = readFileSync(path, "utf-8")
@@ -50,6 +54,10 @@ function javaEnumConstants(enumClassName: string): string[] {
     .split(/[,\s]+/)
     .map((token) => token.trim())
     .filter((token) => /^[A-Z][A-Z0-9_]*$/.test(token));
+}
+
+function javaEnumConstants(enumClassName: string): string[] {
+  return javaEnumConstantsIn(STATE_DIR, enumClassName);
 }
 
 describe("frontend enum constants match the backend Java source of truth", () => {
@@ -75,5 +83,19 @@ describe("frontend enum constants match the backend Java source of truth", () =>
     for (const value of ["PULL_REQUEST", "RISK_SCENARIO", "CONTROL"]) {
       expect(ARTIFACT_TYPES).toContain(value);
     }
+  });
+});
+
+describe("GC-U001 audit enum constants match the backend Java source of truth", () => {
+  it("AuditStatus — api.ts constant equals the Java enum constants (in order)", () => {
+    expect([...AUDIT_STATUSES]).toEqual(
+      javaEnumConstantsIn(AUDIT_STATE_DIR, "AuditStatus"),
+    );
+  });
+
+  it("AuditType — api.ts constant equals the Java enum constants (in order)", () => {
+    expect([...AUDIT_TYPES]).toEqual(
+      javaEnumConstantsIn(AUDIT_STATE_DIR, "AuditType"),
+    );
   });
 });

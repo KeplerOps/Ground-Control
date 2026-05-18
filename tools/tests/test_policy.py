@@ -459,6 +459,8 @@ class PolicyChecksTest(unittest.TestCase):
                 "Priority",
                 "SyncStatus",
                 "ChangeCategory",
+                "AuditType",
+                "AuditStatus",
             },
         )
         for contract in ENUM_CONTRACT_INVENTORY:

@@ -1,5 +1,7 @@
 package com.keplerops.groundcontrol.domain.riskscenarios.service;
 
+import com.keplerops.groundcontrol.domain.audits.repository.AuditLinkRepository;
+import com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
@@ -9,7 +11,11 @@ import com.keplerops.groundcontrol.domain.riskscenarios.model.RiskScenario;
 import com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskRegisterRecordRepository;
 import com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskScenarioRepository;
 import com.keplerops.groundcontrol.domain.riskscenarios.state.RiskRegisterStatus;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,14 +26,17 @@ public class RiskRegisterRecordService {
 
     private final RiskRegisterRecordRepository repository;
     private final RiskScenarioRepository riskScenarioRepository;
+    private final AuditLinkRepository auditLinkRepository;
     private final ProjectService projectService;
 
     public RiskRegisterRecordService(
             RiskRegisterRecordRepository repository,
             RiskScenarioRepository riskScenarioRepository,
+            AuditLinkRepository auditLinkRepository,
             ProjectService projectService) {
         this.repository = repository;
         this.riskScenarioRepository = riskScenarioRepository;
+        this.auditLinkRepository = auditLinkRepository;
         this.projectService = projectService;
     }
 
@@ -85,7 +94,22 @@ public class RiskRegisterRecordService {
     }
 
     public void delete(UUID projectId, UUID id) {
-        repository.delete(getById(projectId, id));
+        var record = getById(projectId, id);
+        var inboundAuditUids = auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                AuditLinkTargetType.RISK_REGISTER_RECORD, id, projectId);
+        if (!inboundAuditUids.isEmpty()) {
+            Map<String, Serializable> detail = new LinkedHashMap<>();
+            detail.put("riskRegisterRecordUid", record.getUid());
+            detail.put("auditCount", inboundAuditUids.size());
+            detail.put("auditUids", new ArrayList<>(inboundAuditUids));
+            throw new ConflictException(
+                    "Risk register record " + record.getUid()
+                            + " cannot be deleted while inbound AuditLink references exist. Remove the"
+                            + " AuditLink references first, then retry.",
+                    "risk_register_record_referenced",
+                    detail);
+        }
+        repository.delete(record);
     }
 
     private List<RiskScenario> resolveScenarios(UUID projectId, List<UUID> ids) {

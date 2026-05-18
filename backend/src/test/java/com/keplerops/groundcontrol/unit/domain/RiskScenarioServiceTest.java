@@ -45,6 +45,9 @@ class RiskScenarioServiceTest {
     private com.keplerops.groundcontrol.domain.findings.repository.FindingLinkRepository findingLinkRepository;
 
     @Mock
+    private com.keplerops.groundcontrol.domain.audits.repository.AuditLinkRepository auditLinkRepository;
+
+    @Mock
     private ProjectService projectService;
 
     @SuppressWarnings("UnusedVariable") // needed by @InjectMocks for constructor injection
@@ -363,6 +366,36 @@ class RiskScenarioServiceTest {
             riskScenarioService.delete(projectId, rs.getId());
 
             verify(riskScenarioRepository).delete(rs);
+        }
+
+        @Test
+        void rejectsDeleteWhenInboundAuditLinkReferencesScenario() {
+            var rs = makeScenario();
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.RISK_SCENARIO,
+                            rs.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType.RISK_SCENARIO,
+                            rs.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of("AUDIT-001"));
+
+            var rsId = rs.getId();
+            var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
+                    ConflictException.class, () -> riskScenarioService.delete(projectId, rsId));
+            assertThat(thrown)
+                    .isNotNull()
+                    .hasMessageContaining("AuditLink references exist")
+                    .extracting("errorCode")
+                    .isEqualTo("risk_scenario_referenced");
+            assertThat(thrown.getDetail()).containsEntry("auditCount", 1);
+            org.mockito.Mockito.verifyNoInteractions(riskScenarioLinkRepository);
+            org.mockito.Mockito.verify(riskScenarioRepository, org.mockito.Mockito.never())
+                    .delete(rs);
         }
 
         @Test

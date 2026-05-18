@@ -196,7 +196,11 @@ public class AssetGraphProjectionContributor implements GraphProjectionContribut
                         // keeps VERIFIED_CLOSED finding nodes in the graph (see its
                         // contributeNodes javadoc) so this edge never dangles.
                     case FINDING -> GraphEntityType.FINDING;
-                    case EVIDENCE, AUDIT, ISSUE, CODE, CONFIGURATION, EXTERNAL -> null;
+                        // Always emits an edge to the AUDIT node. AuditGraphProjectionContributor
+                        // keeps all audit nodes in the graph regardless of status so this edge
+                        // never dangles.
+                    case AUDIT -> GraphEntityType.AUDIT;
+                    case EVIDENCE, ISSUE, CODE, CONFIGURATION, EXTERNAL -> null;
                 };
         if (targetEntityType == null) {
             return null;

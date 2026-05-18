@@ -74,6 +74,9 @@ class AssetServiceTest {
     private com.keplerops.groundcontrol.domain.findings.repository.FindingLinkRepository findingLinkRepository;
 
     @Mock
+    private com.keplerops.groundcontrol.domain.audits.repository.AuditLinkRepository auditLinkRepository;
+
+    @Mock
     private ProjectRepository projectRepository;
 
     @Mock
@@ -564,6 +567,36 @@ class AssetServiceTest {
             var inOrder = org.mockito.Mockito.inOrder(linkRepository, assetRepository);
             inOrder.verify(linkRepository).deleteAll(outboundLinks);
             inOrder.verify(assetRepository).delete(asset);
+        }
+
+        @Test
+        void rejectsDeleteWhenInboundAuditLinkReferencesAsset() {
+            var asset = createAsset("ASSET-002", "Test");
+            var assetId = asset.getId();
+            when(assetRepository.findByIdAndProjectId(assetId, projectId)).thenReturn(Optional.of(asset));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.ASSET,
+                            assetId,
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType.ASSET,
+                            assetId,
+                            projectId))
+                    .thenReturn(java.util.List.of("AUDIT-001"));
+
+            var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
+                    com.keplerops.groundcontrol.domain.exception.ConflictException.class,
+                    () -> assetService.delete(projectId, assetId));
+            assertThat(thrown)
+                    .isNotNull()
+                    .hasMessageContaining("AuditLink references exist")
+                    .extracting("errorCode")
+                    .isEqualTo("asset_referenced");
+            assertThat(thrown.getDetail()).containsEntry("auditCount", 1);
+            org.mockito.Mockito.verifyNoInteractions(linkRepository);
+            org.mockito.Mockito.verify(assetRepository, org.mockito.Mockito.never())
+                    .delete(asset);
         }
 
         @Test
