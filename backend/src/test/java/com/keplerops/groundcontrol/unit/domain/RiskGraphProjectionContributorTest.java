@@ -148,11 +148,42 @@ class RiskGraphProjectionContributorTest {
                 .extracting(edge -> edge.edgeType())
                 .containsExactlyInAnyOrder(
                         "AFFECTS", "TRACKS", "ASSESSES", "USES_METHOD", "USED_OBSERVATION", "TREATS");
-        assertThat(edges).anySatisfy(edge -> {
-            if (edge.edgeType().equals("AFFECTS")) {
-                assertThat(edge.targetId())
-                        .isEqualTo(GraphIds.nodeId(GraphEntityType.OPERATIONAL_ASSET, observationAsset.getId()));
-            }
-        });
+        assertThat(edges)
+                .filteredOn(edge -> edge.edgeType().equals("AFFECTS"))
+                .singleElement()
+                .extracting(edge -> edge.targetId())
+                .isEqualTo(GraphIds.nodeId(GraphEntityType.OPERATIONAL_ASSET, observationAsset.getId()));
+    }
+
+    @Test
+    void emitsEvidenceArtifactEdgeForEvidenceLink() {
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var scenario = new RiskScenario(project, "RS-1", "Scenario", "Actor", "Exploit", "Gateway", "Service outage");
+        setField(scenario, "id", UUID.randomUUID());
+        scenario.setTimeHorizon("12 months");
+        scenario.setCreatedBy("analyst");
+        scenario.transitionStatus(RiskScenarioStatus.ACTIVE);
+
+        var evidenceId = UUID.randomUUID();
+        var evidenceLink = new RiskScenarioLink(
+                scenario, RiskScenarioLinkTargetType.EVIDENCE, evidenceId, null, RiskScenarioLinkType.ASSOCIATED);
+        setField(evidenceLink, "id", UUID.randomUUID());
+
+        when(riskScenarioLinkRepository.findByProjectId(projectId)).thenReturn(List.of(evidenceLink));
+        when(riskRegisterRecordRepository.findByProjectIdWithScenariosOrderByCreatedAtDesc(projectId))
+                .thenReturn(List.of());
+        when(riskAssessmentResultRepository.findByProjectIdWithObservationsOrderByCreatedAtDesc(projectId))
+                .thenReturn(List.of());
+        when(treatmentPlanRepository.findByProjectIdOrderByCreatedAtDesc(projectId))
+                .thenReturn(List.of());
+
+        var edges = contributor.contributeEdges(projectId);
+
+        assertThat(edges).hasSize(1);
+        assertThat(edges.get(0).targetEntityType()).isEqualTo(GraphEntityType.EVIDENCE_ARTIFACT);
+        assertThat(edges.get(0).targetId()).isEqualTo(GraphIds.nodeId(GraphEntityType.EVIDENCE_ARTIFACT, evidenceId));
     }
 }

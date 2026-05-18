@@ -139,7 +139,13 @@ public class GraphTargetResolverService {
                     targetEntityId, findingRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_FINDING);
             case AUDIT -> internalTarget(
                     targetEntityId, auditRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_AUDIT);
-            case EVIDENCE, ISSUE, CODE, CONFIGURATION, EXTERNAL -> externalTarget(targetIdentifier);
+            case EVIDENCE -> internalTarget(
+                    targetEntityId,
+                    evidenceArtifactRepository
+                            .findByIdAndProjectId(targetEntityId, projectId)
+                            .isPresent(),
+                    LABEL_EVIDENCE);
+            case ISSUE, CODE, CONFIGURATION, EXTERNAL -> externalTarget(targetIdentifier);
         };
     }
 
@@ -192,7 +198,13 @@ public class GraphTargetResolverService {
                     targetEntityId, findingRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_FINDING);
             case AUDIT_RECORD -> internalTarget(
                     targetEntityId, auditRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_AUDIT);
-            case VULNERABILITY, EVIDENCE, EXTERNAL -> externalTarget(targetIdentifier);
+            case EVIDENCE -> internalTarget(
+                    targetEntityId,
+                    evidenceArtifactRepository
+                            .findByIdAndProjectId(targetEntityId, projectId)
+                            .isPresent(),
+                    LABEL_EVIDENCE);
+            case VULNERABILITY, EXTERNAL -> externalTarget(targetIdentifier);
         };
     }
 
@@ -241,7 +253,13 @@ public class GraphTargetResolverService {
                     LABEL_OBSERVATION);
             case FINDING -> internalTarget(
                     targetEntityId, findingRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_FINDING);
-            case EVIDENCE, CODE, CONFIGURATION, OPERATIONAL_ARTIFACT, EXTERNAL -> externalTarget(targetIdentifier);
+            case EVIDENCE -> internalTarget(
+                    targetEntityId,
+                    evidenceArtifactRepository
+                            .findByIdAndProjectId(targetEntityId, projectId)
+                            .isPresent(),
+                    LABEL_EVIDENCE);
+            case CODE, CONFIGURATION, OPERATIONAL_ARTIFACT, EXTERNAL -> externalTarget(targetIdentifier);
         };
     }
 
@@ -278,7 +296,13 @@ public class GraphTargetResolverService {
                     LABEL_VERIFICATION_RESULT);
             case FINDING -> internalTarget(
                     targetEntityId, findingRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_FINDING);
-            case ARCHITECTURE_MODEL, CODE, ISSUE, EVIDENCE, EXTERNAL -> externalTarget(targetIdentifier);
+            case EVIDENCE -> internalTarget(
+                    targetEntityId,
+                    evidenceArtifactRepository
+                            .findByIdAndProjectId(targetEntityId, projectId)
+                            .isPresent(),
+                    LABEL_EVIDENCE);
+            case ARCHITECTURE_MODEL, CODE, ISSUE, EXTERNAL -> externalTarget(targetIdentifier);
         };
     }
 
@@ -301,7 +325,13 @@ public class GraphTargetResolverService {
                     LABEL_OBSERVATION);
             case AUDIT -> internalTarget(
                     targetEntityId, auditRepository.existsByIdAndProjectId(targetEntityId, projectId), LABEL_AUDIT);
-            case OPERATIONAL_ARTIFACT, EVIDENCE, REMEDIATION_PLAN, EXTERNAL -> externalTarget(targetIdentifier);
+            case EVIDENCE -> internalTarget(
+                    targetEntityId,
+                    evidenceArtifactRepository
+                            .findByIdAndProjectId(targetEntityId, projectId)
+                            .isPresent(),
+                    LABEL_EVIDENCE);
+            case OPERATIONAL_ARTIFACT, REMEDIATION_PLAN, EXTERNAL -> externalTarget(targetIdentifier);
         };
     }
 

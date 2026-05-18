@@ -111,29 +111,63 @@ class FindingLinkServiceTest {
 
         @Test
         void createsExternalLink() {
+            // OPERATIONAL_ARTIFACT remains external per ADR-011; EVIDENCE was promoted
+            // to an internal first-class target in GC-L006 and is covered by
+            // createsInternalEvidenceLink below.
             when(findingRepository.findByIdAndProjectId(findingId, projectId)).thenReturn(Optional.of(finding));
             when(graphTargetResolverService.validateFindingTarget(
-                            projectId, FindingLinkTargetType.EVIDENCE, null, "s3://evidence/audit-2026-q2.pdf"))
-                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(
-                            null, "s3://evidence/audit-2026-q2.pdf", false));
+                            projectId, FindingLinkTargetType.OPERATIONAL_ARTIFACT, null, "artifact://q2-runbook"))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(null, "artifact://q2-runbook", false));
             when(linkRepository.existsByFindingIdAndTargetTypeAndTargetIdentifierAndLinkType(
                             any(), any(), any(), any()))
                     .thenReturn(false);
             when(linkRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
             var command = new CreateFindingLinkCommand(
-                    FindingLinkTargetType.EVIDENCE,
+                    FindingLinkTargetType.OPERATIONAL_ARTIFACT,
                     null,
-                    "s3://evidence/audit-2026-q2.pdf",
+                    "artifact://q2-runbook",
+                    FindingLinkType.ASSOCIATED,
+                    "https://runbooks.example.com/q2",
+                    "Q2 2026 runbook");
+
+            var result = linkService.create(projectId, findingId, command);
+
+            assertThat(result.getTargetType()).isEqualTo(FindingLinkTargetType.OPERATIONAL_ARTIFACT);
+            assertThat(result.getTargetIdentifier()).isEqualTo("artifact://q2-runbook");
+            assertThat(result.getTargetEntityId()).isNull();
+            assertThat(result.getLinkType()).isEqualTo(FindingLinkType.ASSOCIATED);
+            assertThat(result.getTargetUrl()).isEqualTo("https://runbooks.example.com/q2");
+            assertThat(result.getTargetTitle()).isEqualTo("Q2 2026 runbook");
+        }
+
+        @Test
+        void createsInternalEvidenceLink() {
+            // GC-L006 promoted EVIDENCE from external to internal: callers must now
+            // supply an EvidenceArtifact targetEntityId; the resolver validates the
+            // UUID against EvidenceArtifactRepository.
+            var evidenceId = UUID.randomUUID();
+            when(findingRepository.findByIdAndProjectId(findingId, projectId)).thenReturn(Optional.of(finding));
+            when(graphTargetResolverService.validateFindingTarget(
+                            projectId, FindingLinkTargetType.EVIDENCE, evidenceId, null))
+                    .thenReturn(new GraphTargetResolverService.ValidatedTarget(evidenceId, null, true));
+            when(linkRepository.existsByFindingIdAndTargetTypeAndTargetEntityIdAndLinkType(any(), any(), any(), any()))
+                    .thenReturn(false);
+            when(linkRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new CreateFindingLinkCommand(
+                    FindingLinkTargetType.EVIDENCE,
+                    evidenceId,
+                    null,
                     FindingLinkType.EVIDENCED_BY,
-                    "https://evidence.example.com/audit-2026-q2",
-                    "Q2 2026 audit report");
+                    null,
+                    "Q2 2026 audit evidence");
 
             var result = linkService.create(projectId, findingId, command);
 
             assertThat(result.getTargetType()).isEqualTo(FindingLinkTargetType.EVIDENCE);
-            assertThat(result.getTargetIdentifier()).isEqualTo("s3://evidence/audit-2026-q2.pdf");
-            assertThat(result.getTargetEntityId()).isNull();
+            assertThat(result.getTargetEntityId()).isEqualTo(evidenceId);
+            assertThat(result.getTargetIdentifier()).isNull();
             assertThat(result.getLinkType()).isEqualTo(FindingLinkType.EVIDENCED_BY);
         }
 

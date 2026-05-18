@@ -131,7 +131,12 @@ public class ThreatModelGraphProjectionContributor implements GraphProjectionCon
                     case RISK_ASSESSMENT_RESULT -> GraphEntityType.RISK_ASSESSMENT_RESULT;
                     case VERIFICATION_RESULT -> GraphEntityType.VERIFICATION_RESULT;
                     case FINDING -> GraphEntityType.FINDING;
-                    case ARCHITECTURE_MODEL, CODE, ISSUE, EVIDENCE, EXTERNAL -> null;
+                        // Always emits an edge to the EVIDENCE_ARTIFACT node.
+                        // EvidenceArtifactGraphProjectionContributor projects every
+                        // evidence artifact (current and superseded) so this edge
+                        // never dangles.
+                    case EVIDENCE -> GraphEntityType.EVIDENCE_ARTIFACT;
+                    case ARCHITECTURE_MODEL, CODE, ISSUE, EXTERNAL -> null;
                 };
         if (targetEntityType == null) {
             return null;
