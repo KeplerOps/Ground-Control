@@ -39,6 +39,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -131,52 +133,34 @@ class TestRunControllerTest {
         assertThat(cmd.endAt()).isEqualTo(Instant.parse("2026-06-30T00:00:00Z"));
     }
 
-    @Test
-    void createReturns422WhenUidBlank() throws Exception {
+    @ParameterizedTest(name = "create returns 422 — {0}")
+    @MethodSource("invalidCreatePayloads")
+    void createReturns422OnInvalidRequest(String label, String body) throws Exception {
         when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
 
-        mockMvc.perform(
-                        post("/api/v1/test-runs")
-                                .param("project", "ground-control")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content(
-                                        """
-                                {"uid":"","name":"Run","testPlanId":"00000000-0000-0000-0000-000000000100","testSuiteId":"00000000-0000-0000-0000-000000000200"}
-                                """))
+        mockMvc.perform(post("/api/v1/test-runs")
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
                 .andExpect(status().isUnprocessableEntity());
         verifyNoInteractions(testRunService);
     }
 
-    @Test
-    void createReturns422WhenPlanIdMissing() throws Exception {
-        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
-
-        mockMvc.perform(
-                        post("/api/v1/test-runs")
-                                .param("project", "ground-control")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content(
-                                        """
-                                {"uid":"TR-001","name":"Run","testSuiteId":"00000000-0000-0000-0000-000000000200"}
-                                """))
-                .andExpect(status().isUnprocessableEntity());
-        verifyNoInteractions(testRunService);
-    }
-
-    @Test
-    void createReturns422WhenSuiteIdMissing() throws Exception {
-        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
-
-        mockMvc.perform(
-                        post("/api/v1/test-runs")
-                                .param("project", "ground-control")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content(
-                                        """
-                                {"uid":"TR-001","name":"Run","testPlanId":"00000000-0000-0000-0000-000000000100"}
-                                """))
-                .andExpect(status().isUnprocessableEntity());
-        verifyNoInteractions(testRunService);
+    private static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> invalidCreatePayloads() {
+        return java.util.stream.Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of(
+                        "blank uid",
+                        "{\"uid\":\"\",\"name\":\"Run\","
+                                + "\"testPlanId\":\"00000000-0000-0000-0000-000000000100\","
+                                + "\"testSuiteId\":\"00000000-0000-0000-0000-000000000200\"}"),
+                org.junit.jupiter.params.provider.Arguments.of(
+                        "missing testPlanId",
+                        "{\"uid\":\"TR-001\",\"name\":\"Run\","
+                                + "\"testSuiteId\":\"00000000-0000-0000-0000-000000000200\"}"),
+                org.junit.jupiter.params.provider.Arguments.of(
+                        "missing testSuiteId",
+                        "{\"uid\":\"TR-001\",\"name\":\"Run\","
+                                + "\"testPlanId\":\"00000000-0000-0000-0000-000000000100\"}"));
     }
 
     @Test

@@ -168,22 +168,27 @@ public class TestSuiteService {
         return suite;
     }
 
+    /**
+     * Delete a test suite after rejecting it if any test runs reference it.
+     *
+     * <p>Per TC-008 / ADR-049, the run-side FK is non-null; this check raises
+     * a domain-aware {@link ConflictException} before any child rows are
+     * touched, so the operation stays atomic and the caller receives a
+     * useful message rather than a late persistence integrity violation.
+     *
+     * <p>Children are loaded and entity-deleted (rather than bulk-deleted via
+     * JPQL) so the persistence context stays consistent — a bulk delete
+     * would leave stale instances pointing at the about-to-be-removed parent
+     * and Hibernate would trip on a {@code TransientObjectException} when
+     * the suite is flushed in the same transaction. The schema-level
+     * cascade still backs this path up if a future caller side-steps it.
+     */
     public void delete(UUID projectId, UUID id) {
         var suite = requireSuiteInProject(projectId, id);
-        // TC-008 / ADR-049: TestRun rows carry a NOT NULL FK to this suite;
-        // reject deletion with a domain-aware conflict before touching child
-        // membership rows so the operation is atomic and the caller receives
-        // a meaningful message instead of a late DataIntegrityViolationException.
         if (testRunRepository.existsByTestSuiteId(suite.getId())) {
             throw new ConflictException(
                     "Test suite " + suite.getUid() + " has associated test runs; archive or delete those first");
         }
-        // Load + entity-delete the children so the persistence context stays
-        // consistent — a bulk JPQL DELETE would leave stale instances in the
-        // PC that point at the about-to-be-removed parent, which Hibernate
-        // would then trip on as a TransientObjectException when the suite
-        // itself is removed in the same flush. ON DELETE CASCADE in the
-        // schema still backs us up if a future caller side-steps this path.
         memberRepository.deleteAll(memberRepository.findByTestSuiteId(suite.getId()));
         sourceRepository.deleteAll(sourceRepository.findByTestSuiteId(suite.getId()));
         testSuiteRepository.delete(suite);

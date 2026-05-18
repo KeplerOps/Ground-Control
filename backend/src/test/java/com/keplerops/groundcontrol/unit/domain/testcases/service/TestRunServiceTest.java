@@ -4,7 +4,6 @@ import static com.keplerops.groundcontrol.TestUtil.setField;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -135,7 +134,7 @@ class TestRunServiceTest {
         assertThat(saved.get(0).getTestCase()).isSameAs(tc1);
         assertThat(saved.get(0).getTestCaseUid()).isEqualTo("TC-001");
         assertThat(saved.get(0).getTestCaseTitle()).isEqualTo("Login");
-        assertThat(saved.get(0).getSnapshotOrder()).isEqualTo(0);
+        assertThat(saved.get(0).getSnapshotOrder()).isZero();
         assertThat(saved.get(1).getTestCase()).isSameAs(tc2);
         assertThat(saved.get(1).getTestCaseUid()).isEqualTo("TC-002");
         assertThat(saved.get(1).getTestCaseTitle()).isEqualTo("Logout");
@@ -275,21 +274,11 @@ class TestRunServiceTest {
     void updateRejectsInvertedScheduleAtomic() {
         var run = mkRun();
         when(testRunRepository.findByIdAndProjectId(RUN_ID, PROJECT_ID)).thenReturn(Optional.of(run));
-        assertThatThrownBy(() -> service.update(
-                        PROJECT_ID,
-                        RUN_ID,
-                        new UpdateTestRunCommand(
-                                null,
-                                null,
-                                null,
-                                null,
-                                Instant.parse("2026-07-31T00:00:00Z"),
-                                Instant.parse("2026-07-01T00:00:00Z"),
-                                false,
-                                false,
-                                false,
-                                false,
-                                false)))
+        var invertedStart = Instant.parse("2026-07-31T00:00:00Z");
+        var invertedEnd = Instant.parse("2026-07-01T00:00:00Z");
+        var invertedUpdate = new UpdateTestRunCommand(
+                null, null, null, null, invertedStart, invertedEnd, false, false, false, false, false);
+        assertThatThrownBy(() -> service.update(PROJECT_ID, RUN_ID, invertedUpdate))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("end_at must be on or after start_at");
     }
@@ -407,11 +396,8 @@ class TestRunServiceTest {
         var run = mkRun();
         when(testRunRepository.findByIdAndProjectId(RUN_ID, PROJECT_ID)).thenReturn(Optional.of(run));
         when(caseResultRepository.findByTestRunIdAndTestCaseId(RUN_ID, TC2_ID)).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.updateResult(
-                        PROJECT_ID,
-                        RUN_ID,
-                        TC2_ID,
-                        new UpdateTestRunCaseResultCommand(TestRunCaseResultStatus.PASSED, null, false)))
+        var passedCommand = new UpdateTestRunCaseResultCommand(TestRunCaseResultStatus.PASSED, null, false);
+        assertThatThrownBy(() -> service.updateResult(PROJECT_ID, RUN_ID, TC2_ID, passedCommand))
                 .isInstanceOf(NotFoundException.class);
     }
 
@@ -422,8 +408,8 @@ class TestRunServiceTest {
         var existing = new TestRunCaseResult(run, tc, "TC-001", "Login", 0);
         when(testRunRepository.findByIdAndProjectId(RUN_ID, PROJECT_ID)).thenReturn(Optional.of(run));
         when(caseResultRepository.findByTestRunIdAndTestCaseId(RUN_ID, TC1_ID)).thenReturn(Optional.of(existing));
-        assertThatThrownBy(() -> service.updateResult(
-                        PROJECT_ID, RUN_ID, TC1_ID, new UpdateTestRunCaseResultCommand(null, null, false)))
+        var nullStatusCommand = new UpdateTestRunCaseResultCommand(null, null, false);
+        assertThatThrownBy(() -> service.updateResult(PROJECT_ID, RUN_ID, TC1_ID, nullStatusCommand))
                 .isInstanceOf(DomainValidationException.class);
     }
 
@@ -453,8 +439,7 @@ class TestRunServiceTest {
 
     @Test
     void getByUidThrowsWhenAbsent() {
-        when(testRunRepository.findByProjectIdAndUid(eq(PROJECT_ID), eq("missing")))
-                .thenReturn(Optional.empty());
+        when(testRunRepository.findByProjectIdAndUid(PROJECT_ID, "missing")).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.getByUid(PROJECT_ID, "missing")).isInstanceOf(NotFoundException.class);
     }
 }

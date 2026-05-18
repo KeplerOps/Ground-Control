@@ -147,12 +147,17 @@ public class TestPlanService {
         return plan;
     }
 
+    /**
+     * Delete a test plan after ensuring no test runs reference it.
+     *
+     * <p>Per TC-008 / ADR-049, a {@code TestRun} carries a non-null FK to the
+     * driving plan. Without this guard, callers would receive a late
+     * persistence-layer integrity violation translated to a generic conflict
+     * envelope; the explicit check raises a domain-aware
+     * {@link ConflictException} naming the plan UID and the resolution.
+     */
     public void delete(UUID projectId, UUID id) {
         var plan = requirePlanInProject(projectId, id);
-        // TC-008 / ADR-049: TestRun rows carry a NOT NULL FK to this plan;
-        // reject deletion with a domain-aware conflict so callers receive a
-        // meaningful message instead of a late DataIntegrityViolationException
-        // translated to the generic resource_conflict envelope.
         if (testRunRepository.existsByTestPlanId(plan.getId())) {
             throw new ConflictException(
                     "Test plan " + plan.getUid() + " has associated test runs; archive or delete those first");

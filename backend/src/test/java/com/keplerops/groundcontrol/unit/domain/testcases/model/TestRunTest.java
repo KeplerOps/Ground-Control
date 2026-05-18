@@ -120,7 +120,8 @@ class TestRunTest {
     void setStartAtRejectsValueAfterEndAt() {
         var run = newRun();
         run.setEndAt(Instant.parse("2026-06-01T00:00:00Z"));
-        assertThatThrownBy(() -> run.setStartAt(Instant.parse("2026-06-02T00:00:00Z")))
+        var invalidStart = Instant.parse("2026-06-02T00:00:00Z");
+        assertThatThrownBy(() -> run.setStartAt(invalidStart))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("start_at must be on or before end_at");
     }
@@ -129,7 +130,8 @@ class TestRunTest {
     void setEndAtRejectsValueBeforeStartAt() {
         var run = newRun();
         run.setStartAt(Instant.parse("2026-06-01T00:00:00Z"));
-        assertThatThrownBy(() -> run.setEndAt(Instant.parse("2026-05-31T00:00:00Z")))
+        var invalidEnd = Instant.parse("2026-05-31T00:00:00Z");
+        assertThatThrownBy(() -> run.setEndAt(invalidEnd))
                 .isInstanceOf(DomainValidationException.class)
                 .hasMessageContaining("end_at must be on or after start_at");
     }
