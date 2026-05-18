@@ -620,5 +620,262 @@ class TestSuiteServiceTest {
 
             assertThat(testSuiteService.resolveTestCases(projectId, s.getId())).containsExactly(tcA);
         }
+
+        @Test
+        void composesEveryCriterionWhenAllSet() {
+            var s = suite("TS-Q-FULL", TestSuitePopulationMode.QUERY_BASED);
+            s.setCriteriaStatus(TestCaseStatus.APPROVED);
+            s.setCriteriaType(TestCaseType.AUTOMATED);
+            s.setCriteriaPriority(TestCasePriority.HIGH);
+            s.setCriteriaFormat(com.keplerops.groundcontrol.domain.testcases.state.TestCaseFormat.STEP_BASED);
+            UUID folderId = UUID.randomUUID();
+            s.setCriteriaFolderId(folderId);
+            s.setCriteriaTextSearch("payment");
+
+            var folder = new TestCaseFolder(project, null, "Root", null, 0);
+            setField(folder, "id", folderId);
+            when(testSuiteRepository.findByIdAndProjectId(s.getId(), projectId)).thenReturn(Optional.of(s));
+            when(folderRepository.findByProjectIdOrderBySortOrder(projectId)).thenReturn(List.of(folder));
+            when(testCaseRepository.findAll(any(Specification.class), any(Pageable.class)))
+                    .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of()));
+
+            // Successfully composes every criterion branch (type / priority /
+            // format / folder-tree / text search) without throwing.
+            assertThat(testSuiteService.resolveTestCases(projectId, s.getId())).isEmpty();
+        }
+    }
+
+    @Nested
+    class CrudReads {
+
+        @Test
+        void getByIdDelegatesToRequireSuiteInProject() {
+            var s = suite("TS-G-001", TestSuitePopulationMode.STATIC);
+            when(testSuiteRepository.findByIdAndProjectId(s.getId(), projectId)).thenReturn(Optional.of(s));
+
+            assertThat(testSuiteService.getById(projectId, s.getId())).isSameAs(s);
+        }
+
+        @Test
+        void getByIdThrowsNotFoundWhenMissing() {
+            var id = UUID.randomUUID();
+            when(testSuiteRepository.findByIdAndProjectId(id, projectId)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> testSuiteService.getById(projectId, id))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining(id.toString());
+        }
+
+        @Test
+        void getByUidReturnsExistingSuite() {
+            var s = suite("TS-U-001", TestSuitePopulationMode.STATIC);
+            when(testSuiteRepository.findByProjectIdAndUid(projectId, "TS-U-001"))
+                    .thenReturn(Optional.of(s));
+
+            assertThat(testSuiteService.getByUid(projectId, "TS-U-001")).isSameAs(s);
+        }
+
+        @Test
+        void getByUidThrowsNotFoundWhenMissing() {
+            when(testSuiteRepository.findByProjectIdAndUid(projectId, "TS-MISSING"))
+                    .thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> testSuiteService.getByUid(projectId, "TS-MISSING"))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining("TS-MISSING");
+        }
+
+        @Test
+        void listByProjectDelegatesToRepository() {
+            var a = suite("TS-L-001", TestSuitePopulationMode.STATIC);
+            var b = suite("TS-L-002", TestSuitePopulationMode.QUERY_BASED);
+            when(testSuiteRepository.findByProjectIdOrderByCreatedAtDesc(projectId))
+                    .thenReturn(List.of(a, b));
+
+            assertThat(testSuiteService.listByProject(projectId)).containsExactly(a, b);
+        }
+
+        @Test
+        void deleteRemovesMembersSourcesAndSuite() {
+            var s = suite("TS-D-001", TestSuitePopulationMode.STATIC);
+            var member = new TestSuiteMember(s, testCase("TC-D-1"), 0);
+            when(testSuiteRepository.findByIdAndProjectId(s.getId(), projectId)).thenReturn(Optional.of(s));
+            when(memberRepository.findByTestSuiteId(s.getId())).thenReturn(List.of(member));
+            when(sourceRepository.findByTestSuiteId(s.getId())).thenReturn(List.of());
+
+            testSuiteService.delete(projectId, s.getId());
+
+            verify(memberRepository).deleteAll(List.of(member));
+            verify(sourceRepository).deleteAll(List.of());
+            verify(testSuiteRepository).delete(s);
+        }
+
+        @Test
+        void listMembersDelegatesToRepository() {
+            var s = suite("TS-LM-001", TestSuitePopulationMode.STATIC);
+            var member = new TestSuiteMember(s, testCase("TC-X"), 0);
+            when(testSuiteRepository.findByIdAndProjectId(s.getId(), projectId)).thenReturn(Optional.of(s));
+            when(memberRepository.findByTestSuiteIdOrderByPosition(s.getId())).thenReturn(List.of(member));
+
+            assertThat(testSuiteService.listMembers(projectId, s.getId())).containsExactly(member);
+        }
+
+        @Test
+        void listSourceRequirementsDelegatesToRepository() {
+            var s = suite("TS-LSR-001", TestSuitePopulationMode.REQUIREMENTS_BASED);
+            var src = new TestSuiteSourceRequirement(s, requirement("REQ-X"));
+            when(testSuiteRepository.findByIdAndProjectId(s.getId(), projectId)).thenReturn(Optional.of(s));
+            when(sourceRepository.findByTestSuiteIdOrderByRequirementUid(s.getId()))
+                    .thenReturn(List.of(src));
+
+            assertThat(testSuiteService.listSourceRequirements(projectId, s.getId()))
+                    .containsExactly(src);
+        }
+    }
+
+    @Nested
+    class MutationGuards {
+
+        @Test
+        void addMemberRejectsNullTestCaseId() {
+            var s = suite("TS-S-001", TestSuitePopulationMode.STATIC);
+            when(testSuiteRepository.findByIdAndProjectIdForUpdate(s.getId(), projectId))
+                    .thenReturn(Optional.of(s));
+            UUID suiteId = s.getId();
+            var cmd = new AddTestSuiteMemberCommand(null, null);
+
+            assertThatThrownBy(() -> testSuiteService.addMember(projectId, suiteId, cmd))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("test_case_id");
+        }
+
+        @Test
+        void requireSuiteForMutationThrowsNotFoundWhenAbsent() {
+            var missingId = UUID.randomUUID();
+            when(testSuiteRepository.findByIdAndProjectIdForUpdate(missingId, projectId))
+                    .thenReturn(Optional.empty());
+            var cmd = new AddTestSuiteMemberCommand(UUID.randomUUID(), null);
+
+            assertThatThrownBy(() -> testSuiteService.addMember(projectId, missingId, cmd))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining(missingId.toString());
+        }
+
+        @Test
+        void addSourceRequirementRejectsNullRequirementId() {
+            var s = suite("TS-R-001", TestSuitePopulationMode.REQUIREMENTS_BASED);
+            when(testSuiteRepository.findByIdAndProjectId(s.getId(), projectId)).thenReturn(Optional.of(s));
+            UUID suiteId = s.getId();
+
+            assertThatThrownBy(() -> testSuiteService.addSourceRequirement(projectId, suiteId, null))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("requirement_id");
+        }
+
+        @Test
+        void addSourceRequirementRejectsDuplicate() {
+            var s = suite("TS-R-001", TestSuitePopulationMode.REQUIREMENTS_BASED);
+            var req = requirement("REQ-DUP");
+            when(testSuiteRepository.findByIdAndProjectId(s.getId(), projectId)).thenReturn(Optional.of(s));
+            when(requirementRepository.findByIdAndProjectId(req.getId(), projectId))
+                    .thenReturn(Optional.of(req));
+            when(sourceRepository.existsByTestSuiteIdAndRequirementId(s.getId(), req.getId()))
+                    .thenReturn(true);
+            UUID suiteId = s.getId();
+            UUID reqId = req.getId();
+
+            assertThatThrownBy(() -> testSuiteService.addSourceRequirement(projectId, suiteId, reqId))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessageContaining("REQ-DUP");
+        }
+
+        @Test
+        void removeSourceRequirementSucceedsWhenPresent() {
+            var s = suite("TS-R-001", TestSuitePopulationMode.REQUIREMENTS_BASED);
+            var req = requirement("REQ-RM");
+            var src = new TestSuiteSourceRequirement(s, req);
+            when(testSuiteRepository.findByIdAndProjectId(s.getId(), projectId)).thenReturn(Optional.of(s));
+            when(sourceRepository.findByTestSuiteIdAndRequirementId(s.getId(), req.getId()))
+                    .thenReturn(Optional.of(src));
+
+            testSuiteService.removeSourceRequirement(projectId, s.getId(), req.getId());
+
+            verify(sourceRepository).delete(src);
+        }
+
+        @Test
+        void removeSourceRequirementRejectsMissing() {
+            var s = suite("TS-R-001", TestSuitePopulationMode.REQUIREMENTS_BASED);
+            var reqId = UUID.randomUUID();
+            when(testSuiteRepository.findByIdAndProjectId(s.getId(), projectId)).thenReturn(Optional.of(s));
+            when(sourceRepository.findByTestSuiteIdAndRequirementId(s.getId(), reqId))
+                    .thenReturn(Optional.empty());
+            UUID suiteId = s.getId();
+
+            assertThatThrownBy(() -> testSuiteService.removeSourceRequirement(projectId, suiteId, reqId))
+                    .isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void requireSuiteInModeThrowsWhenModeMismatch() {
+            // listMembers requires STATIC; calling it on REQUIREMENTS_BASED
+            // exercises the requireSuiteInMode mode-mismatch path.
+            var s = suite("TS-R-001", TestSuitePopulationMode.REQUIREMENTS_BASED);
+            when(testSuiteRepository.findByIdAndProjectId(s.getId(), projectId)).thenReturn(Optional.of(s));
+            UUID suiteId = s.getId();
+
+            assertThatThrownBy(() -> testSuiteService.listMembers(projectId, suiteId))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("STATIC");
+        }
+    }
+
+    @Nested
+    class ReorderResorts {
+
+        @Test
+        void reorderReturnsMembersSortedByNewPosition() {
+            var s = suite("TS-S-RO", TestSuitePopulationMode.STATIC);
+            var tcA = testCase("TC-A");
+            var tcB = testCase("TC-B");
+            var mA = new TestSuiteMember(s, tcA, 0);
+            var mB = new TestSuiteMember(s, tcB, 1);
+            when(testSuiteRepository.findByIdAndProjectIdForUpdate(s.getId(), projectId))
+                    .thenReturn(Optional.of(s));
+            // SiblingOrderingHelper inspects current; resolve / re-sort runs
+            // against the in-memory list.
+            when(memberRepository.findByTestSuiteIdOrderByPosition(s.getId())).thenReturn(List.of(mA, mB));
+
+            var reordered = testSuiteService.reorderMembers(projectId, s.getId(), List.of(tcB.getId(), tcA.getId()));
+
+            // Returned in NEW position order: mB at 0, mA at 1.
+            assertThat(reordered).containsExactly(mB, mA);
+            assertThat(mB.getPosition()).isZero();
+            assertThat(mA.getPosition()).isEqualTo(1);
+        }
+    }
+
+    @Nested
+    class CriteriaFolderValidation {
+
+        @Test
+        void rejectsCriteriaFolderThatDoesNotExist() {
+            when(projectService.getById(projectId)).thenReturn(project);
+            when(testSuiteRepository.existsByProjectIdAndUid(projectId, "TS-Q-NF"))
+                    .thenReturn(false);
+            UUID missingFolderId = UUID.randomUUID();
+            when(folderRepository.findById(missingFolderId)).thenReturn(Optional.empty());
+            var cmd = new CreateTestSuiteCommand(
+                    projectId,
+                    "TS-Q-NF",
+                    "n",
+                    null,
+                    TestSuitePopulationMode.QUERY_BASED,
+                    new TestSuiteCriteriaCommand(null, null, null, null, missingFolderId, null));
+
+            assertThatThrownBy(() -> testSuiteService.create(cmd))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessageContaining(missingFolderId.toString());
+        }
     }
 }
