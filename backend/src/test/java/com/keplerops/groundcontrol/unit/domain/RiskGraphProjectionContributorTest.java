@@ -8,6 +8,7 @@ import com.keplerops.groundcontrol.domain.assets.model.Observation;
 import com.keplerops.groundcontrol.domain.assets.model.OperationalAsset;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.assets.state.ObservationCategory;
+import com.keplerops.groundcontrol.domain.graph.model.GraphEdge;
 import com.keplerops.groundcontrol.domain.graph.model.GraphEntityType;
 import com.keplerops.groundcontrol.domain.graph.model.GraphIds;
 import com.keplerops.groundcontrol.domain.graph.service.RiskGraphProjectionContributor;
@@ -149,9 +150,9 @@ class RiskGraphProjectionContributorTest {
                 .containsExactlyInAnyOrder(
                         "AFFECTS", "TRACKS", "ASSESSES", "USES_METHOD", "USED_OBSERVATION", "TREATS");
         assertThat(edges)
-                .filteredOn(edge -> edge.edgeType().equals("AFFECTS"))
+                .filteredOn(edge -> "AFFECTS".equals(edge.edgeType()))
                 .singleElement()
-                .extracting(edge -> edge.targetId())
+                .extracting(GraphEdge::targetId)
                 .isEqualTo(GraphIds.nodeId(GraphEntityType.OPERATIONAL_ASSET, observationAsset.getId()));
     }
 
