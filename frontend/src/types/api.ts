@@ -313,6 +313,100 @@ export interface UpdateTestPlanRequest {
 export interface TestPlanStatusTransitionRequest {
   status: TestPlanStatus;
 }
+
+// TC-007 / ADR-047 — Selection container for test cases. Mirrors backend
+// TestSuiteResponse / TestSuiteRequest / UpdateTestSuiteRequest /
+// AddTestSuiteMemberRequest / etc. The enum is single-sourced per ADR-034
+// convention (today the policy gate scope is requirement/state enums; the
+// test-management enums follow the same pattern manually).
+export type TestSuitePopulationMode = "STATIC" | "REQUIREMENTS_BASED" | "QUERY_BASED";
+export const TEST_SUITE_POPULATION_MODES: TestSuitePopulationMode[] = [
+  "STATIC",
+  "REQUIREMENTS_BASED",
+  "QUERY_BASED",
+];
+
+export interface TestSuiteResponse {
+  id: string;
+  projectIdentifier: string;
+  uid: string;
+  name: string;
+  description: string | null;
+  populationMode: TestSuitePopulationMode;
+  // QUERY_BASED criteria — null on STATIC / REQUIREMENTS_BASED suites.
+  criteriaStatus: TestCaseStatus | null;
+  criteriaType: TestCaseType | null;
+  criteriaPriority: TestCasePriority | null;
+  criteriaFormat: TestCaseFormat | null;
+  criteriaFolderId: string | null;
+  criteriaTextSearch: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TestSuiteRequest {
+  uid: string;
+  name: string;
+  description?: string | null;
+  populationMode: TestSuitePopulationMode;
+  criteriaStatus?: TestCaseStatus | null;
+  criteriaType?: TestCaseType | null;
+  criteriaPriority?: TestCasePriority | null;
+  criteriaFormat?: TestCaseFormat | null;
+  criteriaFolderId?: string | null;
+  criteriaTextSearch?: string | null;
+}
+
+export interface UpdateTestSuiteRequest {
+  name?: string;
+  description?: string | null;
+  criteriaStatus?: TestCaseStatus | null;
+  criteriaType?: TestCaseType | null;
+  criteriaPriority?: TestCasePriority | null;
+  criteriaFormat?: TestCaseFormat | null;
+  criteriaFolderId?: string | null;
+  criteriaTextSearch?: string | null;
+  clearDescription?: boolean;
+  clearCriteriaStatus?: boolean;
+  clearCriteriaType?: boolean;
+  clearCriteriaPriority?: boolean;
+  clearCriteriaFormat?: boolean;
+  clearCriteriaFolderId?: boolean;
+  clearCriteriaTextSearch?: boolean;
+}
+
+export interface TestSuiteMemberResponse {
+  id: string;
+  testSuiteId: string;
+  testCaseId: string;
+  testCaseUid: string;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AddTestSuiteMemberRequest {
+  testCaseId: string;
+  position?: number;
+}
+
+export interface ReorderTestSuiteMembersRequest {
+  orderedTestCaseIds: string[];
+}
+
+export interface TestSuiteSourceRequirementResponse {
+  id: string;
+  testSuiteId: string;
+  requirementId: string;
+  requirementUid: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AddTestSuiteSourceRequirementRequest {
+  requirementId: string;
+}
+
 export type GraphEntityType =
   | "REQUIREMENT"
   | "OPERATIONAL_ASSET"

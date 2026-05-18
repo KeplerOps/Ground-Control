@@ -156,6 +156,12 @@ import {
   // ---- test plans (TC-006 / ADR-044) ----
   createTestPlan, updateTestPlan, deleteTestPlan, transitionTestPlanStatus,
   TEST_PLAN_STATUSES,
+  // ---- test suites (TC-007 / ADR-047) ----
+  createTestSuite, updateTestSuite, deleteTestSuite,
+  addTestSuiteMember, removeTestSuiteMember, reorderTestSuiteMembers,
+  addTestSuiteSourceRequirement, removeTestSuiteSourceRequirement,
+  resolveTestSuiteTestCases,
+  TEST_SUITE_POPULATION_MODES,
   // ---- enums ----
   STATUSES, REQUIREMENT_TYPES, PRIORITIES, RELATION_TYPES,
   ARTIFACT_TYPES, LINK_TYPES, CHANGE_CATEGORIES, CONFIDENCE_LEVELS,
@@ -1562,7 +1568,7 @@ server.tool(
   },
 );
 
-// gc_evidence: GC-M016 / ADR-044. Append-only — create / supersede only;
+// gc_evidence: GC-M016 / ADR-045. Append-only — create / supersede only;
 // reads (list, get) route through gc_query at /api/v1/evidence-artifacts.
 server.tool(
   "gc_evidence",
@@ -1959,6 +1965,161 @@ server.tool(
             null,
             2,
           ));
+        }
+        default: return err(new Error(`Unknown action: ${args.action}`));
+      }
+    } catch (e) { return err(e); }
+  },
+);
+
+// gc_test_suite: TC-007 / ADR-047. Selection container for test cases inside a
+// project, with three population modes (STATIC, REQUIREMENTS_BASED,
+// QUERY_BASED). Mode is set on create and immutable; resolve dispatches on
+// mode at read time. Reads (list, get, get-by-uid) route through gc_query.
+const TEST_SUITE_ACTIONS = [
+  "create",
+  "update",
+  "delete",
+  "resolve",
+  "add_member",
+  "remove_member",
+  "reorder_members",
+  "add_source_requirement",
+  "remove_source_requirement",
+];
+
+server.tool(
+  "gc_test_suite",
+  `Test suite operations (TC-007 / ADR-047). ` +
+    `Actions: ${TEST_SUITE_ACTIONS.join(", ")}. ` +
+    `Reads (list, get, get-by-uid) route through gc_query.`,
+  {
+    action: z.enum(TEST_SUITE_ACTIONS),
+    id: z.string().uuid().optional(),
+    project: z.string().optional(),
+    uid: z.string().optional(),
+    name: z.string().optional(),
+    description: z.string().optional(),
+    population_mode: z.enum(TEST_SUITE_POPULATION_MODES).optional(),
+    // QUERY_BASED criteria (only valid for QUERY_BASED suites — backend
+    // rejects with 422 invalid_test_suite_mode_field on other modes).
+    // Codex pre-push cycle 1 F6: use the test-case enum mirrors (not the
+    // requirements `STATUSES` mirror, which would let "ACTIVE" reach the
+    // backend and miss "APPROVED").
+    criteria_status: z.enum(TEST_CASE_STATUSES).optional(),
+    criteria_type: z.enum(TEST_CASE_TYPES).optional(),
+    criteria_priority: z.enum(TEST_CASE_PRIORITIES).optional(),
+    criteria_format: z.enum(TEST_CASE_FORMATS).optional(),
+    criteria_folder_id: z.string().uuid().optional(),
+    criteria_text_search: z.string().optional(),
+    // Partial-update clear flags for the criteria block.
+    clear_description: z.boolean().optional(),
+    clear_criteria_status: z.boolean().optional(),
+    clear_criteria_type: z.boolean().optional(),
+    clear_criteria_priority: z.boolean().optional(),
+    clear_criteria_format: z.boolean().optional(),
+    clear_criteria_folder_id: z.boolean().optional(),
+    clear_criteria_text_search: z.boolean().optional(),
+    // STATIC-mode member ops.
+    test_case_id: z.string().uuid().optional(),
+    position: z.number().int().nonnegative().optional(),
+    ordered_test_case_ids: z.array(z.string().uuid()).optional(),
+    // REQUIREMENTS_BASED-mode source ops.
+    requirement_id: z.string().uuid().optional(),
+  },
+  async (args) => {
+    try {
+      const TEST_SUITE_CREATE_FIELDS = [
+        "uid", "name", "description", "population_mode",
+        "criteria_status", "criteria_type", "criteria_priority",
+        "criteria_format", "criteria_folder_id", "criteria_text_search",
+      ];
+      const TEST_SUITE_UPDATE_FIELDS = [
+        "name", "description",
+        "criteria_status", "criteria_type", "criteria_priority",
+        "criteria_format", "criteria_folder_id", "criteria_text_search",
+        "clear_description",
+        "clear_criteria_status", "clear_criteria_type", "clear_criteria_priority",
+        "clear_criteria_format", "clear_criteria_folder_id", "clear_criteria_text_search",
+      ];
+      switch (args.action) {
+        case "create": {
+          reqArg(args, "uid", "create");
+          reqArg(args, "name", "create");
+          reqArg(args, "population_mode", "create");
+          return ok(JSON.stringify(
+            await createTestSuite(pick(args, TEST_SUITE_CREATE_FIELDS), args.project),
+            null,
+            2,
+          ));
+        }
+        case "update": {
+          reqArg(args, "id", "update");
+          return ok(JSON.stringify(
+            await updateTestSuite(args.id, pick(args, TEST_SUITE_UPDATE_FIELDS), args.project),
+            null,
+            2,
+          ));
+        }
+        case "delete": {
+          reqArg(args, "id", "delete");
+          await deleteTestSuite(args.id, args.project);
+          return ok("Deleted");
+        }
+        case "resolve": {
+          reqArg(args, "id", "resolve");
+          return ok(JSON.stringify(
+            await resolveTestSuiteTestCases(args.id, args.project),
+            null,
+            2,
+          ));
+        }
+        case "add_member": {
+          reqArg(args, "id", "add_member");
+          reqArg(args, "test_case_id", "add_member");
+          return ok(JSON.stringify(
+            await addTestSuiteMember(
+              args.id,
+              pick(args, ["test_case_id", "position"]),
+              args.project,
+            ),
+            null,
+            2,
+          ));
+        }
+        case "remove_member": {
+          reqArg(args, "id", "remove_member");
+          reqArg(args, "test_case_id", "remove_member");
+          await removeTestSuiteMember(args.id, args.test_case_id, args.project);
+          return ok("Removed");
+        }
+        case "reorder_members": {
+          reqArg(args, "id", "reorder_members");
+          reqArg(args, "ordered_test_case_ids", "reorder_members");
+          return ok(JSON.stringify(
+            await reorderTestSuiteMembers(args.id, args.ordered_test_case_ids, args.project),
+            null,
+            2,
+          ));
+        }
+        case "add_source_requirement": {
+          reqArg(args, "id", "add_source_requirement");
+          reqArg(args, "requirement_id", "add_source_requirement");
+          return ok(JSON.stringify(
+            await addTestSuiteSourceRequirement(
+              args.id,
+              { requirement_id: args.requirement_id },
+              args.project,
+            ),
+            null,
+            2,
+          ));
+        }
+        case "remove_source_requirement": {
+          reqArg(args, "id", "remove_source_requirement");
+          reqArg(args, "requirement_id", "remove_source_requirement");
+          await removeTestSuiteSourceRequirement(args.id, args.requirement_id, args.project);
+          return ok("Removed");
         }
         default: return err(new Error(`Unknown action: ${args.action}`));
       }

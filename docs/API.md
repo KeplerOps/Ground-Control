@@ -419,7 +419,7 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
 | POST | `/assets?project=` | AssetRequest | 201 | Create asset |
-| GET | `/assets?project=&type=&owner=&steward=&environment=&criticality=&scope=&subtype=&knowledgeState=` | — | 200 | List assets (any combination of filters is optional; `subtype` is exact-match per the GC-M011 subtype catalog; `knowledgeState` filters by GC-M018 confirmed-vs-provisional-vs-unknown state) |
+| GET | `/assets?project=&type=&owner=&steward=&environment=&criticality=&scope=&subtype=` | — | 200 | List assets (any combination of filters is optional; `subtype` is exact-match per the GC-M011 subtype catalog) |
 | GET | `/assets/{id}` | — | 200 | Get asset by UUID |
 | GET | `/assets/uid/{uid}?project=` | — | 200 | Get asset by UID |
 | PUT | `/assets/{id}` | UpdateAssetRequest | 200 | Update asset (partial) |
@@ -444,8 +444,7 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
   "metadata": {
     "cloud_account_id": "1234567890",
     "region": "us-west-2"
-  },
-  "knowledgeState": "CONFIRMED"
+  }
 }
 ```
 
@@ -461,9 +460,7 @@ Asset environment (GC-M012): `PRODUCTION`, `STAGING`, `DEVELOPMENT`, `TEST`, `NO
 
 Asset scope designation (GC-M012): `IN_SCOPE`, `OUT_OF_SCOPE`. Two-state explicit; the absence of either (NULL) means "not yet designated" — distinct from `archivedAt` (lifecycle), `quality_gate.scopeStatus`, control `implementationScope`, and risk `assetScopeSummary`.
 
-Asset knowledge state (GC-M018): `CONFIRMED`, `PROVISIONAL`, `UNKNOWN`. `CONFIRMED` is the asserted-fact default; `PROVISIONAL` marks a manually-asserted or unvalidated assertion; `UNKNOWN` is the explicit placeholder for an asset whose details are not yet known (the unresolved-dependency seam — point an `AssetRelation` at an UNKNOWN asset to model a tentative dependency). NOT NULL; legacy rows back-fill to `CONFIRMED`. Distinct from `confidence` (relation provenance), `AssetType.OTHER` (classification fallback), `subtype = null` (no subtype declared), and `scopeDesignation = null` (not yet scoped). The same vocabulary applies on `AssetRelation` to mark a topology edge itself as CONFIRMED / PROVISIONAL / UNKNOWN. Risk, threat, and control workflows reading `AssetResponse`, `AssetRelationResponse`, or the graph projection consume `knowledgeState` directly to separate confirmed model facts from provisional or unknown coverage.
-
-List filters route through `OperationalAssetRepository.findByProjectIdAndArchivedAtIsNullAndFilters` so any combination of `type` / `owner` / `steward` / `environment` / `criticality` / `scope` / `subtype` / `knowledgeState` query parameters is honored in a single JPQL pass; risk, control, audit, and reporting workflows consume this same surface rather than inventing per-workflow lookups.
+List filters route through `OperationalAssetRepository.findByProjectIdAndArchivedAtIsNullAndFilters` so any combination of `type` / `owner` / `steward` / `environment` / `criticality` / `scope` query parameters is honored in a single JPQL pass; risk, control, audit, and reporting workflows consume this same surface rather than inventing per-workflow lookups.
 
 ### Asset Subtype Schemas (GC-M011 schema layering)
 
@@ -519,8 +516,7 @@ Validation errors return HTTP `422` with the canonical `ErrorResponse` envelope 
   "sourceSystem": "AWS_CONFIG",
   "externalSourceId": "cfg-123",
   "collectedAt": "2026-04-01T12:00:00Z",
-  "confidence": "0.80",
-  "knowledgeState": "CONFIRMED"
+  "confidence": "0.80"
 }
 ```
 
@@ -532,16 +528,13 @@ Validation errors return HTTP `422` with the canonical `ErrorResponse` envelope 
   "sourceSystem": "CMDB",
   "externalSourceId": "cmdb-789",
   "collectedAt": "2026-04-02T12:00:00Z",
-  "confidence": "0.95",
-  "knowledgeState": "CONFIRMED"
+  "confidence": "0.95"
 }
 ```
 
-**AssetRelationResponse fields:** `id`, `sourceId`, `sourceUid`, `targetId`, `targetUid`, `relationType`, `description`, `sourceSystem`, `externalSourceId`, `collectedAt`, `confidence`, `knowledgeState`, `createdAt`, `updatedAt`
+**AssetRelationResponse fields:** `id`, `sourceId`, `sourceUid`, `targetId`, `targetUid`, `relationType`, `description`, `sourceSystem`, `externalSourceId`, `collectedAt`, `confidence`, `createdAt`, `updatedAt`
 
 Relation types: `CONTAINS`, `DEPENDS_ON`, `COMMUNICATES_WITH`, `TRUST_BOUNDARY`, `SUPPORTS`, `ACCESSES`, `DATA_FLOW`
-
-`knowledgeState` (GC-M018) on `AssetRelation` carries the same `CONFIRMED` / `PROVISIONAL` / `UNKNOWN` vocabulary as `OperationalAsset.knowledgeState`. `confidence` remains the existing free-text provenance field — they are independent: a `CONFIRMED` edge can carry a `confidence` annotation from the source system, and an `UNKNOWN` edge can omit confidence entirely. Null on the update path means "leave unchanged"; there is no clear flag because the underlying column is NOT NULL.
 
 ### Asset Links (Cross-Entity Linking)
 
@@ -1017,7 +1010,7 @@ the existing list wholesale; pass `null` to leave it unchanged or an empty list 
 keep AGE materialization safe. `ControlTest` deletion is rejected with HTTP 409
 `control_test_referenced` while any assessment still references the test.
 
-### Evidence Artifacts (GC-M016 / ADR-044)
+### Evidence Artifacts (GC-M016 / ADR-045)
 
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
@@ -1267,6 +1260,81 @@ so a team can pause a run window or re-open a completed plan to fold in late-arr
 Invalid transitions surface as HTTP 422 `invalid_status_transition`. Duplicate UID within a
 project returns HTTP 409. An inverted `startDate` / `endDate` pair surfaces as HTTP 422
 `invalid_test_plan_schedule`.
+
+### Test Suites (TC-007 / ADR-047)
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| POST | `/test-suites` | TestSuiteRequest | 201 | Create a project-scoped test suite with an immutable `populationMode` |
+| GET | `/test-suites` | — | 200 | List test suites in a project (ordered by `createdAt DESC`) |
+| GET | `/test-suites/{id}` | — | 200 | Get a test suite by UUID |
+| GET | `/test-suites/uid/{uid}` | — | 200 | Get a test suite by project-scoped UID |
+| PUT | `/test-suites/{id}` | UpdateTestSuiteRequest | 200 | Update mutable fields (null = no change; `clearXxx: true` = clear) — `populationMode` is immutable |
+| DELETE | `/test-suites/{id}` | — | 204 | Delete the test suite (cascades members / source requirements) |
+| GET | `/test-suites/{id}/test-cases` | — | 200 | RESOLVE — return the suite's test cases dispatched on `populationMode` |
+| POST | `/test-suites/{id}/members` | AddTestSuiteMemberRequest | 201 | STATIC only — add a test case to the suite |
+| GET | `/test-suites/{id}/members` | — | 200 | STATIC only — list members in position order |
+| DELETE | `/test-suites/{id}/members/{testCaseId}` | — | 204 | STATIC only — remove a member |
+| PUT | `/test-suites/{id}/members/reorder` | ReorderTestSuiteMembersRequest | 200 | STATIC only — reorder members |
+| POST | `/test-suites/{id}/source-requirements` | AddTestSuiteSourceRequirementRequest | 201 | REQUIREMENTS_BASED only — add a source requirement |
+| GET | `/test-suites/{id}/source-requirements` | — | 200 | REQUIREMENTS_BASED only — list sources |
+| DELETE | `/test-suites/{id}/source-requirements/{requirementId}` | — | 204 | REQUIREMENTS_BASED only — remove a source |
+
+A `TestSuite` is the selection container for test cases inside a project. It carries a single
+**immutable** `populationMode` chosen at create time:
+
+- `STATIC` — manually selected test cases held as explicit `test_suite_member` rows. Add /
+  remove / reorder via the `/members` endpoints. Resolve returns members in `position` order.
+- `REQUIREMENTS_BASED` — auto-populated from one or more source requirements. Add / remove via
+  the `/source-requirements` endpoints. Resolve returns the test cases linked to those
+  requirements through `TraceabilityLink` rows whose `linkType = TESTS` and
+  `artifactType = TEST` (the `artifactIdentifier` is the test case's project-scoped UID).
+- `QUERY_BASED` — auto-populated from typed filter criteria stored as columns on the suite
+  (`criteriaStatus`, `criteriaType`, `criteriaPriority`, `criteriaFormat`, `criteriaFolderId`,
+  `criteriaTextSearch`). Resolve runs the criteria against the test-case repository at
+  read time; results are **dynamic** — they change as matching cases change. At least one
+  criterion must be set on create and on every update.
+
+**Mode immutability.** Switching modes would orphan member / source / criteria state and
+break the resolve-time dispatch contract. The entity has no setter for `populationMode`,
+the controller rejects `populationMode` on updates, and a `CHECK` constraint at the SQL
+layer backstops the invariant. Mode-mismatch operations (adding members to a non-STATIC
+suite, etc.) return HTTP 422 `invalid_test_suite_mode_operation`.
+
+**Result cap.** Resolve returns at most 500 test cases per call across all three modes;
+this is a service-level constant today (no `?page=` parameter). A future requirement can
+promote it to a pageable parameter.
+
+**TestSuiteRequest fields:** `uid` (required, max 50, unique per project), `name` (required,
+max 200), `description` (optional, max 8192), `populationMode` (required, one of `STATIC`,
+`REQUIREMENTS_BASED`, `QUERY_BASED`), plus per-mode criteria fields valid only for
+`QUERY_BASED` (`criteriaStatus`, `criteriaType`, `criteriaPriority`, `criteriaFormat`,
+`criteriaFolderId`, `criteriaTextSearch` — max 200).
+
+**UpdateTestSuiteRequest fields:** `name`, `description`, all `criteriaXxx` fields — all
+optional with null-means-no-change — plus `clearDescription`, `clearCriteriaStatus`,
+`clearCriteriaType`, `clearCriteriaPriority`, `clearCriteriaFormat`,
+`clearCriteriaFolderId`, `clearCriteriaTextSearch` flags to wipe the matching field to
+null. `uid` and `populationMode` are create-only.
+
+**AddTestSuiteMemberRequest fields:** `testCaseId` (required, UUID), `position` (optional,
+non-negative; defaults to `max(position) + 1` for append-on-end semantics).
+
+**ReorderTestSuiteMembersRequest fields:** `orderedTestCaseIds` (required, non-empty). The
+list must contain exactly the current member test-case ids — no extras, no omissions, no
+duplicates. The reorder uses the same shared `SiblingOrderingHelper` as the test-case and
+test-case-folder reorder endpoints, so the error envelope matches: a set-mismatch returns
+HTTP 409 (the partial/mismatched-siblings case); a null/duplicate id in the input list
+returns HTTP 422 with `invalid_reorder`.
+
+**AddTestSuiteSourceRequirementRequest fields:** `requirementId` (required, UUID; must be
+in the same project).
+
+**Error envelope.** Duplicate UID within a project returns HTTP 409. Member / source rows
+that already exist return HTTP 409. Cross-project test cases, requirements, or folder
+references return HTTP 404 (project-scoped lookup). Setting criteria on a non-QUERY_BASED
+suite, or clearing the last criterion of a QUERY_BASED suite, returns HTTP 422
+(`invalid_test_suite_mode_field` / `invalid_test_suite_query`).
 
 ## Request / Response Format
 

@@ -51,7 +51,7 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         "053", "054", "055", "056", "057", "058", "059", "060", "061", "062", "063", "064", "065",
                         "066", "067", "068", "069", "070", "071", "072", "073", "074", "075", "076", "077", "078",
                         "079", "080", "081", "082", "083", "084", "085", "086", "087", "088", "089", "090", "091",
-                        "092", "093");
+                        "092", "093", "094", "095", "096", "097", "098", "099");
     }
 
     @Test
@@ -595,84 +595,135 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         + " WHERE table_name = 'test_plan'"
                         + " AND constraint_name = 'uq_test_plan_project_uid'")
                 .getSingleResult();
-        // V090/V091: evidence_artifact + audit (GC-M016 / ADR-045). The supersede
-        // mechanism is enforced in EvidenceArtifactService, not at the schema
-        // level; the audit table carries the BaseEntity timestamps so
-        // AuditRetentionJob can age rows out.
+        // V090-V095 test_suite + members + sources + audits (TC-007 / ADR-047).
+        // Same column-existence + constraint shape as the test_plan probes so a
+        // V091 copy-paste that omitted a payload column or a V092/V094 missing
+        // FK action would surface as a failing query rather than as a silent
+        // drift across the next migration cycle.
+        entityManager.createNativeQuery("SELECT 1 FROM test_suite LIMIT 1").getResultList();
         entityManager
-                .createNativeQuery("SELECT 1 FROM evidence_artifact LIMIT 1")
+                .createNativeQuery("SELECT 1 FROM test_suite_audit LIMIT 1")
                 .getResultList();
         entityManager
-                .createNativeQuery("SELECT 1 FROM evidence_artifact_audit LIMIT 1")
+                .createNativeQuery("SELECT 1 FROM test_suite_member LIMIT 1")
                 .getResultList();
         entityManager
-                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'evidence_artifact'"
-                        + " AND column_name = 'superseded_by_artifact_id'")
+                .createNativeQuery("SELECT 1 FROM test_suite_member_audit LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM test_suite_source_requirement LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM test_suite_source_requirement_audit LIMIT 1")
+                .getResultList();
+        // Required columns on the suite root (population_mode + criteria_*).
+        for (String column : java.util.List.of(
+                "uid",
+                "name",
+                "population_mode",
+                "criteria_status",
+                "criteria_type",
+                "criteria_priority",
+                "criteria_format",
+                "criteria_folder_id",
+                "criteria_text_search",
+                "created_at",
+                "updated_at")) {
+            entityManager
+                    .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                            + " WHERE table_name = 'test_suite'"
+                            + " AND column_name = '" + column + "'")
+                    .getSingleResult();
+        }
+        // Audit shadow columns (project_id absent — @NotAudited).
+        for (String column : java.util.List.of(
+                "uid",
+                "name",
+                "population_mode",
+                "criteria_status",
+                "criteria_type",
+                "criteria_priority",
+                "criteria_format",
+                "criteria_folder_id",
+                "criteria_text_search",
+                "created_at",
+                "updated_at")) {
+            entityManager
+                    .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                            + " WHERE table_name = 'test_suite_audit'"
+                            + " AND column_name = '" + column + "'")
+                    .getSingleResult();
+        }
+        // (project_id, uid) uniqueness backs the project-scoped UID invariant.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_suite'"
+                        + " AND constraint_name = 'uq_test_suite_project_uid'")
+                .getSingleResult();
+        // CHECK on population_mode keeps the enum honest at the SQL layer.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_suite'"
+                        + " AND constraint_name = 'ck_test_suite_population_mode'")
+                .getSingleResult();
+        // Static-membership UNIQUE + member position column.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                        + " WHERE table_name = 'test_suite_member'"
+                        + " AND column_name = 'position'")
                 .getSingleResult();
         entityManager
-                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'evidence_artifact'"
-                        + " AND column_name = 'derived_at' AND is_nullable = 'NO'")
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_suite_member'"
+                        + " AND constraint_name = 'uq_test_suite_member_pair'")
+                .getSingleResult();
+        // Codex pre-push cycle 2 / test-quality review: the DEFERRABLE
+        // (suite, position) constraint is the only thing keeping concurrent
+        // member writes from duplicating positions. If V092 ever lost the
+        // constraint, single-threaded integration tests would still pass —
+        // pin both its existence AND the DEFERRABLE attribute via
+        // pg_constraint so a non-deferrable variant (which would break
+        // multi-row shift commits) is rejected here.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_suite_member'"
+                        + " AND constraint_name = 'uq_test_suite_member_position'")
                 .getSingleResult();
         entityManager
-                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'evidence_artifact'"
-                        + " AND column_name = 'evidence_type' AND is_nullable = 'NO'")
+                .createNativeQuery("SELECT 1 FROM pg_constraint c"
+                        + " JOIN pg_class t ON c.conrelid = t.oid"
+                        + " WHERE t.relname = 'test_suite_member'"
+                        + " AND c.conname = 'uq_test_suite_member_position'"
+                        + " AND c.condeferrable = true")
+                .getSingleResult();
+        // Audit shadow keeps the identity-defining FKs (codex pre-push
+        // cycle 1 F1) — without these columns a deleted member row could
+        // not be traced back to its suite/test-case.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                        + " WHERE table_name = 'test_suite_member_audit'"
+                        + " AND column_name = 'test_suite_id'")
                 .getSingleResult();
         entityManager
-                .createNativeQuery(
-                        "SELECT 1 FROM information_schema.columns WHERE table_name = 'evidence_artifact_audit'"
-                                + " AND column_name = 'superseded_by_artifact_id'")
+                .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                        + " WHERE table_name = 'test_suite_member_audit'"
+                        + " AND column_name = 'test_case_id'")
+                .getSingleResult();
+        // Requirements-based source UNIQUE.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_suite_source_requirement'"
+                        + " AND constraint_name = 'uq_test_suite_source_requirement_pair'")
                 .getSingleResult();
         entityManager
-                .createNativeQuery(
-                        "SELECT 1 FROM information_schema.columns WHERE table_name = 'evidence_artifact_audit'"
-                                + " AND column_name = 'created_at'")
+                .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                        + " WHERE table_name = 'test_suite_source_requirement_audit'"
+                        + " AND column_name = 'test_suite_id'")
                 .getSingleResult();
         entityManager
-                .createNativeQuery(
-                        "SELECT 1 FROM information_schema.columns WHERE table_name = 'evidence_artifact_audit'"
-                                + " AND column_name = 'updated_at'")
-                .getSingleResult();
-        entityManager
-                .createNativeQuery("SELECT 1 FROM pg_indexes WHERE tablename = 'evidence_artifact'"
-                        + " AND indexname = 'uq_evidence_artifact_project_uid'")
-                .getSingleResult();
-        // V092 / V093: knowledge_state on operational_asset and asset_relation
-        // plus the Envers audit-table parity columns (GC-M018). NOT NULL on
-        // the parent with default 'CONFIRMED' so legacy rows back-fill; the
-        // audit table column is nullable per the Envers convention used by
-        // V070 / V091. The filter indexes back the small-cardinality
-        // queryability clause that risk / threat / control workflows rely on.
-        org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
-                        .createNativeQuery("SELECT knowledge_state FROM operational_asset LIMIT 1")
-                        .getResultList())
-                .doesNotThrowAnyException();
-        org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
-                        .createNativeQuery("SELECT knowledge_state FROM operational_asset_audit LIMIT 1")
-                        .getResultList())
-                .doesNotThrowAnyException();
-        org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
-                        .createNativeQuery("SELECT knowledge_state FROM asset_relation LIMIT 1")
-                        .getResultList())
-                .doesNotThrowAnyException();
-        org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
-                        .createNativeQuery("SELECT knowledge_state FROM asset_relation_audit LIMIT 1")
-                        .getResultList())
-                .doesNotThrowAnyException();
-        entityManager
-                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'operational_asset'"
-                        + " AND column_name = 'knowledge_state' AND is_nullable = 'NO'")
-                .getSingleResult();
-        entityManager
-                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'asset_relation'"
-                        + " AND column_name = 'knowledge_state' AND is_nullable = 'NO'")
-                .getSingleResult();
-        entityManager
-                .createNativeQuery("SELECT 1 FROM pg_indexes WHERE tablename = 'operational_asset'"
-                        + " AND indexname = 'idx_asset_knowledge_state'")
-                .getSingleResult();
-        entityManager
-                .createNativeQuery("SELECT 1 FROM pg_indexes WHERE tablename = 'asset_relation'"
-                        + " AND indexname = 'idx_asset_relation_knowledge_state'")
+                .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                        + " WHERE table_name = 'test_suite_source_requirement_audit'"
+                        + " AND column_name = 'requirement_id'")
                 .getSingleResult();
     }
 }
