@@ -49,7 +49,10 @@ public class AuditRetentionJob {
             "asset_subtype_schema_audit",
             "test_case_folder_audit",
             "test_plan_audit",
-            "evidence_artifact_audit");
+            "evidence_artifact_audit",
+            "test_suite_audit",
+            "test_suite_member_audit",
+            "test_suite_source_requirement_audit");
 
     private final AuditRetentionProperties properties;
     private final EntityManager entityManager;

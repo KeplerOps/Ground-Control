@@ -371,7 +371,9 @@ describe("createTestCaseGherkin (gc_test_case action=gherkin-create)", () => {
     // `{ gherkin_source: ... }` (the MCP arg name) would have Jackson reject
     // the body.
     assert.deepEqual(JSON.parse(opts.body), { source: SOURCE });
-    assert.equal(result.testCaseId, TEST_CASE_ID);
+    // Response keys normalise through toSnakeCase (testCaseId is in TO_CAMEL
+    // since TC-007 added the test-suite member camelCase mapping).
+    assert.equal(result.test_case_id, TEST_CASE_ID);
   });
 });
 
@@ -391,8 +393,9 @@ describe("updateTestCaseGherkin (gc_test_case action=gherkin-update)", () => {
     assert.deepEqual(JSON.parse(opts.body), { source: SOURCE });
     // Return value pass-through — guards against a `request()` regression that
     // returned null for PUT paths, the same shape every other write test in
-    // this file pins.
-    assert.equal(result.testCaseId, TEST_CASE_ID);
+    // this file pins. Response key normalises to snake_case (TC-007 added
+    // testCaseId to TO_CAMEL for the test-suite member round-trip).
+    assert.equal(result.test_case_id, TEST_CASE_ID);
     assert.equal(result.source, SOURCE);
   });
 });

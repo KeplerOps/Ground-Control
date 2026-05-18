@@ -579,6 +579,26 @@ const TO_CAMEL = {
   clear_build: "clearBuild",
   clear_start_date: "clearStartDate",
   clear_end_date: "clearEndDate",
+  // TC-007 / ADR-047 — TestSuite / TestSuiteMember / TestSuiteSourceRequirement
+  // fields. The `gc_test_suite` consolidated tool accepts snake_case args and
+  // forwards them to camelCase backend DTOs; omitting any mapping below would
+  // silently drop the field on the way through Jackson.
+  population_mode: "populationMode",
+  test_case_id: "testCaseId",
+  test_suite_id: "testSuiteId",
+  test_case_uid: "testCaseUid",
+  criteria_status: "criteriaStatus",
+  criteria_type: "criteriaType",
+  criteria_priority: "criteriaPriority",
+  criteria_format: "criteriaFormat",
+  criteria_folder_id: "criteriaFolderId",
+  criteria_text_search: "criteriaTextSearch",
+  clear_criteria_status: "clearCriteriaStatus",
+  clear_criteria_type: "clearCriteriaType",
+  clear_criteria_priority: "clearCriteriaPriority",
+  clear_criteria_format: "clearCriteriaFormat",
+  clear_criteria_folder_id: "clearCriteriaFolderId",
+  clear_criteria_text_search: "clearCriteriaTextSearch",
   // GC-V001 finding adapter — backend FindingRequest / UpdateFindingRequest
   // use these camelCase field names. Mapping is needed so `gc_finding` reaches
   // backend Bean Validation with the right field names (issue #279).
@@ -7580,7 +7600,7 @@ export async function deleteFindingLink(findingId, linkId, project) {
 }
 
 // ---------------------------------------------------------------------------
-// Evidence Artifact API functions (GC-M016 / ADR-044)
+// Evidence Artifact API functions (GC-M016 / ADR-045)
 // ---------------------------------------------------------------------------
 
 export const EVIDENCE_TYPES = [
@@ -7816,6 +7836,77 @@ export async function transitionTestPlanStatus(id, status, project) {
     body: { status },
     params: { project },
   });
+}
+
+// TC-007 / ADR-047 — TestSuite aggregate. Three population modes (STATIC,
+// REQUIREMENTS_BASED, QUERY_BASED). Mode is set at create and immutable.
+// Reads (list, get, get-by-uid) may also route through gc_query.
+
+export const TEST_SUITE_POPULATION_MODES = ["STATIC", "REQUIREMENTS_BASED", "QUERY_BASED"];
+
+export async function createTestSuite(data, project) {
+  return request("POST", "/api/v1/test-suites", { body: data, params: { project } });
+}
+
+export async function listTestSuites(project) {
+  return request("GET", "/api/v1/test-suites", { params: { project } });
+}
+
+export async function getTestSuite(id, project) {
+  return request("GET", `/api/v1/test-suites/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function getTestSuiteByUid(uid, project) {
+  return request("GET", `/api/v1/test-suites/uid/${encodeURIComponent(uid)}`, { params: { project } });
+}
+
+export async function updateTestSuite(id, data, project) {
+  return request("PUT", `/api/v1/test-suites/${encodeURIComponent(id)}`, { body: data, params: { project } });
+}
+
+export async function deleteTestSuite(id, project) {
+  await request("DELETE", `/api/v1/test-suites/${encodeURIComponent(id)}`, { params: { project } });
+}
+
+export async function resolveTestSuiteTestCases(id, project) {
+  return request("GET", `/api/v1/test-suites/${encodeURIComponent(id)}/test-cases`, { params: { project } });
+}
+
+export async function addTestSuiteMember(id, data, project) {
+  return request("POST", `/api/v1/test-suites/${encodeURIComponent(id)}/members`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function removeTestSuiteMember(id, testCaseId, project) {
+  await request(
+    "DELETE",
+    `/api/v1/test-suites/${encodeURIComponent(id)}/members/${encodeURIComponent(testCaseId)}`,
+    { params: { project } },
+  );
+}
+
+export async function reorderTestSuiteMembers(id, orderedTestCaseIds, project) {
+  return request("PUT", `/api/v1/test-suites/${encodeURIComponent(id)}/members/reorder`, {
+    body: { orderedTestCaseIds },
+    params: { project },
+  });
+}
+
+export async function addTestSuiteSourceRequirement(id, data, project) {
+  return request("POST", `/api/v1/test-suites/${encodeURIComponent(id)}/source-requirements`, {
+    body: data,
+    params: { project },
+  });
+}
+
+export async function removeTestSuiteSourceRequirement(id, requirementId, project) {
+  await request(
+    "DELETE",
+    `/api/v1/test-suites/${encodeURIComponent(id)}/source-requirements/${encodeURIComponent(requirementId)}`,
+    { params: { project } },
+  );
 }
 
 export async function createControl(data, project) {
