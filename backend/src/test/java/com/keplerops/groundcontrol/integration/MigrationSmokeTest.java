@@ -50,7 +50,8 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         "040", "041", "042", "043", "044", "045", "046", "047", "048", "049", "050", "051", "052",
                         "053", "054", "055", "056", "057", "058", "059", "060", "061", "062", "063", "064", "065",
                         "066", "067", "068", "069", "070", "071", "072", "073", "074", "075", "076", "077", "078",
-                        "079", "080", "081", "082", "083", "084", "085", "086", "087", "088", "089", "090", "091");
+                        "079", "080", "081", "082", "083", "084", "085", "086", "087", "088", "089", "090", "091",
+                        "092", "093");
     }
 
     @Test
@@ -634,6 +635,44 @@ class MigrationSmokeTest extends BaseIntegrationTest {
         entityManager
                 .createNativeQuery("SELECT 1 FROM pg_indexes WHERE tablename = 'evidence_artifact'"
                         + " AND indexname = 'uq_evidence_artifact_project_uid'")
+                .getSingleResult();
+        // V092 / V093: knowledge_state on operational_asset and asset_relation
+        // plus the Envers audit-table parity columns (GC-M018). NOT NULL on
+        // the parent with default 'CONFIRMED' so legacy rows back-fill; the
+        // audit table column is nullable per the Envers convention used by
+        // V070 / V091. The filter indexes back the small-cardinality
+        // queryability clause that risk / threat / control workflows rely on.
+        org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
+                        .createNativeQuery("SELECT knowledge_state FROM operational_asset LIMIT 1")
+                        .getResultList())
+                .doesNotThrowAnyException();
+        org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
+                        .createNativeQuery("SELECT knowledge_state FROM operational_asset_audit LIMIT 1")
+                        .getResultList())
+                .doesNotThrowAnyException();
+        org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
+                        .createNativeQuery("SELECT knowledge_state FROM asset_relation LIMIT 1")
+                        .getResultList())
+                .doesNotThrowAnyException();
+        org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
+                        .createNativeQuery("SELECT knowledge_state FROM asset_relation_audit LIMIT 1")
+                        .getResultList())
+                .doesNotThrowAnyException();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'operational_asset'"
+                        + " AND column_name = 'knowledge_state' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns WHERE table_name = 'asset_relation'"
+                        + " AND column_name = 'knowledge_state' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM pg_indexes WHERE tablename = 'operational_asset'"
+                        + " AND indexname = 'idx_asset_knowledge_state'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM pg_indexes WHERE tablename = 'asset_relation'"
+                        + " AND indexname = 'idx_asset_relation_knowledge_state'")
                 .getSingleResult();
     }
 }

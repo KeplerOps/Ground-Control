@@ -4,6 +4,7 @@ import com.keplerops.groundcontrol.domain.assets.state.AssetCriticality;
 import com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment;
 import com.keplerops.groundcontrol.domain.assets.state.AssetScope;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
+import com.keplerops.groundcontrol.domain.assets.state.KnowledgeState;
 import jakarta.validation.constraints.Size;
 import java.util.Map;
 
@@ -15,6 +16,9 @@ import java.util.Map;
  * {@code "clearSubtype": true}). The clear flag wins over a non-null
  * assignment in the same payload, so callers can both clear and re-designate
  * in a single PUT without ambiguity — the assign loses.
+ *
+ * <p>GC-M018 {@code knowledgeState} has no clear flag: the underlying column
+ * is NOT NULL. Null on update = leave unchanged.
  */
 public record UpdateAssetRequest(
         @Size(max = 200) String name,
@@ -28,6 +32,7 @@ public record UpdateAssetRequest(
         AssetScope scopeDesignation,
         @Size(max = 100) String subtype,
         Map<String, Object> metadata,
+        KnowledgeState knowledgeState,
         boolean clearOwner,
         boolean clearSteward,
         boolean clearEnvironment,

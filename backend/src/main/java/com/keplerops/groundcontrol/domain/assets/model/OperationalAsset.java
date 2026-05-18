@@ -5,6 +5,7 @@ import com.keplerops.groundcontrol.domain.assets.state.AssetCriticality;
 import com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment;
 import com.keplerops.groundcontrol.domain.assets.state.AssetScope;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
+import com.keplerops.groundcontrol.domain.assets.state.KnowledgeState;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.shared.persistence.JacksonTextCollectionConverters;
 import jakarta.persistence.Column;
@@ -82,6 +83,17 @@ public class OperationalAsset extends BaseEntity {
     @Convert(converter = JacksonTextCollectionConverters.StringObjectMapConverter.class)
     @Column(columnDefinition = "TEXT")
     private Map<String, Object> metadata;
+
+    /**
+     * GC-M018 knowledge / completeness dimension. CONFIRMED, PROVISIONAL,
+     * or UNKNOWN. NOT NULL because "unknown" is a first-class state, not a
+     * NULL-vs-something ambiguity — risk / threat / control workflows must
+     * be able to filter without coercing NULL into a state. The DB default
+     * back-fills legacy rows; new rows pick up the entity initializer.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "knowledge_state", nullable = false, length = 20)
+    private KnowledgeState knowledgeState = KnowledgeState.CONFIRMED;
 
     @Column(name = "archived_at")
     private Instant archivedAt;
@@ -200,6 +212,17 @@ public class OperationalAsset extends BaseEntity {
 
     public void setMetadata(Map<String, Object> metadata) {
         this.metadata = metadata;
+    }
+
+    public KnowledgeState getKnowledgeState() {
+        return knowledgeState;
+    }
+
+    public void setKnowledgeState(KnowledgeState knowledgeState) {
+        if (knowledgeState == null) {
+            throw new IllegalArgumentException("knowledgeState must not be null");
+        }
+        this.knowledgeState = knowledgeState;
     }
 
     @Override

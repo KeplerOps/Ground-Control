@@ -233,6 +233,10 @@ export const ASSET_ENVIRONMENTS = [
   "OTHER",
 ];
 export const ASSET_SCOPES = ["IN_SCOPE", "OUT_OF_SCOPE"];
+// GC-M018 knowledge / completeness dimension. Distinct from confidence,
+// asset type, asset scope, and the (subtype, metadata) bag — see
+// architecture/notes/partial-knowledge-unknown-dependency-preflight.md.
+export const KNOWLEDGE_STATES = ["CONFIRMED", "PROVISIONAL", "UNKNOWN"];
 export const ASSET_RELATION_TYPES = [
   "CONTAINS",
   "DEPENDS_ON",
@@ -482,6 +486,12 @@ const TO_CAMEL = {
   archived_at: "archivedAt",
   business_context: "businessContext",
   scope_designation: "scopeDesignation",
+  // GC-M018: knowledge / completeness dimension on operational asset and
+  // asset relation. snake_case wire form maps to the backend's camelCase
+  // DTO field; recursive camelization would mangle a user-defined inner
+  // metadata key like {"knowledge_state": ...}, so the explicit entry pins
+  // the mapping at the boundary (same rationale as GC-M011 clear_subtype).
+  knowledge_state: "knowledgeState",
   clear_owner: "clearOwner",
   clear_steward: "clearSteward",
   clear_environment: "clearEnvironment",

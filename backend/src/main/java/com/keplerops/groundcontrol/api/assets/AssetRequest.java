@@ -4,6 +4,7 @@ import com.keplerops.groundcontrol.domain.assets.state.AssetCriticality;
 import com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment;
 import com.keplerops.groundcontrol.domain.assets.state.AssetScope;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
+import com.keplerops.groundcontrol.domain.assets.state.KnowledgeState;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.util.Map;
@@ -20,4 +21,8 @@ public record AssetRequest(
         String businessContext,
         AssetScope scopeDesignation,
         @Size(max = 100) String subtype,
-        Map<String, Object> metadata) {}
+        Map<String, Object> metadata,
+        // GC-M018: knowledge / completeness state. Optional on create —
+        // the service defaults to CONFIRMED when omitted, matching the
+        // entity initializer and the DB default applied to legacy rows.
+        KnowledgeState knowledgeState) {}

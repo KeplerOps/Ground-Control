@@ -161,7 +161,7 @@ import {
   ARTIFACT_TYPES, LINK_TYPES, CHANGE_CATEGORIES, CONFIDENCE_LEVELS,
   METRIC_TYPES, COMPARISON_OPERATORS, ADR_STATUSES,
   ASSET_TYPES, ASSET_RELATION_TYPES, ASSET_LINK_TARGET_TYPES, ASSET_LINK_TYPES,
-  ASSET_CRITICALITIES, ASSET_ENVIRONMENTS, ASSET_SCOPES,
+  ASSET_CRITICALITIES, ASSET_ENVIRONMENTS, ASSET_SCOPES, KNOWLEDGE_STATES,
   OBSERVATION_CATEGORIES, RISK_SCENARIO_STATUSES,
   METHODOLOGY_FAMILIES, METHODOLOGY_PROFILE_STATUSES,
   RISK_REGISTER_STATUSES, RISK_ASSESSMENT_APPROVAL_STATUSES,
@@ -1275,6 +1275,11 @@ server.tool(
     metadata: z.record(z.any()).optional(),
     clear_subtype: z.boolean().optional(),
     clear_metadata: z.boolean().optional(),
+    // GC-M018: knowledge / completeness dimension on asset AND relation.
+    // Distinct from confidence; see the preflight note. There is no
+    // clear flag — the underlying column is NOT NULL and null on
+    // update means "leave unchanged".
+    knowledge_state: z.enum(KNOWLEDGE_STATES).optional(),
     // GC-M011: subtype-schema registry parameters. Schema body is an
     // any-shape object so callers can mint registry entries without the
     // MCP enforcing the validator's wire shape — the backend validator is
@@ -1333,8 +1338,13 @@ server.tool(
         "metadata",
         "clear_subtype",
         "clear_metadata",
+        // GC-M018 knowledge / completeness state. Pinned to the
+        // forwarded fields so create / update paths thread the value
+        // through to the backend's CreateAssetCommand /
+        // UpdateAssetCommand.
+        "knowledge_state",
       ];
-      const RELATION_FIELDS = ["source_id", "target_id", "relation_type"];
+      const RELATION_FIELDS = ["source_id", "target_id", "relation_type", "knowledge_state"];
       const EXT_ID_FIELDS = ["namespace", "external_id"];
       switch (args.action) {
         case "create": {

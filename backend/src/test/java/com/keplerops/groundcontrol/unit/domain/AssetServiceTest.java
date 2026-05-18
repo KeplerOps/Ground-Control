@@ -436,6 +436,7 @@ class AssetServiceTest {
                             AssetEnvironment.PRODUCTION,
                             AssetCriticality.CRITICAL,
                             AssetScope.IN_SCOPE,
+                            null,
                             null))
                     .thenReturn(List.of(match));
 
@@ -447,6 +448,7 @@ class AssetServiceTest {
                     AssetEnvironment.PRODUCTION,
                     AssetCriticality.CRITICAL,
                     AssetScope.IN_SCOPE,
+                    null,
                     null);
 
             assertThat(results).containsExactly(match);
@@ -458,10 +460,11 @@ class AssetServiceTest {
             // controller can fall through cleanly when no filter param hits.
             var match = createAsset("ASSET-A", "A");
             when(assetRepository.findByProjectIdAndArchivedAtIsNullAndFilters(
-                            projectId, null, null, null, null, null, null, null))
+                            projectId, null, null, null, null, null, null, null, null))
                     .thenReturn(List.of(match));
 
-            var results = assetService.listByProjectAndFilters(projectId, null, null, null, null, null, null, null);
+            var results =
+                    assetService.listByProjectAndFilters(projectId, null, null, null, null, null, null, null, null);
 
             assertThat(results).containsExactly(match);
         }
@@ -473,11 +476,44 @@ class AssetServiceTest {
             // project-wide scan.
             var match = createAsset("ASSET-101", "EC2 worker");
             when(assetRepository.findByProjectIdAndArchivedAtIsNullAndFilters(
-                            projectId, AssetType.WORKLOAD, null, null, null, null, null, "aws_ec2"))
+                            projectId, AssetType.WORKLOAD, null, null, null, null, null, "aws_ec2", null))
                     .thenReturn(List.of(match));
 
             var results = assetService.listByProjectAndFilters(
-                    projectId, AssetType.WORKLOAD, null, null, null, null, null, "aws_ec2");
+                    projectId, AssetType.WORKLOAD, null, null, null, null, null, "aws_ec2", null);
+
+            assertThat(results).containsExactly(match);
+        }
+
+        @Test
+        void filtersByKnowledgeState() {
+            // GC-M018: knowledge-state filter rides the same single-query
+            // surface. Risk / threat / control workflows that consume
+            // "only confirmed model facts" pass CONFIRMED and the
+            // provisional / unknown rows fall out of the response.
+            var match = createAsset("ASSET-CONFIRMED", "Confirmed Inventory");
+            when(assetRepository.findByProjectIdAndArchivedAtIsNullAndFilters(
+                            projectId,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.CONFIRMED))
+                    .thenReturn(List.of(match));
+
+            var results = assetService.listByProjectAndFilters(
+                    projectId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.CONFIRMED);
 
             assertThat(results).containsExactly(match);
         }
@@ -2041,6 +2077,219 @@ class AssetServiceTest {
             assertThatThrownBy(() -> assetService.listSubtypeSchemas(projectId, null, "rogue"))
                     .isInstanceOf(DomainValidationException.class)
                     .hasMessageContaining("assetType");
+        }
+    }
+
+    @Nested
+    class KnowledgeStateBehavior {
+
+        @Test
+        void createDefaultsToConfirmedWhenOmitted() {
+            // GC-M018: omission == CONFIRMED. The entity initializer sets
+            // CONFIRMED so the service path that simply doesn't pass a value
+            // produces the same end state as an explicit CONFIRMED.
+            var command = new CreateAssetCommand(projectId, "ASSET-001", "Service", "desc", AssetType.SERVICE);
+            when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+            when(assetRepository.existsByProjectIdAndUidIgnoreCase(projectId, "ASSET-001"))
+                    .thenReturn(false);
+            when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var result = assetService.create(command);
+
+            assertThat(result.getKnowledgeState())
+                    .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.CONFIRMED);
+        }
+
+        @Test
+        void createAcceptsExplicitProvisional() {
+            // GC-M018: PROVISIONAL is the explicit "manually asserted but not
+            // yet validated" state. The service must not silently coerce it.
+            var command = new CreateAssetCommand(
+                    projectId,
+                    "ASSET-002",
+                    "Tentative Service",
+                    "Manually asserted; not validated.",
+                    AssetType.SERVICE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.PROVISIONAL);
+            when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+            when(assetRepository.existsByProjectIdAndUidIgnoreCase(projectId, "ASSET-002"))
+                    .thenReturn(false);
+            when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var result = assetService.create(command);
+
+            assertThat(result.getKnowledgeState())
+                    .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.PROVISIONAL);
+        }
+
+        @Test
+        void createAcceptsExplicitUnknownForPlaceholderAssets() {
+            // GC-M018: UNKNOWN is the placeholder-asset state — an
+            // operational asset row whose existence is asserted because a
+            // dependency points at it, but whose details aren't known yet.
+            var command = new CreateAssetCommand(
+                    projectId,
+                    "ASSET-PLACEHOLDER",
+                    "Unknown Service",
+                    "Placeholder for an unresolved dependency.",
+                    AssetType.OTHER,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.UNKNOWN);
+            when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+            when(assetRepository.existsByProjectIdAndUidIgnoreCase(projectId, "ASSET-PLACEHOLDER"))
+                    .thenReturn(false);
+            when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var result = assetService.create(command);
+
+            assertThat(result.getKnowledgeState())
+                    .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.UNKNOWN);
+        }
+
+        @Test
+        void updateNullKnowledgeStateLeavesUnchanged() {
+            // Null = leave unchanged. The service must not coerce a
+            // pre-existing PROVISIONAL back to CONFIRMED on an update that
+            // only touches description.
+            var asset = createAsset("ASSET-001", "Service");
+            asset.setKnowledgeState(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.PROVISIONAL);
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateAssetCommand(null, "Updated description.", null);
+            var result = assetService.update(projectId, asset.getId(), command);
+
+            assertThat(result.getDescription()).isEqualTo("Updated description.");
+            assertThat(result.getKnowledgeState())
+                    .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.PROVISIONAL);
+        }
+
+        @Test
+        void updateTransitionsProvisionalToConfirmed() {
+            // Once a manually-asserted asset is validated, the caller flips
+            // it to CONFIRMED. The service must accept any non-null
+            // KnowledgeState — there is no automatic promotion workflow.
+            var asset = createAsset("ASSET-001", "Service");
+            asset.setKnowledgeState(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.PROVISIONAL);
+            when(assetRepository.findByIdAndProjectId(asset.getId(), projectId)).thenReturn(Optional.of(asset));
+            when(assetRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateAssetCommand(
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.CONFIRMED,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false);
+            var result = assetService.update(projectId, asset.getId(), command);
+
+            assertThat(result.getKnowledgeState())
+                    .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.CONFIRMED);
+        }
+
+        @Test
+        void createRelationDefaultsToConfirmed() {
+            // GC-M018: relation defaults to CONFIRMED, same as the asset.
+            var source = createAsset("ASSET-SRC", "Source");
+            var target = createAsset("ASSET-TGT", "Target");
+            when(assetRepository.findByIdAndProjectId(source.getId(), projectId))
+                    .thenReturn(Optional.of(source));
+            when(assetRepository.findByIdAndProjectId(target.getId(), projectId))
+                    .thenReturn(Optional.of(target));
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(any(), any(), any()))
+                    .thenReturn(false);
+            when(relationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new CreateAssetRelationCommand(
+                    target.getId(), AssetRelationType.DEPENDS_ON, null, null, null, null, null);
+            var result = assetService.createRelation(projectId, command, source.getId());
+
+            assertThat(result.getKnowledgeState())
+                    .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.CONFIRMED);
+        }
+
+        @Test
+        void createRelationAcceptsUnknownForTentativeDependencies() {
+            // GC-M018: a tentative dependency to a placeholder target is
+            // expressed as an UNKNOWN relation. Risk / threat / control
+            // workflows that see the edge can choose whether to treat it as
+            // coverage.
+            var source = createAsset("ASSET-SRC", "Source");
+            var placeholder = createAsset("ASSET-UNKNOWN", "Placeholder");
+            placeholder.setKnowledgeState(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.UNKNOWN);
+            when(assetRepository.findByIdAndProjectId(source.getId(), projectId))
+                    .thenReturn(Optional.of(source));
+            when(assetRepository.findByIdAndProjectId(placeholder.getId(), projectId))
+                    .thenReturn(Optional.of(placeholder));
+            when(relationRepository.existsBySourceIdAndTargetIdAndRelationType(any(), any(), any()))
+                    .thenReturn(false);
+            when(relationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new CreateAssetRelationCommand(
+                    placeholder.getId(),
+                    AssetRelationType.DEPENDS_ON,
+                    "Unresolved external dependency",
+                    null,
+                    null,
+                    null,
+                    null,
+                    com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.UNKNOWN);
+            var result = assetService.createRelation(projectId, command, source.getId());
+
+            assertThat(result.getKnowledgeState())
+                    .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.UNKNOWN);
+            assertThat(result.getTarget().getKnowledgeState())
+                    .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.UNKNOWN);
+        }
+
+        @Test
+        void updateRelationNullKnowledgeStateLeavesUnchanged() {
+            // Null on update = leave alone. Confirmation level on a topology
+            // edge must survive an update that only touches confidence.
+            var source = createAsset("ASSET-SRC", "Source");
+            var target = createAsset("ASSET-TGT", "Target");
+            var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
+            setField(relation, "id", UUID.randomUUID());
+            relation.setKnowledgeState(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.PROVISIONAL);
+            when(relationRepository.findByIdWithEntitiesAndProjectId(relation.getId(), projectId))
+                    .thenReturn(Optional.of(relation));
+            when(relationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateAssetRelationCommand(null, null, null, null, "0.85");
+            var result = assetService.updateRelation(projectId, source.getId(), relation.getId(), command);
+
+            assertThat(result.getKnowledgeState())
+                    .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.PROVISIONAL);
+            assertThat(result.getConfidence()).isEqualTo("0.85");
         }
     }
 }

@@ -387,6 +387,15 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
     @Test
     @Order(6)
     void migrationVerification() throws Exception {
+        // E2E sanity check: confirm migrations completed and the count
+        // matches the authoritative exact-sequence pin in
+        // MigrationSmokeTest.allFlywayMigrationsRan. Duplicating the full
+        // version list here was a class-shape bug — every new migration
+        // forced two hardcoded list updates and a stale copy would have
+        // silently masked a regression in either test class (issue #906
+        // test-quality review). The count anchor lives on the smoke
+        // test; this test only verifies "all expected migrations applied
+        // during the E2E flow" without re-pinning every version.
         List<String> versions = new ArrayList<>();
         try (var conn = dataSource.getConnection();
                 var stmt = conn.createStatement();
@@ -396,99 +405,15 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                 versions.add(rs.getString("version"));
             }
         }
-        assertThat(versions)
-                .containsExactly(
-                        "001",
-                        "002",
-                        "003",
-                        "004",
-                        "005",
-                        "006",
-                        "007",
-                        "008",
-                        "009",
-                        "010",
-                        "011",
-                        "012",
-                        "013",
-                        "014",
-                        "015",
-                        "016",
-                        "017",
-                        "018",
-                        "019",
-                        "020",
-                        "021",
-                        "022",
-                        "023",
-                        "024",
-                        "025",
-                        "026",
-                        "027",
-                        "028",
-                        "029",
-                        "030",
-                        "031",
-                        "032",
-                        "033",
-                        "034",
-                        "035",
-                        "036",
-                        "037",
-                        "038",
-                        "039",
-                        "040",
-                        "041",
-                        "042",
-                        "043",
-                        "044",
-                        "045",
-                        "046",
-                        "047",
-                        "048",
-                        "049",
-                        "050",
-                        "051",
-                        "052", // V052: control pack tables
-                        "053", // V053: pack registry tables
-                        "054", // V054: typed control-pack registry payloads
-                        "055", // V055: threat_model
-                        "056", // V056: threat_model_audit
-                        "057", // V057: threat_model_link (target_url / target_title NOT NULL DEFAULT '')
-                        "058", // V058: threat_model_link_audit
-                        "059", // V059: ADR-037 users + authorities (browser session JDBC store)
-                        "060", // V060: finding (GC-V001 / ADR-038)
-                        "061", // V061: finding_audit
-                        "062", // V062: finding_link (target_url / target_title NOT NULL DEFAULT '')
-                        "063", // V063: finding_link_audit
-                        "064", // V064: drop ON DELETE CASCADE on asset_link / control_link / risk_scenario_link /
-                        // threat_model_link FKs (Envers audit gap)
-                        "065", // V065: control_test (GC-I012 / ADR-039)
-                        "066", // V066: control_test_audit
-                        "067", // V067: control_effectiveness_assessment (GC-I013 / ADR-039)
-                        "068", // V068: control_effectiveness_assessment_audit
-                        "069", // V069: operational_asset ownership/criticality/scope (GC-M012)
-                        "070", // V070: operational_asset_audit parity for GC-M012
-                        "071", // V071: test_case (TC-001 / ADR-040)
-                        "072", // V072: test_case_audit
-                        "073", // V073: test_case_step (TC-002)
-                        "074", // V074: test_case_step_audit
-                        "075", // V075: forward-fix V072 missing timestamp columns on test_case_audit
-                        "076", // V076: add test_case.format discriminator (TC-004)
-                        "077", // V077: add test_case_audit.format parity column
-                        "078", // V078: create test_case_gherkin
-                        "079", // V079: create test_case_gherkin_audit
-                        "080", // V080: operational_asset subtype + metadata (GC-M011)
-                        "081", // V081: operational_asset_audit parity for GC-M011
-                        "082", // V082: asset_subtype_schema (GC-M011 registry)
-                        "083", // V083: asset_subtype_schema_audit
-                        "084", // V084: create test_case_folder (TC-005 / ADR-043)
-                        "085", // V085: create test_case_folder_audit
-                        "086", // V086: add test_case.parent_folder_id + sort_order
-                        "087", // V087: add test_case_audit.parent_folder_id + sort_order
-                        "088", // V088: create test_plan (TC-006 / ADR-044)
-                        "089", // V089: create test_plan_audit
-                        "090", // V090: create evidence_artifact (GC-M016 / ADR-045)
-                        "091"); // V091: create evidence_artifact_audit
+        // Lower bound, not exact: a future migration adds one more row;
+        // the exact pin in MigrationSmokeTest catches drift, this check
+        // catches "migrations didn't run at all" in the E2E ordering.
+        assertThat(versions).hasSizeGreaterThanOrEqualTo(93);
+        assertThat(versions).startsWith("001", "002", "003");
+        // Pin the GC-M018 versions specifically because the E2E flow
+        // exercises asset / relation paths that depend on the
+        // knowledge_state columns; their presence is the structural
+        // precondition for those E2E assertions.
+        assertThat(versions).contains("092", "093");
     }
 }

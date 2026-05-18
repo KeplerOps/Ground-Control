@@ -162,6 +162,7 @@ function getTooltipTags(
     OPERATIONAL_ASSET: [
       { label: "Asset Type", key: "assetType" },
       { label: "Name", key: "assetName" },
+      { label: "Knowledge", key: "knowledgeState" },
     ],
     OBSERVATION: [
       { label: "Category", key: "category" },
@@ -513,6 +514,7 @@ export function Graph() {
           category: getStringProperty(node, "category"),
           assetType: getStringProperty(node, "assetType"),
           assetName: getStringProperty(node, "name"),
+          knowledgeState: getStringProperty(node, "knowledgeState"),
           owner: getStringProperty(node, "owner"),
           source: getStringProperty(node, "source"),
           confidence: getStringProperty(node, "confidence"),

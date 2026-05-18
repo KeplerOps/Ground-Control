@@ -213,6 +213,51 @@ class AssetGraphProjectionContributorTest {
                 .containsEntry("subtype", null);
     }
 
+    @Test
+    void exposesKnowledgeStateOnAssetNodeAndRelationEdge() {
+        // GC-M018: the knowledge / completeness dimension must surface on
+        // both the asset node AND the relation edge so risk / threat /
+        // control workflows reading the graph can distinguish CONFIRMED
+        // model facts from PROVISIONAL or UNKNOWN coverage without a
+        // second persisted aggregate.
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var source = asset(project, "ASSET-SRC", "Source");
+        source.setKnowledgeState(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.CONFIRMED);
+
+        var placeholder = asset(project, "ASSET-PLACEHOLDER", "Unresolved Dependency Target");
+        placeholder.setKnowledgeState(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.UNKNOWN);
+
+        var unknownEdge = new AssetRelation(source, placeholder, AssetRelationType.DEPENDS_ON);
+        setField(unknownEdge, "id", UUID.randomUUID());
+        setField(unknownEdge, "createdAt", Instant.parse("2026-04-02T12:00:00Z"));
+        unknownEdge.setKnowledgeState(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.UNKNOWN);
+
+        when(assetRepository.findByProjectIdAndArchivedAtIsNull(projectId)).thenReturn(List.of(source, placeholder));
+        when(assetRelationRepository.findActiveByProjectId(projectId)).thenReturn(List.of(unknownEdge));
+        when(observationRepository.findByProjectId(projectId)).thenReturn(List.of());
+        when(assetLinkRepository.findByProjectId(projectId)).thenReturn(List.of());
+
+        var nodes = contributor.contributeNodes(projectId);
+        var edges = contributor.contributeEdges(projectId);
+
+        assertThat(nodes)
+                .filteredOn(node -> node.uid().equals("ASSET-SRC"))
+                .singleElement()
+                .satisfies(node -> assertThat(node.properties()).containsEntry("knowledgeState", "CONFIRMED"));
+        assertThat(nodes)
+                .filteredOn(node -> node.uid().equals("ASSET-PLACEHOLDER"))
+                .singleElement()
+                .satisfies(node -> assertThat(node.properties()).containsEntry("knowledgeState", "UNKNOWN"));
+
+        assertThat(edges).hasSize(1);
+        assertThat(edges.get(0).properties())
+                .containsEntry("knowledgeState", "UNKNOWN")
+                .containsKey("createdAt");
+    }
+
     @ParameterizedTest
     @EnumSource(
             value = AssetLinkTargetType.class,

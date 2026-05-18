@@ -5,6 +5,7 @@ import com.keplerops.groundcontrol.domain.assets.state.AssetCriticality;
 import com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment;
 import com.keplerops.groundcontrol.domain.assets.state.AssetScope;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
+import com.keplerops.groundcontrol.domain.assets.state.KnowledgeState;
 import com.keplerops.groundcontrol.domain.graph.model.GraphEntityType;
 import com.keplerops.groundcontrol.domain.graph.model.GraphIds;
 import java.time.Instant;
@@ -27,6 +28,7 @@ public record AssetResponse(
         AssetScope scopeDesignation,
         String subtype,
         Map<String, Object> metadata,
+        KnowledgeState knowledgeState,
         Instant archivedAt,
         Instant createdAt,
         Instant updatedAt) {
@@ -48,6 +50,7 @@ public record AssetResponse(
                 asset.getScopeDesignation(),
                 asset.getSubtype(),
                 asset.getMetadata(),
+                asset.getKnowledgeState(),
                 asset.getArchivedAt(),
                 asset.getCreatedAt(),
                 asset.getUpdatedAt());
