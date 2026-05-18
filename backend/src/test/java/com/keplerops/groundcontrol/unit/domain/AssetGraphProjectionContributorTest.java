@@ -280,6 +280,28 @@ class AssetGraphProjectionContributorTest {
         assertThat(edges).isEmpty();
     }
 
+    @Test
+    void emitsEvidenceArtifactEdgeForEvidenceLink() {
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var source = asset(project, "ASSET-1", "Gateway");
+        var evidenceId = UUID.randomUUID();
+        var link = new AssetLink(source, AssetLinkTargetType.EVIDENCE, evidenceId, null, AssetLinkType.ASSOCIATED);
+        setField(link, "id", UUID.randomUUID());
+
+        when(assetRelationRepository.findActiveByProjectId(projectId)).thenReturn(List.of());
+        when(observationRepository.findByProjectId(projectId)).thenReturn(List.of());
+        when(assetLinkRepository.findByProjectId(projectId)).thenReturn(List.of(link));
+
+        var edges = contributor.contributeEdges(projectId);
+
+        assertThat(edges).hasSize(1);
+        assertThat(edges.get(0).targetEntityType()).isEqualTo(GraphEntityType.EVIDENCE_ARTIFACT);
+        assertThat(edges.get(0).targetId()).isEqualTo(GraphIds.nodeId(GraphEntityType.EVIDENCE_ARTIFACT, evidenceId));
+    }
+
     private OperationalAsset asset(Project project, String uid, String name) {
         var asset = new OperationalAsset(project, uid, name);
         setField(asset, "id", UUID.randomUUID());

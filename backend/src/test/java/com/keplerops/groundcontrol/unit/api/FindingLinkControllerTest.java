@@ -77,10 +77,19 @@ class FindingLinkControllerTest {
     private FindingLink makeExternalLink() {
         var link = new FindingLink(
                 makeFinding(),
-                FindingLinkTargetType.EVIDENCE,
+                FindingLinkTargetType.OPERATIONAL_ARTIFACT,
                 null,
-                "s3://evidence/audit-2026-q2.pdf",
-                FindingLinkType.EVIDENCED_BY);
+                "artifact://q2-runbook",
+                FindingLinkType.ASSOCIATED);
+        setField(link, "id", LINK_ID);
+        setField(link, "createdAt", NOW);
+        setField(link, "updatedAt", NOW);
+        return link;
+    }
+
+    private FindingLink makeInternalEvidenceLink(java.util.UUID evidenceId) {
+        var link = new FindingLink(
+                makeFinding(), FindingLinkTargetType.EVIDENCE, evidenceId, null, FindingLinkType.EVIDENCED_BY);
         setField(link, "id", LINK_ID);
         setField(link, "createdAt", NOW);
         setField(link, "updatedAt", NOW);
@@ -127,6 +136,9 @@ class FindingLinkControllerTest {
 
     @Test
     void createExternalLinkReturns201() throws Exception {
+        // OPERATIONAL_ARTIFACT remains external per ADR-011; EVIDENCE was promoted
+        // to an internal first-class target in GC-L006 and is covered by
+        // createInternalEvidenceLinkReturns201 below.
         when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
         when(linkService.create(eq(PROJECT_ID), eq(FINDING_ID), any())).thenReturn(makeExternalLink());
 
@@ -137,22 +149,58 @@ class FindingLinkControllerTest {
                                 .content(
                                         """
                                 {
-                                    "targetType": "EVIDENCE",
-                                    "targetIdentifier": "s3://evidence/audit-2026-q2.pdf",
-                                    "linkType": "EVIDENCED_BY"
+                                    "targetType": "OPERATIONAL_ARTIFACT",
+                                    "targetIdentifier": "artifact://q2-runbook",
+                                    "linkType": "ASSOCIATED"
                                 }
                                 """))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.targetType", is("OPERATIONAL_ARTIFACT")))
+                .andExpect(jsonPath("$.targetIdentifier", is("artifact://q2-runbook")))
+                .andExpect(jsonPath("$.linkType", is("ASSOCIATED")));
+
+        var captor = ArgumentCaptor.forClass(CreateFindingLinkCommand.class);
+        verify(linkService).create(eq(PROJECT_ID), eq(FINDING_ID), captor.capture());
+        var command = captor.getValue();
+        org.junit.jupiter.api.Assertions.assertEquals(FindingLinkTargetType.OPERATIONAL_ARTIFACT, command.targetType());
+        org.junit.jupiter.api.Assertions.assertNull(command.targetEntityId());
+        org.junit.jupiter.api.Assertions.assertEquals("artifact://q2-runbook", command.targetIdentifier());
+        org.junit.jupiter.api.Assertions.assertEquals(FindingLinkType.ASSOCIATED, command.linkType());
+    }
+
+    @Test
+    void createInternalEvidenceLinkReturns201() throws Exception {
+        // GC-L006 promoted EVIDENCE from external to internal: callers now supply an
+        // EvidenceArtifact UUID as targetEntityId rather than an opaque
+        // targetIdentifier string.
+        var evidenceId = java.util.UUID.randomUUID();
+        when(projectService.resolveProjectId(any())).thenReturn(PROJECT_ID);
+        when(linkService.create(eq(PROJECT_ID), eq(FINDING_ID), any()))
+                .thenReturn(makeInternalEvidenceLink(evidenceId));
+
+        mockMvc.perform(post("/api/v1/findings/{findingId}/links", FINDING_ID)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(
+                                """
+                                {
+                                    "targetType": "EVIDENCE",
+                                    "targetEntityId": "%s",
+                                    "linkType": "EVIDENCED_BY"
+                                }
+                                """
+                                        .formatted(evidenceId)))
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.targetType", is("EVIDENCE")))
-                .andExpect(jsonPath("$.targetIdentifier", is("s3://evidence/audit-2026-q2.pdf")))
+                .andExpect(jsonPath("$.targetEntityId", is(evidenceId.toString())))
                 .andExpect(jsonPath("$.linkType", is("EVIDENCED_BY")));
 
         var captor = ArgumentCaptor.forClass(CreateFindingLinkCommand.class);
         verify(linkService).create(eq(PROJECT_ID), eq(FINDING_ID), captor.capture());
         var command = captor.getValue();
         org.junit.jupiter.api.Assertions.assertEquals(FindingLinkTargetType.EVIDENCE, command.targetType());
-        org.junit.jupiter.api.Assertions.assertNull(command.targetEntityId());
-        org.junit.jupiter.api.Assertions.assertEquals("s3://evidence/audit-2026-q2.pdf", command.targetIdentifier());
+        org.junit.jupiter.api.Assertions.assertEquals(evidenceId, command.targetEntityId());
+        org.junit.jupiter.api.Assertions.assertNull(command.targetIdentifier());
         org.junit.jupiter.api.Assertions.assertEquals(FindingLinkType.EVIDENCED_BY, command.linkType());
     }
 

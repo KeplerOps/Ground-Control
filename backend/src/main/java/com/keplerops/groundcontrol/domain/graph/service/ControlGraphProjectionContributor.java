@@ -80,7 +80,12 @@ public class ControlGraphProjectionContributor implements GraphProjectionContrib
                     case METHODOLOGY_PROFILE -> GraphEntityType.METHODOLOGY_PROFILE;
                     case OBSERVATION -> GraphEntityType.OBSERVATION;
                     case FINDING -> GraphEntityType.FINDING;
-                    case EVIDENCE, CODE, CONFIGURATION, OPERATIONAL_ARTIFACT, EXTERNAL -> null;
+                        // Always emits an edge to the EVIDENCE_ARTIFACT node.
+                        // EvidenceArtifactGraphProjectionContributor projects every
+                        // evidence artifact (current and superseded) so this edge
+                        // never dangles.
+                    case EVIDENCE -> GraphEntityType.EVIDENCE_ARTIFACT;
+                    case CODE, CONFIGURATION, OPERATIONAL_ARTIFACT, EXTERNAL -> null;
                 };
         if (targetEntityType == null) {
             return null;

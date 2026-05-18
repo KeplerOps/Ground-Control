@@ -121,7 +121,13 @@ public class FindingGraphProjectionContributor implements GraphProjectionContrib
                         // keeps all audit nodes in the graph regardless of status so this edge
                         // never dangles.
                     case AUDIT -> GraphEntityType.AUDIT;
-                    case OPERATIONAL_ARTIFACT, EVIDENCE, REMEDIATION_PLAN, EXTERNAL -> null;
+                        // Always emits an edge to the EVIDENCE_ARTIFACT node.
+                        // EvidenceArtifactGraphProjectionContributor projects every
+                        // evidence artifact (current and superseded) so this edge
+                        // never dangles. REMEDIATION_PLAN remains external pending the
+                        // backend aggregate decision documented in the GC-L006 preflight.
+                    case EVIDENCE -> GraphEntityType.EVIDENCE_ARTIFACT;
+                    case OPERATIONAL_ARTIFACT, REMEDIATION_PLAN, EXTERNAL -> null;
                 };
         if (targetEntityType == null) {
             return null;

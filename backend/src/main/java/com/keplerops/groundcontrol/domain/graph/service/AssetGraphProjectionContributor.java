@@ -200,7 +200,12 @@ public class AssetGraphProjectionContributor implements GraphProjectionContribut
                         // keeps all audit nodes in the graph regardless of status so this edge
                         // never dangles.
                     case AUDIT -> GraphEntityType.AUDIT;
-                    case EVIDENCE, ISSUE, CODE, CONFIGURATION, EXTERNAL -> null;
+                        // Always emits an edge to the EVIDENCE_ARTIFACT node.
+                        // EvidenceArtifactGraphProjectionContributor projects every
+                        // evidence artifact (current and superseded) so this edge
+                        // never dangles.
+                    case EVIDENCE -> GraphEntityType.EVIDENCE_ARTIFACT;
+                    case ISSUE, CODE, CONFIGURATION, EXTERNAL -> null;
                 };
         if (targetEntityType == null) {
             return null;

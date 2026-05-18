@@ -501,6 +501,7 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "100", // V100: create audit (GC-U001 / ADR-048 audit-entity-boundary)
                         "101", // V101: create audit_audit
                         "102", // V102: create audit_link
-                        "103"); // V103: create audit_link_audit
+                        "103", // V103: create audit_link_audit
+                        "104"); // V104: migrate legacy EVIDENCE links to EXTERNAL (GC-L006)
     }
 }

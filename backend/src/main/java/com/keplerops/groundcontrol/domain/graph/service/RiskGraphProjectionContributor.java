@@ -259,7 +259,12 @@ public class RiskGraphProjectionContributor implements GraphProjectionContributo
                     case THREAT_MODEL -> GraphEntityType.THREAT_MODEL;
                     case FINDING -> GraphEntityType.FINDING;
                     case AUDIT_RECORD -> GraphEntityType.AUDIT;
-                    case VULNERABILITY, EVIDENCE, EXTERNAL -> null;
+                        // Always emits an edge to the EVIDENCE_ARTIFACT node.
+                        // EvidenceArtifactGraphProjectionContributor projects every
+                        // evidence artifact (current and superseded) so this edge
+                        // never dangles.
+                    case EVIDENCE -> GraphEntityType.EVIDENCE_ARTIFACT;
+                    case VULNERABILITY, EXTERNAL -> null;
                 };
         if (targetEntityType == null) {
             return null;

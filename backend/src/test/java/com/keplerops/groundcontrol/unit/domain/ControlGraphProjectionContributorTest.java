@@ -109,7 +109,8 @@ class ControlGraphProjectionContributorTest {
                 Arguments.of(ControlLinkTargetType.TREATMENT_PLAN, GraphEntityType.TREATMENT_PLAN),
                 Arguments.of(ControlLinkTargetType.METHODOLOGY_PROFILE, GraphEntityType.METHODOLOGY_PROFILE),
                 Arguments.of(ControlLinkTargetType.OBSERVATION, GraphEntityType.OBSERVATION),
-                Arguments.of(ControlLinkTargetType.FINDING, GraphEntityType.FINDING));
+                Arguments.of(ControlLinkTargetType.FINDING, GraphEntityType.FINDING),
+                Arguments.of(ControlLinkTargetType.EVIDENCE, GraphEntityType.EVIDENCE_ARTIFACT));
     }
 
     @ParameterizedTest
@@ -138,7 +139,7 @@ class ControlGraphProjectionContributorTest {
     @ParameterizedTest
     @EnumSource(
             value = ControlLinkTargetType.class,
-            names = {"EVIDENCE", "CODE", "CONFIGURATION", "OPERATIONAL_ARTIFACT", "EXTERNAL"})
+            names = {"CODE", "CONFIGURATION", "OPERATIONAL_ARTIFACT", "EXTERNAL"})
     void filtersExternalTargetTypes(ControlLinkTargetType targetType) {
         var project = new Project("ground-control", "Ground Control");
         var projectId = UUID.randomUUID();

@@ -858,13 +858,15 @@ max 255).
 **Internal target types (require `targetEntityId`, resolved project-scoped):** ASSET
 (includes boundaries via `AssetType.BOUNDARY`), REQUIREMENT, CONTROL, RISK_SCENARIO,
 OBSERVATION, RISK_ASSESSMENT_RESULT, VERIFICATION_RESULT, FINDING (per GC-H009 —
-governed vulnerability/scan/pentest finding records).
+governed vulnerability/scan/pentest finding records), EVIDENCE (per GC-L006 / ADR-045
+projection alignment — `targetEntityId` must reference an `EvidenceArtifact` UUID
+returned by `POST /api/v1/evidence-artifacts`).
 
 **External target types (require `targetIdentifier`):** ARCHITECTURE_MODEL (e.g. C4
 source or Structurizr DSL, per ADR-011), CODE (repo-relative path), ISSUE (GitHub
-issue or PR number), EVIDENCE (external evidence reference), EXTERNAL (catch-all —
-also covers CVE identifiers, scanner finding IDs, and pentest report IDs that have
-not been ingested as first-class `Finding` records).
+issue or PR number), EXTERNAL (catch-all — also covers CVE identifiers, scanner
+finding IDs, and pentest report IDs that have not been ingested as first-class
+`Finding` records).
 
 **Link types:** AFFECTS (threat affects an asset or boundary), EXPLOITS (threat
 exploits a requirement or condition), MITIGATED_BY (threat is mitigated by a control),
@@ -929,12 +931,13 @@ FindingLinkType enum), `targetUrl` (optional, max 2000), `targetTitle` (optional
 **Internal target types (require `targetEntityId`, resolved project-scoped):**
 CONTROL, RISK_SCENARIO, ASSET, OBSERVATION, AUDIT (promoted from external placeholder
 in GC-U001 / ADR-047; `targetEntityId` must reference a UUID returned by
-`POST /api/v1/audits`).
+`POST /api/v1/audits`), EVIDENCE (per GC-L006 / ADR-045 projection alignment;
+`targetEntityId` must reference an `EvidenceArtifact` UUID returned by
+`POST /api/v1/evidence-artifacts`).
 
 **External target types (require `targetIdentifier`):** OPERATIONAL_ARTIFACT (generic
-artifact reference, per ADR-011), EVIDENCE (external evidence reference, e.g.
-`s3://evidence/...`), REMEDIATION_PLAN (remediation plan identifier), EXTERNAL
-(catch-all).
+artifact reference, per ADR-011), REMEDIATION_PLAN (remediation plan identifier),
+EXTERNAL (catch-all).
 
 **Link types:** AFFECTS (finding affects an entity), CAUSED_BY (finding is caused by
 the linked entity), MITIGATED_BY (finding is mitigated by a control or plan),

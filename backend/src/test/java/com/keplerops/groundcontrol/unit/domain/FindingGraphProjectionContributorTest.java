@@ -235,6 +235,32 @@ class FindingGraphProjectionContributorTest {
                 .isEqualTo(GraphIds.nodeId(GraphEntityType.RISK_SCENARIO, liveScenario.getId()));
     }
 
+    @Test
+    void emitsEvidenceArtifactEdgeForEvidenceLink() {
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var f = newFinding(project, "FIND-EV", "Finding with evidence");
+
+        var evidenceId = UUID.randomUUID();
+        var evidenceLink =
+                new FindingLink(f, FindingLinkTargetType.EVIDENCE, evidenceId, null, FindingLinkType.EVIDENCED_BY);
+        setField(evidenceLink, "id", UUID.randomUUID());
+
+        when(findingLinkRepository.findByProjectId(projectId)).thenReturn(List.of(evidenceLink));
+        when(operationalAssetRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId))
+                .thenReturn(List.of());
+        when(riskScenarioRepository.findIdsByProjectIdAndStatusNot(projectId, RiskScenarioStatus.ARCHIVED))
+                .thenReturn(List.of());
+
+        var edges = contributor.contributeEdges(projectId);
+
+        assertThat(edges).hasSize(1);
+        assertThat(edges.get(0).targetEntityType()).isEqualTo(GraphEntityType.EVIDENCE_ARTIFACT);
+        assertThat(edges.get(0).targetId()).isEqualTo(GraphIds.nodeId(GraphEntityType.EVIDENCE_ARTIFACT, evidenceId));
+    }
+
     private Finding newFinding(Project project, String uid, String title) {
         var f = new Finding(project, uid, title, FindingType.CONTROL_DEFICIENCY, FindingSeverity.HIGH, "desc");
         setField(f, "id", UUID.randomUUID());

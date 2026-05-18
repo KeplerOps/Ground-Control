@@ -71,8 +71,9 @@ export const GC_THREAT_MODEL_DESCRIPTION =
   `clear_stride / clear_narrative to explicitly null optional fields. ` +
   `status is consumed only by the transition action (creation defaults to DRAFT). ` +
   `link_create requires target_type + link_type; for internal target types ` +
-  `(ASSET / REQUIREMENT / CONTROL / RISK_SCENARIO / etc.) pass target_entity_id, ` +
-  `for external types (EXTERNAL / EVIDENCE / ISSUE / CODE / etc.) pass target_identifier. ` +
+  `(ASSET / REQUIREMENT / CONTROL / RISK_SCENARIO / OBSERVATION / RISK_ASSESSMENT_RESULT / ` +
+  `VERIFICATION_RESULT / FINDING / EVIDENCE) pass target_entity_id, ` +
+  `for external types (EXTERNAL / ISSUE / CODE / ARCHITECTURE_MODEL) pass target_identifier. ` +
   `target_url and target_title are optional. ` +
   `Reads (list, get, links_list) route through gc_query.`;
 
