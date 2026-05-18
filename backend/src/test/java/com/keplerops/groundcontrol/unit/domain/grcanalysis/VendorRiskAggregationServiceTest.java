@@ -302,11 +302,12 @@ class VendorRiskAggregationServiceTest {
     void singleVendorById_rejectsNonThirdPartyAsset() {
         Instant asOf = Instant.parse("2026-05-18T00:00:00Z");
         var notVendor = makeAsset("APP-1", AssetType.APPLICATION);
+        UUID notVendorId = notVendor.getId();
         when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
-        when(operationalAssetRepository.findByIdAndProjectId(notVendor.getId(), projectId))
+        when(operationalAssetRepository.findByIdAndProjectId(notVendorId, projectId))
                 .thenReturn(Optional.of(notVendor));
 
-        assertThatThrownBy(() -> service.aggregate(projectId, asOf, 90, notVendor.getId()))
+        assertThatThrownBy(() -> service.aggregate(projectId, asOf, 90, notVendorId))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessageContaining("THIRD_PARTY");
     }
@@ -318,11 +319,12 @@ class VendorRiskAggregationServiceTest {
     @Test
     void crossProjectVendorAssetId_isRejectedAsNotFound() {
         UUID foreign = UUID.randomUUID();
+        Instant now = Instant.now();
         when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
         when(operationalAssetRepository.findByIdAndProjectId(foreign, projectId))
                 .thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.aggregate(projectId, Instant.now(), 90, foreign))
+        assertThatThrownBy(() -> service.aggregate(projectId, now, 90, foreign))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessageContaining("Asset not found in project");
         verify(evidenceFreshnessAnalysisService, never()).assetScopedEvidenceFreshness(any(), any(), anyInt(), any());
@@ -383,18 +385,19 @@ class VendorRiskAggregationServiceTest {
 
     @Test
     void projectNotFound_throws() {
+        Instant now = Instant.now();
         when(projectRepository.findById(any())).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.aggregate(projectId, Instant.now(), 90, null))
-                .isInstanceOf(NotFoundException.class);
+        assertThatThrownBy(() -> service.aggregate(projectId, now, 90, null)).isInstanceOf(NotFoundException.class);
     }
 
     /** Finding #8: non-positive freshnessWindowDays must throw at the service boundary. */
     @Test
     void invalidFreshnessWindow_throwsDomainValidationException() {
-        assertThatThrownBy(() -> service.aggregate(projectId, Instant.now(), 0, null))
+        Instant now = Instant.now();
+        assertThatThrownBy(() -> service.aggregate(projectId, now, 0, null))
                 .isInstanceOf(DomainValidationException.class);
-        assertThatThrownBy(() -> service.aggregate(projectId, Instant.now(), -1, null))
+        assertThatThrownBy(() -> service.aggregate(projectId, now, -1, null))
                 .isInstanceOf(DomainValidationException.class);
     }
 }

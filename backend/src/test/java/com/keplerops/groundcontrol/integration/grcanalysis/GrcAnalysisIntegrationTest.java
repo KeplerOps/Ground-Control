@@ -29,11 +29,10 @@ class GrcAnalysisIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.inputs.freshnessWindowDays", is(90)))
                 .andExpect(jsonPath("$.inputs.includeSuperseded", is(false)))
                 .andExpect(jsonPath("$.inputs.asOf").exists())
-                // counts.* are required structural fields — assert they exist and
-                // are numeric. We do not pin counts.fresh to a specific value
-                // because the seed corpus carries no guaranteed-fresh artifact;
-                // pinning shape (vs. value) catches a regression where the count
-                // aggregate stops emitting a field entirely.
+                // The count assertions below check shape (numeric field present),
+                // not value, because the seed corpus does not guarantee a fresh
+                // artifact. A regression that drops one of the count fields must
+                // still fail this test.
                 .andExpect(jsonPath("$.counts.fresh").isNumber())
                 .andExpect(jsonPath("$.counts.stale").isNumber())
                 .andExpect(jsonPath("$.counts.expired").isNumber())

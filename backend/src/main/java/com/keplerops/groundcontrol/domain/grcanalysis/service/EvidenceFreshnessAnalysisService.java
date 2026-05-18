@@ -201,7 +201,10 @@ public class EvidenceFreshnessAnalysisService {
                 case STATE_FRESH -> fresh++;
                 case STATE_STALE -> stale++;
                 case STATE_SUPERSEDED -> superseded++;
-                default -> {}
+                default -> {
+                    // EXPIRED is observation-only; artifacts cannot expire. Other
+                    // states are not counted in the vendor-roll-up summary.
+                }
             }
         }
         for (var o : observationItems) {
@@ -209,23 +212,37 @@ public class EvidenceFreshnessAnalysisService {
                 case STATE_FRESH -> fresh++;
                 case STATE_STALE -> stale++;
                 case STATE_EXPIRED -> expired++;
-                default -> {}
+                default -> {
+                    // SUPERSEDED applies only to artifacts. NO_OBSERVATIONS is
+                    // a list-level signal, not a per-item state.
+                }
             }
         }
 
-        String dominant;
-        if (artifactItems.isEmpty() && observationItems.isEmpty()) {
-            dominant = STATE_NO_OBSERVATIONS;
-        } else if (fresh > 0) {
-            dominant = STATE_FRESH;
-        } else if (expired > 0) {
-            dominant = STATE_EXPIRED;
-        } else if (superseded > 0 && stale == 0) {
-            dominant = STATE_SUPERSEDED;
-        } else {
-            dominant = STATE_STALE;
-        }
+        String dominant = dominantFreshnessState(artifactItems, observationItems, fresh, stale, expired, superseded);
         return new AssetScopedFreshnessSummary(fresh, stale, expired, superseded, dominant);
+    }
+
+    private static String dominantFreshnessState(
+            List<EvidenceFreshnessResult.EvidenceArtifactFreshnessItem> artifactItems,
+            List<EvidenceFreshnessResult.ObservationFreshnessItem> observationItems,
+            int fresh,
+            int stale,
+            int expired,
+            int superseded) {
+        if (artifactItems.isEmpty() && observationItems.isEmpty()) {
+            return STATE_NO_OBSERVATIONS;
+        }
+        if (fresh > 0) {
+            return STATE_FRESH;
+        }
+        if (expired > 0) {
+            return STATE_EXPIRED;
+        }
+        if (superseded > 0 && stale == 0) {
+            return STATE_SUPERSEDED;
+        }
+        return STATE_STALE;
     }
 
     /** Lightweight vendor-rollup summary; see {@link #assetScopedEvidenceFreshness}. */
@@ -240,64 +257,127 @@ public class EvidenceFreshnessAnalysisService {
             UUID assetId,
             UUID controlId) {
 
-        Set<UUID> observationIdsForAsset = null;
-        if (assetId != null) {
-            observationIdsForAsset = new HashSet<>();
-            for (Observation obs : observationRepository.findByAssetIdAndObservedAtLessThanEqual(assetId, asOf)) {
-                observationIdsForAsset.add(obs.getId());
-            }
-        }
-
-        Set<UUID> controlTestIdsForControl = null;
-        Set<UUID> ceaIdsForControl = null;
-        if (controlId != null) {
-            controlTestIdsForControl = new HashSet<>();
-            for (ControlTest test :
-                    controlTestRepository.findByProjectIdAndControlIdAndTestDateLessThanEqualOrderByTestDateDesc(
-                            projectId, controlId, asOf.atZone(ZoneOffset.UTC).toLocalDate())) {
-                controlTestIdsForControl.add(test.getId());
-            }
-            ceaIdsForControl = new HashSet<>();
-            for (var cea : controlEffectivenessAssessmentRepository.findByProjectIdAndControlIdOrderByAssessedAtDesc(
-                    projectId, controlId)) {
-                ceaIdsForControl.add(cea.getId());
-            }
-        }
+        Set<UUID> observationIdsForAsset = assetId != null ? observationIdsForAsset(assetId, asOf) : null;
+        Set<UUID> controlTestIdsForControl =
+                controlId != null ? controlTestIdsForControl(projectId, controlId, asOf) : null;
+        Set<UUID> ceaIdsForControl = controlId != null ? ceaIdsForControl(projectId, controlId) : null;
 
         List<EvidenceArtifact> all =
                 evidenceArtifactRepository.findByProjectIdAndDerivedAtLessThanEqualOrderByDerivedAtDesc(
                         projectId, asOf);
         List<EvidenceFreshnessResult.EvidenceArtifactFreshnessItem> items = new ArrayList<>();
         for (EvidenceArtifact artifact : all) {
-            boolean superseded = artifact.getSupersededByArtifactId() != null;
-            if (!includeSuperseded && superseded) {
-                continue;
+            var item = projectArtifactIfMatched(
+                    artifact,
+                    asOf,
+                    freshnessWindowDays,
+                    includeSuperseded,
+                    assetId,
+                    controlId,
+                    observationIdsForAsset,
+                    controlTestIdsForControl,
+                    ceaIdsForControl);
+            if (item != null) {
+                items.add(item);
             }
-            if (assetId != null && !artifactReferencesObservationInSet(artifact, observationIdsForAsset)) {
-                continue;
-            }
-            if (controlId != null && !artifactReferencesControl(artifact, controlTestIdsForControl, ceaIdsForControl)) {
-                continue;
-            }
-            long ageDays = daysBetween(artifact.getDerivedAt(), asOf);
-            String state;
-            if (superseded) {
-                state = STATE_SUPERSEDED;
-            } else if (ageDays > freshnessWindowDays) {
-                state = STATE_STALE;
-            } else {
-                state = STATE_FRESH;
-            }
-            items.add(new EvidenceFreshnessResult.EvidenceArtifactFreshnessItem(
-                    artifact.getId(),
-                    artifact.getUid(),
-                    artifact.getTitle(),
-                    artifact.getDerivedAt(),
-                    ageDays,
-                    state,
-                    artifact.getSupersededByArtifactId()));
         }
         return items;
+    }
+
+    private Set<UUID> observationIdsForAsset(UUID assetId, Instant asOf) {
+        Set<UUID> ids = new HashSet<>();
+        for (Observation obs : observationRepository.findByAssetIdAndObservedAtLessThanEqual(assetId, asOf)) {
+            ids.add(obs.getId());
+        }
+        return ids;
+    }
+
+    private Set<UUID> controlTestIdsForControl(UUID projectId, UUID controlId, Instant asOf) {
+        Set<UUID> ids = new HashSet<>();
+        for (ControlTest test :
+                controlTestRepository.findByProjectIdAndControlIdAndTestDateLessThanEqualOrderByTestDateDesc(
+                        projectId, controlId, asOf.atZone(ZoneOffset.UTC).toLocalDate())) {
+            ids.add(test.getId());
+        }
+        return ids;
+    }
+
+    private Set<UUID> ceaIdsForControl(UUID projectId, UUID controlId) {
+        Set<UUID> ids = new HashSet<>();
+        for (var cea : controlEffectivenessAssessmentRepository.findByProjectIdAndControlIdOrderByAssessedAtDesc(
+                projectId, controlId)) {
+            ids.add(cea.getId());
+        }
+        return ids;
+    }
+
+    /**
+     * Returns a freshness item for {@code artifact} when it matches the active
+     * filters, otherwise {@code null}. Extracted so the outer loop has a single
+     * exit point (S135) and a lower per-iteration branch count (S3776).
+     */
+    @SuppressWarnings("java:S107") // Internal helper; argument list mirrors the active filter set.
+    private EvidenceFreshnessResult.EvidenceArtifactFreshnessItem projectArtifactIfMatched(
+            EvidenceArtifact artifact,
+            Instant asOf,
+            int freshnessWindowDays,
+            boolean includeSuperseded,
+            UUID assetId,
+            UUID controlId,
+            Set<UUID> observationIdsForAsset,
+            Set<UUID> controlTestIdsForControl,
+            Set<UUID> ceaIdsForControl) {
+        boolean superseded = artifact.getSupersededByArtifactId() != null;
+        if (!artifactMatchesFilters(
+                artifact,
+                superseded,
+                includeSuperseded,
+                assetId,
+                controlId,
+                observationIdsForAsset,
+                controlTestIdsForControl,
+                ceaIdsForControl)) {
+            return null;
+        }
+        long ageDays = daysBetween(artifact.getDerivedAt(), asOf);
+        String state = artifactState(superseded, ageDays, freshnessWindowDays);
+        return new EvidenceFreshnessResult.EvidenceArtifactFreshnessItem(
+                artifact.getId(),
+                artifact.getUid(),
+                artifact.getTitle(),
+                artifact.getDerivedAt(),
+                ageDays,
+                state,
+                artifact.getSupersededByArtifactId());
+    }
+
+    @SuppressWarnings("java:S107") // Internal helper; argument list mirrors the active filter set.
+    private boolean artifactMatchesFilters(
+            EvidenceArtifact artifact,
+            boolean superseded,
+            boolean includeSuperseded,
+            UUID assetId,
+            UUID controlId,
+            Set<UUID> observationIdsForAsset,
+            Set<UUID> controlTestIdsForControl,
+            Set<UUID> ceaIdsForControl) {
+        if (!includeSuperseded && superseded) {
+            return false;
+        }
+        if (assetId != null && !artifactReferencesObservationInSet(artifact, observationIdsForAsset)) {
+            return false;
+        }
+        return controlId == null || artifactReferencesControl(artifact, controlTestIdsForControl, ceaIdsForControl);
+    }
+
+    private String artifactState(boolean superseded, long ageDays, int freshnessWindowDays) {
+        if (superseded) {
+            return STATE_SUPERSEDED;
+        }
+        if (ageDays > freshnessWindowDays) {
+            return STATE_STALE;
+        }
+        return STATE_FRESH;
     }
 
     private boolean artifactReferencesObservationInSet(EvidenceArtifact artifact, Set<UUID> observationIds) {

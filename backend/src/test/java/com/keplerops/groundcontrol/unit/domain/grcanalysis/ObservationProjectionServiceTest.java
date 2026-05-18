@@ -243,7 +243,7 @@ class ObservationProjectionServiceTest {
         when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
         when(controlRepository.findByIdAndProjectId(control.getId(), projectId)).thenReturn(Optional.of(control));
         when(controlEffectivenessAssessmentRepository.findByProjectIdAndControlIdOrderByAssessedAtDesc(
-                        org.mockito.ArgumentMatchers.eq(projectId), org.mockito.ArgumentMatchers.eq(control.getId())))
+                        projectId, control.getId()))
                 .thenReturn(List.of(assessmentLater));
 
         ObservationProjectionResult result =
@@ -284,33 +284,35 @@ class ObservationProjectionServiceTest {
 
     @Test
     void projectNotFound_throws() {
+        Instant now = Instant.now();
         when(projectRepository.findById(any())).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() ->
-                        service.project(projectId, Instant.now(), ObservationProjectionMode.ASSET_EXPOSURE, null, null))
+        assertThatThrownBy(() -> service.project(projectId, now, ObservationProjectionMode.ASSET_EXPOSURE, null, null))
                 .isInstanceOf(NotFoundException.class);
     }
 
     @Test
     void assetNotFound_throws() {
+        Instant now = Instant.now();
         when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
         UUID missing = UUID.randomUUID();
         when(operationalAssetRepository.findByIdAndProjectId(missing, projectId))
                 .thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.project(
-                        projectId, Instant.now(), ObservationProjectionMode.ASSET_EXPOSURE, missing, null))
+        assertThatThrownBy(
+                        () -> service.project(projectId, now, ObservationProjectionMode.ASSET_EXPOSURE, missing, null))
                 .isInstanceOf(NotFoundException.class);
     }
 
     @Test
     void controlNotFound_throws() {
+        Instant now = Instant.now();
         when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
         UUID missing = UUID.randomUUID();
         when(controlRepository.findByIdAndProjectId(missing, projectId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.project(
-                        projectId, Instant.now(), ObservationProjectionMode.CONTROL_STATE, null, missing))
+        assertThatThrownBy(
+                        () -> service.project(projectId, now, ObservationProjectionMode.CONTROL_STATE, null, missing))
                 .isInstanceOf(NotFoundException.class);
     }
 }
