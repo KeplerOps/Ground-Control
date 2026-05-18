@@ -765,16 +765,17 @@ class AgeGraphServiceTest {
                     .isInstanceOf(UnsupportedOperationException.class);
         }
 
+        /**
+         * GC-M018: AssetGraphProjectionContributor emits knowledgeState on
+         * OPERATIONAL_ASSET nodes AND on AssetRelation edges. Both emissions
+         * flow through validatePropertyKey, so if the key ever drops out of
+         * the registry, AGE materialization throws on any partial-knowledge
+         * asset or unknown-dependency edge. Pins both emission sites at
+         * once: the registry key drives both, so a single approved-set
+         * assertion guards the whole class shape.
+         */
         @Test
         void approvedPropertyKeysIncludesKnowledgeStateForAssetNodeAndRelationEdge() {
-            // GC-M018: AssetGraphProjectionContributor emits `knowledgeState`
-            // on OPERATIONAL_ASSET nodes AND on AssetRelation edges. Both
-            // emissions flow through validatePropertyKey, so if the key
-            // ever drops out of the registry, AGE materialization throws on
-            // any partial-knowledge asset or unknown-dependency edge. The
-            // codex pre-push review explicitly called this out as a class
-            // shape (graph contributor adds a key without registering it);
-            // the test pins both emission sites at once.
             assertThat(AgeGraphService.APPROVED_PROPERTY_KEYS).contains("knowledgeState");
         }
     }

@@ -384,18 +384,23 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
         assertThat(importRevisions).hasSizeGreaterThanOrEqualTo(1);
     }
 
+    /**
+     * E2E sanity check: confirm migrations completed and the count matches
+     * the authoritative exact-sequence pin in {@code
+     * MigrationSmokeTest.allFlywayMigrationsRan}. Duplicating the full
+     * version list here was a class-shape bug — every new migration forced
+     * two hardcoded list updates and a stale copy would have silently
+     * masked a regression in either test class. The count anchor lives on
+     * the smoke test; this test only verifies "all expected migrations
+     * applied during the E2E flow" without re-pinning every version. The
+     * lower bound catches "migrations didn't run at all" in the E2E
+     * ordering; the explicit {@code contains("092", "093")} pin guards the
+     * structural precondition for the E2E asset / relation paths that
+     * depend on the knowledge_state columns.
+     */
     @Test
     @Order(6)
     void migrationVerification() throws Exception {
-        // E2E sanity check: confirm migrations completed and the count
-        // matches the authoritative exact-sequence pin in
-        // MigrationSmokeTest.allFlywayMigrationsRan. Duplicating the full
-        // version list here was a class-shape bug — every new migration
-        // forced two hardcoded list updates and a stale copy would have
-        // silently masked a regression in either test class (issue #906
-        // test-quality review). The count anchor lives on the smoke
-        // test; this test only verifies "all expected migrations applied
-        // during the E2E flow" without re-pinning every version.
         List<String> versions = new ArrayList<>();
         try (var conn = dataSource.getConnection();
                 var stmt = conn.createStatement();
@@ -405,15 +410,9 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                 versions.add(rs.getString("version"));
             }
         }
-        // Lower bound, not exact: a future migration adds one more row;
-        // the exact pin in MigrationSmokeTest catches drift, this check
-        // catches "migrations didn't run at all" in the E2E ordering.
-        assertThat(versions).hasSizeGreaterThanOrEqualTo(93);
-        assertThat(versions).startsWith("001", "002", "003");
-        // Pin the GC-M018 versions specifically because the E2E flow
-        // exercises asset / relation paths that depend on the
-        // knowledge_state columns; their presence is the structural
-        // precondition for those E2E assertions.
-        assertThat(versions).contains("092", "093");
+        assertThat(versions)
+                .hasSizeGreaterThanOrEqualTo(93)
+                .startsWith("001", "002", "003")
+                .contains("092", "093");
     }
 }

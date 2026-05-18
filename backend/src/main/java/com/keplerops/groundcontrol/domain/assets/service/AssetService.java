@@ -222,9 +222,11 @@ public class AssetService {
      * @deprecated GC-M018 added the {@code knowledgeState} filter facet.
      *     Callers should adopt the 9-arg overload so the knowledgeState query
      *     parameter is honored. Retained for source compatibility with
-     *     pre-GC-M018 callers.
+     *     pre-GC-M018 callers. Suppressed: S1133 (don't forget to remove
+     *     deprecated code) — removal is tied to all callers migrating off
+     *     this overload, which we are explicitly NOT requiring in this PR.
      */
-    @SuppressWarnings("java:S107")
+    @SuppressWarnings({"java:S107", "java:S1133"})
     @Deprecated(forRemoval = false)
     @Transactional(readOnly = true)
     public List<OperationalAsset> listByProjectAndFilters(
