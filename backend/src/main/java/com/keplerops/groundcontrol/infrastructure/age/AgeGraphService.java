@@ -163,6 +163,12 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
             "criticality",
             "businessContext",
             "scopeDesignation",
+            // GC-M018 knowledge / completeness state. Emitted on both
+            // OPERATIONAL_ASSET nodes and AssetRelation edges by
+            // AssetGraphProjectionContributor; must be approved here or AGE
+            // materialization rejects the writes with
+            // DomainValidationException at validatePropertyKey time.
+            "knowledgeState",
             "categoryTags",
             "expiresAt",
             "observedAt",

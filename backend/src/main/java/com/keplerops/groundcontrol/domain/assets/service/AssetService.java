@@ -125,6 +125,9 @@ public class AssetService {
         if (command.metadata() != null) {
             asset.setMetadata(command.metadata());
         }
+        if (command.knowledgeState() != null) {
+            asset.setKnowledgeState(command.knowledgeState());
+        }
         validateAssetMetadata(asset);
         return assetRepository.save(asset);
     }
@@ -201,15 +204,49 @@ public class AssetService {
             com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment environment,
             com.keplerops.groundcontrol.domain.assets.state.AssetCriticality criticality,
             com.keplerops.groundcontrol.domain.assets.state.AssetScope scopeDesignation,
+            String subtype,
+            com.keplerops.groundcontrol.domain.assets.state.KnowledgeState knowledgeState) {
+        return assetRepository.findByProjectIdAndArchivedAtIsNullAndFilters(
+                projectId,
+                assetType,
+                owner,
+                steward,
+                environment,
+                criticality,
+                scopeDesignation,
+                subtype,
+                knowledgeState);
+    }
+
+    /**
+     * @deprecated GC-M018 added the {@code knowledgeState} filter facet.
+     *     Callers should adopt the 9-arg overload so the knowledgeState query
+     *     parameter is honored. Retained for source compatibility with
+     *     pre-GC-M018 callers. Suppressed: S1133 (don't forget to remove
+     *     deprecated code) — removal is tied to all callers migrating off
+     *     this overload, which we are explicitly NOT requiring in this PR.
+     */
+    @SuppressWarnings({"java:S107", "java:S1133"})
+    @Deprecated(forRemoval = false)
+    @Transactional(readOnly = true)
+    public List<OperationalAsset> listByProjectAndFilters(
+            UUID projectId,
+            AssetType assetType,
+            String owner,
+            String steward,
+            com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment environment,
+            com.keplerops.groundcontrol.domain.assets.state.AssetCriticality criticality,
+            com.keplerops.groundcontrol.domain.assets.state.AssetScope scopeDesignation,
             String subtype) {
         return assetRepository.findByProjectIdAndArchivedAtIsNullAndFilters(
-                projectId, assetType, owner, steward, environment, criticality, scopeDesignation, subtype);
+                projectId, assetType, owner, steward, environment, criticality, scopeDesignation, subtype, null);
     }
 
     /**
      * @deprecated GC-M011 added the {@code subtype} filter facet. Callers
-     *     should adopt the 8-arg overload so the subtype query parameter is
-     *     honored. Retained for source compatibility with pre-GC-M011 callers.
+     *     should adopt the 9-arg overload so the subtype and knowledgeState
+     *     query parameters are honored. Retained for source compatibility
+     *     with pre-GC-M011 callers.
      */
     @Deprecated(forRemoval = false)
     @Transactional(readOnly = true)
@@ -226,7 +263,7 @@ public class AssetService {
         // and Sonar S6809 flags the pattern. The repository call is itself
         // already covered by the class-level @Transactional.
         return assetRepository.findByProjectIdAndArchivedAtIsNullAndFilters(
-                projectId, assetType, owner, steward, environment, criticality, scopeDesignation, null);
+                projectId, assetType, owner, steward, environment, criticality, scopeDesignation, null, null);
     }
 
     @Transactional(readOnly = true)
@@ -299,14 +336,14 @@ public class AssetService {
     public AssetRelation createRelation(UUID projectId, UUID sourceId, UUID targetId, AssetRelationType relationType) {
         return createRelation(
                 projectId,
-                new CreateAssetRelationCommand(targetId, relationType, null, null, null, null, null),
+                new CreateAssetRelationCommand(targetId, relationType, null, null, null, null, null, null),
                 sourceId);
     }
 
     @Deprecated(forRemoval = false)
     public AssetRelation createRelation(UUID sourceId, UUID targetId, AssetRelationType relationType) {
         return createRelation(
-                new CreateAssetRelationCommand(targetId, relationType, null, null, null, null, null), sourceId);
+                new CreateAssetRelationCommand(targetId, relationType, null, null, null, null, null, null), sourceId);
     }
 
     public AssetRelation createRelation(UUID projectId, CreateAssetRelationCommand command, UUID sourceId) {
@@ -327,7 +364,8 @@ public class AssetService {
                 command.sourceSystem(),
                 command.externalSourceId(),
                 command.collectedAt(),
-                command.confidence());
+                command.confidence(),
+                command.knowledgeState());
         return relationRepository.save(relation);
     }
 
@@ -351,7 +389,8 @@ public class AssetService {
                 command.sourceSystem(),
                 command.externalSourceId(),
                 command.collectedAt(),
-                command.confidence());
+                command.confidence(),
+                command.knowledgeState());
         return relationRepository.save(relation);
     }
 
@@ -364,7 +403,8 @@ public class AssetService {
                 command.sourceSystem(),
                 command.externalSourceId(),
                 command.collectedAt(),
-                command.confidence());
+                command.confidence(),
+                command.knowledgeState());
         return relationRepository.save(relation);
     }
 
@@ -377,7 +417,8 @@ public class AssetService {
                 command.sourceSystem(),
                 command.externalSourceId(),
                 command.collectedAt(),
-                command.confidence());
+                command.confidence(),
+                command.knowledgeState());
         return relationRepository.save(relation);
     }
 
@@ -672,6 +713,9 @@ public class AssetService {
         if (command.assetType() != null) {
             asset.setAssetType(command.assetType());
         }
+        if (command.knowledgeState() != null) {
+            asset.setKnowledgeState(command.knowledgeState());
+        }
     }
 
     private void applyMetadataUpdates(OperationalAsset asset, UpdateAssetCommand command) {
@@ -891,13 +935,15 @@ public class AssetService {
         }
     }
 
+    @SuppressWarnings("java:S107") // applyRelationMetadata bundles the relation's optional payload fields.
     private void applyRelationMetadata(
             AssetRelation relation,
             String description,
             String sourceSystem,
             String externalSourceId,
             Instant collectedAt,
-            String confidence) {
+            String confidence,
+            com.keplerops.groundcontrol.domain.assets.state.KnowledgeState knowledgeState) {
         if (description != null) {
             relation.setDescription(description);
         }
@@ -912,6 +958,9 @@ public class AssetService {
         }
         if (confidence != null) {
             relation.setConfidence(confidence);
+        }
+        if (knowledgeState != null) {
+            relation.setKnowledgeState(knowledgeState);
         }
     }
 }

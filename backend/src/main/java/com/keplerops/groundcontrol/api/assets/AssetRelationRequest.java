@@ -1,6 +1,7 @@
 package com.keplerops.groundcontrol.api.assets;
 
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
+import com.keplerops.groundcontrol.domain.assets.state.KnowledgeState;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
@@ -13,4 +14,7 @@ public record AssetRelationRequest(
         @Size(max = 100) String sourceSystem,
         @Size(max = 500) String externalSourceId,
         Instant collectedAt,
-        @Size(max = 50) String confidence) {}
+        @Size(max = 50) String confidence,
+        // GC-M018: knowledge / completeness state on the topology edge.
+        // Optional on create; defaults to CONFIRMED.
+        KnowledgeState knowledgeState) {}

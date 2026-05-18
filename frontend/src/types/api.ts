@@ -355,6 +355,17 @@ export const ASSET_ENVIRONMENTS: AssetEnvironment[] = [
 export type AssetScope = "IN_SCOPE" | "OUT_OF_SCOPE";
 export const ASSET_SCOPES: AssetScope[] = ["IN_SCOPE", "OUT_OF_SCOPE"];
 
+// GC-M018 knowledge / completeness dimension. Mirrors the backend
+// `KnowledgeState` enum. Distinct from confidence, asset type, asset scope,
+// and the (subtype, metadata) bag — see
+// architecture/notes/partial-knowledge-unknown-dependency-preflight.md.
+export type KnowledgeState = "CONFIRMED" | "PROVISIONAL" | "UNKNOWN";
+export const KNOWLEDGE_STATES: KnowledgeState[] = [
+  "CONFIRMED",
+  "PROVISIONAL",
+  "UNKNOWN",
+];
+
 // Responses
 export interface ProjectResponse {
   id: string;

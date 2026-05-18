@@ -14,6 +14,7 @@ import com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetScope;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
+import com.keplerops.groundcontrol.domain.assets.state.KnowledgeState;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -63,7 +64,8 @@ public class AssetController {
                 request.businessContext(),
                 request.scopeDesignation(),
                 request.subtype(),
-                request.metadata());
+                request.metadata(),
+                request.knowledgeState());
         return AssetResponse.from(assetService.create(command));
     }
 
@@ -76,7 +78,8 @@ public class AssetController {
             @RequestParam(required = false) AssetEnvironment environment,
             @RequestParam(required = false) AssetCriticality criticality,
             @RequestParam(required = false) AssetScope scope,
-            @RequestParam(required = false) String subtype) {
+            @RequestParam(required = false) String subtype,
+            @RequestParam(required = false) KnowledgeState knowledgeState) {
         var projectId = projectService.resolveProjectId(project);
         boolean anyFilter = type != null
                 || owner != null
@@ -84,10 +87,12 @@ public class AssetController {
                 || environment != null
                 || criticality != null
                 || scope != null
-                || subtype != null;
+                || subtype != null
+                || knowledgeState != null;
         if (anyFilter) {
             return assetService
-                    .listByProjectAndFilters(projectId, type, owner, steward, environment, criticality, scope, subtype)
+                    .listByProjectAndFilters(
+                            projectId, type, owner, steward, environment, criticality, scope, subtype, knowledgeState)
                     .stream()
                     .map(AssetResponse::from)
                     .toList();
@@ -127,6 +132,7 @@ public class AssetController {
                 request.scopeDesignation(),
                 request.subtype(),
                 request.metadata(),
+                request.knowledgeState(),
                 request.clearOwner(),
                 request.clearSteward(),
                 request.clearEnvironment(),
@@ -165,7 +171,8 @@ public class AssetController {
                 request.sourceSystem(),
                 request.externalSourceId(),
                 request.collectedAt(),
-                request.confidence());
+                request.confidence(),
+                request.knowledgeState());
         return AssetRelationResponse.from(assetService.createRelation(projectId, command, id));
     }
 
@@ -181,7 +188,8 @@ public class AssetController {
                 request.sourceSystem(),
                 request.externalSourceId(),
                 request.collectedAt(),
-                request.confidence());
+                request.confidence(),
+                request.knowledgeState());
         return AssetRelationResponse.from(assetService.updateRelation(projectId, id, relationId, command));
     }
 

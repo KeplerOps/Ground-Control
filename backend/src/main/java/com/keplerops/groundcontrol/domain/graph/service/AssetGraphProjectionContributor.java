@@ -66,6 +66,15 @@ public class AssetGraphProjectionContributor implements GraphProjectionContribut
                     // free-form, high-cardinality, and may carry per-record
                     // detail unsafe for graph-wide indexing.
                     properties.put("subtype", asset.getSubtype());
+                    // GC-M018: knowledge state — risk / threat / control
+                    // workflows reading the graph must be able to distinguish
+                    // CONFIRMED from PROVISIONAL from UNKNOWN without a
+                    // second persisted aggregate.
+                    properties.put(
+                            "knowledgeState",
+                            asset.getKnowledgeState() == null
+                                    ? null
+                                    : asset.getKnowledgeState().name());
                     properties.put("archivedAt", asset.getArchivedAt());
                     return new GraphNode(
                             GraphIds.nodeId(GraphEntityType.OPERATIONAL_ASSET, asset.getId()),
@@ -106,18 +115,32 @@ public class AssetGraphProjectionContributor implements GraphProjectionContribut
     @Override
     public List<GraphEdge> contributeEdges(UUID projectId) {
         var relationEdges = assetRelationRepository.findActiveByProjectId(projectId).stream()
-                .map(relation -> new GraphEdge(
-                        relation.getId().toString(),
-                        relation.getRelationType().name(),
-                        GraphIds.nodeId(
-                                GraphEntityType.OPERATIONAL_ASSET,
-                                relation.getSource().getId()),
-                        GraphIds.nodeId(
-                                GraphEntityType.OPERATIONAL_ASSET,
-                                relation.getTarget().getId()),
-                        GraphEntityType.OPERATIONAL_ASSET,
-                        GraphEntityType.OPERATIONAL_ASSET,
-                        Map.of("createdAt", relation.getCreatedAt())))
+                .map(relation -> {
+                    // LinkedHashMap because the GC-M018 edge property set is
+                    // open-ended ({@code knowledgeState} joins {@code
+                    // createdAt}, and a future edge attribute would extend
+                    // the same map). Map.of(...) is fixed-arity and would
+                    // need to be re-written for every new property.
+                    Map<String, Object> edgeProperties = new LinkedHashMap<>();
+                    edgeProperties.put("createdAt", relation.getCreatedAt());
+                    edgeProperties.put(
+                            "knowledgeState",
+                            relation.getKnowledgeState() == null
+                                    ? null
+                                    : relation.getKnowledgeState().name());
+                    return new GraphEdge(
+                            relation.getId().toString(),
+                            relation.getRelationType().name(),
+                            GraphIds.nodeId(
+                                    GraphEntityType.OPERATIONAL_ASSET,
+                                    relation.getSource().getId()),
+                            GraphIds.nodeId(
+                                    GraphEntityType.OPERATIONAL_ASSET,
+                                    relation.getTarget().getId()),
+                            GraphEntityType.OPERATIONAL_ASSET,
+                            GraphEntityType.OPERATIONAL_ASSET,
+                            edgeProperties);
+                })
                 .toList();
 
         var observationEdges = observationRepository.findByProjectId(projectId).stream()

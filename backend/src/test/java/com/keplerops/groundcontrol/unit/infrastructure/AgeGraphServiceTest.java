@@ -227,10 +227,26 @@ class AgeGraphServiceTest {
         }
 
         @Test
-        void getAncestors_queriesGraph() {
+        void getAncestors_queriesGraph() throws SQLException {
             when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
-            enabledService.getAncestors(PROJECT_ID, "REQ-001", 5);
+            // Feed a synthetic agtype string through the RowCallbackHandler
+            // so the callback actually runs — without this, the mock keeps
+            // the handler unexecuted and the test would pass even if
+            // queryUids stopped reading column 1 or stopped calling
+            // stringValue (test-quality review #906).
+            java.sql.ResultSet rs = mock(java.sql.ResultSet.class);
+            when(rs.getString(1)).thenReturn("\"REQ-PARENT\"");
+            org.mockito.Mockito.doAnswer(invocation -> {
+                        RowCallbackHandler handler = invocation.getArgument(2);
+                        handler.processRow(rs);
+                        return null;
+                    })
+                    .when(jdbcTemplate)
+                    .query(anyString(), any(PreparedStatementSetter.class), any(RowCallbackHandler.class));
 
+            List<String> result = enabledService.getAncestors(PROJECT_ID, "REQ-001", 5);
+
+            assertThat(result).containsExactly("REQ-PARENT");
             // setupSearchPath: LOAD + SET
             verify(jdbcTemplate, times(2)).execute(anyString());
             ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
@@ -240,10 +256,25 @@ class AgeGraphServiceTest {
         }
 
         @Test
-        void getDescendants_queriesGraph() {
+        void getDescendants_queriesGraph() throws SQLException {
             when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
-            enabledService.getDescendants(PROJECT_ID, "REQ-001", 5);
+            // Same doAnswer pattern as getAncestors — exercise the
+            // RowCallbackHandler so a regression in the descendant column
+            // index or in stringValue surfaces here rather than at the
+            // higher integration layer (test-quality review #906).
+            java.sql.ResultSet rs = mock(java.sql.ResultSet.class);
+            when(rs.getString(1)).thenReturn("\"REQ-CHILD\"");
+            org.mockito.Mockito.doAnswer(invocation -> {
+                        RowCallbackHandler handler = invocation.getArgument(2);
+                        handler.processRow(rs);
+                        return null;
+                    })
+                    .when(jdbcTemplate)
+                    .query(anyString(), any(PreparedStatementSetter.class), any(RowCallbackHandler.class));
 
+            List<String> result = enabledService.getDescendants(PROJECT_ID, "REQ-001", 5);
+
+            assertThat(result).containsExactly("REQ-CHILD");
             verify(jdbcTemplate, times(2)).execute(anyString());
             ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
             verify(jdbcTemplate)
@@ -252,10 +283,33 @@ class AgeGraphServiceTest {
         }
 
         @Test
-        void findPaths_queriesGraphWithRelationships() {
+        void findPaths_queriesGraphWithRelationships() throws SQLException {
             when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(TEST_PROJECT));
-            enabledService.findPaths(PROJECT_ID, "REQ-001", "REQ-002");
+            // findPaths reads TWO columns per row: column 1 is
+            // nodes(path) as an agtype vertex list, column 2 is
+            // relationships(path) as an agtype edge list. Without this
+            // pair feeding the callback, the test could not catch a
+            // regression that swapped the two extract calls (test-quality
+            // review #906).
+            String nodesAgtype = "[{\"label\":\"REQUIREMENT\",\"properties\":{\"uid\":\"REQ-001\"}}::vertex, "
+                    + "{\"label\":\"REQUIREMENT\",\"properties\":{\"uid\":\"REQ-002\"}}::vertex]";
+            String edgesAgtype = "[{\"label\":\"PARENT\"}::edge]";
+            java.sql.ResultSet rs = mock(java.sql.ResultSet.class);
+            when(rs.getString(1)).thenReturn(nodesAgtype);
+            when(rs.getString(2)).thenReturn(edgesAgtype);
+            org.mockito.Mockito.doAnswer(invocation -> {
+                        RowCallbackHandler handler = invocation.getArgument(2);
+                        handler.processRow(rs);
+                        return null;
+                    })
+                    .when(jdbcTemplate)
+                    .query(anyString(), any(PreparedStatementSetter.class), any(RowCallbackHandler.class));
 
+            var result = enabledService.findPaths(PROJECT_ID, "REQ-001", "REQ-002");
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).nodeUids()).containsExactly("REQ-001", "REQ-002");
+            assertThat(result.get(0).edgeLabels()).containsExactly("PARENT");
             verify(jdbcTemplate, times(2)).execute(anyString());
             ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
             verify(jdbcTemplate)
@@ -709,6 +763,20 @@ class AgeGraphServiceTest {
             // not a mutable HashSet a future caller could grow at runtime.
             assertThatThrownBy(() -> AgeGraphService.APPROVED_PROPERTY_KEYS.add("evil"))
                     .isInstanceOf(UnsupportedOperationException.class);
+        }
+
+        /**
+         * GC-M018: AssetGraphProjectionContributor emits knowledgeState on
+         * OPERATIONAL_ASSET nodes AND on AssetRelation edges. Both emissions
+         * flow through validatePropertyKey, so if the key ever drops out of
+         * the registry, AGE materialization throws on any partial-knowledge
+         * asset or unknown-dependency edge. Pins both emission sites at
+         * once: the registry key drives both, so a single approved-set
+         * assertion guards the whole class shape.
+         */
+        @Test
+        void approvedPropertyKeysIncludesKnowledgeStateForAssetNodeAndRelationEdge() {
+            assertThat(AgeGraphService.APPROVED_PROPERTY_KEYS).contains("knowledgeState");
         }
     }
 

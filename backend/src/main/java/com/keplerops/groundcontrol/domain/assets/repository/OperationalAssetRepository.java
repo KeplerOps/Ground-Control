@@ -5,6 +5,7 @@ import com.keplerops.groundcontrol.domain.assets.state.AssetCriticality;
 import com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment;
 import com.keplerops.groundcontrol.domain.assets.state.AssetScope;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
+import com.keplerops.groundcontrol.domain.assets.state.KnowledgeState;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,14 +31,18 @@ public interface OperationalAssetRepository extends JpaRepository<OperationalAss
     List<UUID> findIdsByProjectIdAndArchivedAtIsNull(@Param("projectId") UUID projectId);
 
     /**
-     * GC-M012 + GC-M011: single filtered project-scoped query for active
-     * assets. Any combination of asset-type, owner, steward, environment,
-     * criticality, scope-designation, and subtype predicates may be null;
-     * nulls disable that predicate (IS NULL guard), so risk / control / audit
-     * / reporting callers share one query surface instead of inventing
-     * per-workflow lookups. Owner / steward comparison is case-insensitive to
-     * match the free-form string shape; subtype is case-sensitive because the
-     * subtype catalog (AssetSubtypeSchema) keys off the exact string.
+     * GC-M012 + GC-M011 + GC-M018: single filtered project-scoped query for
+     * active assets. Any combination of asset-type, owner, steward,
+     * environment, criticality, scope-designation, subtype, and
+     * knowledge-state predicates may be null; nulls disable that predicate
+     * (IS NULL guard), so risk / control / audit / reporting callers share
+     * one query surface instead of inventing per-workflow lookups. Owner /
+     * steward comparison is case-insensitive to match the free-form string
+     * shape; subtype is case-sensitive because the subtype catalog
+     * (AssetSubtypeSchema) keys off the exact string. {@code knowledgeState}
+     * is the explicit "confirmed vs provisional vs unknown" filter knob the
+     * GC-M018 statement requires risk / threat / control workflows to be
+     * able to use.
      */
     @SuppressWarnings("java:S107") // JPA @Query requires each filter as an explicit @Param binding.
     @Query(
@@ -52,6 +57,7 @@ public interface OperationalAssetRepository extends JpaRepository<OperationalAss
               AND (:criticality IS NULL OR a.criticality = :criticality)
               AND (:scopeDesignation IS NULL OR a.scopeDesignation = :scopeDesignation)
               AND (:subtype IS NULL OR a.subtype = :subtype)
+              AND (:knowledgeState IS NULL OR a.knowledgeState = :knowledgeState)
             """)
     List<OperationalAsset> findByProjectIdAndArchivedAtIsNullAndFilters(
             @Param("projectId") UUID projectId,
@@ -61,5 +67,6 @@ public interface OperationalAssetRepository extends JpaRepository<OperationalAss
             @Param("environment") AssetEnvironment environment,
             @Param("criticality") AssetCriticality criticality,
             @Param("scopeDesignation") AssetScope scopeDesignation,
-            @Param("subtype") String subtype);
+            @Param("subtype") String subtype,
+            @Param("knowledgeState") KnowledgeState knowledgeState);
 }

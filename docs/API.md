@@ -419,7 +419,7 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
 | Method | Path | Body | Status | Purpose |
 |--------|------|------|--------|---------|
 | POST | `/assets?project=` | AssetRequest | 201 | Create asset |
-| GET | `/assets?project=&type=&owner=&steward=&environment=&criticality=&scope=&subtype=` | — | 200 | List assets (any combination of filters is optional; `subtype` is exact-match per the GC-M011 subtype catalog) |
+| GET | `/assets?project=&type=&owner=&steward=&environment=&criticality=&scope=&subtype=&knowledgeState=` | — | 200 | List assets (any combination of filters is optional; `subtype` is exact-match per the GC-M011 subtype catalog; `knowledgeState` filters by GC-M018 confirmed-vs-provisional-vs-unknown state) |
 | GET | `/assets/{id}` | — | 200 | Get asset by UUID |
 | GET | `/assets/uid/{uid}?project=` | — | 200 | Get asset by UID |
 | PUT | `/assets/{id}` | UpdateAssetRequest | 200 | Update asset (partial) |
@@ -444,7 +444,8 @@ The tree endpoint returns a nested JSON structure with `children` arrays.
   "metadata": {
     "cloud_account_id": "1234567890",
     "region": "us-west-2"
-  }
+  },
+  "knowledgeState": "CONFIRMED"
 }
 ```
 
@@ -460,7 +461,9 @@ Asset environment (GC-M012): `PRODUCTION`, `STAGING`, `DEVELOPMENT`, `TEST`, `NO
 
 Asset scope designation (GC-M012): `IN_SCOPE`, `OUT_OF_SCOPE`. Two-state explicit; the absence of either (NULL) means "not yet designated" — distinct from `archivedAt` (lifecycle), `quality_gate.scopeStatus`, control `implementationScope`, and risk `assetScopeSummary`.
 
-List filters route through `OperationalAssetRepository.findByProjectIdAndArchivedAtIsNullAndFilters` so any combination of `type` / `owner` / `steward` / `environment` / `criticality` / `scope` query parameters is honored in a single JPQL pass; risk, control, audit, and reporting workflows consume this same surface rather than inventing per-workflow lookups.
+Asset knowledge state (GC-M018): `CONFIRMED`, `PROVISIONAL`, `UNKNOWN`. `CONFIRMED` is the asserted-fact default; `PROVISIONAL` marks a manually-asserted or unvalidated assertion; `UNKNOWN` is the explicit placeholder for an asset whose details are not yet known (the unresolved-dependency seam — point an `AssetRelation` at an UNKNOWN asset to model a tentative dependency). NOT NULL; legacy rows back-fill to `CONFIRMED`. Distinct from `confidence` (relation provenance), `AssetType.OTHER` (classification fallback), `subtype = null` (no subtype declared), and `scopeDesignation = null` (not yet scoped). The same vocabulary applies on `AssetRelation` to mark a topology edge itself as CONFIRMED / PROVISIONAL / UNKNOWN. Risk, threat, and control workflows reading `AssetResponse`, `AssetRelationResponse`, or the graph projection consume `knowledgeState` directly to separate confirmed model facts from provisional or unknown coverage.
+
+List filters route through `OperationalAssetRepository.findByProjectIdAndArchivedAtIsNullAndFilters` so any combination of `type` / `owner` / `steward` / `environment` / `criticality` / `scope` / `subtype` / `knowledgeState` query parameters is honored in a single JPQL pass; risk, control, audit, and reporting workflows consume this same surface rather than inventing per-workflow lookups.
 
 ### Asset Subtype Schemas (GC-M011 schema layering)
 
@@ -516,7 +519,8 @@ Validation errors return HTTP `422` with the canonical `ErrorResponse` envelope 
   "sourceSystem": "AWS_CONFIG",
   "externalSourceId": "cfg-123",
   "collectedAt": "2026-04-01T12:00:00Z",
-  "confidence": "0.80"
+  "confidence": "0.80",
+  "knowledgeState": "CONFIRMED"
 }
 ```
 
@@ -528,13 +532,16 @@ Validation errors return HTTP `422` with the canonical `ErrorResponse` envelope 
   "sourceSystem": "CMDB",
   "externalSourceId": "cmdb-789",
   "collectedAt": "2026-04-02T12:00:00Z",
-  "confidence": "0.95"
+  "confidence": "0.95",
+  "knowledgeState": "CONFIRMED"
 }
 ```
 
-**AssetRelationResponse fields:** `id`, `sourceId`, `sourceUid`, `targetId`, `targetUid`, `relationType`, `description`, `sourceSystem`, `externalSourceId`, `collectedAt`, `confidence`, `createdAt`, `updatedAt`
+**AssetRelationResponse fields:** `id`, `sourceId`, `sourceUid`, `targetId`, `targetUid`, `relationType`, `description`, `sourceSystem`, `externalSourceId`, `collectedAt`, `confidence`, `knowledgeState`, `createdAt`, `updatedAt`
 
 Relation types: `CONTAINS`, `DEPENDS_ON`, `COMMUNICATES_WITH`, `TRUST_BOUNDARY`, `SUPPORTS`, `ACCESSES`, `DATA_FLOW`
+
+`knowledgeState` (GC-M018) on `AssetRelation` carries the same `CONFIRMED` / `PROVISIONAL` / `UNKNOWN` vocabulary as `OperationalAsset.knowledgeState`. `confidence` remains the existing free-text provenance field — they are independent: a `CONFIRMED` edge can carry a `confidence` annotation from the source system, and an `UNKNOWN` edge can omit confidence entirely. Null on the update path means "leave unchanged"; there is no clear flag because the underlying column is NOT NULL.
 
 ### Asset Links (Cross-Entity Linking)
 

@@ -177,7 +177,8 @@ class AssetControllerTest {
                         com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment.PRODUCTION,
                         com.keplerops.groundcontrol.domain.assets.state.AssetCriticality.CRITICAL,
                         com.keplerops.groundcontrol.domain.assets.state.AssetScope.IN_SCOPE,
-                        "aws_ec2"))
+                        "aws_ec2",
+                        null))
                 .thenReturn(List.of(makeAsset()));
 
         mockMvc.perform(get("/api/v1/assets")
@@ -196,10 +197,97 @@ class AssetControllerTest {
         // GC-M011: subtype alone is a valid filter facet on the canonical
         // list path; routes through listByProjectAndFilters(... subtype).
         when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
-        when(assetService.listByProjectAndFilters(PROJECT_ID, null, null, null, null, null, null, "aws_ec2"))
+        when(assetService.listByProjectAndFilters(PROJECT_ID, null, null, null, null, null, null, "aws_ec2", null))
                 .thenReturn(List.of(makeAsset()));
 
         mockMvc.perform(get("/api/v1/assets").param("project", "ground-control").param("subtype", "aws_ec2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)));
+    }
+
+    @Test
+    void createForwardsKnowledgeStateIntoCommand() throws Exception {
+        // GC-M018: knowledgeState arrives on the request body, lands on
+        // the CreateAssetCommand, AND round-trips through AssetResponse so
+        // the controller↔response wiring is verified end-to-end. Without
+        // the $.knowledgeState jsonPath assertion, a regression that
+        // dropped the field from AssetResponse.from() (or mapped it to
+        // null) would leave this test green because the mock return value
+        // is independent of the request body (test-quality review #906).
+        var stub = makeAsset();
+        stub.setKnowledgeState(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.PROVISIONAL);
+        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(assetService.create(any())).thenReturn(stub);
+
+        mockMvc.perform(
+                        post("/api/v1/assets")
+                                .param("project", "ground-control")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                                {
+                                  "uid":"ASSET-NEW",
+                                  "name":"Tentative Service",
+                                  "knowledgeState":"PROVISIONAL"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.knowledgeState", is("PROVISIONAL")));
+
+        var captor = ArgumentCaptor.forClass(CreateAssetCommand.class);
+        verify(assetService).create(captor.capture());
+        var cmd = captor.getValue();
+        org.assertj.core.api.Assertions.assertThat(cmd.knowledgeState())
+                .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.PROVISIONAL);
+    }
+
+    @Test
+    void updateForwardsKnowledgeStateIntoCommand() throws Exception {
+        // GC-M018: PUT body's knowledgeState lands on UpdateAssetCommand
+        // AND round-trips through AssetResponse. Same wiring contract as
+        // createForwardsKnowledgeStateIntoCommand.
+        var stub = makeAsset();
+        stub.setKnowledgeState(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.CONFIRMED);
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(assetService.update(eq(PROJECT_ID), eq(ASSET_ID), any())).thenReturn(stub);
+
+        mockMvc.perform(
+                        put("/api/v1/assets/{id}", ASSET_ID)
+                                .param("project", "ground-control")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        """
+                                {"knowledgeState":"CONFIRMED"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.knowledgeState", is("CONFIRMED")));
+
+        var captor = ArgumentCaptor.forClass(UpdateAssetCommand.class);
+        verify(assetService).update(eq(PROJECT_ID), eq(ASSET_ID), captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().knowledgeState())
+                .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.CONFIRMED);
+    }
+
+    @Test
+    void listSupportsKnowledgeStateFilter() throws Exception {
+        // GC-M018: knowledgeState is the explicit confirmed-vs-provisional
+        // filter knob the requirement says risk / threat / control workflows
+        // must be able to use. Routes through listByProjectAndFilters(...,
+        // knowledgeState).
+        when(projectService.resolveProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(assetService.listByProjectAndFilters(
+                        PROJECT_ID,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.CONFIRMED))
+                .thenReturn(List.of(makeAsset()));
+
+        mockMvc.perform(get("/api/v1/assets").param("project", "ground-control").param("knowledgeState", "CONFIRMED"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)));
     }
@@ -760,5 +848,46 @@ class AssetControllerTest {
                 .andExpect(jsonPath("$.description", is("Observed dependency")))
                 .andExpect(jsonPath("$.sourceSystem", is("AWS_CONFIG")))
                 .andExpect(jsonPath("$.confidence", is("0.95")));
+    }
+
+    @Test
+    void createRelationForwardsKnowledgeStateIntoCommand() throws Exception {
+        // GC-M018: knowledgeState on a topology edge round-trips through
+        // the controller into CreateAssetRelationCommand. ArgumentCaptor
+        // anchors the assertion to the actual command shape — without it,
+        // a controller drop would still pass because the mock return value
+        // is independent of the request body.
+        var source = makeAsset();
+        var target = makeAsset();
+        setField(target, "id", UUID.randomUUID());
+        var relation = new AssetRelation(source, target, AssetRelationType.DEPENDS_ON);
+        setField(relation, "id", UUID.randomUUID());
+        setField(relation, "createdAt", Instant.now());
+        setField(relation, "updatedAt", Instant.now());
+        relation.setKnowledgeState(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.UNKNOWN);
+
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(assetService.createRelation(
+                        eq(PROJECT_ID),
+                        any(com.keplerops.groundcontrol.domain.assets.service.CreateAssetRelationCommand.class),
+                        eq(ASSET_ID)))
+                .thenReturn(relation);
+
+        mockMvc.perform(post("/api/v1/assets/{id}/relations", ASSET_ID)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(
+                                """
+                {"targetId":"%s","relationType":"DEPENDS_ON","knowledgeState":"UNKNOWN"}
+                """
+                                        .formatted(target.getId())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.knowledgeState", is("UNKNOWN")));
+
+        var captor = ArgumentCaptor.forClass(
+                com.keplerops.groundcontrol.domain.assets.service.CreateAssetRelationCommand.class);
+        verify(assetService).createRelation(eq(PROJECT_ID), captor.capture(), eq(ASSET_ID));
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().knowledgeState())
+                .isEqualTo(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.UNKNOWN);
     }
 }

@@ -2,6 +2,7 @@ package com.keplerops.groundcontrol.api.assets;
 
 import com.keplerops.groundcontrol.domain.assets.model.AssetRelation;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
+import com.keplerops.groundcontrol.domain.assets.state.KnowledgeState;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -17,6 +18,7 @@ public record AssetRelationResponse(
         String externalSourceId,
         Instant collectedAt,
         String confidence,
+        KnowledgeState knowledgeState,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -33,6 +35,7 @@ public record AssetRelationResponse(
                 r.getExternalSourceId(),
                 r.getCollectedAt(),
                 r.getConfidence(),
+                r.getKnowledgeState(),
                 r.getCreatedAt(),
                 r.getUpdatedAt());
     }

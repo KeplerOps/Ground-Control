@@ -2,6 +2,7 @@ package com.keplerops.groundcontrol.domain.assets.model;
 
 import com.keplerops.groundcontrol.domain.BaseEntity;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
+import com.keplerops.groundcontrol.domain.assets.state.KnowledgeState;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -52,6 +53,18 @@ public class AssetRelation extends BaseEntity {
 
     @Column(length = 50)
     private String confidence;
+
+    /**
+     * GC-M018 knowledge / completeness dimension on the topology edge. A
+     * relation may be CONFIRMED, PROVISIONAL, or UNKNOWN even when its
+     * source and target are themselves CONFIRMED — the edge carries its
+     * own assertion strength. An "unknown dependency" pairs an UNKNOWN
+     * relation with a target asset whose own {@code knowledgeState} is
+     * UNKNOWN (the placeholder-asset seam).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "knowledge_state", nullable = false, length = 20)
+    private KnowledgeState knowledgeState = KnowledgeState.CONFIRMED;
 
     protected AssetRelation() {
         // JPA
@@ -121,6 +134,17 @@ public class AssetRelation extends BaseEntity {
 
     public void setConfidence(String confidence) {
         this.confidence = confidence;
+    }
+
+    public KnowledgeState getKnowledgeState() {
+        return knowledgeState;
+    }
+
+    public void setKnowledgeState(KnowledgeState knowledgeState) {
+        if (knowledgeState == null) {
+            throw new IllegalArgumentException("knowledgeState must not be null");
+        }
+        this.knowledgeState = knowledgeState;
     }
 
     @Override
