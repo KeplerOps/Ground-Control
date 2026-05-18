@@ -216,6 +216,63 @@ band across its `evidence`. Status drift is also surfaced inside
 }
 ```
 
+### GRC Analysis (GC-L007)
+
+GRC-specific analyses live under `/analysis/grc/*` and ride on existing
+substrates: `EvidenceArtifact` (derivedAt / supersededByArtifactId / sources),
+`Observation` (observedAt / expiresAt), `ControlTest` (testDate), and
+`OperationalAsset` (filtered by `AssetType.THIRD_PARTY` for vendor analyses).
+Every response is methodology-attributed and structured for agent
+consumption — `analysisKind`, `project`, `asOf`, `derivationMethod`,
+`inputs`/`outputs`/`limitations` sections — per
+`architecture/notes/mcp-grc-analysis-tools-preflight.md`. No generic
+`risk_score`; no executions of FAIR / FAIR-CAM / NIST methodology engines
+(those are tracked in GC-T011 / GC-I017 / GC-T014 and ship their own
+analysis endpoints when the engine lands).
+
+| Method | Path | Body | Status | Purpose |
+|--------|------|------|--------|---------|
+| GET | `/analysis/grc/evidence-freshness` | — | 200 | Per-evidence / per-observation / per-control-test freshness state given an `asOf` and `freshnessWindowDays`. |
+| GET | `/analysis/grc/observation-projection?mode=ASSET_EXPOSURE\|CONTROL_STATE` | — | 200 | Current-state projection from observations; ASSET_EXPOSURE flags assets with active observations; CONTROL_STATE joins through `ControlEffectivenessAssessment`. |
+| GET | `/analysis/grc/vendor-risk` | — | 200 | Aggregation over `OperationalAsset` of `AssetType.THIRD_PARTY` (findings, observations, evidence freshness, mapped controls). |
+
+`GET /analysis/grc/evidence-freshness` accepts:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `project` | string | auto-resolved | Project identifier |
+| `asOf` | ISO-8601 instant | `now()` | Evaluation timestamp; freshness is computed against this |
+| `freshnessWindowDays` | int (positive) | 90 | Items older than this are flagged `STALE`. Non-positive values return `400`. |
+| `includeSuperseded` | boolean | false | If true, `SUPERSEDED` artifacts are still surfaced (state-labeled) |
+| `assetId` | UUID | — | Narrow to evidence/observations attached to this asset. Must belong to the resolved project or `404` is returned. |
+| `controlId` | UUID | — | Narrow to evidence/observations/tests for this control. When supplied without `assetId`, observations are not joinable from controls today; the response surfaces an empty `observations` list and a `limitations` entry explaining the carve-out. When supplied with `assetId`, sections are intersected. |
+
+`GET /analysis/grc/observation-projection` accepts:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `project` | string | auto-resolved | Project identifier |
+| `asOf` | ISO-8601 instant | `now()` | Evaluation timestamp; expired observations are flagged `EXPIRED` |
+| `mode` | enum (`ASSET_EXPOSURE` \| `CONTROL_STATE`) | required | Which projection to run |
+| `assetId` | UUID | — | Narrow to observations on this asset |
+| `controlId` | UUID | — | Narrow `CONTROL_STATE` to this control (ignored for `ASSET_EXPOSURE`) |
+
+`GET /analysis/grc/vendor-risk` accepts:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `project` | string | auto-resolved | Project identifier |
+| `asOf` | ISO-8601 instant | `now()` | Evaluation timestamp; freshness is computed against this |
+| `freshnessWindowDays` | int (positive) | 90 | Window used to label vendor-attached evidence as `STALE`/`FRESH`. Non-positive values return `400`. |
+| `vendorAssetId` | UUID | — | Narrow to a single third-party asset (otherwise rolls up every `AssetType.THIRD_PARTY` row). Must belong to the resolved project or `404`. |
+
+Every response carries a `limitations` array. For the vendor-risk endpoint
+that array always includes a note that vendors are modeled as
+`OperationalAsset` rows of `AssetType.THIRD_PARTY` rather than a first-class
+vendor aggregate (per the GC-L009 carve-out from GC-L006). When external
+framework identifiers, missing evidence, or unvalidated methodology schemas
+are involved, additional `limitations` entries are emitted.
+
 ### Embeddings
 
 | Method | Path | Body | Status | Purpose |

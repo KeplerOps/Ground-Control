@@ -1,0 +1,85 @@
+package com.keplerops.groundcontrol.integration.grcanalysis;
+
+import static org.hamcrest.Matchers.is;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.keplerops.groundcontrol.integration.BaseIntegrationTest;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
+
+@AutoConfigureMockMvc
+@Transactional
+class GrcAnalysisIntegrationTest extends BaseIntegrationTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Test
+    void evidenceFreshness_returnsStructuredResultForSeedProject() throws Exception {
+        mockMvc.perform(get("/api/v1/analysis/grc/evidence-freshness").param("project", "ground-control"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.analysisKind", is("evidence_freshness")))
+                .andExpect(jsonPath("$.project", is("ground-control")))
+                .andExpect(jsonPath("$.derivationMethod", is("evidence-freshness-projection-v1")))
+                .andExpect(jsonPath("$.inputs.freshnessWindowDays", is(90)))
+                .andExpect(jsonPath("$.inputs.includeSuperseded", is(false)))
+                .andExpect(jsonPath("$.inputs.asOf").exists())
+                // counts.* are required structural fields — assert they exist and
+                // are numeric. We do not pin counts.fresh to a specific value
+                // because the seed corpus carries no guaranteed-fresh artifact;
+                // pinning shape (vs. value) catches a regression where the count
+                // aggregate stops emitting a field entirely.
+                .andExpect(jsonPath("$.counts.fresh").isNumber())
+                .andExpect(jsonPath("$.counts.stale").isNumber())
+                .andExpect(jsonPath("$.counts.expired").isNumber())
+                .andExpect(jsonPath("$.counts.superseded").isNumber())
+                .andExpect(jsonPath("$.evidenceArtifacts").isArray())
+                .andExpect(jsonPath("$.observations").isArray())
+                .andExpect(jsonPath("$.controlTests").isArray())
+                .andExpect(jsonPath("$.limitations").isArray());
+    }
+
+    @Test
+    void observationProjection_assetExposureMode_returnsStructuredResult() throws Exception {
+        mockMvc.perform(get("/api/v1/analysis/grc/observation-projection")
+                        .param("project", "ground-control")
+                        .param("mode", "ASSET_EXPOSURE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.analysisKind", is("observation_exposure")))
+                .andExpect(jsonPath("$.derivationMethod", is("observation-current-state-projection-v1")))
+                .andExpect(jsonPath("$.inputs.mode", is("ASSET_EXPOSURE")));
+    }
+
+    @Test
+    void observationProjection_controlStateMode_carriesAntiPatternLimitation() throws Exception {
+        mockMvc.perform(get("/api/v1/analysis/grc/observation-projection")
+                        .param("project", "ground-control")
+                        .param("mode", "CONTROL_STATE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.analysisKind", is("control_state")))
+                .andExpect(jsonPath(
+                        "$.limitations[?(@ =~ /.*ControlStatus.OPERATIONAL is NOT treated.*/)]",
+                        is(java.util.List.of("controlEffectiveness is derived from ControlEffectivenessAssessment; "
+                                + "ControlStatus.OPERATIONAL is NOT treated as evidence of effectiveness "
+                                + "(preflight anti-pattern)"))));
+    }
+
+    @Test
+    void vendorRisk_carriesThirdPartyLabelAndCarveOutLimitation() throws Exception {
+        mockMvc.perform(get("/api/v1/analysis/grc/vendor-risk").param("project", "ground-control"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.analysisKind", is("vendor_risk_aggregation")))
+                .andExpect(jsonPath("$.assetType", is("THIRD_PARTY")))
+                .andExpect(jsonPath("$.derivationMethod", is("vendor-third-party-rollup-v1")))
+                .andExpect(jsonPath(
+                        "$.limitations[?(@ =~ /.*GC-L009 carve-out.*/)]",
+                        is(java.util.List.of(
+                                "not a first-class vendor aggregate; modeled as OperationalAsset.THIRD_PARTY"
+                                        + " per GC-L009 carve-out"))));
+    }
+}

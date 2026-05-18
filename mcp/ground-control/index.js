@@ -58,6 +58,8 @@ import {
   crossWaveValidation, detectConsistencyViolations, analyzeCompleteness,
   analyzeStatusDrift, analyzeSemanticSimilarity, getWorkOrder,
   getDashboardStats,
+  // ---- GC-L007 GRC analysis ----
+  analyzeEvidenceFreshness, analyzeObservationProjection, aggregateVendorRisk,
   // ---- history / exports (kept for completeness even though tools route to gc_query) ----
   getRequirementHistory, getRelationHistory, getTraceabilityLinkHistory,
   getRequirementTimeline, getRequirementDiff, getProjectTimeline,
@@ -1061,12 +1063,21 @@ server.tool(
 const ANALYZE_KINDS = [
   "cycles", "orphans", "coverage_gaps", "impact", "cross_wave",
   "consistency", "completeness", "status_drift", "similarity", "work_order",
+  // GC-L007 — GRC analyses on existing substrates. Methodology-execution
+  // engines (FAIR / FAIR-CAM / NIST) and compliance-framework analyses are
+  // tracked separately and ship their own kinds when those engines land.
+  "evidence_freshness", "observation_exposure", "control_state", "vendor_risk_aggregation",
 ];
 
 server.tool(
   "gc_analyze",
   `Compute-heavy analysis operations. Kinds: ${ANALYZE_KINDS.join(", ")}. ` +
-    `Required fields per kind: coverage_gaps→{link_type}; impact→{id}; status_drift→{minimum_confidence?}; similarity→{threshold?}. Others take {project?}.`,
+    `Required fields per kind: coverage_gaps→{link_type}; impact→{id}; status_drift→{minimum_confidence?}; similarity→{threshold?}; ` +
+    `evidence_freshness→{project?, as_of?, freshness_window_days?, include_superseded?, asset_id?, control_id?}; ` +
+    `observation_exposure→{project?, as_of?, asset_id?}; ` +
+    `control_state→{project?, as_of?, asset_id?, control_id?}; ` +
+    `vendor_risk_aggregation→{project?, as_of?, freshness_window_days?, vendor_asset_id?}. ` +
+    `Others take {project?}.`,
   {
     kind: z.enum(ANALYZE_KINDS),
     project: z.string().optional(),
@@ -1074,6 +1085,13 @@ server.tool(
     link_type: z.enum(LINK_TYPES).optional(),
     minimum_confidence: z.enum(CONFIDENCE_LEVELS).optional(),
     threshold: z.number().optional(),
+    // GC-L007 GRC analysis params
+    as_of: z.string().datetime().optional(),
+    freshness_window_days: z.number().int().positive().optional(),
+    include_superseded: z.boolean().optional(),
+    asset_id: z.string().uuid().optional(),
+    control_id: z.string().uuid().optional(),
+    vendor_asset_id: z.string().uuid().optional(),
   },
   async (args) => {
     try {
@@ -1094,6 +1112,37 @@ server.tool(
         case "status_drift": return ok(JSON.stringify(await analyzeStatusDrift({ project: args.project, minimumConfidence: args.minimum_confidence }), null, 2));
         case "similarity": return ok(JSON.stringify(await analyzeSemanticSimilarity({ project: args.project, threshold: args.threshold }), null, 2));
         case "work_order": return ok(JSON.stringify(await getWorkOrder(args.project), null, 2));
+        case "evidence_freshness":
+          return ok(JSON.stringify(await analyzeEvidenceFreshness({
+            project: args.project,
+            asOf: args.as_of,
+            freshnessWindowDays: args.freshness_window_days,
+            includeSuperseded: args.include_superseded,
+            assetId: args.asset_id,
+            controlId: args.control_id,
+          }), null, 2));
+        case "observation_exposure":
+          return ok(JSON.stringify(await analyzeObservationProjection({
+            project: args.project,
+            asOf: args.as_of,
+            mode: "ASSET_EXPOSURE",
+            assetId: args.asset_id,
+          }), null, 2));
+        case "control_state":
+          return ok(JSON.stringify(await analyzeObservationProjection({
+            project: args.project,
+            asOf: args.as_of,
+            mode: "CONTROL_STATE",
+            assetId: args.asset_id,
+            controlId: args.control_id,
+          }), null, 2));
+        case "vendor_risk_aggregation":
+          return ok(JSON.stringify(await aggregateVendorRisk({
+            project: args.project,
+            asOf: args.as_of,
+            freshnessWindowDays: args.freshness_window_days,
+            vendorAssetId: args.vendor_asset_id,
+          }), null, 2));
         default: return err(new Error(`Unknown kind: ${args.kind}`));
       }
     } catch (e) { return err(e); }
