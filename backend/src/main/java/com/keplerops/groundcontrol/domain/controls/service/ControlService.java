@@ -29,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ControlService {
 
     private static final Logger log = LoggerFactory.getLogger(ControlService.class);
+    private static final String DETAIL_CONTROL_UID = "controlUid";
 
     private final ControlRepository controlRepository;
     private final ControlLinkRepository controlLinkRepository;
@@ -153,7 +154,7 @@ public class ControlService {
                 FindingLinkTargetType.CONTROL, id, projectId);
         if (!inboundFindingUids.isEmpty()) {
             Map<String, Serializable> detail = new LinkedHashMap<>();
-            detail.put("controlUid", control.getUid());
+            detail.put(DETAIL_CONTROL_UID, control.getUid());
             detail.put("findingCount", inboundFindingUids.size());
             detail.put("findingUids", new ArrayList<>(inboundFindingUids));
             throw new ConflictException(
@@ -168,7 +169,7 @@ public class ControlService {
                 AuditLinkTargetType.CONTROL, id, projectId);
         if (!inboundAuditUids.isEmpty()) {
             Map<String, Serializable> detail = new LinkedHashMap<>();
-            detail.put("controlUid", control.getUid());
+            detail.put(DETAIL_CONTROL_UID, control.getUid());
             detail.put("auditCount", inboundAuditUids.size());
             detail.put("auditUids", new ArrayList<>(inboundAuditUids));
             throw new ConflictException(
@@ -189,7 +190,7 @@ public class ControlService {
         long assessmentCount = effectivenessAssessmentRepository.countByProjectIdAndControlId(projectId, id);
         if (testCount > 0 || assessmentCount > 0) {
             Map<String, Serializable> detail = new LinkedHashMap<>();
-            detail.put("controlUid", control.getUid());
+            detail.put(DETAIL_CONTROL_UID, control.getUid());
             detail.put("controlTestCount", testCount);
             detail.put("controlEffectivenessAssessmentCount", assessmentCount);
             throw new ConflictException(

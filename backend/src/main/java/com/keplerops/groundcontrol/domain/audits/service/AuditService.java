@@ -32,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class AuditService {
 
     private static final Logger log = LoggerFactory.getLogger(AuditService.class);
+    private static final String DETAIL_FIELD = "field";
 
     private final AuditRepository auditRepository;
     private final AuditLinkRepository auditLinkRepository;
@@ -128,7 +129,9 @@ public class AuditService {
     private static void rejectBlankIfPresent(String fieldName, String value) {
         if (value != null && value.isBlank()) {
             throw new DomainValidationException(
-                    fieldName + " must not be blank when provided", "validation_error", Map.of("field", fieldName));
+                    fieldName + " must not be blank when provided",
+                    "validation_error",
+                    Map.of(DETAIL_FIELD, fieldName));
         }
     }
 
@@ -142,7 +145,7 @@ public class AuditService {
                 throw new DomainValidationException(
                         "Phase at index " + i + " is missing required field 'kind'",
                         "validation_error",
-                        Map.of("field", "phases[" + i + "].kind"));
+                        Map.of(DETAIL_FIELD, "phases[" + i + "].kind"));
             }
             rejectInvertedRange("plannedStart", phase.plannedStart(), "plannedEnd", phase.plannedEnd(), i);
             rejectInvertedRange("actualStart", phase.actualStart(), "actualEnd", phase.actualEnd(), i);
@@ -159,7 +162,7 @@ public class AuditService {
                     "Phase at index " + index + " has " + endField + " before " + startField,
                     "validation_error",
                     Map.of(
-                            "field",
+                            DETAIL_FIELD,
                             "phases[" + index + "]." + endField,
                             startField,
                             start.toString(),

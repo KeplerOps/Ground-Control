@@ -94,22 +94,29 @@ public class RiskRegisterRecordService {
     }
 
     public void delete(UUID projectId, UUID id) {
-        var record = getById(projectId, id);
+        // Resolve directly via the repository rather than via getById() to avoid
+        // the @Transactional self-invocation pattern Sonar S6809 flags — the
+        // proxy is bypassed and any per-method tx semantics would be lost. The
+        // class-level @Transactional covers this method too, so behavior is
+        // unchanged.
+        var registerRecord = repository
+                .findByIdAndProjectIdWithScenarios(id, projectId)
+                .orElseThrow(() -> new NotFoundException("Risk register record not found: " + id));
         var inboundAuditUids = auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
                 AuditLinkTargetType.RISK_REGISTER_RECORD, id, projectId);
         if (!inboundAuditUids.isEmpty()) {
             Map<String, Serializable> detail = new LinkedHashMap<>();
-            detail.put("riskRegisterRecordUid", record.getUid());
+            detail.put("riskRegisterRecordUid", registerRecord.getUid());
             detail.put("auditCount", inboundAuditUids.size());
             detail.put("auditUids", new ArrayList<>(inboundAuditUids));
             throw new ConflictException(
-                    "Risk register record " + record.getUid()
+                    "Risk register record " + registerRecord.getUid()
                             + " cannot be deleted while inbound AuditLink references exist. Remove the"
                             + " AuditLink references first, then retry.",
                     "risk_register_record_referenced",
                     detail);
         }
-        repository.delete(record);
+        repository.delete(registerRecord);
     }
 
     private List<RiskScenario> resolveScenarios(UUID projectId, List<UUID> ids) {

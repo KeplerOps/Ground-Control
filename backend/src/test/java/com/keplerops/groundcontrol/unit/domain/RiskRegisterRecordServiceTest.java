@@ -175,10 +175,10 @@ class RiskRegisterRecordServiceTest {
 
     @Test
     void rejectsDeleteWhenInboundAuditLinkReferencesRecord() {
-        var record = new RiskRegisterRecord(project, "RR-2", "Audited record");
+        var registerRecord = new RiskRegisterRecord(project, "RR-2", "Audited record");
         var recordId = UUID.randomUUID();
-        setField(record, "id", recordId);
-        when(repository.findByIdAndProjectIdWithScenarios(recordId, projectId)).thenReturn(Optional.of(record));
+        setField(registerRecord, "id", recordId);
+        when(repository.findByIdAndProjectIdWithScenarios(recordId, projectId)).thenReturn(Optional.of(registerRecord));
         when(auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
                         com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType.RISK_REGISTER_RECORD,
                         recordId,
@@ -193,6 +193,6 @@ class RiskRegisterRecordServiceTest {
                 .extracting("errorCode")
                 .isEqualTo("risk_register_record_referenced");
         assertThat(thrown.getDetail()).containsEntry("auditCount", 1);
-        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).delete(record);
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).delete(registerRecord);
     }
 }

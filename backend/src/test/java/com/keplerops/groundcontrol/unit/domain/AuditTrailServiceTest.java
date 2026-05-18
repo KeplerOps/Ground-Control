@@ -35,8 +35,9 @@ class AuditTrailServiceTest {
 
             var diff = SnapshotMapper.computeDiff(previous, current);
 
-            assertThat(diff).containsOnlyKeys("title");
-            assertThat(diff.get("title")).isEqualTo(new FieldChange("Old Title", "New Title"));
+            assertThat(diff)
+                    .containsOnlyKeys("title")
+                    .containsEntry("title", new FieldChange("Old Title", "New Title"));
         }
 
         @Test
@@ -55,8 +56,7 @@ class AuditTrailServiceTest {
 
             var diff = SnapshotMapper.computeDiff(previous, current);
 
-            assertThat(diff).hasSize(2);
-            assertThat(diff).containsKeys("title", "status");
+            assertThat(diff).hasSize(2).containsKeys("title", "status");
         }
 
         @Test
@@ -71,8 +71,7 @@ class AuditTrailServiceTest {
 
             var diff = SnapshotMapper.computeDiff(previous, current);
 
-            assertThat(diff).containsOnlyKeys("wave");
-            assertThat(diff.get("wave")).isEqualTo(new FieldChange(null, 2));
+            assertThat(diff).containsOnlyKeys("wave").containsEntry("wave", new FieldChange(null, 2));
         }
 
         @Test
