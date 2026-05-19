@@ -75,7 +75,7 @@ import {
   runTestQualityReview, TEST_QUALITY_REVIEW_HARD_CAP,
   runPostImplementationPlan,
   runPostDecisionRecord, runPostFinalReport, runRenderPrBody, runLogStepTelemetry,
-  runGetIssueThread,
+  runGetIssueThread, runWatchCiRun,
   runResolveWorkflowRoute,
   DECISION_RECORD_REVIEWERS, DECISION_RECORD_DECISIONS, DECISION_RECORD_CLASSIFICATIONS,
   PR_BODY_CHANGE_CLASSES, PR_REQUIREMENT_RE, EXACT_REQUIREMENT_UID_RE,
@@ -767,6 +767,31 @@ server.tool(
         repoPath: repo_path,
         issueNumber: issue_number,
         expectedHash: expected_hash ?? null,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_watch_ci_run",
+  "Poll a GitHub Actions run to a terminal state server-side and return one compact terminal envelope (conclusion, failed steps, bounded log summary). Designed for the /implement Step 10 monitor: the agent makes one tool call; the MCP server holds the connection while polling so the agent's context is not burned by per-poll turns. Defaults: queued cap 5 min, total cap 45 min, poll every 15s. On queued-too-long or timeout the tool returns ok=true with conclusion='queued_too_long' or 'timed_out' so the caller can decide policy. If run_id is omitted, the latest run for the branch is resolved via `gh run list`. Raw CI logs stay server-side; only a bounded UTF-8 summary (default 4096 bytes from the tail of `--log-failed`) reaches the caller.",
+  {
+    repo_path: z.string(),
+    branch: z.string().min(1),
+    run_id: z.number().int().positive().nullable().optional(),
+    queued_timeout_seconds: z.number().int().positive().optional(),
+    total_timeout_seconds: z.number().int().positive().optional(),
+    poll_interval_seconds: z.number().int().positive().optional(),
+  },
+  async ({ repo_path, branch, run_id, queued_timeout_seconds, total_timeout_seconds, poll_interval_seconds }) => {
+    try {
+      return ok(JSON.stringify(await runWatchCiRun({
+        repoPath: repo_path,
+        branch,
+        runId: run_id ?? null,
+        queuedTimeoutSeconds: queued_timeout_seconds ?? 300,
+        totalTimeoutSeconds: total_timeout_seconds ?? 2700,
+        pollIntervalSeconds: poll_interval_seconds ?? 15,
       }), null, 2));
     } catch (e) { return err(e); }
   },

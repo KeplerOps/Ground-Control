@@ -9186,3 +9186,263 @@ describe("runGetIssueThread cache short-circuit (issue #934)", () => {
     }
   });
 });
+
+// =============================================================================
+// gc_watch_ci_run (issue #934)
+// =============================================================================
+//
+// Server-side CI poller. The agent makes one MCP tool call; the MCP server
+// holds the connection while polling GitHub for up to ~45 minutes. The
+// terminal envelope summarizes the run; raw logs stay server-side. Three
+// pure helpers carry the testable logic — the async loop is covered by the
+// end-to-end run in Phase 5.
+
+describe("evaluateCiPollState (issue #934)", () => {
+  it("returns action=complete when status is completed regardless of elapsed", async () => {
+    const { evaluateCiPollState } = await import("./lib.js");
+    const r = evaluateCiPollState({
+      status: "completed",
+      elapsedSeconds: 5,
+      queuedTimeoutSeconds: 300,
+      totalTimeoutSeconds: 2700,
+    });
+    assert.equal(r.action, "complete");
+  });
+
+  it("returns action=queued_too_long when still queued past the queued cap", async () => {
+    const { evaluateCiPollState } = await import("./lib.js");
+    const r = evaluateCiPollState({
+      status: "queued",
+      elapsedSeconds: 301,
+      queuedTimeoutSeconds: 300,
+      totalTimeoutSeconds: 2700,
+    });
+    assert.equal(r.action, "queued_too_long");
+  });
+
+  it("stays action=continue while queued under the queued cap", async () => {
+    const { evaluateCiPollState } = await import("./lib.js");
+    const r = evaluateCiPollState({
+      status: "queued",
+      elapsedSeconds: 60,
+      queuedTimeoutSeconds: 300,
+      totalTimeoutSeconds: 2700,
+    });
+    assert.equal(r.action, "continue");
+  });
+
+  it("returns action=timed_out when in_progress past the total cap", async () => {
+    const { evaluateCiPollState } = await import("./lib.js");
+    const r = evaluateCiPollState({
+      status: "in_progress",
+      elapsedSeconds: 2701,
+      queuedTimeoutSeconds: 300,
+      totalTimeoutSeconds: 2700,
+    });
+    assert.equal(r.action, "timed_out");
+  });
+
+  it("stays action=continue while in_progress under the total cap", async () => {
+    const { evaluateCiPollState } = await import("./lib.js");
+    const r = evaluateCiPollState({
+      status: "in_progress",
+      elapsedSeconds: 500,
+      queuedTimeoutSeconds: 300,
+      totalTimeoutSeconds: 2700,
+    });
+    assert.equal(r.action, "continue");
+  });
+
+  it("treats an unknown status as continue (defensive — GH may add statuses)", async () => {
+    const { evaluateCiPollState } = await import("./lib.js");
+    const r = evaluateCiPollState({
+      status: "requested",
+      elapsedSeconds: 50,
+      queuedTimeoutSeconds: 300,
+      totalTimeoutSeconds: 2700,
+    });
+    assert.equal(r.action, "continue");
+  });
+
+  it("returns queued_too_long with priority over timed_out at the boundary", async () => {
+    // If somehow elapsed exceeds BOTH caps while still queued, queued_too_long
+    // is the more specific signal (a stuck runner pool), so report that.
+    const { evaluateCiPollState } = await import("./lib.js");
+    const r = evaluateCiPollState({
+      status: "queued",
+      elapsedSeconds: 3000,
+      queuedTimeoutSeconds: 300,
+      totalTimeoutSeconds: 2700,
+    });
+    assert.equal(r.action, "queued_too_long");
+  });
+});
+
+describe("summarizeCiLogFailedOutput (issue #934)", () => {
+  it("returns an empty string for empty input", async () => {
+    const { summarizeCiLogFailedOutput } = await import("./lib.js");
+    assert.equal(summarizeCiLogFailedOutput("", 4096), "");
+    assert.equal(summarizeCiLogFailedOutput(null, 4096), "");
+    assert.equal(summarizeCiLogFailedOutput(undefined, 4096), "");
+  });
+
+  it("returns the input unchanged when under the cap", async () => {
+    const { summarizeCiLogFailedOutput } = await import("./lib.js");
+    const text = "short log line\nanother\n";
+    assert.equal(summarizeCiLogFailedOutput(text, 4096), text);
+  });
+
+  it("truncates the FRONT of long input and keeps the tail (failures are at the end)", async () => {
+    const { summarizeCiLogFailedOutput } = await import("./lib.js");
+    const text = "x".repeat(2000) + "\nTHE_ERROR_LINE\n" + "y".repeat(2000);
+    const out = summarizeCiLogFailedOutput(text, 200);
+    assert.ok(out.length <= 200 + 64); // +64 budget for the prefix marker
+    assert.ok(out.includes("THE_ERROR_LINE") || out.includes("y"));
+  });
+
+  it("includes a truncation marker when the input is truncated", async () => {
+    const { summarizeCiLogFailedOutput } = await import("./lib.js");
+    const text = "a".repeat(10000);
+    const out = summarizeCiLogFailedOutput(text, 200);
+    assert.match(out, /\[truncated/i);
+  });
+});
+
+describe("extractFailedStepsFromJobsJson (issue #934)", () => {
+  it("returns [] for missing or empty input", async () => {
+    const { extractFailedStepsFromJobsJson } = await import("./lib.js");
+    assert.deepEqual(extractFailedStepsFromJobsJson(null), []);
+    assert.deepEqual(extractFailedStepsFromJobsJson({}), []);
+    assert.deepEqual(extractFailedStepsFromJobsJson({ jobs: [] }), []);
+  });
+
+  it("returns only steps whose conclusion is failure", async () => {
+    const { extractFailedStepsFromJobsJson } = await import("./lib.js");
+    const jobs = {
+      jobs: [
+        {
+          name: "build",
+          conclusion: "failure",
+          steps: [
+            { name: "checkout", conclusion: "success" },
+            { name: "compile", conclusion: "failure" },
+          ],
+        },
+        {
+          name: "lint",
+          conclusion: "success",
+          steps: [{ name: "spotless", conclusion: "success" }],
+        },
+      ],
+    };
+    const r = extractFailedStepsFromJobsJson(jobs);
+    assert.deepEqual(r, [{ job_name: "build", step_name: "compile" }]);
+  });
+
+  it("bounds the number of returned failed steps", async () => {
+    const { extractFailedStepsFromJobsJson } = await import("./lib.js");
+    const jobs = {
+      jobs: [
+        {
+          name: "j",
+          conclusion: "failure",
+          steps: Array.from({ length: 20 }, (_, i) => ({
+            name: `s${i}`,
+            conclusion: "failure",
+          })),
+        },
+      ],
+    };
+    const r = extractFailedStepsFromJobsJson(jobs, 10);
+    assert.equal(r.length, 10);
+  });
+
+  it("treats cancelled, timed_out, and skipped steps as not-failed (GitHub semantics)", async () => {
+    const { extractFailedStepsFromJobsJson } = await import("./lib.js");
+    const jobs = {
+      jobs: [
+        {
+          name: "j",
+          conclusion: "failure",
+          steps: [
+            { name: "a", conclusion: "cancelled" },
+            { name: "b", conclusion: "timed_out" },
+            { name: "c", conclusion: "skipped" },
+            { name: "d", conclusion: "failure" },
+          ],
+        },
+      ],
+    };
+    const r = extractFailedStepsFromJobsJson(jobs);
+    assert.deepEqual(r, [{ job_name: "j", step_name: "d" }]);
+  });
+});
+
+describe("runWatchCiRun input validation (issue #934)", () => {
+  it("refuses when repo_path is missing", async () => {
+    const { runWatchCiRun } = await import("./lib.js");
+    const r = await runWatchCiRun({ repoPath: "", branch: "main" });
+    assert.equal(r.ok, false);
+    assert.equal(r.error, "ci_watch_input_invalid");
+  });
+
+  it("refuses when branch is missing or empty", async () => {
+    const { runWatchCiRun } = await import("./lib.js");
+    const r1 = await runWatchCiRun({ repoPath: "/tmp", branch: "" });
+    assert.equal(r1.ok, false);
+    assert.equal(r1.error, "ci_watch_input_invalid");
+    const r2 = await runWatchCiRun({ repoPath: "/tmp", branch: null });
+    assert.equal(r2.ok, false);
+    assert.equal(r2.error, "ci_watch_input_invalid");
+  });
+
+  it("refuses when run_id is provided but not a positive integer", async () => {
+    const { runWatchCiRun } = await import("./lib.js");
+    for (const bad of [0, -1, 1.5, "1"]) {
+      const r = await runWatchCiRun({
+        repoPath: "/tmp",
+        branch: "main",
+        runId: bad,
+      });
+      assert.equal(r.ok, false, `bad=${bad}`);
+      assert.equal(r.error, "ci_watch_input_invalid");
+    }
+  });
+
+  it("refuses when timeout fields are not positive integers", async () => {
+    const { runWatchCiRun } = await import("./lib.js");
+    const r1 = await runWatchCiRun({
+      repoPath: "/tmp",
+      branch: "main",
+      queuedTimeoutSeconds: 0,
+    });
+    assert.equal(r1.ok, false);
+    assert.equal(r1.error, "ci_watch_input_invalid");
+    const r2 = await runWatchCiRun({
+      repoPath: "/tmp",
+      branch: "main",
+      totalTimeoutSeconds: -5,
+    });
+    assert.equal(r2.ok, false);
+    assert.equal(r2.error, "ci_watch_input_invalid");
+    const r3 = await runWatchCiRun({
+      repoPath: "/tmp",
+      branch: "main",
+      pollIntervalSeconds: 0,
+    });
+    assert.equal(r3.ok, false);
+    assert.equal(r3.error, "ci_watch_input_invalid");
+  });
+
+  it("refuses when repo_path is not a git repository", async () => {
+    const { runWatchCiRun } = await import("./lib.js");
+    const dir = mkdtempSync(join(tmpdir(), "gc-ci-watch-not-git-"));
+    try {
+      const r = await runWatchCiRun({ repoPath: dir, branch: "main" });
+      assert.equal(r.ok, false);
+      assert.equal(r.error, "ci_watch_repo_not_found");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

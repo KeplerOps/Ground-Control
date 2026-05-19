@@ -11061,6 +11061,316 @@ export async function runGetIssueThread({ repoPath, issueNumber, expectedHash = 
 }
 
 // ---------------------------------------------------------------------------
+// CI run watcher (gc_watch_ci_run, issue #934)
+// ---------------------------------------------------------------------------
+//
+// Server-side CI poller. The agent makes one MCP tool call; the MCP server
+// polls `gh run view` until the run reaches a terminal state, hits the
+// queued-too-long cap (5 min default), or hits the total cap (45 min
+// default). On failure the watcher pulls `gh run view --log-failed` and
+// returns a bounded summary plus the list of failed steps — raw logs stay
+// server-side.
+//
+// Three pure helpers below carry the testable decision logic; the async
+// polling loop is covered by the end-to-end /implement run rather than
+// mocked, matching the existing codebase convention.
+
+const CI_TERMINAL_STATUSES = new Set(["completed"]);
+const CI_QUEUED_STATUSES = new Set(["queued", "pending", "waiting"]);
+
+export function evaluateCiPollState({
+  status,
+  elapsedSeconds,
+  queuedTimeoutSeconds,
+  totalTimeoutSeconds,
+}) {
+  if (CI_TERMINAL_STATUSES.has(status)) {
+    return { action: "complete" };
+  }
+  // The queued-too-long signal is more specific than timed_out (a stuck
+  // runner pool is a different failure mode than a slow run); report it
+  // even if the total cap was also crossed.
+  if (CI_QUEUED_STATUSES.has(status) && elapsedSeconds > queuedTimeoutSeconds) {
+    return { action: "queued_too_long" };
+  }
+  if (elapsedSeconds > totalTimeoutSeconds) {
+    return { action: "timed_out" };
+  }
+  return { action: "continue" };
+}
+
+export function summarizeCiLogFailedOutput(rawText, maxBytes = 4096) {
+  if (typeof rawText !== "string" || rawText.length === 0) {
+    return "";
+  }
+  const buf = Buffer.from(rawText, "utf8");
+  if (buf.length <= maxBytes) {
+    return rawText;
+  }
+  // CI failure detail typically sits near the END of the log (the failing
+  // step's stderr is the last thing written before the runner aborts).
+  // Keep the tail; drop the front; add a clearly-marked truncation prefix.
+  const tailBuf = buf.subarray(buf.length - maxBytes);
+  const droppedBytes = buf.length - maxBytes;
+  const marker = `[truncated: dropped first ${droppedBytes} bytes of ${buf.length}]\n`;
+  return marker + tailBuf.toString("utf8");
+}
+
+export function extractFailedStepsFromJobsJson(jobsJson, maxSteps = 10) {
+  if (!jobsJson || typeof jobsJson !== "object") return [];
+  const jobs = Array.isArray(jobsJson.jobs) ? jobsJson.jobs : [];
+  const out = [];
+  for (const job of jobs) {
+    if (!job || typeof job !== "object") continue;
+    const steps = Array.isArray(job.steps) ? job.steps : [];
+    for (const step of steps) {
+      if (!step || typeof step !== "object") continue;
+      if (step.conclusion !== "failure") continue;
+      out.push({
+        job_name: typeof job.name === "string" ? job.name : "",
+        step_name: typeof step.name === "string" ? step.name : "",
+      });
+      if (out.length >= maxSteps) return out;
+    }
+  }
+  return out;
+}
+
+async function _resolveLatestCiRunForBranch(repoRoot, branch) {
+  const { stdout } = await execFile(
+    "gh",
+    [
+      "run",
+      "list",
+      "--branch",
+      branch,
+      "--limit",
+      "1",
+      "--json",
+      "status,conclusion,databaseId,url,createdAt",
+    ],
+    { cwd: repoRoot },
+  );
+  const runs = JSON.parse(stdout);
+  if (!Array.isArray(runs) || runs.length === 0) {
+    return null;
+  }
+  return runs[0];
+}
+
+async function _fetchCiRunSnapshot(repoRoot, runId) {
+  const { stdout } = await execFile(
+    "gh",
+    [
+      "run",
+      "view",
+      String(runId),
+      "--json",
+      "status,conclusion,databaseId,url,createdAt,updatedAt,jobs",
+    ],
+    { cwd: repoRoot },
+  );
+  return JSON.parse(stdout);
+}
+
+async function _fetchCiRunFailedLog(repoRoot, runId) {
+  try {
+    const { stdout } = await execFile(
+      "gh",
+      ["run", "view", String(runId), "--log-failed"],
+      { cwd: repoRoot, maxBuffer: 64 * 1024 * 1024 },
+    );
+    return stdout;
+  } catch (e) {
+    // Best-effort. The run summary is more valuable than a fragile log dump;
+    // surface the partial stdout if gh emitted anything before erroring.
+    return typeof e?.stdout === "string" ? e.stdout : "";
+  }
+}
+
+function _sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function runWatchCiRun({
+  repoPath,
+  branch,
+  runId = null,
+  queuedTimeoutSeconds = 300,
+  totalTimeoutSeconds = 2700,
+  pollIntervalSeconds = 15,
+}) {
+  if (typeof repoPath !== "string" || repoPath.length === 0) {
+    return {
+      ok: false,
+      error: "ci_watch_input_invalid",
+      message: "repo_path is required",
+    };
+  }
+  if (typeof branch !== "string" || branch.length === 0) {
+    return {
+      ok: false,
+      error: "ci_watch_input_invalid",
+      message: "branch is required",
+    };
+  }
+  if (runId !== null && runId !== undefined) {
+    if (
+      typeof runId !== "number" ||
+      !Number.isInteger(runId) ||
+      runId <= 0
+    ) {
+      return {
+        ok: false,
+        error: "ci_watch_input_invalid",
+        message: "run_id must be a positive integer when provided",
+      };
+    }
+  }
+  for (const [name, value] of [
+    ["queued_timeout_seconds", queuedTimeoutSeconds],
+    ["total_timeout_seconds", totalTimeoutSeconds],
+    ["poll_interval_seconds", pollIntervalSeconds],
+  ]) {
+    if (
+      typeof value !== "number" ||
+      !Number.isInteger(value) ||
+      value <= 0
+    ) {
+      return {
+        ok: false,
+        error: "ci_watch_input_invalid",
+        message: `${name} must be a positive integer`,
+      };
+    }
+  }
+
+  let repoRoot;
+  try {
+    repoRoot = await ensureGitRepo(repoPath);
+  } catch (e) {
+    return {
+      ok: false,
+      error: "ci_watch_repo_not_found",
+      message: e?.message ?? "ensureGitRepo failed",
+    };
+  }
+
+  // Resolve the run id if the caller didn't supply one.
+  let effectiveRunId = runId ?? null;
+  if (effectiveRunId === null) {
+    let latest;
+    try {
+      latest = await _resolveLatestCiRunForBranch(repoRoot, branch);
+    } catch (e) {
+      return {
+        ok: false,
+        error: "ci_watch_run_lookup_failed",
+        message: e?.message ?? "gh run list failed",
+        branch,
+      };
+    }
+    if (latest === null) {
+      return {
+        ok: false,
+        error: "ci_watch_no_run_for_branch",
+        message: `no CI runs found for branch '${branch}'`,
+        branch,
+      };
+    }
+    effectiveRunId =
+      typeof latest.databaseId === "number" ? latest.databaseId : null;
+    if (effectiveRunId === null) {
+      return {
+        ok: false,
+        error: "ci_watch_run_lookup_failed",
+        message: "gh run list returned no databaseId",
+        branch,
+      };
+    }
+  }
+
+  const startMs = Date.now();
+  let snapshot = null;
+  while (true) {
+    try {
+      snapshot = await _fetchCiRunSnapshot(repoRoot, effectiveRunId);
+    } catch (e) {
+      return {
+        ok: false,
+        error: "ci_watch_snapshot_failed",
+        message: e?.message ?? "gh run view failed",
+        run_id: effectiveRunId,
+      };
+    }
+    const elapsedSeconds = Math.floor((Date.now() - startMs) / 1000);
+    const decision = evaluateCiPollState({
+      status: snapshot.status,
+      elapsedSeconds,
+      queuedTimeoutSeconds,
+      totalTimeoutSeconds,
+    });
+    if (decision.action === "complete") {
+      break;
+    }
+    if (decision.action === "queued_too_long") {
+      return {
+        ok: true,
+        run_id: effectiveRunId,
+        conclusion: "queued_too_long",
+        status: snapshot.status ?? "queued",
+        url: snapshot.url ?? "",
+        duration_seconds: elapsedSeconds,
+        failed_steps: [],
+        log_summary: null,
+      };
+    }
+    if (decision.action === "timed_out") {
+      return {
+        ok: true,
+        run_id: effectiveRunId,
+        conclusion: "timed_out",
+        status: snapshot.status ?? "in_progress",
+        url: snapshot.url ?? "",
+        duration_seconds: elapsedSeconds,
+        failed_steps: [],
+        log_summary: null,
+      };
+    }
+    await _sleepMs(pollIntervalSeconds * 1000);
+  }
+
+  // Terminal state reached. Compute return envelope.
+  const elapsedSeconds = Math.floor((Date.now() - startMs) / 1000);
+  const ghConclusion = typeof snapshot.conclusion === "string" ? snapshot.conclusion : "";
+  const isFailure =
+    ghConclusion === "failure" ||
+    ghConclusion === "cancelled" ||
+    ghConclusion === "timed_out" ||
+    ghConclusion === "action_required" ||
+    ghConclusion === "startup_failure";
+
+  let failedSteps = [];
+  let logSummary = null;
+  if (isFailure) {
+    failedSteps = extractFailedStepsFromJobsJson(snapshot);
+    const rawLog = await _fetchCiRunFailedLog(repoRoot, effectiveRunId);
+    logSummary = summarizeCiLogFailedOutput(rawLog, 4096);
+  }
+
+  return {
+    ok: true,
+    run_id: effectiveRunId,
+    conclusion: ghConclusion || (isFailure ? "failure" : "success"),
+    status: typeof snapshot.status === "string" ? snapshot.status : "completed",
+    url: typeof snapshot.url === "string" ? snapshot.url : "",
+    duration_seconds: elapsedSeconds,
+    failed_steps: failedSteps,
+    log_summary: logSummary,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Telemetry writer (gc_log_step_telemetry)
 // ---------------------------------------------------------------------------
 //
