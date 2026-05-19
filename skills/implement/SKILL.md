@@ -219,6 +219,9 @@ The issue body was cached in Step 1; re-read it now for labels, comments, and an
 
 ### Step 2.5: Run Codex Architecture Preflight
 
+When the repo declares `architecture.vocabulary` in `.ground-control.yaml` (per #931), preflight reads that block and emits a "Design Vocabulary That Applies" section in its binding note — the subset of patterns / canonical helpers / boundary contract / binding ADRs / anti-recommendations the proposed work plausibly touches. The pre-push reviewers (Steps 6.5 and 6.6) consume the same vocabulary so their `architectural_read` anchors on the repo's dialect. When the block is absent, preflight runs with workflow-level defaults and the reviewers fall back to general principal-engineer judgment. Nothing in the workflow tools hardcodes any single repo's vocabulary.
+
+
 Preflight MUST cover every in-scope requirement, not just the first one. The preflight tool loads exactly one requirement payload per call, so grouped issues that carry multiple UIDs need one call per UID — otherwise codex never sees the statements, rationale, or existing traceability for every requirement after the first, and the returned guardrails will be incomplete.
 
 1. Reuse the absolute repository root from Step 1.
@@ -377,6 +380,8 @@ If any check fails, fix it before proceeding. Do NOT move to Phase C until every
 
 Run `gc_codex_review` with `uncommitted=true` against the staged + unstaged changes BEFORE the first push. **This is THE codex review pass for the PR** — there is no second post-push codex review (see issue #804). Merge-commit drift relative to the target branch is the responsibility of CI (compile/tests/integration) and SonarCloud (quality), not a separate codex pass.
 
+The reviewer returns a **verdict envelope** (`verdict` + `architectural_read` + `blocking` + capped `notes`) per issue #931. `verdict: ship` is a first-class outcome — when the change is shaped correctly, the reviewer says so and the workflow advances without finding-padding. One-off blocking findings carry a required `sweep_evidence` field; class findings carry `category.instances`. Pass the verdict + architectural_read + notes to `gc_post_decision_record` alongside the per-finding decisions.
+
 Each codex review cycle takes ~5 min locally; each CI cycle to discover the same findings takes 10–15 min. Iterating locally collapses N CI runs into N local runs and one push.
 
 **Cycle semantics — what each cycle is, and what the completion predicate is.**
@@ -403,6 +408,8 @@ Why caps exist: a single review pass has bounded depth — typically one or two 
 Skip this step only if the diff is so trivial (one-liner typo fix) that codex would have nothing to find. When in doubt, run it.
 
 ### Step 6.6: Pre-push Test-Quality Review
+
+The test-quality reviewer returns the same **verdict envelope** as Step 6.5 (per #931): `verdict` + `architectural_read` + `blocking` + capped `notes`. One-off findings carry `sweep_evidence`; class findings carry `category.instances`. `verdict: ship` with empty `blocking` is the principal-engineer "tests are solid" signal — pass it through to the decision record verbatim instead of re-asking the reviewer.
 
 Run `gc_test_quality_review` against the same staged + unstaged diff BEFORE pushing. Per issue #906 this review moved from post-PR (former Step 13) to pre-push so the PR opens with **both** AI-assisted reviewers clean. Without the move, a reviewer scanning the PR sees a stale picture (codex clean, test-quality pending), and any test-quality fix costs an extra commit + push + CI run + SonarCloud re-analyze cycle. Pre-push, it's just re-stage + re-run.
 

@@ -209,3 +209,14 @@ The user picks. Do not silently upgrade.
 - ADR-031 (Codex Review Stopping Model) — the cap-1 default + override semantics this skill inherits.
 - ADR-036 (Per-Step Routing / Tool Surfaces / Telemetry) — routing tier semantics + MCP-tool surfaces.
 - `architecture/notes/quickfix-workflow-lane-preflight.md` — preflight design context for this skill.
+
+## Amendments
+
+**2026-05-19 (issue #931).** When the optional codex pre-push review is
+invoked from /quickfix, it returns the same verdict envelope as the
+/implement lane (`verdict` + `architectural_read` + `blocking` + capped
+`notes`). The /quickfix slim close comment is unchanged —
+`gc_post_final_report` with `lane="quickfix"` still drops empty reviews /
+traceability sections. The /quickfix lane does NOT consume
+`.ground-control.yaml::architecture.vocabulary` itself; that block is
+consumed only by the pre-push reviewers and the preflight (when invoked).

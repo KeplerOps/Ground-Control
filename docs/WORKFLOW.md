@@ -338,3 +338,17 @@ Ground Control exposes its full API as MCP tools. This means an AI agent (Claude
 - Evaluate quality gates before shipping
 
 The agent doesn't need to leave the editor. Requirements, code, tests, and traceability all live in the same workflow.
+
+## Amendments
+
+**2026-05-19 (issue #931).** Pre-push reviewers (`gc_codex_review`,
+`gc_test_quality_review`) return a verdict envelope — `verdict` +
+`architectural_read` + `blocking` + capped `notes` — instead of a
+`findings[]`-only payload. The decision-record renderer
+(`gc_post_decision_record`) accepts and renders the new shape. `.ground-
+control.yaml` gains an optional `architecture.vocabulary` block that the
+preflight + reviewers consume when present. Test tooling additions: Pitest
+mutation testing (`make test-quality`), CI gate on new CRITICAL OSV-scanner
+CVEs, ADR-051 (PROPOSED) drafting a SonarCloud gate recalibration. See
+`skills/implement/SKILL.md` Step 2.5 / 6.5 / 6.6 and the binding preflight
+note at `architecture/notes/ai-review-recalibration-preflight.md`.

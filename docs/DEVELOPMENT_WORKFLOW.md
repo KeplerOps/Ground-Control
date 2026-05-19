@@ -355,6 +355,22 @@ bin/install-skills.sh                  # skills/* (agent-neutral) into ~/.claude
 
 If a pre-existing host file or directory has local changes that are NOT in the repo, the script refuses to clobber it and exits non-zero — re-run with `--force` only after you've confirmed the repo copy is the version you want. Already-correct entries are left alone.
 
+## Test tooling beyond unit tests (#931)
+
+The `make test` target runs the unit-test suite; the project also ships three
+complementary test-quality signals:
+
+| Signal | Purpose | How to run |
+|--------|---------|-----------|
+| **Mutation testing (Pitest)** | Directly measures whether the unit tests detect breakage. A high mutation-kill score is a stronger signal than line coverage. | `make test-quality` |
+| **Property-based testing (jqwik)** | Already wired on five domain surfaces — cycle detection, finding-status state machine, impact analysis, audit-status state machine, requirement-status transitions. Property tests find edge cases TDD misses by construction. | `make test` (runs alongside the unit suite) |
+| **Dependency / SBOM scanning (OSV + Trivy)** | OSV-scanner runs against `backend/gradle.lockfile` in CI. Findings are advisory, **except**: any new CRITICAL CVE fails the job (added in #931). Trivy scans the deploy image + IaC, advisory-only. | `.github/workflows/ci.yml` (`osv-scanner` job) |
+
+Pitest's initial thresholds are intentionally loose (60% mutation, 0% coverage)
+so the very first PR doesn't fail before there is calibration data. After the
+first ~5 PRs of mutation-score evidence, tighten via `pitest { mutationThreshold = ... }`
+in `backend/build.gradle.kts`.
+
 ## Key Lessons (from GC-J001 first run)
 
 - **Write `@WebMvcTest` controller tests**, not just integration tests. SonarCloud CI doesn't run Testcontainers.

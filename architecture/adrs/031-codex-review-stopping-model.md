@@ -226,3 +226,17 @@ per-project knob; the initial implementation hard-codes them.
   boundary preserved)
 - ADR-027 Agent-Neutral Implement Workflow Packaging (reviewer-of-record
   invariant preserved)
+
+## Amendments
+
+**2026-05-19 (issue #931): verdict envelope replaces the findings-only tail.**
+Codex now emits a JSON object inside `===REVIEW===...===END===` containing
+`verdict` (`ship` | `ship-with-fixes` | `don't-ship`), required non-empty
+`architectural_read`, `blocking[]` (the validated finding objects this ADR
+documents, plus a required `sweep_evidence` field on one-off classifications
+and an optional `structural_blocker` boolean), and optional `notes[]` capped
+at 2. Cycle stopping and override semantics are unchanged. The principal-
+engineer motivation: a clean review now returns `verdict: ship` as a
+first-class outcome rather than the reviewer being structurally pushed to
+manufacture findings. See issue #931 and the preflight note at
+`architecture/notes/ai-review-recalibration-preflight.md`.

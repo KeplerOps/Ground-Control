@@ -207,7 +207,38 @@ jobs:
             cat osv-scanner.sarif | head -20 >&2 || true
             exit 1
           fi
-          echo "OSV-scanner SARIF emitted at osv-scanner.sarif (advisory; findings do not fail the job)"
+          echo "OSV-scanner SARIF emitted at osv-scanner.sarif (advisory baseline; the gate step below fails on CRITICAL CVEs)"
+
+      # CRITICAL CVE gate (#931). Parses the SARIF that the advisory step
+      # produced and fails the job if any rule has severity CRITICAL. OSV
+      # encodes severity in two places per rule: `properties.severity` (CVSS
+      # category) and a `level` (note/warning/error). We match either
+      # CRITICAL-flagged property or `level=error` so the gate catches both
+      # cases. Building on the existing job (per #931 preflight) instead of
+      # adding a new scanner lane keeps secret-scope/permissions surface flat.
+      - name: Gate on CRITICAL CVEs
+        run: |
+          set -euo pipefail
+          # Best-effort jq install (Ubuntu runners ship with jq pre-installed,
+          # but we don't rely on it).
+          command -v jq >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq jq; }
+          # Count CRITICAL rules / results. The SARIF "level=error" mapping
+          # is OSV-scanner's signal for CRITICAL; we also look for the
+          # canonical CVSS severity field as a belt-and-suspenders check.
+          critical=$(jq '[
+            .runs[]?.results[]?
+            | select((.level == "error") or ((.properties?.severity // "") | ascii_upcase == "CRITICAL"))
+          ] | length' osv-scanner.sarif)
+          if [ "$critical" -gt 0 ]; then
+            echo "::error::OSV-scanner flagged $critical CRITICAL CVE(s). Update the affected dependency or pin to a patched version."
+            jq '[
+              .runs[]?.results[]?
+              | select((.level == "error") or ((.properties?.severity // "") | ascii_upcase == "CRITICAL"))
+              | { ruleId, message: (.message.text // ""), level }
+            ]' osv-scanner.sarif >&2 || true
+            exit 1
+          fi
+          echo "OSV-scanner: no CRITICAL CVEs."
 
       - name: Upload OSV-scanner SARIF artifact
         if: always()
