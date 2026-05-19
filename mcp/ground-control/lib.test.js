@@ -9447,6 +9447,62 @@ describe("runWatchCiRun input validation (issue #934)", () => {
   });
 });
 
+describe("buildCiWatchGhArgs — GH_REPO hijack defense (issue #934)", () => {
+  // A regression target for the bug surfaced by the gc-orchestrator-test
+  // end-to-end run: an MCP server launched with `GH_REPO=other-owner/other`
+  // env var would hijack every `gh run view` / `gh run list` call inside
+  // the CI watcher and return HTTP 404. The fix is to always pass
+  // `--repo owner/name` explicitly so the env var is ignored.
+
+  it("prepends --repo owner/name to the run-specific argv", async () => {
+    const { buildCiWatchGhArgs } = await import("./lib.js");
+    const args = buildCiWatchGhArgs("Brad-Edwards/gc-orchestrator-test", [
+      "run",
+      "list",
+      "--branch",
+      "x",
+    ]);
+    assert.equal(args[0], "--repo");
+    assert.equal(args[1], "Brad-Edwards/gc-orchestrator-test");
+    assert.deepEqual(args.slice(2), ["run", "list", "--branch", "x"]);
+  });
+
+  it("throws when repoSlug is missing the owner/name shape", async () => {
+    const { buildCiWatchGhArgs } = await import("./lib.js");
+    assert.throws(
+      () => buildCiWatchGhArgs("not-a-slug", ["run", "view", "1"]),
+      /owner\/name slug/,
+    );
+    assert.throws(
+      () => buildCiWatchGhArgs("", ["run", "view", "1"]),
+      /owner\/name slug/,
+    );
+    assert.throws(
+      () => buildCiWatchGhArgs(null, ["run", "view", "1"]),
+      /owner\/name slug/,
+    );
+  });
+
+  it("never produces argv that allows GH_REPO env override", async () => {
+    // The contract: --repo must appear before the gh subcommand so
+    // gh's argv parser sees it ahead of the implicit env resolution.
+    const { buildCiWatchGhArgs } = await import("./lib.js");
+    const args = buildCiWatchGhArgs("o/r", [
+      "run",
+      "view",
+      "12345",
+      "--log-failed",
+    ]);
+    const repoFlagIndex = args.indexOf("--repo");
+    const runSubcommandIndex = args.indexOf("run");
+    assert.ok(repoFlagIndex >= 0, "--repo must be in the argv");
+    assert.ok(
+      repoFlagIndex < runSubcommandIndex,
+      "--repo must precede the gh subcommand",
+    );
+  });
+});
+
 // =============================================================================
 // gc_watch_sonar_analysis (issue #934)
 // =============================================================================

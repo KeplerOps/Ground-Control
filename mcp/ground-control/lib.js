@@ -11136,10 +11136,27 @@ export function extractFailedStepsFromJobsJson(jobsJson, maxSteps = 10) {
   return out;
 }
 
-async function _resolveLatestCiRunForBranch(repoRoot, branch) {
+// All `gh` calls in this section pass `--repo owner/name` explicitly so a
+// rogue `GH_REPO` env var on the MCP host cannot hijack the call. Real
+// failure mode: an MCP server launched from a shell with `GH_REPO=other`
+// would otherwise issue every `gh run view` / `gh run list` against the
+// other repo and return HTTP 404 — surfaced during the issue #934
+// end-to-end test against gc-orchestrator-test.
+
+export function buildCiWatchGhArgs(repoSlug, runArgs) {
+  // Exported for tests so callers can assert `--repo` is always first in
+  // the argv shape. Concatenates `["--repo", "<owner>/<name>"]` ahead of
+  // the run-specific flags.
+  if (typeof repoSlug !== "string" || !repoSlug.includes("/")) {
+    throw new Error(`buildCiWatchGhArgs: expected owner/name slug, got '${repoSlug}'`);
+  }
+  return ["--repo", repoSlug, ...runArgs];
+}
+
+async function _resolveLatestCiRunForBranch(repoRoot, repoSlug, branch) {
   const { stdout } = await execFile(
     "gh",
-    [
+    buildCiWatchGhArgs(repoSlug, [
       "run",
       "list",
       "--branch",
@@ -11148,7 +11165,7 @@ async function _resolveLatestCiRunForBranch(repoRoot, branch) {
       "1",
       "--json",
       "status,conclusion,databaseId,url,createdAt",
-    ],
+    ]),
     { cwd: repoRoot },
   );
   const runs = JSON.parse(stdout);
@@ -11158,26 +11175,26 @@ async function _resolveLatestCiRunForBranch(repoRoot, branch) {
   return runs[0];
 }
 
-async function _fetchCiRunSnapshot(repoRoot, runId) {
+async function _fetchCiRunSnapshot(repoRoot, repoSlug, runId) {
   const { stdout } = await execFile(
     "gh",
-    [
+    buildCiWatchGhArgs(repoSlug, [
       "run",
       "view",
       String(runId),
       "--json",
       "status,conclusion,databaseId,url,createdAt,updatedAt,jobs",
-    ],
+    ]),
     { cwd: repoRoot },
   );
   return JSON.parse(stdout);
 }
 
-async function _fetchCiRunFailedLog(repoRoot, runId) {
+async function _fetchCiRunFailedLog(repoRoot, repoSlug, runId) {
   try {
     const { stdout } = await execFile(
       "gh",
-      ["run", "view", String(runId), "--log-failed"],
+      buildCiWatchGhArgs(repoSlug, ["run", "view", String(runId), "--log-failed"]),
       { cwd: repoRoot, maxBuffer: 64 * 1024 * 1024 },
     );
     return stdout;
@@ -11256,12 +11273,27 @@ export async function runWatchCiRun({
     };
   }
 
+  // Resolve owner/name from the repo's git remote up-front so every
+  // subsequent `gh` call can pass `--repo <slug>` and ignore any rogue
+  // `GH_REPO` env var on the MCP host.
+  let repoSlug;
+  try {
+    const { owner, name } = await getOwnerRepo(repoRoot);
+    repoSlug = `${owner}/${name}`;
+  } catch (e) {
+    return {
+      ok: false,
+      error: "ci_watch_repo_lookup_failed",
+      message: e?.message ?? "getOwnerRepo failed",
+    };
+  }
+
   // Resolve the run id if the caller didn't supply one.
   let effectiveRunId = runId ?? null;
   if (effectiveRunId === null) {
     let latest;
     try {
-      latest = await _resolveLatestCiRunForBranch(repoRoot, branch);
+      latest = await _resolveLatestCiRunForBranch(repoRoot, repoSlug, branch);
     } catch (e) {
       return {
         ok: false,
@@ -11294,7 +11326,7 @@ export async function runWatchCiRun({
   let snapshot = null;
   while (true) {
     try {
-      snapshot = await _fetchCiRunSnapshot(repoRoot, effectiveRunId);
+      snapshot = await _fetchCiRunSnapshot(repoRoot, repoSlug, effectiveRunId);
     } catch (e) {
       return {
         ok: false,
@@ -11354,7 +11386,7 @@ export async function runWatchCiRun({
   let logSummary = null;
   if (isFailure) {
     failedSteps = extractFailedStepsFromJobsJson(snapshot);
-    const rawLog = await _fetchCiRunFailedLog(repoRoot, effectiveRunId);
+    const rawLog = await _fetchCiRunFailedLog(repoRoot, repoSlug, effectiveRunId);
     logSummary = summarizeCiLogFailedOutput(rawLog, 4096);
   }
 
