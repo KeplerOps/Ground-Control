@@ -189,9 +189,9 @@ public class TestRunService {
         if (!assignments.isEmpty()) {
             testerAssignmentRepository.deleteAll(assignments);
         }
-        // TC-009 / ADR-050 — Step results are FK-children of case results;
-        // delete them first so the cascade reads bottom-up without an FK
-        // violation. Run-wide query is cheaper than per-case-result loops.
+        /* TC-009 / ADR-050. Step-result rows are FK-bound to case results,
+         * so they have to leave the database before their parents.
+         * Querying once at run scope avoids an N+1 per case-result. */
         var stepResults = stepResultRepository.findByTestRunId(run.getId());
         if (!stepResults.isEmpty()) {
             stepResultRepository.deleteAll(stepResults);

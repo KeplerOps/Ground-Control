@@ -582,12 +582,19 @@ server.tool(
 
 server.tool(
   "gc_post_decision_record",
-  "Post the canonical review-cycle decision record as a comment on the GitHub issue (per ADR-029, the issue thread is the durable record). Renders structured findings into the standard decision-record Markdown layout; rejects 'defer' decisions and any body containing detected secrets. Replaces free-prose decision comments from the Step 6.5 review loop. Returns the posted comment's URL and id.",
+  "Post the canonical review-cycle decision record as a comment on the GitHub issue (per ADR-029, the issue thread is the durable record). Renders the verdict envelope (verdict, architectural_read, blocking, notes) into the standard decision-record Markdown layout; rejects 'defer' decisions and any body containing detected secrets. Replaces free-prose decision comments from the Step 6.5 / 6.6 review loops. The verdict + architectural_read fields are optional for back-compat; new callers (issue #931) populate them. Returns the posted comment's URL and id.",
   {
     repo_path: z.string(),
     issue_number: z.number().int().positive(),
     cycle: z.number().int().positive(),
     reviewer: z.enum(DECISION_RECORD_REVIEWERS),
+    // Verdict envelope (#931). Optional for back-compat; required for the new
+    // principal-engineer contract.
+    verdict: z.enum(["ship", "ship-with-fixes", "don't-ship"]).optional(),
+    architectural_read: z.string().min(1).optional(),
+    notes: z.array(z.object({
+      text: z.string().min(1),
+    })).max(2).optional(),
     findings: z.array(z.object({
       id: z.string().min(1),
       title: z.string().min(1),
@@ -605,10 +612,11 @@ server.tool(
       instances: z.array(z.string().min(1)).optional(),
     })),
   },
-  async ({ repo_path, issue_number, cycle, reviewer, findings }) => {
+  async ({ repo_path, issue_number, cycle, reviewer, findings, verdict, architectural_read, notes }) => {
     try {
       return ok(JSON.stringify(await runPostDecisionRecord({
         repoPath: repo_path, issueNumber: issue_number, cycle, reviewer, findings,
+        verdict, architectural_read, notes,
       }), null, 2));
     } catch (e) { return err(e); }
   },
@@ -2343,11 +2351,11 @@ server.tool(
           ));
         }
         case "list_step_results": {
-          // TC-009 codex review cycle 1: explicit MCP surface for the step
-          // result read. The same GET is reachable via gc_query under the
-          // /api/v1/test-runs allowlist, but exposing it as a discoverable
-          // action makes the runner end-to-end usable without callers
-          // having to know the URL shape.
+          // TC-009 — explicit MCP surface for the step-result read. The same
+          // GET is reachable via gc_query under the /api/v1/test-runs
+          // allow-list, but exposing it as a discoverable action makes the
+          // runner end-to-end usable without callers having to know the URL
+          // shape.
           reqArg(args, "id", "list_step_results");
           reqArg(args, "case_result_id", "list_step_results");
           return ok(JSON.stringify(
@@ -2383,8 +2391,6 @@ server.tool(
         }
         case "update_cursor": {
           reqArg(args, "id", "update_cursor");
-          // Cursor body is small and shape-stable; explicit construction
-          // keeps the toCamelCase pass from surprising the agent.
           const payload = {};
           if (args.current_case_result_id !== undefined) payload.currentCaseResultId = args.current_case_result_id;
           if (args.current_step_result_id !== undefined) payload.currentStepResultId = args.current_step_result_id;
