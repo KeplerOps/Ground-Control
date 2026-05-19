@@ -76,6 +76,7 @@ import {
   runPostImplementationPlan,
   runPostDecisionRecord, runPostFinalReport, runRenderPrBody, runLogStepTelemetry,
   runGetIssueThread, runWatchCiRun, runWatchSonarAnalysis,
+  runCodexReviewCycle, runTestQualityReviewCycle,
   runResolveWorkflowRoute,
   DECISION_RECORD_REVIEWERS, DECISION_RECORD_DECISIONS, DECISION_RECORD_CLASSIFICATIONS,
   PR_BODY_CHANGE_CLASSES, PR_REQUIREMENT_RE, EXACT_REQUIREMENT_UID_RE,
@@ -792,6 +793,56 @@ server.tool(
         queuedTimeoutSeconds: queued_timeout_seconds ?? 300,
         totalTimeoutSeconds: total_timeout_seconds ?? 2700,
         pollIntervalSeconds: poll_interval_seconds ?? 15,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_codex_review_cycle",
+  "Pre-push codex-review cycle wrapper. Runs gc_codex_review (uncommitted=true) AND auto-posts the canonical per-cycle decision record (every finding gets decision='fix' with auto-rationale, the only decision the cycle tool can record without user authorization). Returns a compact envelope: {ok, reviewer, cycle, cap, status, next_action, findings_summary, findings_record_url, decision_record_url}. Verbatim review prose and per-finding bodies stay server-side via the underlying review's findings record — they never reach the agent through this tool. The subagent that drives the loop calls this tool once per cycle; on next_action='fix_findings_and_reinvoke' it fixes, self-verifies locally, re-stages, and re-invokes. wontfix / not-applicable decisions still require an explicit gc_post_decision_record call after user authorization.",
+  {
+    repo_path: z.string(),
+    issue_number: z.number().int().positive(),
+    base_branch: z.string().nullable().optional(),
+    uncommitted: z.boolean().optional(),
+    override_cap: z.boolean().optional(),
+    override_reason: z.string().nullable().optional(),
+  },
+  async ({ repo_path, issue_number, base_branch, uncommitted, override_cap, override_reason }) => {
+    try {
+      return ok(JSON.stringify(await runCodexReviewCycle({
+        repoPath: repo_path,
+        issueNumber: issue_number,
+        baseBranch: base_branch ?? null,
+        uncommitted: uncommitted ?? true,
+        overrideCap: Boolean(override_cap),
+        overrideReason: override_reason ?? null,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_test_quality_review_cycle",
+  "Pre-push test-quality review cycle wrapper. Runs gc_test_quality_review AND auto-posts the canonical per-cycle decision record (reviewer='test-quality', every finding decision='fix' with auto-rationale). Same compact envelope shape as gc_codex_review_cycle. Verbatim reviewer prose stays server-side. Skips automatically when the diff has no test files (the underlying review handles that).",
+  {
+    repo_path: z.string(),
+    issue_number: z.number().int().positive(),
+    base_branch: z.string().nullable().optional(),
+    override_cap: z.boolean().optional(),
+    override_reason: z.string().nullable().optional(),
+    model: z.string().optional(),
+  },
+  async ({ repo_path, issue_number, base_branch, override_cap, override_reason, model }) => {
+    try {
+      return ok(JSON.stringify(await runTestQualityReviewCycle({
+        repoPath: repo_path,
+        issueNumber: issue_number,
+        baseBranch: base_branch ?? null,
+        overrideCap: Boolean(override_cap),
+        overrideReason: override_reason ?? null,
+        model,
       }), null, 2));
     } catch (e) { return err(e); }
   },

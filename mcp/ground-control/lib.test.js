@@ -9623,3 +9623,242 @@ describe("runWatchSonarAnalysis input validation + skip path (issue #934)", () =
     }
   });
 });
+
+// =============================================================================
+// Shared review-cycle seam + cycle wrappers (issue #934)
+// =============================================================================
+//
+// gc_codex_review_cycle and gc_test_quality_review_cycle share one
+// parameterized helper (per the issue #934 preflight binding rule: do NOT
+// duplicate near-identical functions per reviewer). The helper:
+//   1. Calls the underlying review fn (runCodexReview / runTestQualityReview).
+//   2. Builds a decision-record entry per finding (decision='fix' as the only
+//      decision the cycle tool can post without user authorization).
+//   3. Posts the decision record via runPostDecisionRecord.
+//   4. Returns a compact envelope (no verbatim findings; raw stays
+//      server-side via the underlying review's findings record).
+//
+// Tests here cover the pure mapper + input validation. The end-to-end
+// path through the underlying review + decision-record post is covered
+// by the Phase 5 verification run.
+
+describe("buildAutoFixDecisionFindings (issue #934)", () => {
+  it("returns an empty array for an empty findings list (clean cycle)", async () => {
+    const { buildAutoFixDecisionFindings } = await import("./lib.js");
+    assert.deepEqual(buildAutoFixDecisionFindings([]), []);
+  });
+
+  it("maps a one-off finding to a decision entry with sweep_evidence", async () => {
+    const { buildAutoFixDecisionFindings } = await import("./lib.js");
+    const out = buildAutoFixDecisionFindings([
+      {
+        path: "src/Foo.java",
+        line: 42,
+        title: "Missing input validation",
+        body: "The handler does not validate `name`.",
+        classification: "one-off",
+        sweep_evidence: "grepped controllers for missing @Valid",
+      },
+    ]);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].classification, "one-off");
+    assert.equal(out[0].decision, "fix");
+    assert.equal(out[0].sweep_evidence, "grepped controllers for missing @Valid");
+    assert.equal(out[0].location, "src/Foo.java:42");
+    assert.equal(out[0].title, "Missing input validation");
+    assert.ok(typeof out[0].rationale === "string" && out[0].rationale.length > 0);
+    assert.ok(out[0].id);
+  });
+
+  it("maps a class finding to a decision entry with instances", async () => {
+    const { buildAutoFixDecisionFindings } = await import("./lib.js");
+    const out = buildAutoFixDecisionFindings([
+      {
+        path: "src/Bar.java",
+        line: 88,
+        title: "Bypass of existing helper",
+        body: "Uses raw JdbcTemplate.",
+        classification: "class",
+        category: {
+          shape: "controller method bypassing scoped repository",
+          instances: ["src/Bar.java:88", "src/Baz.java:140"],
+        },
+      },
+    ]);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].classification, "class");
+    assert.equal(out[0].decision, "fix");
+    assert.deepEqual(out[0].instances, ["src/Bar.java:88", "src/Baz.java:140"]);
+    assert.equal(out[0].location, "src/Bar.java:88");
+  });
+
+  it("synthesizes sweep_evidence for one-off findings missing it (cycle tool must post a valid record)", async () => {
+    const { buildAutoFixDecisionFindings } = await import("./lib.js");
+    const out = buildAutoFixDecisionFindings([
+      {
+        path: "src/Foo.java",
+        line: 1,
+        title: "x",
+        body: "y",
+        classification: "one-off",
+        // no sweep_evidence — cycle tool synthesizes
+      },
+    ]);
+    assert.equal(out.length, 1);
+    assert.ok(
+      typeof out[0].sweep_evidence === "string" && out[0].sweep_evidence.length > 0,
+      "sweep_evidence must be non-empty for one-off decision entries",
+    );
+  });
+
+  it("falls back to id=F{idx+1} when the source finding has no id", async () => {
+    const { buildAutoFixDecisionFindings } = await import("./lib.js");
+    const out = buildAutoFixDecisionFindings([
+      { path: "a", line: 1, title: "x", classification: "one-off" },
+      { path: "b", line: 2, title: "y", classification: "one-off" },
+    ]);
+    assert.equal(out[0].id, "F1");
+    assert.equal(out[1].id, "F2");
+  });
+
+  it("treats anything other than 'class' as 'one-off'", async () => {
+    const { buildAutoFixDecisionFindings } = await import("./lib.js");
+    const out = buildAutoFixDecisionFindings([
+      { path: "a", line: 1, title: "x" }, // no classification — default
+      { path: "b", line: 2, title: "y", classification: "minor" }, // unknown classifier
+      { path: "c", line: 3, title: "z", classification: "class" },
+    ]);
+    assert.equal(out[0].classification, "one-off");
+    assert.equal(out[1].classification, "one-off");
+    assert.equal(out[2].classification, "class");
+  });
+
+  it("truncates very long bodies so the decision record stays under the GH comment cap", async () => {
+    const { buildAutoFixDecisionFindings } = await import("./lib.js");
+    const big = "x".repeat(5000);
+    const out = buildAutoFixDecisionFindings([
+      {
+        path: "a",
+        line: 1,
+        title: "t",
+        body: big,
+        classification: "one-off",
+        sweep_evidence: "s",
+      },
+    ]);
+    assert.ok(out[0].rationale.length < 500, `rationale length=${out[0].rationale.length}`);
+  });
+});
+
+describe("summarizeReviewFindings (issue #934)", () => {
+  it("returns zero counts for empty input (clean cycle)", async () => {
+    const { summarizeReviewFindings } = await import("./lib.js");
+    const r = summarizeReviewFindings([]);
+    assert.equal(r.one_off_count, 0);
+    assert.equal(r.class_count, 0);
+    assert.deepEqual(r.top_categories, []);
+  });
+
+  it("counts one-off vs class", async () => {
+    const { summarizeReviewFindings } = await import("./lib.js");
+    const r = summarizeReviewFindings([
+      { classification: "one-off", path: "a", line: 1, title: "x" },
+      { classification: "one-off", path: "b", line: 2, title: "y" },
+      { classification: "class", path: "c", line: 3, title: "z", category: { shape: "shape-1", instances: ["c:3", "d:4"] } },
+    ]);
+    assert.equal(r.one_off_count, 2);
+    assert.equal(r.class_count, 1);
+  });
+
+  it("groups class findings by category.shape and caps top_categories", async () => {
+    const { summarizeReviewFindings } = await import("./lib.js");
+    const r = summarizeReviewFindings([
+      // "missing helper" total instances: 1
+      { classification: "class", category: { shape: "missing helper", instances: ["a"] } },
+      // "raw query" total instances: 5 (clear winner)
+      { classification: "class", category: { shape: "raw query", instances: ["d", "e", "f", "g", "h"] } },
+    ], 1);
+    assert.equal(r.top_categories.length, 1);
+    // Largest category by summed instance count wins.
+    assert.equal(r.top_categories[0].shape, "raw query");
+    assert.equal(r.top_categories[0].instance_count, 5);
+  });
+
+  it("sums instance_count across multiple findings of the same shape", async () => {
+    const { summarizeReviewFindings } = await import("./lib.js");
+    const r = summarizeReviewFindings([
+      { classification: "class", category: { shape: "missing helper", instances: ["a", "b"] } },
+      { classification: "class", category: { shape: "missing helper", instances: ["c"] } },
+    ]);
+    assert.equal(r.top_categories.length, 1);
+    assert.equal(r.top_categories[0].shape, "missing helper");
+    assert.equal(r.top_categories[0].instance_count, 3);
+    assert.equal(r.top_categories[0].finding_count, 2);
+  });
+});
+
+describe("runCodexReviewCycle input validation (issue #934)", () => {
+  // The cycle wrapper validates BEFORE the underlying review runs.
+  // We can't hit the full flow without `gh`/`claude`, but we can verify
+  // that invalid input never reaches the underlying review tool.
+
+  it("refuses when repo_path is missing", async () => {
+    const { runCodexReviewCycle } = await import("./lib.js");
+    const r = await runCodexReviewCycle({
+      repoPath: "",
+      issueNumber: 1,
+      uncommitted: true,
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.error, "codex_review_cycle_input_invalid");
+  });
+
+  it("refuses when issue_number is not a positive integer", async () => {
+    const { runCodexReviewCycle } = await import("./lib.js");
+    for (const bad of [0, -1, 1.5, "1", null, undefined]) {
+      const r = await runCodexReviewCycle({
+        repoPath: "/tmp",
+        issueNumber: bad,
+        uncommitted: true,
+      });
+      assert.equal(r.ok, false, `bad=${bad}`);
+      assert.equal(r.error, "codex_review_cycle_input_invalid");
+    }
+  });
+
+  it("refuses when uncommitted is not true (cycle tool is pre-push only)", async () => {
+    const { runCodexReviewCycle } = await import("./lib.js");
+    const r = await runCodexReviewCycle({
+      repoPath: "/tmp",
+      issueNumber: 1,
+      uncommitted: false,
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.error, "codex_review_cycle_input_invalid");
+    assert.match(r.message, /uncommitted/i);
+  });
+});
+
+describe("runTestQualityReviewCycle input validation (issue #934)", () => {
+  it("refuses when repo_path is missing", async () => {
+    const { runTestQualityReviewCycle } = await import("./lib.js");
+    const r = await runTestQualityReviewCycle({
+      repoPath: "",
+      issueNumber: 1,
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.error, "test_quality_review_cycle_input_invalid");
+  });
+
+  it("refuses when issue_number is not a positive integer", async () => {
+    const { runTestQualityReviewCycle } = await import("./lib.js");
+    for (const bad of [0, -1, 1.5, "1", null, undefined]) {
+      const r = await runTestQualityReviewCycle({
+        repoPath: "/tmp",
+        issueNumber: bad,
+      });
+      assert.equal(r.ok, false, `bad=${bad}`);
+      assert.equal(r.error, "test_quality_review_cycle_input_invalid");
+    }
+  });
+});

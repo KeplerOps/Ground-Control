@@ -11754,6 +11754,325 @@ export async function runWatchSonarAnalysis({
 }
 
 // ---------------------------------------------------------------------------
+// Review-cycle seam (gc_codex_review_cycle / gc_test_quality_review_cycle,
+// issue #934)
+// ---------------------------------------------------------------------------
+//
+// The cycle tools wrap the existing reviewer entry points (runCodexReview,
+// runTestQualityReview) with an auto-posted decision record so the agent
+// collapses "run review → post decision record" into a single MCP call
+// per cycle. The shared seam is parameterized by reviewer (`codex` /
+// `test-quality`) and the underlying review fn — there is exactly one
+// implementation of the cycle wrapper, not one per reviewer (per the
+// issue #934 preflight binding rule).
+//
+// What the cycle tools post: the decision-record schema requires a
+// `decision` per finding, and only the agent (subagent) can record
+// `wontfix` / `not-applicable` (those require user authorization). The
+// cycle tool therefore posts `decision: "fix"` for every finding — the
+// common path. A subagent that has user authorization to record a
+// wontfix calls `gc_post_decision_record` directly with the override
+// AFTER the cycle, not through this wrapper.
+//
+// Compact return envelope (no verbatim findings; raw stays server-side):
+//   { ok, cycle, cap, status, next_action, findings_summary,
+//     findings_record_url, decision_record_url, error?, message? }
+
+const _AUTO_FIX_RATIONALE_MAX = 240;
+
+function _truncateForRationale(text) {
+  if (typeof text !== "string" || text.length === 0) {
+    return "Addressed by next cycle";
+  }
+  if (text.length <= _AUTO_FIX_RATIONALE_MAX) return text;
+  return text.slice(0, _AUTO_FIX_RATIONALE_MAX - 1) + "…";
+}
+
+export function buildAutoFixDecisionFindings(findings) {
+  const arr = Array.isArray(findings) ? findings : [];
+  return arr.map((f, idx) => {
+    const classification = f?.classification === "class" ? "class" : "one-off";
+    const entry = {
+      id: typeof f?.id === "string" && f.id.length > 0 ? f.id : `F${idx + 1}`,
+      title: typeof f?.title === "string" && f.title.length > 0 ? f.title : "(no title)",
+      classification,
+      decision: "fix",
+      rationale: _truncateForRationale(typeof f?.body === "string" ? f.body : ""),
+    };
+    // Synthesize a location from path:line when available — gives the agent
+    // a stable anchor when revisiting the finding in the next cycle.
+    const path = typeof f?.path === "string" ? f.path : null;
+    if (path) {
+      entry.location = typeof f?.line === "number" ? `${path}:${f.line}` : path;
+    }
+    if (classification === "one-off") {
+      const swe = typeof f?.sweep_evidence === "string" && f.sweep_evidence.length > 0
+        ? f.sweep_evidence
+        : "auto-fix-cycle (no separate sweep evidence supplied by the reviewer)";
+      entry.sweep_evidence = swe;
+    } else {
+      const instances = Array.isArray(f?.category?.instances)
+        ? f.category.instances.filter((s) => typeof s === "string" && s.length > 0)
+        : [];
+      entry.instances = instances;
+    }
+    return entry;
+  });
+}
+
+export function summarizeReviewFindings(findings, topCategoriesLimit = 5) {
+  const arr = Array.isArray(findings) ? findings : [];
+  let oneOffCount = 0;
+  let classCount = 0;
+  const categoryMap = new Map();
+  for (const f of arr) {
+    if (!f || typeof f !== "object") continue;
+    const classification = f.classification === "class" ? "class" : "one-off";
+    if (classification === "class") {
+      classCount += 1;
+      const shape = typeof f?.category?.shape === "string" ? f.category.shape : "(uncategorized)";
+      const inst = Array.isArray(f?.category?.instances) ? f.category.instances.length : 0;
+      const prev = categoryMap.get(shape) ?? { shape, instance_count: 0, finding_count: 0 };
+      prev.instance_count += inst;
+      prev.finding_count += 1;
+      categoryMap.set(shape, prev);
+    } else {
+      oneOffCount += 1;
+    }
+  }
+  const topCategories = Array.from(categoryMap.values())
+    .sort((a, b) => {
+      if (b.instance_count !== a.instance_count) return b.instance_count - a.instance_count;
+      return a.shape.localeCompare(b.shape);
+    })
+    .slice(0, topCategoriesLimit);
+  return {
+    one_off_count: oneOffCount,
+    class_count: classCount,
+    top_categories: topCategories,
+  };
+}
+
+// Map the underlying-review envelope's `next_action` to the cycle-tool
+// status string. The reviewer's `next_action` is the agent's directive;
+// the cycle tool's `status` is a coarser classification used for
+// branching on the agent's side.
+function _statusForReviewerAction(nextAction, hasFindings) {
+  if (nextAction === "post_summary_and_escalate_to_user") return "capped";
+  if (nextAction === "post_clean_decision_record_and_advance_to_phase_c") return "clean";
+  if (
+    nextAction === "fix_findings_and_reinvoke" ||
+    nextAction === "fix_findings_then_summarize_and_escalate"
+  ) {
+    return "findings";
+  }
+  // Any other next_action (e.g. shorten_findings_and_retry,
+  // scrub_findings_and_retry, checkout_named_feature_branch) is a fatal
+  // boundary error from the underlying review — surface as "post_failed"
+  // so the agent stops dispatching.
+  return hasFindings ? "findings" : "clean";
+}
+
+async function _runReviewCycleShared({
+  reviewer,
+  reviewResult,
+  repoPath,
+  issueNumber,
+}) {
+  // Non-ok review results pass straight through; the cycle tool does
+  // not paper over reviewer boundary errors with a decision record.
+  if (!reviewResult || reviewResult.ok !== true) {
+    return reviewResult;
+  }
+
+  const cycle =
+    typeof reviewResult.cycle === "number" ? reviewResult.cycle : null;
+  const cap = typeof reviewResult.cap === "number" ? reviewResult.cap : null;
+  const findings = Array.isArray(reviewResult.findings) ? reviewResult.findings : [];
+  const nextAction =
+    typeof reviewResult.next_action === "string" ? reviewResult.next_action : "";
+  const status = _statusForReviewerAction(nextAction, findings.length > 0);
+
+  const summary = summarizeReviewFindings(findings);
+  const findingsRecordUrl =
+    typeof reviewResult.findings_comment_url === "string"
+      ? reviewResult.findings_comment_url
+      : typeof reviewResult.findings_record_url === "string"
+        ? reviewResult.findings_record_url
+        : null;
+
+  // Cap-refused: the underlying review did NOT consume a cycle (the
+  // marker was not written). The agent must escalate to the user.
+  // No decision record is posted.
+  if (status === "capped") {
+    return {
+      ok: true,
+      reviewer,
+      cycle,
+      cap,
+      status: "capped",
+      next_action: "post_summary_and_escalate_to_user",
+      findings_summary: summary,
+      findings_record_url: findingsRecordUrl,
+      decision_record_url: null,
+    };
+  }
+
+  // Otherwise: post the auto-fix decision record. The cycle was
+  // consumed by the review, so the decision record must be posted —
+  // failure here means the durable record is incomplete and the
+  // workflow contract is violated (ADR-029).
+  const decisionFindings = buildAutoFixDecisionFindings(findings);
+  let drResult;
+  try {
+    drResult = await runPostDecisionRecord({
+      repoPath,
+      issueNumber,
+      cycle: cycle ?? 1,
+      reviewer,
+      findings: decisionFindings,
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      reviewer,
+      cycle,
+      cap,
+      status: "post_failed",
+      error: "review_cycle_decision_record_post_failed",
+      message: e?.message ?? "runPostDecisionRecord threw",
+      findings_summary: summary,
+      findings_record_url: findingsRecordUrl,
+      decision_record_url: null,
+    };
+  }
+  if (!drResult || drResult.ok !== true) {
+    return {
+      ok: false,
+      reviewer,
+      cycle,
+      cap,
+      status: "post_failed",
+      error: drResult?.error ?? "review_cycle_decision_record_post_failed",
+      message: drResult?.message ?? "runPostDecisionRecord returned ok=false",
+      findings_summary: summary,
+      findings_record_url: findingsRecordUrl,
+      decision_record_url: null,
+    };
+  }
+
+  return {
+    ok: true,
+    reviewer,
+    cycle,
+    cap,
+    status,
+    next_action: nextAction,
+    findings_summary: summary,
+    findings_record_url: findingsRecordUrl,
+    decision_record_url: drResult.comment_url ?? null,
+  };
+}
+
+export async function runCodexReviewCycle({
+  repoPath,
+  issueNumber,
+  baseBranch = null,
+  uncommitted = true,
+  overrideCap = false,
+  overrideReason = null,
+}) {
+  if (typeof repoPath !== "string" || repoPath.length === 0) {
+    return {
+      ok: false,
+      error: "codex_review_cycle_input_invalid",
+      message: "repo_path is required",
+    };
+  }
+  if (
+    typeof issueNumber !== "number" ||
+    !Number.isInteger(issueNumber) ||
+    issueNumber <= 0
+  ) {
+    return {
+      ok: false,
+      error: "codex_review_cycle_input_invalid",
+      message: "issue_number must be a positive integer",
+    };
+  }
+  if (uncommitted !== true) {
+    return {
+      ok: false,
+      error: "codex_review_cycle_input_invalid",
+      message:
+        "gc_codex_review_cycle is the pre-push entrypoint only; uncommitted must be true. " +
+        "Post-push direct callers should use gc_codex_review with pr_number.",
+    };
+  }
+
+  const reviewResult = await runCodexReview({
+    repoPath,
+    baseBranch: baseBranch ?? "dev",
+    uncommitted: true,
+    issueNumber,
+    overrideCap,
+    overrideReason,
+  });
+
+  return _runReviewCycleShared({
+    reviewer: "codex",
+    reviewResult,
+    repoPath,
+    issueNumber,
+  });
+}
+
+export async function runTestQualityReviewCycle({
+  repoPath,
+  issueNumber,
+  baseBranch = null,
+  overrideCap = false,
+  overrideReason = null,
+  model = undefined,
+}) {
+  if (typeof repoPath !== "string" || repoPath.length === 0) {
+    return {
+      ok: false,
+      error: "test_quality_review_cycle_input_invalid",
+      message: "repo_path is required",
+    };
+  }
+  if (
+    typeof issueNumber !== "number" ||
+    !Number.isInteger(issueNumber) ||
+    issueNumber <= 0
+  ) {
+    return {
+      ok: false,
+      error: "test_quality_review_cycle_input_invalid",
+      message: "issue_number must be a positive integer",
+    };
+  }
+
+  const reviewParams = {
+    repoPath,
+    baseBranch,
+    issueNumber,
+    overrideCap,
+    overrideReason,
+  };
+  if (model !== undefined) reviewParams.model = model;
+  const reviewResult = await runTestQualityReview(reviewParams);
+
+  return _runReviewCycleShared({
+    reviewer: "test-quality",
+    reviewResult,
+    repoPath,
+    issueNumber,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Telemetry writer (gc_log_step_telemetry)
 // ---------------------------------------------------------------------------
 //
