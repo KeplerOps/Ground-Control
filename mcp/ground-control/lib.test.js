@@ -9279,6 +9279,465 @@ describe("SONAR_EXPORT_RETENTION (issue #934 fix-list)", () => {
 // renames a stage, deletes a step file, or adds a stage without wiring it
 // into the orchestrator fails CI.
 
+// =============================================================================
+// Integration tests with execFile mocking for new MCP tools (issue #934 fix-list)
+// =============================================================================
+//
+// The pure-helper coverage is good but the integration path (real gh
+// subprocess + real fetch) was previously only exercised by live runs
+// against gc-orchestrator-test. These tests use the existing hermetic-shim
+// pattern (PATH-overriding `gh` and stub-overriding `fetch`) so a future
+// regression in the integration layer shows up without needing a live
+// run to find it.
+
+describe("gc_watch_ci_run integration (hermetic gh shim, issue #934 fix-list)", () => {
+  // Standalone shim helper scoped to this describe so the test is
+  // self-contained. Same shape as the postCodexReviewFindings shim
+  // above; duplicated here intentionally to avoid coupling describes.
+  function makeWatchShim({ remote, routes }) {
+    const repoDir = mkdtempSync(join(tmpdir(), "gc-ciwatch-repo-"));
+    execFileSync("git", ["-C", repoDir, "init", "-q", "--initial-branch", "main"]);
+    execFileSync("git", ["-C", repoDir, "config", "user.email", "t@example.com"]);
+    execFileSync("git", ["-C", repoDir, "config", "user.name", "t"]);
+    writeFileSync(join(repoDir, "README"), "x\n");
+    execFileSync("git", ["-C", repoDir, "add", "README"]);
+    execFileSync("git", ["-C", repoDir, "commit", "-q", "-m", "init"]);
+    execFileSync("git", ["-C", repoDir, "remote", "add", "origin", remote]);
+    const binDir = mkdtempSync(join(tmpdir(), "gc-ciwatch-bin-"));
+    const cfgPath = join(binDir, "config.json");
+    writeFileSync(cfgPath, JSON.stringify({ routes }));
+    const ghShim = `#!/usr/bin/env node
+const fs = require("node:fs");
+const cfg = JSON.parse(fs.readFileSync(${JSON.stringify(cfgPath)}, "utf8"));
+const argv = process.argv.slice(2);
+function match(prefix) { return prefix.every((p, i) => argv[i] === p); }
+for (const route of cfg.routes) {
+  if (match(route.argv_prefix)) {
+    if (route.exit_code != null && route.exit_code !== 0) {
+      process.stderr.write(route.stderr || "");
+      process.exit(route.exit_code);
+    }
+    process.stdout.write(route.stdout || "");
+    process.exit(0);
+  }
+}
+process.stderr.write("ci-watch gh shim: unhandled argv: " + JSON.stringify(argv) + "\\n");
+process.exit(2);
+`;
+    writeFileSync(join(binDir, "gh"), ghShim, { mode: 0o755 });
+    return {
+      repoDir, binDir,
+      cleanup() {
+        rmSync(repoDir, { recursive: true, force: true });
+        rmSync(binDir, { recursive: true, force: true });
+      },
+    };
+  }
+
+  async function withShimPath(binDir, fn) {
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${oldPath}`;
+    try {
+      return await fn();
+    } finally {
+      process.env.PATH = oldPath;
+    }
+  }
+
+  it("success path: returns conclusion='success' with empty failed_steps and null log_summary", async () => {
+    const { runWatchCiRun } = await import("./lib.js");
+    const shim = makeWatchShim({
+      remote: "https://github.com/test-owner/test-repo.git",
+      routes: [
+        {
+          argv_prefix: [
+            "--repo", "test-owner/test-repo",
+            "run", "view", "123",
+            "--json", "status,conclusion,databaseId,url,createdAt,updatedAt,jobs",
+          ],
+          stdout: JSON.stringify({
+            status: "completed",
+            conclusion: "success",
+            databaseId: 123,
+            url: "https://example.test/runs/123",
+            jobs: [
+              { name: "build", conclusion: "success", steps: [{ name: "compile", conclusion: "success" }] },
+            ],
+          }),
+        },
+      ],
+    });
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const r = await runWatchCiRun({
+          repoPath: shim.repoDir,
+          branch: "main",
+          runId: 123,
+          pollIntervalSeconds: 1,
+        });
+        assert.equal(r.ok, true);
+        assert.equal(r.conclusion, "success");
+        assert.equal(r.run_id, 123);
+        assert.deepEqual(r.failed_steps, []);
+        assert.equal(r.log_summary, null);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("failure path: returns failed_steps[] + bounded log_summary", async () => {
+    const { runWatchCiRun } = await import("./lib.js");
+    const shim = makeWatchShim({
+      remote: "https://github.com/test-owner/test-repo.git",
+      routes: [
+        {
+          argv_prefix: [
+            "--repo", "test-owner/test-repo",
+            "run", "view", "456",
+            "--json", "status,conclusion,databaseId,url,createdAt,updatedAt,jobs",
+          ],
+          stdout: JSON.stringify({
+            status: "completed",
+            conclusion: "failure",
+            databaseId: 456,
+            url: "https://example.test/runs/456",
+            jobs: [
+              {
+                name: "test",
+                conclusion: "failure",
+                steps: [
+                  { name: "checkout", conclusion: "success" },
+                  { name: "run-tests", conclusion: "failure" },
+                ],
+              },
+            ],
+          }),
+        },
+        {
+          argv_prefix: [
+            "--repo", "test-owner/test-repo",
+            "run", "view", "456", "--log-failed",
+          ],
+          stdout: "test\trun-tests\t2026-01-01T00:00:00Z error: assertion failed\n",
+        },
+      ],
+    });
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const r = await runWatchCiRun({
+          repoPath: shim.repoDir,
+          branch: "main",
+          runId: 456,
+          pollIntervalSeconds: 1,
+        });
+        assert.equal(r.ok, true);
+        assert.equal(r.conclusion, "failure");
+        assert.deepEqual(r.failed_steps, [{ job_name: "test", step_name: "run-tests" }]);
+        assert.match(r.log_summary, /assertion failed/);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("auto-resolves run_id from branch via gh run list (success after resolution)", async () => {
+    const { runWatchCiRun } = await import("./lib.js");
+    const shim = makeWatchShim({
+      remote: "https://github.com/test-owner/test-repo.git",
+      routes: [
+        {
+          argv_prefix: [
+            "--repo", "test-owner/test-repo",
+            "run", "list", "--branch", "feature/x", "--limit", "1",
+            "--json", "status,conclusion,databaseId,url,createdAt",
+          ],
+          stdout: JSON.stringify([
+            { status: "completed", conclusion: "success", databaseId: 789, url: "https://example.test/runs/789", createdAt: "2026-01-01T00:00:00Z" },
+          ]),
+        },
+        {
+          argv_prefix: [
+            "--repo", "test-owner/test-repo",
+            "run", "view", "789",
+            "--json", "status,conclusion,databaseId,url,createdAt,updatedAt,jobs",
+          ],
+          stdout: JSON.stringify({
+            status: "completed",
+            conclusion: "success",
+            databaseId: 789,
+            url: "https://example.test/runs/789",
+            jobs: [],
+          }),
+        },
+      ],
+    });
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const r = await runWatchCiRun({
+          repoPath: shim.repoDir,
+          branch: "feature/x",
+          pollIntervalSeconds: 1,
+        });
+        assert.equal(r.ok, true);
+        assert.equal(r.run_id, 789);
+        assert.equal(r.conclusion, "success");
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+});
+
+describe("gc_get_issue_thread integration (hermetic gh shim, issue #934 fix-list)", () => {
+  function makeThreadShim({ remote, routes }) {
+    const repoDir = mkdtempSync(join(tmpdir(), "gc-thread-repo-"));
+    execFileSync("git", ["-C", repoDir, "init", "-q", "--initial-branch", "main"]);
+    execFileSync("git", ["-C", repoDir, "config", "user.email", "t@example.com"]);
+    execFileSync("git", ["-C", repoDir, "config", "user.name", "t"]);
+    writeFileSync(join(repoDir, "README"), "x\n");
+    execFileSync("git", ["-C", repoDir, "add", "README"]);
+    execFileSync("git", ["-C", repoDir, "commit", "-q", "-m", "init"]);
+    execFileSync("git", ["-C", repoDir, "remote", "add", "origin", remote]);
+    const binDir = mkdtempSync(join(tmpdir(), "gc-thread-bin-"));
+    const cfgPath = join(binDir, "config.json");
+    writeFileSync(cfgPath, JSON.stringify({ routes }));
+    const ghShim = `#!/usr/bin/env node
+const fs = require("node:fs");
+const cfg = JSON.parse(fs.readFileSync(${JSON.stringify(cfgPath)}, "utf8"));
+const argv = process.argv.slice(2);
+function match(prefix) { return prefix.every((p, i) => argv[i] === p); }
+for (const route of cfg.routes) {
+  if (match(route.argv_prefix)) {
+    process.stdout.write(route.stdout || "");
+    process.exit(0);
+  }
+}
+process.stderr.write("thread gh shim: unhandled argv: " + JSON.stringify(argv) + "\\n");
+process.exit(2);
+`;
+    writeFileSync(join(binDir, "gh"), ghShim, { mode: 0o755 });
+    return {
+      repoDir, binDir,
+      cleanup() {
+        rmSync(repoDir, { recursive: true, force: true });
+        rmSync(binDir, { recursive: true, force: true });
+      },
+    };
+  }
+
+  async function withShimPath(binDir, fn) {
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${oldPath}`;
+    try { return await fn(); } finally { process.env.PATH = oldPath; }
+  }
+
+  it("full fetch: body + comments parsed from gh api responses; hash is deterministic", async () => {
+    const { runGetIssueThread, resetIssueThreadCacheForTest, hashIssueThreadPayload } = await import("./lib.js");
+    resetIssueThreadCacheForTest();
+    const shim = makeThreadShim({
+      remote: "https://github.com/o/r.git",
+      routes: [
+        {
+          argv_prefix: ["api", "/repos/o/r/issues/42"],
+          stdout: JSON.stringify({
+            body: "issue body",
+            title: "Test issue",
+            labels: [{ name: "bug" }, { name: "p1" }],
+            state: "open",
+            html_url: "https://example.test/issues/42",
+          }),
+        },
+        {
+          argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp", "/repos/o/r/issues/42/comments"],
+          stdout: JSON.stringify([[
+            { id: 1, user: { login: "alice" }, created_at: "2026-01-01T00:00:00Z", body: "first comment" },
+            { id: 2, user: { login: "bob" }, created_at: "2026-01-02T00:00:00Z", body: "second comment" },
+          ]]),
+        },
+      ],
+    });
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const r = await runGetIssueThread({ repoPath: shim.repoDir, issueNumber: 42 });
+        assert.equal(r.ok, true);
+        assert.equal(r.unchanged, false);
+        assert.equal(r.body, "issue body");
+        assert.equal(r.title, "Test issue");
+        assert.deepEqual(r.labels, ["bug", "p1"]);
+        assert.equal(r.state, "open");
+        assert.equal(r.comments.length, 2);
+        assert.equal(r.comments[0].author, "alice");
+        // Hash matches the pure-function hashIssueThreadPayload over the
+        // body + parsed comments.
+        const expectedHash = hashIssueThreadPayload(r.body, r.comments);
+        assert.equal(r.hash, expectedHash);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+
+  it("second call with the returned hash returns {unchanged: true} without re-invoking gh", async () => {
+    const { runGetIssueThread, resetIssueThreadCacheForTest } = await import("./lib.js");
+    resetIssueThreadCacheForTest();
+    let firstHash = null;
+    const shim = makeThreadShim({
+      remote: "https://github.com/o/r.git",
+      routes: [
+        {
+          argv_prefix: ["api", "/repos/o/r/issues/55"],
+          stdout: JSON.stringify({
+            body: "body", title: "t", labels: [], state: "open",
+            html_url: "https://example.test/issues/55",
+          }),
+        },
+        {
+          argv_prefix: ["api", "--method", "GET", "--paginate", "--slurp", "/repos/o/r/issues/55/comments"],
+          stdout: JSON.stringify([[]]),
+        },
+      ],
+    });
+    try {
+      await withShimPath(shim.binDir, async () => {
+        const r1 = await runGetIssueThread({ repoPath: shim.repoDir, issueNumber: 55 });
+        assert.equal(r1.ok, true);
+        firstHash = r1.hash;
+        // Second call with the hash should NOT touch gh.
+        const r2 = await runGetIssueThread({
+          repoPath: shim.repoDir,
+          issueNumber: 55,
+          expectedHash: firstHash,
+        });
+        assert.equal(r2.ok, true);
+        assert.equal(r2.unchanged, true);
+        assert.equal(r2.hash, firstHash);
+        assert.equal(r2.body, null);
+      });
+    } finally {
+      shim.cleanup();
+    }
+  });
+});
+
+describe("gc_watch_sonar_analysis integration (mocked fetch, issue #934 fix-list)", () => {
+  // Sonar uses fetch(), not gh. Mock by replacing global.fetch for the
+  // duration of the test. Each test restores the original to avoid
+  // leaking into other suites.
+
+  function makeMockRepo(yamlBody) {
+    const dir = mkdtempSync(join(tmpdir(), "gc-sonar-int-"));
+    execFileSync("git", ["-C", dir, "init", "-q"]);
+    execFileSync("git", ["-C", dir, "config", "user.email", "t@example.com"]);
+    execFileSync("git", ["-C", dir, "config", "user.name", "t"]);
+    writeFileSync(join(dir, ".ground-control.yaml"), yamlBody);
+    execFileSync("git", ["-C", dir, "add", ".ground-control.yaml"]);
+    execFileSync("git", ["-C", dir, "commit", "-q", "-m", "init"]);
+    return dir;
+  }
+
+  it("retries on 503 then succeeds; final envelope reflects the successful response", async () => {
+    const { runWatchSonarAnalysis } = await import("./lib.js");
+    const dir = makeMockRepo(
+      "schema_version: 1\nproject: test\nsonarcloud:\n  project_key: test_key\n  organization: test_org\n",
+    );
+    const originalFetch = globalThis.fetch;
+    const originalToken = process.env.SONAR_TOKEN;
+    process.env.SONAR_TOKEN = "test-token-stub";
+    const callLog = [];
+    let qgCallCount = 0;
+    globalThis.fetch = async (url) => {
+      callLog.push(url);
+      if (url.includes("/api/qualitygates/project_status")) {
+        qgCallCount++;
+        // First call returns 503 (transient); second call succeeds.
+        if (qgCallCount === 1) {
+          return { status: 503, ok: false, json: async () => ({}) };
+        }
+        return {
+          status: 200, ok: true,
+          json: async () => ({ projectStatus: { status: "OK" } }),
+        };
+      }
+      if (url.includes("/api/issues/search")) {
+        return {
+          status: 200, ok: true,
+          json: async () => ({ total: 0, issues: [] }),
+        };
+      }
+      if (url.includes("/api/hotspots/search")) {
+        return {
+          status: 200, ok: true,
+          json: async () => ({ paging: { total: 0 }, hotspots: [] }),
+        };
+      }
+      return { status: 404, ok: false, json: async () => ({}) };
+    };
+    try {
+      const r = await runWatchSonarAnalysis({
+        repoPath: dir,
+        prNumber: 7,
+        initialWaitSeconds: 0,
+        pollIntervalSeconds: 0,
+        totalTimeoutSeconds: 10,
+      });
+      assert.equal(r.ok, true);
+      assert.equal(r.quality_gate, "OK");
+      assert.equal(r.skipped, false);
+      assert.equal(r.issues_summary.open_count, 0);
+      assert.equal(r.hotspots_summary.open_count, 0);
+      // The 503 retry MUST have happened — qgCallCount should be at
+      // least 2 (1 transient failure + 1 success).
+      assert.ok(qgCallCount >= 2, `expected >=2 quality-gate fetches; got ${qgCallCount}`);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalToken === undefined) delete process.env.SONAR_TOKEN;
+      else process.env.SONAR_TOKEN = originalToken;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT retry on 404 (permanent failure) — quality gate not available", async () => {
+    const { runWatchSonarAnalysis } = await import("./lib.js");
+    const dir = makeMockRepo(
+      "schema_version: 1\nproject: test\nsonarcloud:\n  project_key: test_key\n  organization: test_org\n",
+    );
+    const originalFetch = globalThis.fetch;
+    const originalToken = process.env.SONAR_TOKEN;
+    process.env.SONAR_TOKEN = "test-token-stub";
+    let qgCallCount = 0;
+    globalThis.fetch = async (url) => {
+      if (url.includes("/api/qualitygates/project_status")) {
+        qgCallCount++;
+        return { status: 404, ok: false, json: async () => ({}) };
+      }
+      return { status: 404, ok: false, json: async () => ({}) };
+    };
+    try {
+      const r = await runWatchSonarAnalysis({
+        repoPath: dir,
+        prNumber: 9,
+        initialWaitSeconds: 0,
+        pollIntervalSeconds: 0,
+        totalTimeoutSeconds: 1, // tight cap so the polling loop exits fast
+      });
+      // 404 means quality gate not yet available; tool polls until timeout
+      // and returns a timed-out envelope. Each poll iteration calls
+      // qualitygates once. With totalTimeoutSeconds=1 and pollInterval=0,
+      // we expect a small bounded number of calls — and crucially, NO
+      // retry-attempts beyond the single call per poll iteration.
+      assert.equal(r.ok, true);
+      assert.equal(r.timed_out, true);
+      assert.equal(r.quality_gate, "NONE");
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalToken === undefined) delete process.env.SONAR_TOKEN;
+      else process.env.SONAR_TOKEN = originalToken;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("Orchestrator ↔ routing-stages ↔ step-files sync (issue #934 fix-list)", () => {
   // Resolve REPO_ROOT relative to this test file so the validator works on
   // any host (CI, contributor machines, ephemeral checkouts) — not just
