@@ -6,6 +6,7 @@ import com.keplerops.groundcontrol.domain.testcases.model.TestCase;
 import com.keplerops.groundcontrol.domain.testcases.model.TestCaseStep;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseStepRepository;
+import com.keplerops.groundcontrol.domain.testcases.repository.TestRunStepResultRepository;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseFormat;
 import java.util.List;
 import java.util.UUID;
@@ -22,10 +23,15 @@ public class TestCaseStepService {
 
     private final TestCaseStepRepository stepRepository;
     private final TestCaseRepository testCaseRepository;
+    private final TestRunStepResultRepository runStepResultRepository;
 
-    public TestCaseStepService(TestCaseStepRepository stepRepository, TestCaseRepository testCaseRepository) {
+    public TestCaseStepService(
+            TestCaseStepRepository stepRepository,
+            TestCaseRepository testCaseRepository,
+            TestRunStepResultRepository runStepResultRepository) {
         this.stepRepository = stepRepository;
         this.testCaseRepository = testCaseRepository;
+        this.runStepResultRepository = runStepResultRepository;
     }
 
     public TestCaseStep create(CreateTestCaseStepCommand command) {
@@ -93,6 +99,16 @@ public class TestCaseStepService {
 
     public void delete(UUID projectId, UUID testCaseId, UUID stepId) {
         var step = findStepOrThrow(projectId, testCaseId, stepId);
+        // TC-009 / ADR-050 — V116 adds a hard FK from test_run_step_result
+        // to test_case_step. Refuse the delete with a domain-aware conflict
+        // when run evidence references this step so the failure surfaces as
+        // 409 ConflictException rather than a low-level FK / DataIntegrity
+        // violation, mirroring the TestCase delete guard against
+        // TestRunCaseResultRepository.existsByTestCaseId.
+        if (runStepResultRepository.existsByTestCaseStepId(stepId)) {
+            throw new ConflictException(
+                    "Test case step " + stepId + " has snapshotted run evidence and cannot be deleted");
+        }
         stepRepository.delete(step);
         log.info("test_case_step_deleted: id={} test_case={}", stepId, testCaseId);
     }

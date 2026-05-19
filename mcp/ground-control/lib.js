@@ -617,6 +617,30 @@ const TO_CAMEL = {
   clear_start_at: "clearStartAt",
   clear_end_at: "clearEndAt",
   clear_notes: "clearNotes",
+  // TC-009 / ADR-050 — step-result + cursor fields. The step-level
+  // `status` field is constructed explicitly in index.js's update_step_result
+  // handler so the MCP-side `step_status` argument (disambiguated from the
+  // run-level `status` like `result_status`) doesn't bleed through the
+  // snake→camel pass.
+  case_result_id: "caseResultId",
+  step_result_id: "stepResultId",
+  current_case_result_id: "currentCaseResultId",
+  current_step_result_id: "currentStepResultId",
+  executed_at: "executedAt",
+  clear_comment: "clearComment",
+  clear_executed_at: "clearExecutedAt",
+  clear_cursor: "clearCursor",
+  // Snapshot fields on TestRunStepResultResponse. Without these, toSnakeCase
+  // would leave camelCase names verbatim and MCP callers reading the
+  // step-result list (the values the runner UI renders) would see a mix of
+  // snake- and camel-cased fields. Map every snapshot field plus the FK
+  // ids so the read shape matches the rest of the TC-008/TC-009 surface.
+  test_run_case_result_id: "testRunCaseResultId",
+  test_case_step_id: "testCaseStepId",
+  step_number_snapshot: "stepNumberSnapshot",
+  action_snapshot: "actionSnapshot",
+  expected_result_snapshot: "expectedResultSnapshot",
+  snapshot_order: "snapshotOrder",
   // GC-V001 finding adapter — backend FindingRequest / UpdateFindingRequest
   // use these camelCase field names. Mapping is needed so `gc_finding` reaches
   // backend Bean Validation with the right field names (issue #279).
@@ -8116,6 +8140,30 @@ export async function updateTestRunCaseResult(id, testCaseId, data, project) {
     `/api/v1/test-runs/${encodeURIComponent(id)}/results/${encodeURIComponent(testCaseId)}`,
     { body: data, params: { project } },
   );
+}
+
+// TC-009 / ADR-050 — Per-step execution results on the runner.
+export async function listTestRunStepResults(id, caseResultId, project) {
+  return request(
+    "GET",
+    `/api/v1/test-runs/${encodeURIComponent(id)}/results/${encodeURIComponent(caseResultId)}/steps`,
+    { params: { project } },
+  );
+}
+
+export async function updateTestRunStepResult(id, caseResultId, stepResultId, data, project) {
+  return request(
+    "PUT",
+    `/api/v1/test-runs/${encodeURIComponent(id)}/results/${encodeURIComponent(caseResultId)}/steps/${encodeURIComponent(stepResultId)}`,
+    { body: data, params: { project } },
+  );
+}
+
+export async function updateTestRunCursor(id, data, project) {
+  return request("PUT", `/api/v1/test-runs/${encodeURIComponent(id)}/cursor`, {
+    body: data,
+    params: { project },
+  });
 }
 
 export async function createControl(data, project) {

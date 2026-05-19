@@ -52,7 +52,7 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                         "066", "067", "068", "069", "070", "071", "072", "073", "074", "075", "076", "077", "078",
                         "079", "080", "081", "082", "083", "084", "085", "086", "087", "088", "089", "090", "091",
                         "092", "093", "094", "095", "096", "097", "098", "099", "100", "101", "102", "103", "104",
-                        "110", "111", "112", "113", "114", "115");
+                        "110", "111", "112", "113", "114", "115", "116", "117", "118");
     }
 
     @Test
@@ -851,5 +851,69 @@ class MigrationSmokeTest extends BaseIntegrationTest {
                                 + " FROM test_run_case_result_audit LIMIT 1")
                         .getResultList())
                 .doesNotThrowAnyException();
+        // V116-V118 step-result + cursor (TC-009 / ADR-050). Pin the
+        // snapshot columns + status backstop on the live table and the
+        // shape of the _audit shadow so a downstream alter cannot silently
+        // drop a snapshot column or the CHECK on status. The cursor lives
+        // on test_run (not the audit shadow — see V118 / @NotAudited).
+        entityManager
+                .createNativeQuery("SELECT 1 FROM test_run_step_result LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM test_run_step_result_audit LIMIT 1")
+                .getResultList();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                        + " WHERE table_name = 'test_run_step_result'"
+                        + " AND column_name = 'step_number_snapshot' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                        + " WHERE table_name = 'test_run_step_result'"
+                        + " AND column_name = 'action_snapshot' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                        + " WHERE table_name = 'test_run_step_result'"
+                        + " AND column_name = 'expected_result_snapshot' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                        + " WHERE table_name = 'test_run_step_result'"
+                        + " AND column_name = 'snapshot_order' AND is_nullable = 'NO'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_run_step_result'"
+                        + " AND constraint_name = 'uq_test_run_step_result'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_run_step_result'"
+                        + " AND constraint_name = 'uq_test_run_step_result_order'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE table_name = 'test_run_step_result'"
+                        + " AND constraint_name = 'ck_test_run_step_result_status'")
+                .getSingleResult();
+        org.assertj.core.api.Assertions.assertThatCode(() -> entityManager
+                        .createNativeQuery("SELECT test_run_case_result_id, test_case_step_id,"
+                                + " step_number_snapshot, action_snapshot, expected_result_snapshot,"
+                                + " snapshot_order, status, comment, executed_at, created_at, updated_at"
+                                + " FROM test_run_step_result_audit LIMIT 1")
+                        .getResultList())
+                .doesNotThrowAnyException();
+        // V118 cursor columns on test_run live table only.
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                        + " WHERE table_name = 'test_run'"
+                        + " AND column_name = 'current_case_result_id'")
+                .getSingleResult();
+        entityManager
+                .createNativeQuery("SELECT 1 FROM information_schema.columns"
+                        + " WHERE table_name = 'test_run'"
+                        + " AND column_name = 'current_step_result_id'")
+                .getSingleResult();
     }
 }

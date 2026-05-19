@@ -21,15 +21,19 @@ import com.keplerops.groundcontrol.api.testcases.TestRunController;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.testcases.model.TestCase;
+import com.keplerops.groundcontrol.domain.testcases.model.TestCaseStep;
 import com.keplerops.groundcontrol.domain.testcases.model.TestPlan;
 import com.keplerops.groundcontrol.domain.testcases.model.TestRun;
 import com.keplerops.groundcontrol.domain.testcases.model.TestRunCaseResult;
+import com.keplerops.groundcontrol.domain.testcases.model.TestRunStepResult;
 import com.keplerops.groundcontrol.domain.testcases.model.TestRunTesterAssignment;
 import com.keplerops.groundcontrol.domain.testcases.model.TestSuite;
 import com.keplerops.groundcontrol.domain.testcases.service.CreateTestRunCommand;
 import com.keplerops.groundcontrol.domain.testcases.service.TestRunService;
 import com.keplerops.groundcontrol.domain.testcases.service.UpdateTestRunCaseResultCommand;
 import com.keplerops.groundcontrol.domain.testcases.service.UpdateTestRunCommand;
+import com.keplerops.groundcontrol.domain.testcases.service.UpdateTestRunCursorCommand;
+import com.keplerops.groundcontrol.domain.testcases.service.UpdateTestRunStepResultCommand;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCasePriority;
 import com.keplerops.groundcontrol.domain.testcases.state.TestCaseType;
 import com.keplerops.groundcontrol.domain.testcases.state.TestRunCaseResultStatus;
@@ -406,14 +410,234 @@ class TestRunControllerTest {
     }
 
     @Test
-    void updateResultReturns422WhenStatusMissing() throws Exception {
+    void updateResultAcceptsBodyWithoutStatus() throws Exception {
+        // TC-009 codex review cycle 1: status is intentionally optional on
+        // UpdateTestRunCaseResultRequest so the runner's notes-only autosave
+        // can't stomp a concurrent status flip. The controller forwards an
+        // omitted status as null; the service preserves the existing value.
         when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        var run = makeRun();
+        var project = run.getProject();
+        var tc = new TestCase(project, "TC-001", "Login", TestCaseType.MANUAL, TestCasePriority.MEDIUM);
+        setField(tc, "id", TC_ID);
+        var result = new TestRunCaseResult(run, tc, "TC-001", "Login", 0);
+        result.setStatus(TestRunCaseResultStatus.PASSED);
+        result.setNotes("notes-only autosave");
+        setField(result, "id", UUID.randomUUID());
+        setField(result, "createdAt", NOW);
+        setField(result, "updatedAt", NOW);
+        when(testRunService.updateResult(
+                        eq(PROJECT_ID), eq(RUN_ID), eq(TC_ID), any(UpdateTestRunCaseResultCommand.class)))
+                .thenReturn(result);
 
         mockMvc.perform(put("/api/v1/test-runs/{id}/results/{testCaseId}", RUN_ID, TC_ID)
                         .param("project", "ground-control")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
-                .andExpect(status().isUnprocessableEntity());
-        verifyNoInteractions(testRunService);
+                        .content("{\"notes\":\"notes-only autosave\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", is("PASSED")));
+
+        ArgumentCaptor<UpdateTestRunCaseResultCommand> captor =
+                ArgumentCaptor.forClass(UpdateTestRunCaseResultCommand.class);
+        verify(testRunService).updateResult(eq(PROJECT_ID), eq(RUN_ID), eq(TC_ID), captor.capture());
+        assertThat(captor.getValue().status()).isNull();
+    }
+
+    // ------------------------------------------------------------------
+    // TC-009 / ADR-050 — step results + cursor
+    // ------------------------------------------------------------------
+
+    private static final UUID CASE_RESULT_ID = UUID.fromString("00000000-0000-0000-0000-000000000a01");
+    private static final UUID STEP_RESULT_ID = UUID.fromString("00000000-0000-0000-0000-000000000b01");
+
+    private TestRunStepResult makeStepResult() {
+        var run = makeRun();
+        var project = run.getProject();
+        var tc = new TestCase(project, "TC-001", "Login", TestCaseType.MANUAL, TestCasePriority.MEDIUM);
+        setField(tc, "id", TC_ID);
+        var caseResult = new TestRunCaseResult(run, tc, "TC-001", "Login", 0);
+        setField(caseResult, "id", CASE_RESULT_ID);
+        var step = new TestCaseStep(tc, 1, "Open page", "Form visible");
+        setField(step, "id", UUID.randomUUID());
+        var stepResult = new TestRunStepResult(caseResult, step, 1, "Open page", "Form visible", 0);
+        setField(stepResult, "id", STEP_RESULT_ID);
+        setField(stepResult, "createdAt", NOW);
+        setField(stepResult, "updatedAt", NOW);
+        return stepResult;
+    }
+
+    @Test
+    void listStepResultsReturnsRowsForCaseResult() throws Exception {
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(testRunService.listStepResults(PROJECT_ID, RUN_ID, CASE_RESULT_ID)).thenReturn(List.of(makeStepResult()));
+
+        mockMvc.perform(get("/api/v1/test-runs/{id}/results/{caseResultId}/steps", RUN_ID, CASE_RESULT_ID)
+                        .param("project", "ground-control"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].testRunCaseResultId", is(CASE_RESULT_ID.toString())))
+                .andExpect(jsonPath("$[0].stepNumberSnapshot", is(1)))
+                .andExpect(jsonPath("$[0].actionSnapshot", is("Open page")))
+                .andExpect(jsonPath("$[0].expectedResultSnapshot", is("Form visible")))
+                .andExpect(jsonPath("$[0].snapshotOrder", is(0)))
+                .andExpect(jsonPath("$[0].status", is("NOT_RUN")));
+    }
+
+    @Test
+    void updateStepResultBindsAllFields() throws Exception {
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        var updated = makeStepResult();
+        updated.setStatus(TestRunCaseResultStatus.PASSED);
+        updated.setComment("Looks good");
+        updated.setExecutedAt(Instant.parse("2026-06-15T12:00:00Z"));
+        when(testRunService.updateStepResult(
+                        eq(PROJECT_ID),
+                        eq(RUN_ID),
+                        eq(CASE_RESULT_ID),
+                        eq(STEP_RESULT_ID),
+                        any(UpdateTestRunStepResultCommand.class)))
+                .thenReturn(updated);
+
+        mockMvc.perform(put(
+                                "/api/v1/test-runs/{id}/results/{caseResultId}/steps/{stepResultId}",
+                                RUN_ID,
+                                CASE_RESULT_ID,
+                                STEP_RESULT_ID)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"PASSED\",\"comment\":\"Looks good\","
+                                + "\"executedAt\":\"2026-06-15T12:00:00Z\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", is("PASSED")))
+                .andExpect(jsonPath("$.comment", is("Looks good")))
+                .andExpect(jsonPath("$.executedAt", is("2026-06-15T12:00:00Z")));
+
+        ArgumentCaptor<UpdateTestRunStepResultCommand> captor =
+                ArgumentCaptor.forClass(UpdateTestRunStepResultCommand.class);
+        verify(testRunService)
+                .updateStepResult(eq(PROJECT_ID), eq(RUN_ID), eq(CASE_RESULT_ID), eq(STEP_RESULT_ID), captor.capture());
+        var cmd = captor.getValue();
+        assertThat(cmd.status()).isEqualTo(TestRunCaseResultStatus.PASSED);
+        assertThat(cmd.comment()).isEqualTo("Looks good");
+        assertThat(cmd.executedAt()).isEqualTo(Instant.parse("2026-06-15T12:00:00Z"));
+        assertThat(cmd.clearComment()).isFalse();
+        assertThat(cmd.clearExecutedAt()).isFalse();
+    }
+
+    @Test
+    void updateStepResultPropagatesClearFlags() throws Exception {
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(testRunService.updateStepResult(
+                        eq(PROJECT_ID),
+                        eq(RUN_ID),
+                        eq(CASE_RESULT_ID),
+                        eq(STEP_RESULT_ID),
+                        any(UpdateTestRunStepResultCommand.class)))
+                .thenReturn(makeStepResult());
+
+        mockMvc.perform(put(
+                                "/api/v1/test-runs/{id}/results/{caseResultId}/steps/{stepResultId}",
+                                RUN_ID,
+                                CASE_RESULT_ID,
+                                STEP_RESULT_ID)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"NOT_RUN\",\"clearComment\":true,\"clearExecutedAt\":true}"))
+                .andExpect(status().isOk())
+                // Response-body cover: makeStepResult() returns a step with
+                // null comment + null executedAt, so jsonPath().doesNotExist
+                // catches a future regression in
+                // TestRunStepResultResponse.from() that echoed the request
+                // body instead of the serialized entity.
+                .andExpect(jsonPath("$.comment").doesNotExist())
+                .andExpect(jsonPath("$.executedAt").doesNotExist());
+
+        ArgumentCaptor<UpdateTestRunStepResultCommand> captor =
+                ArgumentCaptor.forClass(UpdateTestRunStepResultCommand.class);
+        verify(testRunService)
+                .updateStepResult(eq(PROJECT_ID), eq(RUN_ID), eq(CASE_RESULT_ID), eq(STEP_RESULT_ID), captor.capture());
+        assertThat(captor.getValue().clearComment()).isTrue();
+        assertThat(captor.getValue().clearExecutedAt()).isTrue();
+    }
+
+    @Test
+    void updateStepResultAcceptsBodyWithoutStatus() throws Exception {
+        // Mirror of updateResultAcceptsBodyWithoutStatus for the step-result
+        // path: a comment-only autosave forwards null status; the service
+        // preserves the existing value (regression guard for the codex
+        // review cycle 1 "Comment saves can revert a newer status" finding).
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(testRunService.updateStepResult(
+                        eq(PROJECT_ID),
+                        eq(RUN_ID),
+                        eq(CASE_RESULT_ID),
+                        eq(STEP_RESULT_ID),
+                        any(UpdateTestRunStepResultCommand.class)))
+                .thenReturn(makeStepResult());
+
+        mockMvc.perform(put(
+                                "/api/v1/test-runs/{id}/results/{caseResultId}/steps/{stepResultId}",
+                                RUN_ID,
+                                CASE_RESULT_ID,
+                                STEP_RESULT_ID)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"comment\":\"comment-only autosave\"}"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<UpdateTestRunStepResultCommand> captor =
+                ArgumentCaptor.forClass(UpdateTestRunStepResultCommand.class);
+        verify(testRunService)
+                .updateStepResult(eq(PROJECT_ID), eq(RUN_ID), eq(CASE_RESULT_ID), eq(STEP_RESULT_ID), captor.capture());
+        assertThat(captor.getValue().status()).isNull();
+        assertThat(captor.getValue().comment()).isEqualTo("comment-only autosave");
+    }
+
+    @Test
+    void updateCursorBindsBothFieldsAndReturnsRun() throws Exception {
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        var run = makeRun();
+        run.setCurrentCaseResultId(CASE_RESULT_ID);
+        run.setCurrentStepResultId(STEP_RESULT_ID);
+        when(testRunService.updateCursor(eq(PROJECT_ID), eq(RUN_ID), any(UpdateTestRunCursorCommand.class)))
+                .thenReturn(run);
+
+        mockMvc.perform(put("/api/v1/test-runs/{id}/cursor", RUN_ID)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentCaseResultId\":\"" + CASE_RESULT_ID + "\"," + "\"currentStepResultId\":\""
+                                + STEP_RESULT_ID + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.currentCaseResultId", is(CASE_RESULT_ID.toString())))
+                .andExpect(jsonPath("$.currentStepResultId", is(STEP_RESULT_ID.toString())));
+
+        ArgumentCaptor<UpdateTestRunCursorCommand> captor = ArgumentCaptor.forClass(UpdateTestRunCursorCommand.class);
+        verify(testRunService).updateCursor(eq(PROJECT_ID), eq(RUN_ID), captor.capture());
+        assertThat(captor.getValue().currentCaseResultId()).isEqualTo(CASE_RESULT_ID);
+        assertThat(captor.getValue().currentStepResultId()).isEqualTo(STEP_RESULT_ID);
+        assertThat(captor.getValue().clearCursor()).isFalse();
+    }
+
+    @Test
+    void updateCursorPropagatesClearFlag() throws Exception {
+        when(projectService.requireProjectId("ground-control")).thenReturn(PROJECT_ID);
+        when(testRunService.updateCursor(eq(PROJECT_ID), eq(RUN_ID), any(UpdateTestRunCursorCommand.class)))
+                .thenReturn(makeRun());
+
+        mockMvc.perform(put("/api/v1/test-runs/{id}/cursor", RUN_ID)
+                        .param("project", "ground-control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clearCursor\":true}"))
+                .andExpect(status().isOk())
+                // makeRun() returns a run with null cursor fields, so these
+                // assertions pin the cleared-cursor shape against a future
+                // TestRunResponse.from() refactor that might echo the
+                // pre-save cursor.
+                .andExpect(jsonPath("$.currentCaseResultId").doesNotExist())
+                .andExpect(jsonPath("$.currentStepResultId").doesNotExist());
+
+        ArgumentCaptor<UpdateTestRunCursorCommand> captor = ArgumentCaptor.forClass(UpdateTestRunCursorCommand.class);
+        verify(testRunService).updateCursor(eq(PROJECT_ID), eq(RUN_ID), captor.capture());
+        assertThat(captor.getValue().clearCursor()).isTrue();
     }
 }

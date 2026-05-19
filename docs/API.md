@@ -1471,6 +1471,9 @@ suite, or clearing the last criterion of a QUERY_BASED suite, returns HTTP 422
 | DELETE | `/test-runs/{id}/testers/{testerName}` | — | 204 | Remove a tester |
 | GET | `/test-runs/{id}/results` | — | 200 | List per-case execution results (ordered by `snapshotOrder`) |
 | PUT | `/test-runs/{id}/results/{testCaseId}` | UpdateTestRunCaseResultRequest | 200 | Update the per-case status and optional notes |
+| GET | `/test-runs/{id}/results/{caseResultId}/steps` | — | 200 | List per-step execution results for a case (TC-009 / ADR-050; ordered by `snapshotOrder`) |
+| PUT | `/test-runs/{id}/results/{caseResultId}/steps/{stepResultId}` | UpdateTestRunStepResultRequest | 200 | Update per-step status, comment, and execution timestamp |
+| PUT | `/test-runs/{id}/cursor` | UpdateTestRunCursorRequest | 200 | Set / clear the pause-resume cursor (TC-009 / ADR-050) |
 
 A `TestRun` is the execution-time record for one pass through a `TestSuite` against a
 `TestPlan` for a specific environment / version / build window. The aggregate is
@@ -1523,6 +1526,34 @@ enum: `NOT_RUN`, `PASSED`, `FAILED`, `BLOCKED`, `SKIPPED`), `notes` (optional, m
 per-case result status — a tester may flip a result freely as re-tests, descopes, and
 unblocks happen over the life of a run. Attempting to update a result for a case that
 is not part of the run's snapshot returns HTTP 404.
+
+**Manual test execution runner (TC-009 / ADR-050).** When a run is created, the service
+also snapshots every authored `TestCaseStep` of every resolved case as a
+`test_run_step_result` child of the parent `test_run_case_result` row. Later edits to
+the authored step never rewrite a run's historical evidence (the
+`action_snapshot` / `expected_result_snapshot` / `step_number_snapshot` columns are
+authoritative for replay). Per-step status uses the same `TestRunCaseResultStatus`
+vocabulary as the case-level status; no parallel enum is introduced. `GET
+/test-runs/{id}/results/{caseResultId}/steps` replays rows in `snapshotOrder`. Pause
+and resume are persisted on the parent run via the
+`current_case_result_id` / `current_step_result_id` cursor columns; these are
+`@NotAudited` so cursor movement does not generate per-step `test_run_audit`
+revisions. Per-case status is NOT auto-rolled-up from per-step status — a tester may
+mark a case `BLOCKED` even when some steps `PASSED` (and vice versa).
+
+**UpdateTestRunStepResultRequest fields:** `status` (required, `TestRunCaseResultStatus`
+enum), `comment` (optional, max 8192 chars; per-step tester note), `clearComment`
+(boolean, wipes comment to null), `executedAt` (optional, ISO-8601 timestamp; the
+moment the tester observed the step), `clearExecutedAt` (boolean, wipes the timestamp).
+Attempting to update a step result whose `caseResultId` is not part of the run, or
+whose `stepResultId` is not part of the case-result, returns HTTP 404.
+
+**UpdateTestRunCursorRequest fields:** `currentCaseResultId` (optional UUID; must
+identify a case-result row that belongs to this run), `currentStepResultId` (optional
+UUID; must identify a step-result row that belongs to the supplied case-result —
+and `currentCaseResultId` must therefore also be supplied), `clearCursor` (boolean;
+when true, both fields are nulled regardless of the supplied UUIDs). The cursor is
+ephemeral runner-UI state and is intentionally NOT audited.
 
 ## Request / Response Format
 

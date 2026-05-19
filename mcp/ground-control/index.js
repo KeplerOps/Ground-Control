@@ -164,10 +164,11 @@ import {
   addTestSuiteSourceRequirement, removeTestSuiteSourceRequirement,
   resolveTestSuiteTestCases,
   TEST_SUITE_POPULATION_MODES,
-  // ---- test runs (TC-008 / ADR-049) ----
+  // ---- test runs (TC-008 / ADR-049) + runner (TC-009 / ADR-050) ----
   createTestRun, updateTestRun, deleteTestRun, transitionTestRunStatus,
   addTestRunTester, removeTestRunTester,
   updateTestRunCaseResult,
+  listTestRunStepResults, updateTestRunStepResult, updateTestRunCursor,
   TEST_RUN_STATUSES, TEST_RUN_CASE_RESULT_STATUSES,
   // ---- enums ----
   STATUSES, REQUIREMENT_TYPES, PRIORITIES, RELATION_TYPES,
@@ -2212,6 +2213,10 @@ const TEST_RUN_ACTIONS = [
   "add_tester",
   "remove_tester",
   "update_result",
+  // TC-009 / ADR-050 — runner ops.
+  "list_step_results",
+  "update_step_result",
+  "update_cursor",
 ];
 
 server.tool(
@@ -2248,6 +2253,17 @@ server.tool(
     result_status: z.enum(TEST_RUN_CASE_RESULT_STATUSES).optional(),
     notes: z.string().optional(),
     clear_notes: z.boolean().optional(),
+    // TC-009 / ADR-050 — runner ops.
+    case_result_id: z.string().uuid().optional(),
+    step_result_id: z.string().uuid().optional(),
+    step_status: z.enum(TEST_RUN_CASE_RESULT_STATUSES).optional(),
+    comment: z.string().optional(),
+    clear_comment: z.boolean().optional(),
+    executed_at: z.string().optional(),
+    clear_executed_at: z.boolean().optional(),
+    current_case_result_id: z.string().uuid().optional(),
+    current_step_result_id: z.string().uuid().optional(),
+    clear_cursor: z.boolean().optional(),
   },
   async (args) => {
     try {
@@ -2322,6 +2338,59 @@ server.tool(
           if (args.clear_notes !== undefined) payload.clearNotes = args.clear_notes;
           return ok(JSON.stringify(
             await updateTestRunCaseResult(args.id, args.test_case_id, payload, args.project),
+            null,
+            2,
+          ));
+        }
+        case "list_step_results": {
+          // TC-009 codex review cycle 1: explicit MCP surface for the step
+          // result read. The same GET is reachable via gc_query under the
+          // /api/v1/test-runs allowlist, but exposing it as a discoverable
+          // action makes the runner end-to-end usable without callers
+          // having to know the URL shape.
+          reqArg(args, "id", "list_step_results");
+          reqArg(args, "case_result_id", "list_step_results");
+          return ok(JSON.stringify(
+            await listTestRunStepResults(args.id, args.case_result_id, args.project),
+            null,
+            2,
+          ));
+        }
+        case "update_step_result": {
+          reqArg(args, "id", "update_step_result");
+          reqArg(args, "case_result_id", "update_step_result");
+          reqArg(args, "step_result_id", "update_step_result");
+          reqArg(args, "step_status", "update_step_result");
+          // Same `result_status`-style disambiguation: the runner-side
+          // status is exposed as `step_status` so it never collides with
+          // the run-level enum; the backend DTO field is plain `status`.
+          const payload = { status: args.step_status };
+          if (args.comment !== undefined) payload.comment = args.comment;
+          if (args.clear_comment !== undefined) payload.clearComment = args.clear_comment;
+          if (args.executed_at !== undefined) payload.executedAt = args.executed_at;
+          if (args.clear_executed_at !== undefined) payload.clearExecutedAt = args.clear_executed_at;
+          return ok(JSON.stringify(
+            await updateTestRunStepResult(
+              args.id,
+              args.case_result_id,
+              args.step_result_id,
+              payload,
+              args.project,
+            ),
+            null,
+            2,
+          ));
+        }
+        case "update_cursor": {
+          reqArg(args, "id", "update_cursor");
+          // Cursor body is small and shape-stable; explicit construction
+          // keeps the toCamelCase pass from surprising the agent.
+          const payload = {};
+          if (args.current_case_result_id !== undefined) payload.currentCaseResultId = args.current_case_result_id;
+          if (args.current_step_result_id !== undefined) payload.currentStepResultId = args.current_step_result_id;
+          if (args.clear_cursor !== undefined) payload.clearCursor = args.clear_cursor;
+          return ok(JSON.stringify(
+            await updateTestRunCursor(args.id, payload, args.project),
             null,
             2,
           ));

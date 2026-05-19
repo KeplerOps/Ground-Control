@@ -15,6 +15,7 @@ import com.keplerops.groundcontrol.domain.testcases.model.TestCase;
 import com.keplerops.groundcontrol.domain.testcases.model.TestCaseStep;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseStepRepository;
+import com.keplerops.groundcontrol.domain.testcases.repository.TestRunStepResultRepository;
 import com.keplerops.groundcontrol.domain.testcases.service.CreateTestCaseStepCommand;
 import com.keplerops.groundcontrol.domain.testcases.service.TestCaseStepService;
 import com.keplerops.groundcontrol.domain.testcases.service.UpdateTestCaseStepCommand;
@@ -40,6 +41,9 @@ class TestCaseStepServiceTest {
 
     @Mock
     private TestCaseRepository testCaseRepository;
+
+    @Mock
+    private TestRunStepResultRepository runStepResultRepository;
 
     @InjectMocks
     private TestCaseStepService stepService;
@@ -333,6 +337,25 @@ class TestCaseStepServiceTest {
 
             assertThatThrownBy(() -> stepService.delete(projectId, testCaseId, stepId))
                     .isInstanceOf(NotFoundException.class);
+        }
+
+        @Test
+        void rejectsDeleteWhenStepHasRunEvidence() {
+            // TC-009 / ADR-050 — V116 adds a hard FK from
+            // test_run_step_result.test_case_step_id to test_case_step(id).
+            // The service must convert the would-be FK violation into a
+            // domain-aware ConflictException, mirroring the TestCase delete
+            // guard against TestRunCaseResultRepository.existsByTestCaseId.
+            var step = makeStep(1);
+            when(testCaseRepository.existsByIdAndProjectId(testCaseId, projectId))
+                    .thenReturn(true);
+            when(stepRepository.findByIdAndTestCaseId(step.getId(), testCaseId)).thenReturn(Optional.of(step));
+            when(runStepResultRepository.existsByTestCaseStepId(step.getId())).thenReturn(true);
+
+            UUID stepId = step.getId();
+            assertThatThrownBy(() -> stepService.delete(projectId, testCaseId, stepId))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessageContaining("run evidence");
         }
     }
 }

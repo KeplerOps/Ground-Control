@@ -20,12 +20,15 @@ import {
   getTestRun,
   getTestRunByUid,
   listTestRunCaseResults,
+  listTestRunStepResults,
   listTestRunTesters,
   listTestRuns,
   removeTestRunTester,
   transitionTestRunStatus,
   updateTestRun,
   updateTestRunCaseResult,
+  updateTestRunCursor,
+  updateTestRunStepResult,
 } from "./lib.js";
 
 const BASE_URL = "http://gc-test:8000";
@@ -309,5 +312,110 @@ describe("per-case result endpoints (gc_test_run action=update_result)", () => {
     assert.equal(parsed.pathname, `/api/v1/test-runs/${RUN_ID}/results`);
     assert.equal(parsed.searchParams.get("project"), "ground-control");
     assert.equal(result[0].status, "NOT_RUN");
+  });
+});
+
+// TC-009 / ADR-050 — per-step result + cursor adapter shapes.
+const CASE_RESULT_ID = "55555555-5555-5555-5555-555555555555";
+const STEP_RESULT_ID = "66666666-6666-6666-6666-666666666666";
+
+describe("per-step result endpoints (gc_test_run actions=update_step_result/update_cursor)", () => {
+  it("GETs /api/v1/test-runs/{id}/results/{caseResultId}/steps", async () => {
+    setNextResponse({
+      body: [
+        {
+          id: STEP_RESULT_ID,
+          testRunCaseResultId: CASE_RESULT_ID,
+          stepNumberSnapshot: 1,
+          actionSnapshot: "Open",
+          expectedResultSnapshot: "Form visible",
+          snapshotOrder: 0,
+          status: "NOT_RUN",
+        },
+      ],
+    });
+    const result = await listTestRunStepResults(RUN_ID, CASE_RESULT_ID, "ground-control");
+    const { url, opts } = fetchCalls[0];
+    const parsed = new URL(url);
+    assert.equal(opts.method, "GET");
+    assert.equal(parsed.pathname, `/api/v1/test-runs/${RUN_ID}/results/${CASE_RESULT_ID}/steps`);
+    assert.equal(parsed.searchParams.get("project"), "ground-control");
+    // toSnakeCase pass on the response — every snapshot field the runner UI
+    // displays must survive the camel→snake transformation. A future
+    // adapter regression that dropped one of these would render an empty
+    // step in the runner; pin each field explicitly.
+    assert.equal(result[0].status, "NOT_RUN");
+    assert.equal(result[0].step_number_snapshot, 1);
+    assert.equal(result[0].action_snapshot, "Open");
+    assert.equal(result[0].expected_result_snapshot, "Form visible");
+    assert.equal(result[0].snapshot_order, 0);
+    assert.equal(result[0].test_run_case_result_id, CASE_RESULT_ID);
+  });
+
+  it("PUTs /api/v1/test-runs/{id}/results/{caseResultId}/steps/{stepResultId} with camelCase body", async () => {
+    setNextResponse({ body: { id: STEP_RESULT_ID, status: "PASSED" } });
+    const result = await updateTestRunStepResult(
+      RUN_ID,
+      CASE_RESULT_ID,
+      STEP_RESULT_ID,
+      {
+        status: "PASSED",
+        comment: "Looks good",
+        clearComment: false,
+        executedAt: "2026-06-15T12:00:00Z",
+        clearExecutedAt: false,
+      },
+      "ground-control",
+    );
+    const { url, opts } = fetchCalls[0];
+    const parsed = new URL(url);
+    assert.equal(opts.method, "PUT");
+    assert.equal(
+      parsed.pathname,
+      `/api/v1/test-runs/${RUN_ID}/results/${CASE_RESULT_ID}/steps/${STEP_RESULT_ID}`,
+    );
+    assert.deepEqual(JSON.parse(opts.body), {
+      status: "PASSED",
+      comment: "Looks good",
+      clearComment: false,
+      executedAt: "2026-06-15T12:00:00Z",
+      clearExecutedAt: false,
+    });
+    assert.equal(result.status, "PASSED");
+  });
+
+  it("PUTs /api/v1/test-runs/{id}/cursor with the cursor body", async () => {
+    setNextResponse({
+      body: {
+        id: RUN_ID,
+        currentCaseResultId: CASE_RESULT_ID,
+        currentStepResultId: STEP_RESULT_ID,
+      },
+    });
+    const result = await updateTestRunCursor(
+      RUN_ID,
+      {
+        currentCaseResultId: CASE_RESULT_ID,
+        currentStepResultId: STEP_RESULT_ID,
+        clearCursor: false,
+      },
+      "ground-control",
+    );
+    const { url, opts } = fetchCalls[0];
+    const parsed = new URL(url);
+    assert.equal(opts.method, "PUT");
+    assert.equal(parsed.pathname, `/api/v1/test-runs/${RUN_ID}/cursor`);
+    assert.deepEqual(JSON.parse(opts.body), {
+      currentCaseResultId: CASE_RESULT_ID,
+      currentStepResultId: STEP_RESULT_ID,
+      clearCursor: false,
+    });
+    // lib.request applies toSnakeCase to the parsed response body, so the
+    // assertion targets the snake-cased echo from the response, not the
+    // camelCase shape we sent in the body. Both cursor fields are covered
+    // so a future toSnakeCase regression that drops the step-cursor would
+    // be visible from the test suite.
+    assert.equal(result.current_case_result_id, CASE_RESULT_ID);
+    assert.equal(result.current_step_result_id, STEP_RESULT_ID);
   });
 });

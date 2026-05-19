@@ -452,6 +452,9 @@ export interface TestRunResponse {
   // ISO-8601 timestamp strings; Instant on the backend.
   startAt: string | null;
   endAt: string | null;
+  // TC-009 / ADR-050 — pause/resume cursor. Both axes nullable.
+  currentCaseResultId: string | null;
+  currentStepResultId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -513,9 +516,45 @@ export interface TestRunCaseResultResponse {
 }
 
 export interface UpdateTestRunCaseResultRequest {
-  status: TestRunCaseResultStatus;
+  // TC-009 / ADR-050: status is intentionally optional. The runner's
+  // notes-only autosave omits it so a stale local status snapshot can't
+  // revert a concurrent flip.
+  status?: TestRunCaseResultStatus;
   notes?: string | null;
   clearNotes?: boolean;
+}
+
+// TC-009 / ADR-050 — Per-step execution result on a TestRunCaseResult.
+// Snapshot fields capture authored step content at run-create time.
+export interface TestRunStepResultResponse {
+  id: string;
+  testRunCaseResultId: string;
+  testCaseStepId: string;
+  stepNumberSnapshot: number;
+  actionSnapshot: string;
+  expectedResultSnapshot: string;
+  snapshotOrder: number;
+  status: TestRunCaseResultStatus;
+  comment: string | null;
+  executedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateTestRunStepResultRequest {
+  // Status is optional so a comment-only autosave doesn't carry a stale
+  // status snapshot through to the backend (see UpdateTestRunCaseResultRequest).
+  status?: TestRunCaseResultStatus;
+  comment?: string | null;
+  clearComment?: boolean;
+  executedAt?: string | null;
+  clearExecutedAt?: boolean;
+}
+
+export interface UpdateTestRunCursorRequest {
+  currentCaseResultId?: string | null;
+  currentStepResultId?: string | null;
+  clearCursor?: boolean;
 }
 
 export type GraphEntityType =
