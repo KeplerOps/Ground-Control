@@ -54,7 +54,8 @@ export function TestRunRunner() {
   useEffect(() => {
     if (activeCaseResultId || !caseResults?.length) return;
     const fromCursor = caseResults.find((c) => c.id === run?.currentCaseResultId);
-    setActiveCaseResultId((fromCursor ?? caseResults[0]).id);
+    const target = fromCursor ?? caseResults[0];
+    if (target) setActiveCaseResultId(target.id);
   }, [activeCaseResultId, caseResults, run?.currentCaseResultId]);
 
   if (!activeProject) {
@@ -351,7 +352,12 @@ function ActiveCasePanel({
         <div className="flex min-h-[12rem] items-center justify-center rounded-lg border border-border bg-card">
           <div className="h-6 w-6 animate-spin rounded-full border-4 border-muted border-t-primary" />
         </div>
-      ) : steps.length === 0 ? (
+      ) : !activeStep ? (
+        // steps.length is 0 or the cursor index resolved to nothing; either
+        // way we have no step to render. The first branch covers the
+        // documented "case with no authored steps" path; the second is a
+        // defensive fallback for the transient render before the cursor
+        // effect resolves.
         <div className="rounded-lg border border-dashed border-muted-foreground/30 py-8 text-center text-sm text-muted-foreground">
           This case has no authored steps.
         </div>
@@ -359,6 +365,7 @@ function ActiveCasePanel({
         <StepViewport
           runId={run.id}
           caseResultId={caseResult.id}
+          step={activeStep}
           steps={steps}
           activeStepIndex={activeStepIndex}
           onSelectStep={(stepId) =>
@@ -410,17 +417,18 @@ function CaseStatusControls({
 function StepViewport({
   runId,
   caseResultId,
+  step,
   steps,
   activeStepIndex,
   onSelectStep,
 }: {
   runId: string;
   caseResultId: string;
+  step: TestRunStepResultResponse;
   steps: TestRunStepResultResponse[];
   activeStepIndex: number;
   onSelectStep: (stepResultId: string) => void;
 }) {
-  const step = steps[activeStepIndex];
   const updateStep = useUpdateTestRunStepResult(runId, caseResultId, step.id);
   const [commentDraft, setCommentDraft] = useState(step.comment ?? "");
   useEffect(() => setCommentDraft(step.comment ?? ""), [step.id, step.comment]);
@@ -493,16 +501,22 @@ function StepViewport({
         <span className="flex gap-2">
           <button
             type="button"
-            disabled={activeStepIndex === 0}
-            onClick={() => onSelectStep(steps[activeStepIndex - 1].id)}
+            disabled={activeStepIndex <= 0 || !steps[activeStepIndex - 1]}
+            onClick={() => {
+              const prev = steps[activeStepIndex - 1];
+              if (prev) onSelectStep(prev.id);
+            }}
             className="rounded border border-border px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
             ← Prev
           </button>
           <button
             type="button"
-            disabled={activeStepIndex >= steps.length - 1}
-            onClick={() => onSelectStep(steps[activeStepIndex + 1].id)}
+            disabled={activeStepIndex >= steps.length - 1 || !steps[activeStepIndex + 1]}
+            onClick={() => {
+              const next = steps[activeStepIndex + 1];
+              if (next) onSelectStep(next.id);
+            }}
             className="rounded border border-border px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
             Next →
