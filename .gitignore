@@ -246,3 +246,8 @@ docs/notes
 # /implement per-step telemetry (ADR-036) — operational measurement only,
 # never workflow state. Each /implement run appends to one file under here.
 .gc/telemetry/
+
+# SonarCloud per-PR drilldown exports written by gc_watch_sonar_analysis
+# (issue #934). The MCP envelope returns only summaries; the full per-issue
+# payload lands here for on-demand subagent drilldown. Operational only.
+.gc/sonar/
