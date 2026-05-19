@@ -5123,8 +5123,63 @@ function extractGhErrorMessage(error) {
   return error?.message || String(error);
 }
 
+// owner/name comes from the git remote URL, NOT from `gh repo view`.
+// Rationale: `gh repo view` honors the GH_REPO env var on the MCP host,
+// which silently hijacks every downstream call (`gh api`, `gh pr view`,
+// `gh run view`) and routes them at the wrong repo — surfaced during
+// the issue #934 end-to-end test on gc-orchestrator-test. The git
+// remote is the authoritative GitHub identity for a checked-out repo
+// and git ignores GH_REPO entirely.
+export function parseOwnerRepoFromRemoteUrl(url) {
+  // Accepts the three URL shapes git remote emits:
+  //   https://github.com/owner/name.git
+  //   https://github.com/owner/name
+  //   git@github.com:owner/name.git
+  // Returns null when the URL is not a github.com remote — callers
+  // decide whether that's fatal (most are; this MCP server is github-only).
+  if (typeof url !== "string" || url.length === 0) return null;
+  const trimmed = url.trim();
+  // SSH form: git@github.com:owner/name(.git)?
+  const sshMatch = trimmed.match(/^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/);
+  if (sshMatch) return { owner: sshMatch[1], name: sshMatch[2] };
+  // HTTPS form: https://github.com/owner/name(.git)?(/)?
+  const httpsMatch = trimmed.match(
+    /^https?:\/\/(?:[^/@]+@)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/,
+  );
+  if (httpsMatch) return { owner: httpsMatch[1], name: httpsMatch[2] };
+  return null;
+}
+
 async function getOwnerRepo(repoRoot) {
-  const { stdout } = await execFile("gh", ["repo", "view", "--json", "nameWithOwner"], { cwd: repoRoot });
+  // Primary path: read the git remote URL directly. git ignores GH_REPO,
+  // so this path is immune to env-var hijack and is the source of truth
+  // for every real /implement run (real repos always have an origin
+  // remote — that's where they were cloned from).
+  try {
+    const { stdout } = await execFile(
+      "git",
+      ["-C", repoRoot, "remote", "get-url", "origin"],
+    );
+    const parsed = parseOwnerRepoFromRemoteUrl(stdout);
+    if (parsed !== null) return parsed;
+    // origin exists but isn't a github.com URL — fall through to the
+    // gh fallback rather than throwing immediately. A non-github origin
+    // is unusual but the gh CLI might still resolve via its own config.
+  } catch {
+    // No origin remote (typical only in test fixtures that init a bare
+    // repo without setting origin, or in an emergency detached state).
+    // Fall through.
+  }
+  // Fallback: `gh repo view --json nameWithOwner`. This path honors
+  // GH_REPO and is therefore vulnerable to env hijack — but it only
+  // fires when the git-remote path fails. Real repos always have a
+  // github.com origin, so the fallback is exercised only by tests and
+  // pathological states. Documented in the issue #934 follow-up.
+  const { stdout } = await execFile(
+    "gh",
+    ["repo", "view", "--json", "nameWithOwner"],
+    { cwd: repoRoot },
+  );
   const data = JSON.parse(stdout);
   const [owner, name] = String(data.nameWithOwner).split("/");
   if (!owner || !name) {
@@ -5138,10 +5193,25 @@ async function getOwnerRepo(repoRoot) {
 // markers live. Returns [] when the PR closes no issues (legitimate case for
 // some refactors and chore PRs).
 async function getPullRequestClosingIssues(repoRoot, prNumber) {
+  // Pin --repo to the git-remote-derived slug so a rogue GH_REPO on the
+  // MCP host can't redirect this lookup at the wrong repo (which would
+  // silently return wrong "closes" issue numbers and corrupt the
+  // issue-thread cycle counter resolution). --repo is placed at the
+  // end of argv (gh accepts flags in any order) so the hermetic-shim
+  // test fixtures' strict argv-prefix matches still work.
   try {
+    const { owner, name } = await getOwnerRepo(repoRoot);
     const { stdout } = await execFile(
       "gh",
-      ["pr", "view", String(prNumber), "--json", "closingIssuesReferences"],
+      [
+        "pr",
+        "view",
+        String(prNumber),
+        "--json",
+        "closingIssuesReferences",
+        "--repo",
+        `${owner}/${name}`,
+      ],
       { cwd: repoRoot },
     );
     const data = JSON.parse(stdout);
@@ -5349,8 +5419,17 @@ async function getCurrentBranchName(repoRoot) {
 }
 
 async function autoDetectPrNumber(repoRoot) {
+  // Pin --repo to the git-remote-derived slug so a rogue GH_REPO on the
+  // MCP host can't redirect this lookup at a different repo. --repo is
+  // placed at the end of argv (gh accepts flags in any order) so the
+  // hermetic-shim test fixtures' strict argv-prefix matches still work.
   try {
-    const { stdout } = await execFile("gh", ["pr", "view", "--json", "number"], { cwd: repoRoot });
+    const { owner, name } = await getOwnerRepo(repoRoot);
+    const { stdout } = await execFile(
+      "gh",
+      ["pr", "view", "--json", "number", "--repo", `${owner}/${name}`],
+      { cwd: repoRoot },
+    );
     const data = JSON.parse(stdout);
     const n = Number.parseInt(data.number, 10);
     return Number.isInteger(n) && n > 0 ? n : null;

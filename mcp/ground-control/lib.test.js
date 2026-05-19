@@ -9447,6 +9447,85 @@ describe("runWatchCiRun input validation (issue #934)", () => {
   });
 });
 
+describe("parseOwnerRepoFromRemoteUrl — git-based owner/repo resolution (issue #934 fix-list)", () => {
+  // getOwnerRepo previously used `gh repo view` which honors GH_REPO and
+  // can be hijacked. The replacement reads the git remote URL directly.
+  // These tests pin the URL parser so the parser stays robust across
+  // every URL shape `git remote get-url origin` emits.
+
+  it("parses HTTPS URL with .git suffix", async () => {
+    const { parseOwnerRepoFromRemoteUrl } = await import("./lib.js");
+    assert.deepEqual(
+      parseOwnerRepoFromRemoteUrl("https://github.com/Brad-Edwards/Ground-Control.git\n"),
+      { owner: "Brad-Edwards", name: "Ground-Control" },
+    );
+  });
+
+  it("parses HTTPS URL without .git suffix", async () => {
+    const { parseOwnerRepoFromRemoteUrl } = await import("./lib.js");
+    assert.deepEqual(
+      parseOwnerRepoFromRemoteUrl("https://github.com/Brad-Edwards/Ground-Control"),
+      { owner: "Brad-Edwards", name: "Ground-Control" },
+    );
+  });
+
+  it("parses HTTPS URL with trailing slash", async () => {
+    const { parseOwnerRepoFromRemoteUrl } = await import("./lib.js");
+    assert.deepEqual(
+      parseOwnerRepoFromRemoteUrl("https://github.com/Brad-Edwards/Ground-Control/"),
+      { owner: "Brad-Edwards", name: "Ground-Control" },
+    );
+  });
+
+  it("parses HTTPS URL with embedded credentials", async () => {
+    const { parseOwnerRepoFromRemoteUrl } = await import("./lib.js");
+    // git clone with token-embedded URLs is common in CI; the parser
+    // must strip the credentials and still return owner/name.
+    assert.deepEqual(
+      parseOwnerRepoFromRemoteUrl("https://x-access-token:ghs_xxx@github.com/Brad-Edwards/Ground-Control.git"),
+      { owner: "Brad-Edwards", name: "Ground-Control" },
+    );
+  });
+
+  it("parses SSH URL with .git suffix", async () => {
+    const { parseOwnerRepoFromRemoteUrl } = await import("./lib.js");
+    assert.deepEqual(
+      parseOwnerRepoFromRemoteUrl("git@github.com:Brad-Edwards/Ground-Control.git\n"),
+      { owner: "Brad-Edwards", name: "Ground-Control" },
+    );
+  });
+
+  it("parses SSH URL without .git suffix", async () => {
+    const { parseOwnerRepoFromRemoteUrl } = await import("./lib.js");
+    assert.deepEqual(
+      parseOwnerRepoFromRemoteUrl("git@github.com:Brad-Edwards/Ground-Control"),
+      { owner: "Brad-Edwards", name: "Ground-Control" },
+    );
+  });
+
+  it("returns null for non-github URLs", async () => {
+    const { parseOwnerRepoFromRemoteUrl } = await import("./lib.js");
+    assert.equal(parseOwnerRepoFromRemoteUrl("https://gitlab.com/foo/bar.git"), null);
+    assert.equal(parseOwnerRepoFromRemoteUrl("https://example.com/owner/name"), null);
+  });
+
+  it("returns null for empty / non-string input", async () => {
+    const { parseOwnerRepoFromRemoteUrl } = await import("./lib.js");
+    assert.equal(parseOwnerRepoFromRemoteUrl(""), null);
+    assert.equal(parseOwnerRepoFromRemoteUrl(null), null);
+    assert.equal(parseOwnerRepoFromRemoteUrl(undefined), null);
+    assert.equal(parseOwnerRepoFromRemoteUrl(123), null);
+  });
+
+  it("handles whitespace and newlines from git output", async () => {
+    const { parseOwnerRepoFromRemoteUrl } = await import("./lib.js");
+    assert.deepEqual(
+      parseOwnerRepoFromRemoteUrl("  https://github.com/o/n.git\n\n"),
+      { owner: "o", name: "n" },
+    );
+  });
+});
+
 describe("buildCiWatchGhArgs — GH_REPO hijack defense (issue #934)", () => {
   // A regression target for the bug surfaced by the gc-orchestrator-test
   // end-to-end run: an MCP server launched with `GH_REPO=other-owner/other`
