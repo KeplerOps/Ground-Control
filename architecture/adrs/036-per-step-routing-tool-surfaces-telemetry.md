@@ -290,3 +290,15 @@ list so future SKILL changes must keep it in sync.
 - `.ground-control.yaml` (this repo) — opts in to `routing.enabled: true`
   and `telemetry.enabled: true` so the change is dogfooded.
 - `changelog.d/868.changed.md` — release note fragment.
+
+## Amendments
+
+**2026-05-19 (issue #931).** No change to the routing stage names, tier
+semantics, or telemetry record shape. The downstream deterministic tools
+(`gc_post_decision_record`, `gc_post_final_report`, `gc_render_pr_body`) gain
+optional verdict-envelope fields on `gc_post_decision_record` — `verdict`,
+`architectural_read`, `notes[]` — alongside the existing `findings[]` input.
+The renderer contract (canonical Markdown, sensitive-content scrub,
+reserved-marker rejection, marker family `gc:decision-record`, defer
+rejection) is unchanged. See ADR-029 (amendments) for the envelope shape and
+issue #931 for the principal-engineer recalibration motivation.

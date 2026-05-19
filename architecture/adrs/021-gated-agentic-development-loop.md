@@ -74,3 +74,14 @@ The requirement:
 ### Risks
 
 - Over-specification could make the skill rigid; the requirement intentionally specifies gate structure (what must be checked) rather than implementation details (how to check it), preserving flexibility in tooling choices
+
+## Amendments
+
+**2026-05-19 (issue #931).** The pre-push review gate (Step 6.5 codex + Step
+6.6 test-quality) now consumes a verdict envelope (`verdict` +
+`architectural_read` + `blocking` + capped `notes`) rather than a
+findings-only payload. The gate contract is unchanged — both reviewers must
+return clean before push — but a clean cycle now emits `verdict: ship` as a
+first-class outcome instead of an empty findings array. See ADR-029
+(amendments) and ADR-031 (amendments) for the envelope shape; see
+`skills/implement/SKILL.md` Step 6.5 / 6.6 for the operative loop prose.
