@@ -9446,3 +9446,180 @@ describe("runWatchCiRun input validation (issue #934)", () => {
     }
   });
 });
+
+// =============================================================================
+// gc_watch_sonar_analysis (issue #934)
+// =============================================================================
+//
+// Server-side SonarCloud poller. Skips entirely when the repo has no
+// sonarcloud block in .ground-control.yaml (mirrors Step 11). Pure
+// helpers carry the summarization logic; HTTP calls are end-to-end only.
+
+describe("summarizeSonarIssues (issue #934)", () => {
+  it("returns zero counts for empty input", async () => {
+    const { summarizeSonarIssues } = await import("./lib.js");
+    const r = summarizeSonarIssues([]);
+    assert.equal(r.open_count, 0);
+    assert.deepEqual(r.top_issues, []);
+  });
+
+  it("counts by severity and type", async () => {
+    const { summarizeSonarIssues } = await import("./lib.js");
+    const issues = [
+      { key: "a", severity: "BLOCKER", type: "BUG", message: "x", component: "f.java", line: 1 },
+      { key: "b", severity: "BLOCKER", type: "VULNERABILITY", message: "y", component: "g.java", line: 2 },
+      { key: "c", severity: "MINOR", type: "CODE_SMELL", message: "z", component: "h.java", line: 3 },
+    ];
+    const r = summarizeSonarIssues(issues);
+    assert.equal(r.open_count, 3);
+    assert.equal(r.by_severity.BLOCKER, 2);
+    assert.equal(r.by_severity.MINOR, 1);
+    assert.equal(r.by_type.BUG, 1);
+    assert.equal(r.by_type.VULNERABILITY, 1);
+    assert.equal(r.by_type.CODE_SMELL, 1);
+  });
+
+  it("caps top_issues to the requested limit, prioritizing higher severity", async () => {
+    const { summarizeSonarIssues } = await import("./lib.js");
+    const issues = [
+      { key: "minor1", severity: "MINOR", type: "CODE_SMELL", message: "m", component: "x", line: 1 },
+      { key: "blocker1", severity: "BLOCKER", type: "BUG", message: "b", component: "y", line: 2 },
+      { key: "critical1", severity: "CRITICAL", type: "BUG", message: "c", component: "z", line: 3 },
+      { key: "info1", severity: "INFO", type: "CODE_SMELL", message: "i", component: "w", line: 4 },
+    ];
+    const r = summarizeSonarIssues(issues, 2);
+    assert.equal(r.top_issues.length, 2);
+    // Highest severity first.
+    assert.equal(r.top_issues[0].severity, "BLOCKER");
+    assert.equal(r.top_issues[1].severity, "CRITICAL");
+  });
+
+  it("tolerates issues missing optional fields", async () => {
+    const { summarizeSonarIssues } = await import("./lib.js");
+    const issues = [
+      { key: "a", severity: "MINOR" }, // no type, message, component, line
+      { key: "b" }, // no severity either
+    ];
+    const r = summarizeSonarIssues(issues);
+    assert.equal(r.open_count, 2);
+    // Unknown severity should not crash.
+    assert.equal(typeof r.by_severity, "object");
+  });
+});
+
+describe("summarizeSonarHotspots (issue #934)", () => {
+  it("returns zero counts for empty input", async () => {
+    const { summarizeSonarHotspots } = await import("./lib.js");
+    const r = summarizeSonarHotspots([]);
+    assert.equal(r.open_count, 0);
+    assert.deepEqual(r.top_hotspots, []);
+  });
+
+  it("captures probability + component + line per hotspot", async () => {
+    const { summarizeSonarHotspots } = await import("./lib.js");
+    const hotspots = [
+      { key: "h1", vulnerabilityProbability: "HIGH", message: "x", component: "f.java", line: 10 },
+      { key: "h2", vulnerabilityProbability: "LOW", message: "y", component: "g.java", line: 20 },
+    ];
+    const r = summarizeSonarHotspots(hotspots);
+    assert.equal(r.open_count, 2);
+    assert.equal(r.top_hotspots.length, 2);
+    assert.equal(r.top_hotspots[0].key, "h1");
+    assert.equal(r.top_hotspots[0].vulnerability_probability, "HIGH");
+  });
+
+  it("caps top_hotspots to the requested limit", async () => {
+    const { summarizeSonarHotspots } = await import("./lib.js");
+    const hotspots = Array.from({ length: 20 }, (_, i) => ({
+      key: `h${i}`,
+      vulnerabilityProbability: "MEDIUM",
+      message: "m",
+      component: "c",
+      line: i,
+    }));
+    const r = summarizeSonarHotspots(hotspots, 5);
+    assert.equal(r.top_hotspots.length, 5);
+    assert.equal(r.open_count, 20);
+  });
+});
+
+describe("runWatchSonarAnalysis input validation + skip path (issue #934)", () => {
+  function makeRepoWithYaml(yamlBody) {
+    const dir = mkdtempSync(join(tmpdir(), "gc-sonar-watch-"));
+    execFileSync("git", ["-C", dir, "init", "-q"]);
+    execFileSync("git", ["-C", dir, "config", "user.email", "t@example.com"]);
+    execFileSync("git", ["-C", dir, "config", "user.name", "t"]);
+    writeFileSync(join(dir, ".ground-control.yaml"), yamlBody);
+    execFileSync("git", ["-C", dir, "add", ".ground-control.yaml"]);
+    execFileSync("git", ["-C", dir, "commit", "-q", "-m", "init"]);
+    return dir;
+  }
+
+  it("refuses when repo_path is missing", async () => {
+    const { runWatchSonarAnalysis } = await import("./lib.js");
+    const r = await runWatchSonarAnalysis({ repoPath: "", prNumber: 1 });
+    assert.equal(r.ok, false);
+    assert.equal(r.error, "sonar_watch_input_invalid");
+  });
+
+  it("refuses when pr_number is not a positive integer", async () => {
+    const { runWatchSonarAnalysis } = await import("./lib.js");
+    for (const bad of [0, -1, 1.5, "1", null, undefined]) {
+      const r = await runWatchSonarAnalysis({
+        repoPath: "/tmp",
+        prNumber: bad,
+      });
+      assert.equal(r.ok, false, `bad=${bad}`);
+      assert.equal(r.error, "sonar_watch_input_invalid");
+    }
+  });
+
+  it("refuses when repo_path is not a git repository", async () => {
+    const { runWatchSonarAnalysis } = await import("./lib.js");
+    const dir = mkdtempSync(join(tmpdir(), "gc-sonar-not-git-"));
+    try {
+      const r = await runWatchSonarAnalysis({ repoPath: dir, prNumber: 1 });
+      assert.equal(r.ok, false);
+      assert.equal(r.error, "sonar_watch_repo_not_found");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns ok=true with quality_gate='NONE' when the repo has no sonarcloud block", async () => {
+    const { runWatchSonarAnalysis } = await import("./lib.js");
+    const dir = makeRepoWithYaml(
+      "schema_version: 1\nproject: test-proj\n",
+    );
+    try {
+      const r = await runWatchSonarAnalysis({ repoPath: dir, prNumber: 1 });
+      assert.equal(r.ok, true);
+      assert.equal(r.quality_gate, "NONE");
+      assert.equal(r.skipped, true);
+      assert.equal(r.issues_summary.open_count, 0);
+      assert.equal(r.hotspots_summary.open_count, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns ok=true skipped=true when the repo's .ground-control.yaml is missing", async () => {
+    const { runWatchSonarAnalysis } = await import("./lib.js");
+    const dir = mkdtempSync(join(tmpdir(), "gc-sonar-no-yaml-"));
+    try {
+      execFileSync("git", ["-C", dir, "init", "-q"]);
+      execFileSync("git", ["-C", dir, "config", "user.email", "t@example.com"]);
+      execFileSync("git", ["-C", dir, "config", "user.name", "t"]);
+      writeFileSync(join(dir, "README"), "x\n");
+      execFileSync("git", ["-C", dir, "add", "README"]);
+      execFileSync("git", ["-C", dir, "commit", "-q", "-m", "init"]);
+      const r = await runWatchSonarAnalysis({ repoPath: dir, prNumber: 1 });
+      // Missing yaml is the same effective state as no sonarcloud block.
+      assert.equal(r.ok, true);
+      assert.equal(r.quality_gate, "NONE");
+      assert.equal(r.skipped, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

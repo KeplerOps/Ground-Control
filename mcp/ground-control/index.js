@@ -75,7 +75,7 @@ import {
   runTestQualityReview, TEST_QUALITY_REVIEW_HARD_CAP,
   runPostImplementationPlan,
   runPostDecisionRecord, runPostFinalReport, runRenderPrBody, runLogStepTelemetry,
-  runGetIssueThread, runWatchCiRun,
+  runGetIssueThread, runWatchCiRun, runWatchSonarAnalysis,
   runResolveWorkflowRoute,
   DECISION_RECORD_REVIEWERS, DECISION_RECORD_DECISIONS, DECISION_RECORD_CLASSIFICATIONS,
   PR_BODY_CHANGE_CLASSES, PR_REQUIREMENT_RE, EXACT_REQUIREMENT_UID_RE,
@@ -792,6 +792,29 @@ server.tool(
         queuedTimeoutSeconds: queued_timeout_seconds ?? 300,
         totalTimeoutSeconds: total_timeout_seconds ?? 2700,
         pollIntervalSeconds: poll_interval_seconds ?? 15,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_watch_sonar_analysis",
+  "Poll SonarCloud for a PR's quality gate and open issues / hotspots server-side. Returns one compact terminal envelope: {quality_gate, issues_summary, hotspots_summary, full_issue_export_path}. Designed for /implement Step 11: the agent makes one tool call; the MCP server holds the connection through the analysis propagation wait (60s default) and quality-gate polling (30 min default). When the repo has no sonarcloud block in .ground-control.yaml the tool returns ok=true skipped=true quality_gate='NONE' (mirrors the existing skip behavior). SonarCloud REST authentication uses HTTP Basic with the SONAR_TOKEN env var as the username — the token is read at call time and passed only in the Authorization header (never argv, telemetry, export, or returned envelope). The full per-issue + per-hotspot payload is written server-side under `.gc/sonar/<pr>-<ts>.json` for on-demand drilldown; only summaries reach the caller.",
+  {
+    repo_path: z.string(),
+    pr_number: z.number().int().positive(),
+    initial_wait_seconds: z.number().int().nonnegative().optional(),
+    total_timeout_seconds: z.number().int().nonnegative().optional(),
+    poll_interval_seconds: z.number().int().nonnegative().optional(),
+  },
+  async ({ repo_path, pr_number, initial_wait_seconds, total_timeout_seconds, poll_interval_seconds }) => {
+    try {
+      return ok(JSON.stringify(await runWatchSonarAnalysis({
+        repoPath: repo_path,
+        prNumber: pr_number,
+        initialWaitSeconds: initial_wait_seconds ?? 60,
+        totalTimeoutSeconds: total_timeout_seconds ?? 1800,
+        pollIntervalSeconds: poll_interval_seconds ?? 30,
       }), null, 2));
     } catch (e) { return err(e); }
   },

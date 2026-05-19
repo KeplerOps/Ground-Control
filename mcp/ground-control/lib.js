@@ -1,4 +1,4 @@
-import { appendFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { execFile as execFileCb } from "node:child_process";
@@ -11367,6 +11367,389 @@ export async function runWatchCiRun({
     duration_seconds: elapsedSeconds,
     failed_steps: failedSteps,
     log_summary: logSummary,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// SonarCloud analysis watcher (gc_watch_sonar_analysis, issue #934)
+// ---------------------------------------------------------------------------
+//
+// Server-side SonarCloud poller. The agent makes one MCP tool call; the
+// MCP server holds the connection while waiting for analysis propagation
+// (60s default), then queries the quality gate and paginates the open
+// issues + hotspots lists. The terminal envelope carries summaries plus
+// a path to a server-side JSON export for on-demand drilldown — raw
+// per-issue payloads stay server-side.
+//
+// Skips entirely when the repo's .ground-control.yaml does not declare a
+// sonarcloud block (mirrors the current /implement Step 11 behavior).
+//
+// Authentication: SonarCloud REST uses HTTP Basic with the token as the
+// username and an empty password. The token is read from process.env at
+// call time and passed only in the Authorization header — never in argv,
+// telemetry, the export file, or the returned envelope.
+
+const SONAR_BASE_URL = "https://sonarcloud.io";
+
+const SONAR_SEVERITY_RANK = {
+  BLOCKER: 5,
+  CRITICAL: 4,
+  MAJOR: 3,
+  MINOR: 2,
+  INFO: 1,
+};
+
+const SONAR_HOTSPOT_PROBABILITY_RANK = {
+  HIGH: 3,
+  MEDIUM: 2,
+  LOW: 1,
+};
+
+export function summarizeSonarIssues(issues, maxTop = 10) {
+  const arr = Array.isArray(issues) ? issues : [];
+  const bySeverity = {};
+  const byType = {};
+  for (const it of arr) {
+    if (!it || typeof it !== "object") continue;
+    const sev = typeof it.severity === "string" ? it.severity : "UNKNOWN";
+    bySeverity[sev] = (bySeverity[sev] ?? 0) + 1;
+    const ty = typeof it.type === "string" ? it.type : "UNKNOWN";
+    byType[ty] = (byType[ty] ?? 0) + 1;
+  }
+  // Sort by severity rank desc; stable-ish tie-break by component+line so
+  // identical inputs produce identical top_issues across runs.
+  const sorted = arr
+    .filter((it) => it && typeof it === "object")
+    .map((it) => ({
+      raw: it,
+      rank: SONAR_SEVERITY_RANK[it.severity] ?? 0,
+    }))
+    .sort((a, b) => {
+      if (b.rank !== a.rank) return b.rank - a.rank;
+      const ac = `${a.raw.component ?? ""}:${a.raw.line ?? ""}`;
+      const bc = `${b.raw.component ?? ""}:${b.raw.line ?? ""}`;
+      return ac.localeCompare(bc);
+    });
+  const topIssues = sorted.slice(0, maxTop).map(({ raw }) => ({
+    key: typeof raw.key === "string" ? raw.key : "",
+    severity: typeof raw.severity === "string" ? raw.severity : "",
+    type: typeof raw.type === "string" ? raw.type : "",
+    message: typeof raw.message === "string" ? raw.message : "",
+    component: typeof raw.component === "string" ? raw.component : "",
+    line: typeof raw.line === "number" ? raw.line : null,
+  }));
+  return {
+    open_count: arr.length,
+    by_severity: bySeverity,
+    by_type: byType,
+    top_issues: topIssues,
+  };
+}
+
+export function summarizeSonarHotspots(hotspots, maxTop = 10) {
+  const arr = Array.isArray(hotspots) ? hotspots : [];
+  const sorted = arr
+    .filter((h) => h && typeof h === "object")
+    .map((h) => ({
+      raw: h,
+      rank: SONAR_HOTSPOT_PROBABILITY_RANK[h.vulnerabilityProbability] ?? 0,
+    }))
+    .sort((a, b) => {
+      if (b.rank !== a.rank) return b.rank - a.rank;
+      const ac = `${a.raw.component ?? ""}:${a.raw.line ?? ""}`;
+      const bc = `${b.raw.component ?? ""}:${b.raw.line ?? ""}`;
+      return ac.localeCompare(bc);
+    });
+  const topHotspots = sorted.slice(0, maxTop).map(({ raw }) => ({
+    key: typeof raw.key === "string" ? raw.key : "",
+    vulnerability_probability:
+      typeof raw.vulnerabilityProbability === "string" ? raw.vulnerabilityProbability : "",
+    message: typeof raw.message === "string" ? raw.message : "",
+    component: typeof raw.component === "string" ? raw.component : "",
+    line: typeof raw.line === "number" ? raw.line : null,
+  }));
+  return {
+    open_count: arr.length,
+    top_hotspots: topHotspots,
+  };
+}
+
+function _readSonarCloudConfigFromRepo(repoRoot) {
+  // Best-effort read of the sonarcloud block. Returns null if the file
+  // is missing, malformed, or has no sonarcloud declaration — all three
+  // are "skip" signals, not errors, by design (mirrors Step 11).
+  let yamlText;
+  try {
+    yamlText = readFileSync(join(repoRoot, ".ground-control.yaml"), "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = parseYaml(yamlText);
+    if (!parsed || typeof parsed !== "object") return null;
+    const sc = parsed.sonarcloud;
+    if (!sc || typeof sc !== "object") return null;
+    const projectKey = typeof sc.project_key === "string" ? sc.project_key : null;
+    const organization = typeof sc.organization === "string" ? sc.organization : null;
+    if (!projectKey) return null;
+    return { projectKey, organization };
+  } catch {
+    return null;
+  }
+}
+
+function _sonarAuthHeader(token) {
+  // SonarCloud REST: HTTP Basic with token as username, empty password.
+  const b64 = Buffer.from(`${token}:`, "utf8").toString("base64");
+  return `Basic ${b64}`;
+}
+
+async function _fetchSonarQualityGate({ projectKey, prNumber, token }) {
+  const url = `${SONAR_BASE_URL}/api/qualitygates/project_status?projectKey=${encodeURIComponent(projectKey)}&pullRequest=${encodeURIComponent(String(prNumber))}`;
+  const resp = await fetch(url, {
+    headers: { Authorization: _sonarAuthHeader(token), Accept: "application/json" },
+  });
+  if (resp.status === 404) return { available: false };
+  if (!resp.ok) {
+    throw new Error(`sonar quality gate fetch failed: HTTP ${resp.status}`);
+  }
+  const data = await resp.json();
+  const status = data?.projectStatus?.status;
+  return {
+    available: typeof status === "string" && status.length > 0,
+    status: typeof status === "string" ? status : "UNKNOWN",
+  };
+}
+
+async function _fetchSonarIssues({ projectKey, prNumber, token, maxPages = 20 }) {
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const url = `${SONAR_BASE_URL}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&pullRequest=${encodeURIComponent(String(prNumber))}&resolved=false&ps=500&p=${page}`;
+    const resp = await fetch(url, {
+      headers: { Authorization: _sonarAuthHeader(token), Accept: "application/json" },
+    });
+    if (!resp.ok) {
+      throw new Error(`sonar issues fetch failed (page ${page}): HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    const issues = Array.isArray(data?.issues) ? data.issues : [];
+    out.push(...issues);
+    const total = typeof data?.total === "number" ? data.total : out.length;
+    if (out.length >= total) break;
+    if (issues.length === 0) break;
+  }
+  return out;
+}
+
+async function _fetchSonarHotspots({ projectKey, prNumber, token, maxPages = 20 }) {
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const url = `${SONAR_BASE_URL}/api/hotspots/search?projectKey=${encodeURIComponent(projectKey)}&pullRequest=${encodeURIComponent(String(prNumber))}&status=TO_REVIEW&ps=500&p=${page}`;
+    const resp = await fetch(url, {
+      headers: { Authorization: _sonarAuthHeader(token), Accept: "application/json" },
+    });
+    if (!resp.ok) {
+      throw new Error(`sonar hotspots fetch failed (page ${page}): HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    const hotspots = Array.isArray(data?.hotspots) ? data.hotspots : [];
+    out.push(...hotspots);
+    const paging = data?.paging;
+    const total = typeof paging?.total === "number" ? paging.total : out.length;
+    if (out.length >= total) break;
+    if (hotspots.length === 0) break;
+  }
+  return out;
+}
+
+function _writeSonarExport(repoRoot, prNumber, payload) {
+  // Best-effort, repo-relative, containment-checked write under
+  // .gc/sonar/. Returns the rel path on success, null on any failure
+  // (the export is a convenience for drilldown — never a correctness
+  // requirement, so failures are non-fatal).
+  try {
+    const relDir = ".gc/sonar";
+    const fileName = `${prNumber}-${Date.now()}.json`;
+    const rel = `${relDir}/${fileName}`;
+    const resolved = resolveRepoRelativePath(repoRoot, rel, "sonar_export_path");
+    if (!resolved.ok) return null;
+    const abs = resolved.abs;
+    mkdirSync(dirname(abs), { recursive: true });
+    const realRepo = realpathSync(repoRoot);
+    const contain = assertRealpathInRepo(realRepo, abs, "sonar_export_path");
+    if (!contain.ok) return null;
+    writeFileSync(abs, JSON.stringify(payload, null, 2));
+    return rel;
+  } catch {
+    return null;
+  }
+}
+
+export async function runWatchSonarAnalysis({
+  repoPath,
+  prNumber,
+  initialWaitSeconds = 60,
+  totalTimeoutSeconds = 1800,
+  pollIntervalSeconds = 30,
+}) {
+  if (typeof repoPath !== "string" || repoPath.length === 0) {
+    return {
+      ok: false,
+      error: "sonar_watch_input_invalid",
+      message: "repo_path is required",
+    };
+  }
+  if (
+    typeof prNumber !== "number" ||
+    !Number.isInteger(prNumber) ||
+    prNumber <= 0
+  ) {
+    return {
+      ok: false,
+      error: "sonar_watch_input_invalid",
+      message: "pr_number must be a positive integer",
+    };
+  }
+  for (const [name, value] of [
+    ["initial_wait_seconds", initialWaitSeconds],
+    ["total_timeout_seconds", totalTimeoutSeconds],
+    ["poll_interval_seconds", pollIntervalSeconds],
+  ]) {
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+      return {
+        ok: false,
+        error: "sonar_watch_input_invalid",
+        message: `${name} must be a non-negative integer`,
+      };
+    }
+  }
+
+  let repoRoot;
+  try {
+    repoRoot = await ensureGitRepo(repoPath);
+  } catch (e) {
+    return {
+      ok: false,
+      error: "sonar_watch_repo_not_found",
+      message: e?.message ?? "ensureGitRepo failed",
+    };
+  }
+
+  const sonarConfig = _readSonarCloudConfigFromRepo(repoRoot);
+  if (sonarConfig === null) {
+    // No sonarcloud block — skip entirely. Mirrors current /implement Step 11.
+    return {
+      ok: true,
+      skipped: true,
+      pr_number: prNumber,
+      quality_gate: "NONE",
+      issues_summary: { open_count: 0, by_severity: {}, by_type: {}, top_issues: [] },
+      hotspots_summary: { open_count: 0, top_hotspots: [] },
+      full_issue_export_path: null,
+    };
+  }
+
+  const token = process.env.SONAR_TOKEN;
+  if (typeof token !== "string" || token.length === 0) {
+    return {
+      ok: false,
+      error: "sonar_watch_token_missing",
+      message: "SONAR_TOKEN env var is not set on the MCP host",
+      pr_number: prNumber,
+    };
+  }
+
+  // Initial wait for analysis propagation (Step 11's existing 60s pause).
+  if (initialWaitSeconds > 0) {
+    await _sleepMs(initialWaitSeconds * 1000);
+  }
+
+  // Poll for the quality gate; PRs not yet analyzed return 404.
+  const startMs = Date.now();
+  let qg = null;
+  while (true) {
+    try {
+      qg = await _fetchSonarQualityGate({
+        projectKey: sonarConfig.projectKey,
+        prNumber,
+        token,
+      });
+    } catch (e) {
+      return {
+        ok: false,
+        error: "sonar_watch_quality_gate_failed",
+        message: e?.message ?? "sonar quality gate fetch failed",
+        pr_number: prNumber,
+      };
+    }
+    if (qg.available) break;
+    const elapsedSeconds = Math.floor((Date.now() - startMs) / 1000);
+    if (elapsedSeconds > totalTimeoutSeconds) {
+      return {
+        ok: true,
+        skipped: false,
+        pr_number: prNumber,
+        quality_gate: "NONE",
+        issues_summary: { open_count: 0, by_severity: {}, by_type: {}, top_issues: [] },
+        hotspots_summary: { open_count: 0, top_hotspots: [] },
+        full_issue_export_path: null,
+        timed_out: true,
+      };
+    }
+    if (pollIntervalSeconds > 0) {
+      await _sleepMs(pollIntervalSeconds * 1000);
+    }
+  }
+
+  let issues = [];
+  let hotspots = [];
+  try {
+    issues = await _fetchSonarIssues({
+      projectKey: sonarConfig.projectKey,
+      prNumber,
+      token,
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      error: "sonar_watch_issues_fetch_failed",
+      message: e?.message ?? "sonar issues fetch failed",
+      pr_number: prNumber,
+      quality_gate: qg.status,
+    };
+  }
+  try {
+    hotspots = await _fetchSonarHotspots({
+      projectKey: sonarConfig.projectKey,
+      prNumber,
+      token,
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      error: "sonar_watch_hotspots_fetch_failed",
+      message: e?.message ?? "sonar hotspots fetch failed",
+      pr_number: prNumber,
+      quality_gate: qg.status,
+    };
+  }
+
+  const exportPath = _writeSonarExport(repoRoot, prNumber, {
+    pr_number: prNumber,
+    quality_gate: qg.status,
+    issues,
+    hotspots,
+    fetched_at: new Date().toISOString(),
+  });
+
+  return {
+    ok: true,
+    skipped: false,
+    pr_number: prNumber,
+    quality_gate: qg.status,
+    issues_summary: summarizeSonarIssues(issues),
+    hotspots_summary: summarizeSonarHotspots(hotspots),
+    full_issue_export_path: exportPath,
   };
 }
 
