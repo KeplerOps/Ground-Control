@@ -36,15 +36,17 @@ public class RiskScenarioLinkController {
             @Valid @RequestBody RiskScenarioLinkRequest request,
             @RequestParam(required = false) String project) {
         var projectId = projectService.requireProjectId(project);
-        return RiskScenarioLinkResponse.from(linkService.create(
-                projectId,
-                riskScenarioId,
-                request.targetType(),
-                request.targetEntityId(),
-                request.targetIdentifier(),
-                request.linkType(),
-                request.targetUrl(),
-                request.targetTitle()));
+        return RiskScenarioLinkResponse.from(
+                linkService.create(
+                        projectId,
+                        riskScenarioId,
+                        request.targetType(),
+                        request.targetEntityId(),
+                        request.targetIdentifier(),
+                        request.linkType(),
+                        request.targetUrl(),
+                        request.targetTitle()),
+                riskScenarioId);
     }
 
     @GetMapping
@@ -54,7 +56,7 @@ public class RiskScenarioLinkController {
             @RequestParam(required = false) String project) {
         var projectId = projectService.requireProjectId(project);
         return linkService.listByScenario(projectId, riskScenarioId, targetType).stream()
-                .map(RiskScenarioLinkResponse::from)
+                .map(link -> RiskScenarioLinkResponse.from(link, riskScenarioId))
                 .toList();
     }
 

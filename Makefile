@@ -1,4 +1,4 @@
-.PHONY: rapid build test test-cov format lint check integration verify policy policy-tests policy-live \
+.PHONY: rapid build test test-cov test-quality format lint check integration verify policy policy-tests policy-live \
        assert-backup-policy test-backup-restore-local \
        ground-control-mcp-install sync-ground-control-policy scaffold-controller scaffold-audited-entity \
        scaffold-l2-state-machine sync-packs trigger-pack-sync dev clean up down docker-build smoke frontend-install frontend-dev \
@@ -19,6 +19,9 @@ test: ## Run unit tests (no static analysis)
 
 test-cov: ## Run tests with coverage report
 	cd backend && ./gradlew test jacocoTestReport
+
+test-quality: ## Run Pitest mutation testing (measures test effectiveness; #931)
+	cd backend && ./gradlew pitest
 
 format: ## Format code with Spotless
 	cd backend && ./gradlew spotlessApply
@@ -45,6 +48,9 @@ policy: policy-tests assert-backup-policy ## Run repo-native policy checks share
 
 assert-backup-policy: ## Assert GC-P021 backup cadence / retention / verification defaults are intact
 	bash scripts/assert-backup-policy.sh
+
+implement-cost-summary: ## Summarize /implement step telemetry — wall time + token counts (when available) per step / per model (ADR-036)
+	python3 tools/summarize_implement_telemetry.py
 
 test-backup-restore-local: ## Run the self-contained local backup/restore verification loop (requires Docker)
 	bash scripts/test-backup-restore-locally.sh

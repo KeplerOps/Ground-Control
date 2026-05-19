@@ -18,10 +18,10 @@ public record ThreatModelLinkResponse(
         Instant createdAt,
         Instant updatedAt) {
 
-    public static ThreatModelLinkResponse from(ThreatModelLink link) {
+    public static ThreatModelLinkResponse from(ThreatModelLink link, UUID threatModelId) {
         return new ThreatModelLinkResponse(
                 link.getId(),
-                link.getThreatModel().getId(),
+                threatModelId,
                 link.getTargetType(),
                 link.getTargetEntityId(),
                 link.getTargetIdentifier(),

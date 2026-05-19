@@ -1,10 +1,14 @@
 package com.keplerops.groundcontrol.unit.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.keplerops.groundcontrol.api.GlobalExceptionHandler;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
+import com.keplerops.groundcontrol.domain.riskscenarios.state.TreatmentPlanStatus;
 import com.keplerops.groundcontrol.shared.web.ErrorResponse;
 import java.io.Serializable;
 import java.util.LinkedHashMap;
@@ -34,6 +38,45 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().error().code()).isEqualTo("bad_request");
         assertThat(response.getBody().error().message()).isEqualTo("Malformed request body");
+    }
+
+    @Test
+    void handleHttpMessageNotReadable_returnsValidationErrorForInvalidEnumValue() {
+        var mapper = new ObjectMapper();
+        var cause = assertThrows(
+                InvalidFormatException.class,
+                () -> mapper.readValue("{\"status\":\"PROPOSED\"}", TreatmentPlanStatusRequest.class));
+        var ex = new HttpMessageNotReadableException("bad enum", cause);
+
+        var response = handler.handleHttpMessageNotReadable(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error().code()).isEqualTo("validation_error");
+        assertThat(response.getBody().error().message()).contains("Invalid value for field 'status'");
+        assertThat(response.getBody().error().detail()).containsEntry("field", "status");
+        assertThat(response.getBody().error().detail().get("validValues"))
+                .asList()
+                .contains("PLANNED", "IN_PROGRESS", "BLOCKED", "COMPLETED", "CANCELED");
+    }
+
+    @Test
+    void handleHttpMessageNotReadable_returnsLeafFieldNameForNestedInvalidEnumValue() {
+        // The Jackson path on a nested enum failure carries every level (outer.inner);
+        // the leaf field name is what the caller needs to act on. Confirms that
+        // extractFieldName's reduce-to-last yields the leaf, not "request" or "outer".
+        var mapper = new ObjectMapper();
+        var cause = assertThrows(
+                InvalidFormatException.class,
+                () -> mapper.readValue(
+                        "{\"outer\":{\"status\":\"PROPOSED\"}}", NestedTreatmentPlanStatusRequest.class));
+        var ex = new HttpMessageNotReadableException("bad nested enum", cause);
+
+        var response = handler.handleHttpMessageNotReadable(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error().detail()).containsEntry("field", "status");
     }
 
     @Test
@@ -188,4 +231,30 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody().error().code()).isEqualTo("validation_error");
         assertThat(response.getBody().error().detail()).containsEntry("field", "title");
     }
+
+    @Test
+    void handleDataIntegrityViolation_returns409ResourceConflict() {
+        // Multiple services pair preflight existsBy checks with database UNIQUE
+        // constraints; under concurrent writes only the DB constraint catches
+        // the loser. Without this handler the loser surfaced as a generic 500
+        // and the legitimate race was hidden behind "internal_error". The
+        // translation must NOT echo the constraint name or the conflicting
+        // payload — constraint names are an implementation detail and the
+        // original request may contain user-controlled tokens.
+        var ex = new org.springframework.dao.DataIntegrityViolationException(
+                "could not execute statement; constraint [uq_test_case_gherkin_test_case]");
+
+        var response = handler.handleDataIntegrityViolation(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error().code()).isEqualTo("resource_conflict");
+        // Stable, generic message — no constraint name leak.
+        assertThat(response.getBody().error().message()).doesNotContain("uq_test_case_gherkin_test_case");
+        assertThat(response.getBody().error().message()).doesNotContain("constraint");
+    }
+
+    private record TreatmentPlanStatusRequest(TreatmentPlanStatus status) {}
+
+    private record NestedTreatmentPlanStatusRequest(TreatmentPlanStatusRequest outer) {}
 }

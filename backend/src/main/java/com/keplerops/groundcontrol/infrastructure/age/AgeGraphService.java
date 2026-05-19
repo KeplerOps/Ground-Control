@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.graph.GraphTraversalLimits;
 import com.keplerops.groundcontrol.domain.graph.model.GraphEdge;
 import com.keplerops.groundcontrol.domain.graph.model.GraphEntityType;
 import com.keplerops.groundcontrol.domain.graph.model.GraphNode;
@@ -95,16 +96,19 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
      * #findPaths}. AGE 1.6 cannot parameterize variable-length-path bounds, so we enforce a hard
      * cap before constructing the cypher; otherwise a caller could request {@code depth=10_000}
      * and trigger an unbounded graph expansion. Cap chosen to fit any realistic requirement
-     * dependency tree while keeping latency bounded.
+     * dependency tree while keeping latency bounded. Delegated to the canonical policy in
+     * {@link GraphTraversalLimits} per ADR-032 so this adapter and {@code MixedGraphService}
+     * cannot drift apart.
      */
-    static final int MAX_GRAPH_TRAVERSAL_DEPTH = 20;
+    static final int MAX_GRAPH_TRAVERSAL_DEPTH = GraphTraversalLimits.MAX_DEPTH;
 
     /**
      * Result-row cap on {@link #findPaths}. Even with a depth bound, a dense or cyclic graph
      * can produce an exponential number of distinct paths between two requirements; this cap
-     * keeps the response size bounded and the per-call latency predictable.
+     * keeps the response size bounded and the per-call latency predictable. Delegated to the
+     * canonical policy in {@link GraphTraversalLimits}.
      */
-    static final int MAX_FIND_PATHS_RESULTS = 50;
+    static final int MAX_FIND_PATHS_RESULTS = GraphTraversalLimits.MAX_PATH_RESULTS;
 
     /** Maximum allowed length for a UID arriving at the AGE adapter (matches the column width). */
     static final int MAX_UID_LENGTH = 50;
@@ -150,6 +154,21 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
             "assetType",
             "assetScopeSummary",
             "owner",
+            // GC-M012 asset ownership / criticality / scope metadata. Every key
+            // here is also emitted by AssetGraphProjectionContributor; any new
+            // node-property emit must register here too or AGE materialization
+            // throws DomainValidationException at write time.
+            "steward",
+            "environment",
+            "criticality",
+            "businessContext",
+            "scopeDesignation",
+            // GC-M018 knowledge / completeness state. Emitted on both
+            // OPERATIONAL_ASSET nodes and AssetRelation edges by
+            // AssetGraphProjectionContributor; must be approved here or AGE
+            // materialization rejects the writes with
+            // DomainValidationException at validatePropertyKey time.
+            "knowledgeState",
             "categoryTags",
             "expiresAt",
             "observedAt",
@@ -185,7 +204,22 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
             "assuranceLevel",
             // Methodology profile.
             "family",
-            "version");
+            "version",
+            // Finding projection (GC-V001 / ADR-038).
+            "findingType",
+            "severity",
+            "rootCauseAnalysis",
+            // Control / ControlTest / ControlEffectivenessAssessment projections (ADR-039).
+            "controlFunction",
+            "controlUid",
+            "methodology",
+            "conclusion",
+            "testerIdentity",
+            "testDate",
+            "designEffectiveness",
+            "operatingEffectiveness",
+            "assessor",
+            "assessedAt");
     // AGE's ag_catalog.cypher() function takes cstring/cstring/agtype. Its first two arguments
     // are parsed at SQL parse time by AGE's parser hook, so they cannot be JDBC bind parameters
     // — they must be SQL literals. The third argument (params agtype) is the user-data carrier
@@ -322,28 +356,110 @@ public class AgeGraphService implements GraphClient, MixedGraphClient {
     }
 
     @Override
-    public GraphProjection getVisualization(UUID projectId) {
+    public GraphProjection getVisualization(UUID projectId, Set<GraphEntityType> entityTypes) {
+        Set<GraphEntityType> filter = entityTypes == null ? Set.of() : entityTypes;
         if (!ageProperties.enabled()) {
-            return graphProjectionRegistryService.buildProjectionForProject(projectId);
+            // AGE-disabled fallback walks every contributor in memory; we cannot short-circuit the
+            // contributor loop, so apply the entityTypes filter and size cap in memory. The
+            // filter is applied BEFORE the cap, so a caller's narrowing actually matters: a tight
+            // filter on a large project produces a small projection that passes the cap.
+            GraphProjection full = graphProjectionRegistryService.buildProjectionForProject(projectId);
+            GraphProjection filtered = filter.isEmpty() ? full : filterByEntityType(full, filter);
+            return enforceProjectionSizeCap(filtered);
         }
         String graph = validateGraphName(ageProperties.graphName());
         String projectIdentifier = getProjectIdentifier(projectId);
         setupSearchPath();
 
+        // Push BOTH the entityTypes narrowing and the size cap into Cypher itself. The filter uses
+        // a parameter-bound `IN` against the `entity_type` property (a string materialized at
+        // executeCreateNode time, KEY_ENTITY_TYPE), so labels are NOT inlined into the query text
+        // — the surrounding ADR-032 constraint is preserved. The LIMIT (MAX + 1) is enforced on
+        // the FILTERED set, which means a caller narrowing the projection actually narrows what
+        // the database materializes; the +1 row, if present, signals overflow at adapter level so
+        // the bound is still enforced on database work even when no filter is supplied.
+        int nodeLimitInclusive = GraphTraversalLimits.MAX_PROJECTION_NODES + 1;
         List<GraphNode> nodes = new ArrayList<>();
-        String nodeCypher = "MATCH (n {project_identifier: $project_identifier}) RETURN properties(n)";
-        String nodeParams = encodeParams(Map.of(KEY_PROJECT_IDENTIFIER, projectIdentifier));
-        jdbcTemplate.query(buildCypherSql(graph, nodeCypher), bindAgtypeParams(nodeParams), (RowCallbackHandler)
-                rs -> nodes.add(toGraphNode(parseAgtypeMap(rs.getString(1)))));
+        Map<String, Object> nodeParamMap = new LinkedHashMap<>();
+        nodeParamMap.put(KEY_PROJECT_IDENTIFIER, projectIdentifier);
+        StringBuilder nodeCypher = new StringBuilder("MATCH (n {project_identifier: $project_identifier})");
+        if (!filter.isEmpty()) {
+            List<String> typeNames = filter.stream().map(GraphEntityType::name).toList();
+            nodeParamMap.put("entity_types", typeNames);
+            nodeCypher.append(" WHERE n.entity_type IN $entity_types");
+        }
+        nodeCypher.append(" RETURN properties(n) LIMIT ").append(nodeLimitInclusive);
+        jdbcTemplate.query(
+                buildCypherSql(graph, nodeCypher.toString()),
+                bindAgtypeParams(encodeParams(nodeParamMap)),
+                (RowCallbackHandler) rs -> nodes.add(toGraphNode(parseAgtypeMap(rs.getString(1)))));
+        if (nodes.size() > GraphTraversalLimits.MAX_PROJECTION_NODES) {
+            throw new DomainValidationException(
+                    filter.isEmpty()
+                            ? "projection node count exceeds maximum " + GraphTraversalLimits.MAX_PROJECTION_NODES
+                                    + "; apply an entityTypes filter to narrow the result"
+                            : "projection node count exceeds maximum " + GraphTraversalLimits.MAX_PROJECTION_NODES
+                                    + " even with the supplied entityTypes filter; narrow the filter further");
+        }
 
+        // Edges must connect two nodes whose entity_type is in the filter set. We bind the filter
+        // a second time as edge params; AGE evaluates `IN` against the bound list parameter, so
+        // the cost of materialization stays bounded by the filter on both endpoints. The size cap
+        // applies to the filtered edges.
+        int edgeLimitInclusive = GraphTraversalLimits.MAX_PROJECTION_EDGES + 1;
         List<GraphEdge> edges = new ArrayList<>();
-        String edgeCypher = "MATCH (s {project_identifier: $project_identifier})"
-                + "-[r]->(t {project_identifier: $project_identifier}) RETURN properties(r)";
-        String edgeParams = encodeParams(Map.of(KEY_PROJECT_IDENTIFIER, projectIdentifier));
-        jdbcTemplate.query(buildCypherSql(graph, edgeCypher), bindAgtypeParams(edgeParams), (RowCallbackHandler)
-                rs -> edges.add(toGraphEdge(parseAgtypeMap(rs.getString(1)))));
+        Map<String, Object> edgeParamMap = new LinkedHashMap<>();
+        edgeParamMap.put(KEY_PROJECT_IDENTIFIER, projectIdentifier);
+        StringBuilder edgeCypher = new StringBuilder("MATCH (s {project_identifier: $project_identifier})"
+                + "-[r]->(t {project_identifier: $project_identifier})");
+        if (!filter.isEmpty()) {
+            List<String> typeNames = filter.stream().map(GraphEntityType::name).toList();
+            edgeParamMap.put("entity_types", typeNames);
+            edgeCypher.append(" WHERE s.entity_type IN $entity_types AND t.entity_type IN $entity_types");
+        }
+        edgeCypher.append(" RETURN properties(r) LIMIT ").append(edgeLimitInclusive);
+        jdbcTemplate.query(
+                buildCypherSql(graph, edgeCypher.toString()),
+                bindAgtypeParams(encodeParams(edgeParamMap)),
+                (RowCallbackHandler) rs -> edges.add(toGraphEdge(parseAgtypeMap(rs.getString(1)))));
+        if (edges.size() > GraphTraversalLimits.MAX_PROJECTION_EDGES) {
+            throw new DomainValidationException(
+                    filter.isEmpty()
+                            ? "projection edge count exceeds maximum " + GraphTraversalLimits.MAX_PROJECTION_EDGES
+                                    + "; apply an entityTypes filter to narrow the result"
+                            : "projection edge count exceeds maximum " + GraphTraversalLimits.MAX_PROJECTION_EDGES
+                                    + " even with the supplied entityTypes filter; narrow the filter further");
+        }
 
         return new GraphProjection(nodes, edges);
+    }
+
+    private static GraphProjection filterByEntityType(GraphProjection projection, Set<GraphEntityType> entityTypes) {
+        List<GraphNode> nodes = projection.nodes().stream()
+                .filter(node -> entityTypes.contains(node.entityType()))
+                .toList();
+        java.util.Set<String> visibleNodeIds =
+                nodes.stream().map(GraphNode::id).collect(java.util.stream.Collectors.toSet());
+        List<GraphEdge> edges = projection.edges().stream()
+                .filter(edge -> visibleNodeIds.contains(edge.sourceId()) && visibleNodeIds.contains(edge.targetId()))
+                .toList();
+        return new GraphProjection(nodes, edges);
+    }
+
+    private static GraphProjection enforceProjectionSizeCap(GraphProjection projection) {
+        if (projection.nodes().size() > GraphTraversalLimits.MAX_PROJECTION_NODES) {
+            throw new DomainValidationException(
+                    "projection node count " + projection.nodes().size()
+                            + " exceeds maximum " + GraphTraversalLimits.MAX_PROJECTION_NODES
+                            + "; apply an entityTypes filter to narrow the result");
+        }
+        if (projection.edges().size() > GraphTraversalLimits.MAX_PROJECTION_EDGES) {
+            throw new DomainValidationException(
+                    "projection edge count " + projection.edges().size()
+                            + " exceeds maximum " + GraphTraversalLimits.MAX_PROJECTION_EDGES
+                            + "; apply an entityTypes filter to narrow the result");
+        }
+        return projection;
     }
 
     private void executeCreateNode(String graph, GraphNode node) {

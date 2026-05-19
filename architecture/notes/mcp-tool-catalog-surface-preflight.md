@@ -44,6 +44,10 @@ implementation plan.
 - **Validation:** MCP Zod schemas validate tool arguments only. Backend request
   DTOs, Bean Validation, Jackson enum binding, and domain services remain the
   authoritative validators for API semantics.
+- **Transport metadata:** SDK-injected control fields are not user-facing tool
+  arguments. Normalize only known runtime keys at the MCP adapter boundary, then
+  keep the public argument allowlist strict so `headers`, `method`, `body`, and
+  caller-supplied tokens still fail loudly.
 - **Enum contracts:** API enum mirrors in `mcp/ground-control/lib.js` remain
   governed by ADR-034 and `make policy`; do not introduce another enum registry
   for a curated catalog.
@@ -81,6 +85,10 @@ implementation plan.
 - **OS/process exposure:** no design should require users to pass bearer tokens
   on the command line or embed them in generated server args. Catalog selection
   may be an env/config value because it is not secret.
+- **MCP runtime plumbing:** known non-user fields injected by the SDK or
+  transport, such as an AbortController `signal`, must be consumed or ignored
+  only at the adapter boundary. Do not forward them to URL construction,
+  request params, headers, backend DTOs, logs, or error details.
 
 ## Extensibility Guardrail
 
@@ -103,6 +111,10 @@ MCP server or reimplementing auth, error handling, or Zod schema definitions.
 - Do not duplicate request schemas in a new catalog layer. Reuse existing Zod
   schemas or centralize registration metadata so descriptions and validators do
   not drift between curated and expanded modes.
+- Do not fix SDK-injected metadata by globally accepting arbitrary unknown
+  arguments. A narrow allowlist for runtime metadata is acceptable; a generic
+  passthrough that lets user-supplied `method`, `headers`, or `body` reach the
+  handler is not.
 - Do not split servers by copying `index.js` into multiple entrypoints with
   different hand-pruned tool lists. That preserves the current maintenance
   problem under more files.

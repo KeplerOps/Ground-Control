@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.keplerops.groundcontrol.api.admin.GraphController;
+import com.keplerops.groundcontrol.domain.graph.GraphTraversalLimits;
 import com.keplerops.groundcontrol.domain.graph.model.GraphEdge;
 import com.keplerops.groundcontrol.domain.graph.model.GraphEntityType;
 import com.keplerops.groundcontrol.domain.graph.model.GraphNode;
@@ -27,6 +28,8 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -203,6 +206,86 @@ class GraphControllerTest {
                     .andExpect(jsonPath("$[0].nodeIds", hasSize(3)))
                     .andExpect(jsonPath("$[0].edgeTypes", hasSize(2)))
                     .andExpect(jsonPath("$[0].edgeTypes[0]", is("DEPENDS_ON")));
+        }
+    }
+
+    @Nested
+    class RequestValidation {
+
+        @Test
+        void rejectsSubgraphMaxDepthAboveCap() throws Exception {
+            UUID rootId = UUID.randomUUID();
+            when(projectService.requireProjectId("test")).thenReturn(UUID.randomUUID());
+
+            mockMvc.perform(post("/api/v1/graph/subgraph/query")
+                            .param("project", "test")
+                            .contentType("application/json")
+                            .content(("{\"rootNodeIds\":[\"" + rootId + "\"],\"maxDepth\":"
+                                    + (GraphTraversalLimits.MAX_DEPTH + 1) + "}")))
+                    .andExpect(status().isUnprocessableEntity());
+        }
+
+        @Test
+        void rejectsSubgraphMaxDepthZero() throws Exception {
+            UUID rootId = UUID.randomUUID();
+            when(projectService.requireProjectId("test")).thenReturn(UUID.randomUUID());
+
+            mockMvc.perform(post("/api/v1/graph/subgraph/query")
+                            .param("project", "test")
+                            .contentType("application/json")
+                            .content("{\"rootNodeIds\":[\"" + rootId + "\"],\"maxDepth\":0}"))
+                    .andExpect(status().isUnprocessableEntity());
+        }
+
+        @Test
+        void rejectsSubgraphOversizeRootNodeIds() throws Exception {
+            when(projectService.requireProjectId("test")).thenReturn(UUID.randomUUID());
+            String roots = IntStream.range(0, GraphTraversalLimits.MAX_ROOT_NODES + 1)
+                    .mapToObj(i -> "\"REQ-" + i + "\"")
+                    .collect(Collectors.joining(","));
+
+            mockMvc.perform(post("/api/v1/graph/subgraph/query")
+                            .param("project", "test")
+                            .contentType("application/json")
+                            .content("{\"rootNodeIds\":[" + roots + "],\"maxDepth\":1}"))
+                    .andExpect(status().isUnprocessableEntity());
+        }
+
+        @Test
+        void rejectsSubgraphOversizeEntityTypes() throws Exception {
+            when(projectService.requireProjectId("test")).thenReturn(UUID.randomUUID());
+            String types = IntStream.range(0, GraphTraversalLimits.MAX_ENTITY_TYPE_FILTER + 1)
+                    .mapToObj(i -> "\"REQUIREMENT\"")
+                    .collect(Collectors.joining(","));
+
+            mockMvc.perform(post("/api/v1/graph/subgraph/query")
+                            .param("project", "test")
+                            .contentType("application/json")
+                            .content("{\"rootNodeIds\":[\"REQ-A\"],\"maxDepth\":1,\"entityTypes\":[" + types + "]}"))
+                    .andExpect(status().isUnprocessableEntity());
+        }
+
+        @Test
+        void rejectsPathsMaxDepthAboveCap() throws Exception {
+            when(projectService.requireProjectId("test")).thenReturn(UUID.randomUUID());
+
+            mockMvc.perform(post("/api/v1/graph/paths/query")
+                            .param("project", "test")
+                            .contentType("application/json")
+                            .content("{\"sourceNodeId\":\"s\",\"targetNodeId\":\"t\",\"maxDepth\":"
+                                    + (GraphTraversalLimits.MAX_DEPTH + 1) + "}"))
+                    .andExpect(status().isUnprocessableEntity());
+        }
+
+        @Test
+        void rejectsPathsMaxDepthZero() throws Exception {
+            when(projectService.requireProjectId("test")).thenReturn(UUID.randomUUID());
+
+            mockMvc.perform(post("/api/v1/graph/paths/query")
+                            .param("project", "test")
+                            .contentType("application/json")
+                            .content("{\"sourceNodeId\":\"s\",\"targetNodeId\":\"t\",\"maxDepth\":0}"))
+                    .andExpect(status().isUnprocessableEntity());
         }
     }
 

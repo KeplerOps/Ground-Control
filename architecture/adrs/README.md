@@ -37,7 +37,7 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | [018](018-aws-ec2-deployment.md) | AWS EC2 Deployment | Superseded by ADR-030 |
 | [019](019-asset-topology-model.md) | Asset Topology and Boundary Relationships | Accepted |
 | [020](020-asset-cross-entity-linking.md) | Asset Cross-Entity Linking | Accepted |
-| [021](021-gated-agentic-development-loop.md) | Gated Agentic Development Loop | Accepted (amended by ADR-029) |
+| [021](021-gated-agentic-development-loop.md) | Gated Agentic Development Loop | Accepted (amended by ADR-029, ADR-036) |
 | [022](022-content-pack-distribution-architecture.md) | Content Pack Distribution Architecture | Accepted |
 | [023](023-plugin-architecture.md) | Plugin Architecture | Accepted |
 | [024](024-threat-model-entry-boundary.md) | Threat Model Entry Boundary | Accepted |
@@ -51,5 +51,8 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records). Each
 | [032](032-age-query-construction-boundary.md) | AGE Query Construction Boundary | Accepted |
 | [033](033-authenticated-audit-actor-provenance.md) | Authenticated Audit Actor Provenance | Accepted |
 | [034](034-api-enum-contract-single-source.md) | API Enum Contract Single Source of Truth | Accepted |
+| [035](035-mcp-tool-catalog-curation.md) | MCP Tool Catalog Curation | Accepted |
+| [036](036-per-step-routing-tool-surfaces-telemetry.md) | Per-Step Model Routing, Durable-Record Tool Surfaces, and Step Telemetry (amends ADR-021) | Accepted |
+| [037](037-browser-session-access-control.md) | Browser Session Access Control | Accepted |
 
 Prior ADRs from the old project frame are archived in `archive/architecture/adrs/`.

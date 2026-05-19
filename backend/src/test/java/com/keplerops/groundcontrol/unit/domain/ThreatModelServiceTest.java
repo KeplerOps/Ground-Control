@@ -43,6 +43,10 @@ class ThreatModelServiceTest {
     private ThreatModelRepository threatModelRepository;
 
     @Mock
+    private com.keplerops.groundcontrol.domain.threatmodels.repository.ThreatModelLinkRepository
+            threatModelLinkRepository;
+
+    @Mock
     private ProjectService projectService;
 
     @Mock
@@ -358,10 +362,41 @@ class ThreatModelServiceTest {
             when(riskScenarioLinkRepository.findRiskScenarioUidsByTargetTypeAndTargetEntityIdAndProjectId(
                             RiskScenarioLinkTargetType.THREAT_MODEL, tm.getId(), projectId))
                     .thenReturn(List.of());
+            when(threatModelLinkRepository.findByThreatModelId(tm.getId())).thenReturn(List.of());
 
             threatModelService.delete(projectId, tm.getId());
 
             verify(threatModelRepository).delete(tm);
+        }
+
+        @Test
+        void deletesOutboundLinksThroughRepositoryBeforeParent() {
+            var tm = makeThreatModel();
+            var outboundLinks = List.of(new com.keplerops.groundcontrol.domain.threatmodels.model.ThreatModelLink(
+                    tm,
+                    com.keplerops.groundcontrol.domain.threatmodels.state.ThreatModelLinkTargetType.ASSET,
+                    UUID.randomUUID(),
+                    null,
+                    com.keplerops.groundcontrol.domain.threatmodels.state.ThreatModelLinkType.AFFECTS));
+            when(threatModelRepository.findByIdAndProjectId(tm.getId(), projectId))
+                    .thenReturn(Optional.of(tm));
+            when(assetLinkRepository.findAssetUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            AssetLinkTargetType.THREAT_MODEL_ENTRY, tm.getId(), projectId))
+                    .thenReturn(List.of());
+            when(riskScenarioLinkRepository.findRiskScenarioUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            RiskScenarioLinkTargetType.THREAT_MODEL, tm.getId(), projectId))
+                    .thenReturn(List.of());
+            when(threatModelLinkRepository.findByThreatModelId(tm.getId())).thenReturn(outboundLinks);
+
+            threatModelService.delete(projectId, tm.getId());
+
+            // Envers writes delete revisions only when Hibernate sees the link
+            // delete. Driving outbound link deletes through the repository before
+            // deleting the parent closes the parent-delete audit-history gap
+            // (cycle-2 pre-push codex review on issue #279, ADR-038).
+            var inOrder = org.mockito.Mockito.inOrder(threatModelLinkRepository, threatModelRepository);
+            inOrder.verify(threatModelLinkRepository).deleteAll(outboundLinks);
+            inOrder.verify(threatModelRepository).delete(tm);
         }
 
         @Test

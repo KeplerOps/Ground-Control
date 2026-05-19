@@ -41,6 +41,9 @@ class RiskRegisterRecordServiceTest {
     private RiskScenarioRepository riskScenarioRepository;
 
     @Mock
+    private com.keplerops.groundcontrol.domain.audits.repository.AuditLinkRepository auditLinkRepository;
+
+    @Mock
     private ProjectService projectService;
 
     @InjectMocks
@@ -159,9 +162,37 @@ class RiskRegisterRecordServiceTest {
         var recordId = UUID.randomUUID();
         setField(record, "id", recordId);
         when(repository.findByIdAndProjectIdWithScenarios(recordId, projectId)).thenReturn(Optional.of(record));
+        when(auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                        com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType.RISK_REGISTER_RECORD,
+                        recordId,
+                        projectId))
+                .thenReturn(List.of());
 
         service.delete(projectId, recordId);
 
         verify(repository).delete(record);
+    }
+
+    @Test
+    void rejectsDeleteWhenInboundAuditLinkReferencesRecord() {
+        var registerRecord = new RiskRegisterRecord(project, "RR-2", "Audited record");
+        var recordId = UUID.randomUUID();
+        setField(registerRecord, "id", recordId);
+        when(repository.findByIdAndProjectIdWithScenarios(recordId, projectId)).thenReturn(Optional.of(registerRecord));
+        when(auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                        com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType.RISK_REGISTER_RECORD,
+                        recordId,
+                        projectId))
+                .thenReturn(List.of("AUDIT-001"));
+
+        var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
+                ConflictException.class, () -> service.delete(projectId, recordId));
+        assertThat(thrown)
+                .isNotNull()
+                .hasMessageContaining("AuditLink references exist")
+                .extracting("errorCode")
+                .isEqualTo("risk_register_record_referenced");
+        assertThat(thrown.getDetail()).containsEntry("auditCount", 1);
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).delete(registerRecord);
     }
 }

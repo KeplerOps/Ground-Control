@@ -18,10 +18,10 @@ public record ControlLinkResponse(
         Instant createdAt,
         Instant updatedAt) {
 
-    public static ControlLinkResponse from(ControlLink link) {
+    public static ControlLinkResponse from(ControlLink link, UUID controlId) {
         return new ControlLinkResponse(
                 link.getId(),
-                link.getControl().getId(),
+                controlId,
                 link.getTargetType(),
                 link.getTargetEntityId(),
                 link.getTargetIdentifier(),

@@ -320,7 +320,10 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status", is("ACTIVE")));
 
-        // Create traceability link (requires ACTIVE status for IMPLEMENTS)
+        // Create traceability link (requires ACTIVE status for IMPLEMENTS).
+        // Assert the response echoes each posted field — without these
+        // assertions a silent field swap (wrong link type, mis-deserialized
+        // artifact identifier) would still produce a 201 and pass.
         var linkBody = Map.of(
                 "artifactType", "GITHUB_ISSUE",
                 "artifactIdentifier", "99",
@@ -328,7 +331,10 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
         mockMvc.perform(post("/api/v1/requirements/" + crudReqId + "/traceability")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(linkBody)))
-                .andExpect(status().isCreated());
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.linkType", is("IMPLEMENTS")))
+                .andExpect(jsonPath("$.artifactType", is("GITHUB_ISSUE")))
+                .andExpect(jsonPath("$.artifactIdentifier", is("99")));
 
         // Archive
         mockMvc.perform(post("/api/v1/requirements/" + crudReqId + "/archive"))
@@ -392,16 +398,119 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
         }
         assertThat(versions)
                 .containsExactly(
-                        "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012", "013",
-                        "014", "015", "016", "017", "018", "019", "020", "021", "022", "023", "024", "025", "026",
-                        "027", "028", "029", "030", "031", "032", "033", "034", "035", "036", "037", "038", "039",
-                        "040", "041", "042", "043", "044", "045", "046", "047", "048", "049", "050", "051",
+                        "001",
+                        "002",
+                        "003",
+                        "004",
+                        "005",
+                        "006",
+                        "007",
+                        "008",
+                        "009",
+                        "010",
+                        "011",
+                        "012",
+                        "013",
+                        "014",
+                        "015",
+                        "016",
+                        "017",
+                        "018",
+                        "019",
+                        "020",
+                        "021",
+                        "022",
+                        "023",
+                        "024",
+                        "025",
+                        "026",
+                        "027",
+                        "028",
+                        "029",
+                        "030",
+                        "031",
+                        "032",
+                        "033",
+                        "034",
+                        "035",
+                        "036",
+                        "037",
+                        "038",
+                        "039",
+                        "040",
+                        "041",
+                        "042",
+                        "043",
+                        "044",
+                        "045",
+                        "046",
+                        "047",
+                        "048",
+                        "049",
+                        "050",
+                        "051",
                         "052", // V052: control pack tables
                         "053", // V053: pack registry tables
                         "054", // V054: typed control-pack registry payloads
                         "055", // V055: threat_model
                         "056", // V056: threat_model_audit
                         "057", // V057: threat_model_link (target_url / target_title NOT NULL DEFAULT '')
-                        "058"); // V058: threat_model_link_audit
+                        "058", // V058: threat_model_link_audit
+                        "059", // V059: ADR-037 users + authorities (browser session JDBC store)
+                        "060", // V060: finding (GC-V001 / ADR-038)
+                        "061", // V061: finding_audit
+                        "062", // V062: finding_link (target_url / target_title NOT NULL DEFAULT '')
+                        "063", // V063: finding_link_audit
+                        "064", // V064: drop ON DELETE CASCADE on asset_link / control_link / risk_scenario_link /
+                        // threat_model_link FKs (Envers audit gap)
+                        "065", // V065: control_test (GC-I012 / ADR-039)
+                        "066", // V066: control_test_audit
+                        "067", // V067: control_effectiveness_assessment (GC-I013 / ADR-039)
+                        "068", // V068: control_effectiveness_assessment_audit
+                        "069", // V069: operational_asset ownership/criticality/scope (GC-M012)
+                        "070", // V070: operational_asset_audit parity for GC-M012
+                        "071", // V071: test_case (TC-001 / ADR-040)
+                        "072", // V072: test_case_audit
+                        "073", // V073: test_case_step (TC-002)
+                        "074", // V074: test_case_step_audit
+                        "075", // V075: forward-fix V072 missing timestamp columns on test_case_audit
+                        "076", // V076: add test_case.format discriminator (TC-004)
+                        "077", // V077: add test_case_audit.format parity column
+                        "078", // V078: create test_case_gherkin
+                        "079", // V079: create test_case_gherkin_audit
+                        "080", // V080: operational_asset subtype + metadata (GC-M011)
+                        "081", // V081: operational_asset_audit parity for GC-M011
+                        "082", // V082: asset_subtype_schema (GC-M011 registry)
+                        "083", // V083: asset_subtype_schema_audit
+                        "084", // V084: create test_case_folder (TC-005 / ADR-043)
+                        "085", // V085: create test_case_folder_audit
+                        "086", // V086: add test_case.parent_folder_id + sort_order
+                        "087", // V087: add test_case_audit.parent_folder_id + sort_order
+                        "088", // V088: create test_plan (TC-006 / ADR-044)
+                        "089", // V089: create test_plan_audit
+                        "090", // V090: create evidence_artifact (GC-M016 / ADR-045)
+                        "091", // V091: create evidence_artifact_audit
+                        "092", // V092: add_asset_knowledge_state (GC-M018 / ADR-046)
+                        "093", // V093: add_asset_knowledge_state_audit
+                        "094", // V094: create test_suite (TC-007 / ADR-047)
+                        "095", // V095: create test_suite_audit
+                        "096", // V096: create test_suite_member
+                        "097", // V097: create test_suite_member_audit
+                        "098", // V098: create test_suite_source_requirement
+                        "099", // V099: create test_suite_source_requirement_audit
+                        "100", // V100: create audit (GC-U001 / ADR-048 audit-entity-boundary)
+                        "101", // V101: create audit_audit
+                        "102", // V102: create audit_link
+                        "103", // V103: create audit_link_audit
+                        "104", // V104: migrate legacy EVIDENCE links to EXTERNAL (GC-L006)
+                        "110", // V110: create test_run (TC-008 / ADR-049)
+                        "111", // V111: create test_run_audit
+                        "112", // V112: create test_run_tester_assignment
+                        "113", // V113: create test_run_tester_assignment_audit
+                        "114", // V114: create test_run_case_result
+                        "115", // V115: create test_run_case_result_audit
+                        "116", // V116: create test_run_step_result (TC-009 / ADR-050)
+                        "117", // V117: create test_run_step_result_audit
+                        "118"); // V118: add test_run cursor columns
     }
 }

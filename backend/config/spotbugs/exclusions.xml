@@ -70,7 +70,9 @@
     </Match>
 
     <!-- Spring Security filters and HTTP handlers store the injected SecurityProperties /
-         ObjectMapper bean by reference — that is the standard Spring DI pattern. -->
+         ObjectMapper / DataSource / Encoder bean by reference — that is the standard Spring DI
+         pattern. Listed per-class so a future security-sensitive class added to the package is
+         scanned (and a real EI exposure surfaces). -->
     <Match>
         <Class name="com.keplerops.groundcontrol.shared.security.BearerTokenAuthFilter" />
         <Bug pattern="EI_EXPOSE_REP2" />
@@ -85,6 +87,18 @@
     </Match>
     <Match>
         <Class name="com.keplerops.groundcontrol.shared.security.ApiAccessDeniedHandler" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.keplerops.groundcontrol.shared.security.PathAwareAccessDeniedHandler" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.keplerops.groundcontrol.shared.security.FirstAdminBootstrapRunner" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.keplerops.groundcontrol.shared.security.service.UserAdminService" />
         <Bug pattern="EI_EXPOSE_REP2" />
     </Match>
 

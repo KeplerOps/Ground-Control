@@ -17,6 +17,7 @@ import com.keplerops.groundcontrol.domain.assets.state.AssetLinkType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetRelationType;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
 import com.keplerops.groundcontrol.domain.assets.state.ObservationCategory;
+import com.keplerops.groundcontrol.domain.graph.model.GraphEdge;
 import com.keplerops.groundcontrol.domain.graph.model.GraphEntityType;
 import com.keplerops.groundcontrol.domain.graph.model.GraphIds;
 import com.keplerops.groundcontrol.domain.graph.service.AssetGraphProjectionContributor;
@@ -91,21 +92,25 @@ class AssetGraphProjectionContributorTest {
         assertThat(nodes)
                 .extracting(node -> node.entityType().name())
                 .containsExactlyInAnyOrder("OPERATIONAL_ASSET", "OPERATIONAL_ASSET", "OBSERVATION");
-        assertThat(nodes).anySatisfy(node -> {
-            if (node.entityType() == GraphEntityType.OPERATIONAL_ASSET) {
-                assertThat(node.properties()).containsKey("assetType").containsKey("name");
-            }
-        });
+        // Conditional `anySatisfy` is unsafe — when the if-guard is false the
+        // lambda exits without an assertion and the element trivially
+        // satisfies, masking a property regression. Filter-then-allSatisfy
+        // gives the same intent (every OPERATIONAL_ASSET node must expose
+        // the properties) with real assertion firing on every match.
+        assertThat(nodes)
+                .filteredOn(node -> node.entityType() == GraphEntityType.OPERATIONAL_ASSET)
+                .isNotEmpty()
+                .allSatisfy(node ->
+                        assertThat(node.properties()).containsKey("assetType").containsKey("name"));
         assertThat(edges).hasSize(3);
         assertThat(edges)
                 .extracting(edge -> edge.edgeType())
                 .containsExactlyInAnyOrder("DEPENDS_ON", "OBSERVED_ON", "ASSOCIATED");
-        assertThat(edges).anySatisfy(edge -> {
-            if (edge.edgeType().equals("ASSOCIATED")) {
-                assertThat(edge.targetId())
-                        .isEqualTo(GraphIds.nodeId(GraphEntityType.RISK_SCENARIO, internalLink.getTargetEntityId()));
-            }
-        });
+        assertThat(edges)
+                .filteredOn(edge -> edge.edgeType().equals("ASSOCIATED"))
+                .singleElement()
+                .extracting(GraphEdge::targetId)
+                .isEqualTo(GraphIds.nodeId(GraphEntityType.RISK_SCENARIO, internalLink.getTargetEntityId()));
     }
 
     @Test
@@ -134,6 +139,125 @@ class AssetGraphProjectionContributorTest {
         assertThat(edges.get(0).targetEntityType()).isEqualTo(GraphEntityType.CONTROL);
     }
 
+    @Test
+    void exposesOwnershipCriticalityScopeAsNodeProperties() {
+        // GC-M012: ownership, stewardship, environment, criticality,
+        // business/mission context, and scope designation must surface as
+        // graph node properties so risk/control/audit/reporting graph reads
+        // can consume them without a second persisted aggregate.
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var asset = new OperationalAsset(project, "ASSET-PCI", "Payments API");
+        setField(asset, "id", UUID.randomUUID());
+        asset.setAssetType(AssetType.SERVICE);
+        asset.setDescription("Production payments service.");
+        asset.setOwner("alice@example.com");
+        asset.setSteward("platform-sre");
+        asset.setEnvironment(com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment.PRODUCTION);
+        asset.setCriticality(com.keplerops.groundcontrol.domain.assets.state.AssetCriticality.CRITICAL);
+        asset.setBusinessContext("Revenue-bearing payments flow; PCI-DSS scope.");
+        asset.setScopeDesignation(com.keplerops.groundcontrol.domain.assets.state.AssetScope.IN_SCOPE);
+        // GC-M011: subtype is also a graph facet (low-cardinality, queryable).
+        asset.setSubtype("aws_ec2");
+
+        when(assetRepository.findByProjectIdAndArchivedAtIsNull(projectId)).thenReturn(List.of(asset));
+        when(observationRepository.findByProjectId(projectId)).thenReturn(List.of());
+
+        var nodes = contributor.contributeNodes(projectId);
+
+        assertThat(nodes).hasSize(1);
+        var properties = nodes.get(0).properties();
+        assertThat(properties)
+                .containsEntry("owner", "alice@example.com")
+                .containsEntry("steward", "platform-sre")
+                .containsEntry("environment", "PRODUCTION")
+                .containsEntry("criticality", "CRITICAL")
+                .containsEntry("businessContext", "Revenue-bearing payments flow; PCI-DSS scope.")
+                .containsEntry("scopeDesignation", "IN_SCOPE")
+                // GC-M011: subtype property is pinned alongside the other
+                // queryable facets so a rename / removal breaks the test
+                // before it breaks graph consumers.
+                .containsEntry("subtype", "aws_ec2");
+    }
+
+    @Test
+    void exposesNullOwnershipMetadataAsNullProperties() {
+        // Legacy assets without GC-M012 metadata must still project — the
+        // node properties carry nulls rather than throwing or omitting keys
+        // so frontend / agent consumers can rely on a stable shape. Same
+        // contract holds for GC-M011 `subtype`.
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var asset = new OperationalAsset(project, "ASSET-LEGACY", "Legacy");
+        setField(asset, "id", UUID.randomUUID());
+        asset.setAssetType(AssetType.SERVICE);
+
+        when(assetRepository.findByProjectIdAndArchivedAtIsNull(projectId)).thenReturn(List.of(asset));
+        when(observationRepository.findByProjectId(projectId)).thenReturn(List.of());
+
+        var nodes = contributor.contributeNodes(projectId);
+
+        assertThat(nodes).hasSize(1);
+        var properties = nodes.get(0).properties();
+        assertThat(properties)
+                .containsEntry("owner", null)
+                .containsEntry("steward", null)
+                .containsEntry("environment", null)
+                .containsEntry("criticality", null)
+                .containsEntry("businessContext", null)
+                .containsEntry("scopeDesignation", null)
+                .containsEntry("subtype", null);
+    }
+
+    @Test
+    void exposesKnowledgeStateOnAssetNodeAndRelationEdge() {
+        // GC-M018: the knowledge / completeness dimension must surface on
+        // both the asset node AND the relation edge so risk / threat /
+        // control workflows reading the graph can distinguish CONFIRMED
+        // model facts from PROVISIONAL or UNKNOWN coverage without a
+        // second persisted aggregate.
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var source = asset(project, "ASSET-SRC", "Source");
+        source.setKnowledgeState(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.CONFIRMED);
+
+        var placeholder = asset(project, "ASSET-PLACEHOLDER", "Unresolved Dependency Target");
+        placeholder.setKnowledgeState(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.UNKNOWN);
+
+        var unknownEdge = new AssetRelation(source, placeholder, AssetRelationType.DEPENDS_ON);
+        setField(unknownEdge, "id", UUID.randomUUID());
+        setField(unknownEdge, "createdAt", Instant.parse("2026-04-02T12:00:00Z"));
+        unknownEdge.setKnowledgeState(com.keplerops.groundcontrol.domain.assets.state.KnowledgeState.UNKNOWN);
+
+        when(assetRepository.findByProjectIdAndArchivedAtIsNull(projectId)).thenReturn(List.of(source, placeholder));
+        when(assetRelationRepository.findActiveByProjectId(projectId)).thenReturn(List.of(unknownEdge));
+        when(observationRepository.findByProjectId(projectId)).thenReturn(List.of());
+        when(assetLinkRepository.findByProjectId(projectId)).thenReturn(List.of());
+
+        var nodes = contributor.contributeNodes(projectId);
+        var edges = contributor.contributeEdges(projectId);
+
+        assertThat(nodes)
+                .filteredOn(node -> node.uid().equals("ASSET-SRC"))
+                .singleElement()
+                .satisfies(node -> assertThat(node.properties()).containsEntry("knowledgeState", "CONFIRMED"));
+        assertThat(nodes)
+                .filteredOn(node -> node.uid().equals("ASSET-PLACEHOLDER"))
+                .singleElement()
+                .satisfies(node -> assertThat(node.properties()).containsEntry("knowledgeState", "UNKNOWN"));
+
+        assertThat(edges).hasSize(1);
+        assertThat(edges.get(0).properties())
+                .containsEntry("knowledgeState", "UNKNOWN")
+                .containsKey("createdAt");
+    }
+
     @ParameterizedTest
     @EnumSource(
             value = AssetLinkTargetType.class,
@@ -154,6 +278,28 @@ class AssetGraphProjectionContributorTest {
         var edges = contributor.contributeEdges(projectId);
 
         assertThat(edges).isEmpty();
+    }
+
+    @Test
+    void emitsEvidenceArtifactEdgeForEvidenceLink() {
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var source = asset(project, "ASSET-1", "Gateway");
+        var evidenceId = UUID.randomUUID();
+        var link = new AssetLink(source, AssetLinkTargetType.EVIDENCE, evidenceId, null, AssetLinkType.ASSOCIATED);
+        setField(link, "id", UUID.randomUUID());
+
+        when(assetRelationRepository.findActiveByProjectId(projectId)).thenReturn(List.of());
+        when(observationRepository.findByProjectId(projectId)).thenReturn(List.of());
+        when(assetLinkRepository.findByProjectId(projectId)).thenReturn(List.of(link));
+
+        var edges = contributor.contributeEdges(projectId);
+
+        assertThat(edges).hasSize(1);
+        assertThat(edges.get(0).targetEntityType()).isEqualTo(GraphEntityType.EVIDENCE_ARTIFACT);
+        assertThat(edges.get(0).targetId()).isEqualTo(GraphIds.nodeId(GraphEntityType.EVIDENCE_ARTIFACT, evidenceId));
     }
 
     private OperationalAsset asset(Project project, String uid, String name) {

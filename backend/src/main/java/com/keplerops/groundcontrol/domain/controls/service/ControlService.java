@@ -1,12 +1,23 @@
 package com.keplerops.groundcontrol.domain.controls.service;
 
+import com.keplerops.groundcontrol.domain.audits.repository.AuditLinkRepository;
+import com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType;
 import com.keplerops.groundcontrol.domain.controls.model.Control;
+import com.keplerops.groundcontrol.domain.controls.repository.ControlEffectivenessAssessmentRepository;
+import com.keplerops.groundcontrol.domain.controls.repository.ControlLinkRepository;
 import com.keplerops.groundcontrol.domain.controls.repository.ControlRepository;
+import com.keplerops.groundcontrol.domain.controls.repository.ControlTestRepository;
 import com.keplerops.groundcontrol.domain.controls.state.ControlStatus;
 import com.keplerops.groundcontrol.domain.exception.ConflictException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
+import com.keplerops.groundcontrol.domain.findings.repository.FindingLinkRepository;
+import com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,12 +29,30 @@ import org.springframework.transaction.annotation.Transactional;
 public class ControlService {
 
     private static final Logger log = LoggerFactory.getLogger(ControlService.class);
+    private static final String DETAIL_CONTROL_UID = "controlUid";
 
     private final ControlRepository controlRepository;
+    private final ControlLinkRepository controlLinkRepository;
+    private final ControlTestRepository controlTestRepository;
+    private final ControlEffectivenessAssessmentRepository effectivenessAssessmentRepository;
+    private final FindingLinkRepository findingLinkRepository;
+    private final AuditLinkRepository auditLinkRepository;
     private final ProjectService projectService;
 
-    public ControlService(ControlRepository controlRepository, ProjectService projectService) {
+    public ControlService(
+            ControlRepository controlRepository,
+            ControlLinkRepository controlLinkRepository,
+            ControlTestRepository controlTestRepository,
+            ControlEffectivenessAssessmentRepository effectivenessAssessmentRepository,
+            FindingLinkRepository findingLinkRepository,
+            AuditLinkRepository auditLinkRepository,
+            ProjectService projectService) {
         this.controlRepository = controlRepository;
+        this.controlLinkRepository = controlLinkRepository;
+        this.controlTestRepository = controlTestRepository;
+        this.effectivenessAssessmentRepository = effectivenessAssessmentRepository;
+        this.findingLinkRepository = findingLinkRepository;
+        this.auditLinkRepository = auditLinkRepository;
         this.projectService = projectService;
     }
 
@@ -116,7 +145,71 @@ public class ControlService {
 
     public void delete(UUID projectId, UUID id) {
         var control = findOrThrow(projectId, id);
+
+        // Reject delete while inbound FindingLink rows still target this control.
+        // FindingLink.targetEntityId is not a database FK, so a delete here would
+        // leave dangling rows that FindingLinkController.list and the graph
+        // projection would happily surface (ADR-038 / cycle-3 codex review).
+        var inboundFindingUids = findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                FindingLinkTargetType.CONTROL, id, projectId);
+        if (!inboundFindingUids.isEmpty()) {
+            Map<String, Serializable> detail = new LinkedHashMap<>();
+            detail.put(DETAIL_CONTROL_UID, control.getUid());
+            detail.put("findingCount", inboundFindingUids.size());
+            detail.put("findingUids", new ArrayList<>(inboundFindingUids));
+            throw new ConflictException(
+                    "Control " + control.getUid()
+                            + " cannot be deleted while inbound FindingLink references exist. Remove the"
+                            + " FindingLink references first, then retry.",
+                    "control_referenced",
+                    detail);
+        }
+
+        var inboundAuditUids = auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                AuditLinkTargetType.CONTROL, id, projectId);
+        if (!inboundAuditUids.isEmpty()) {
+            Map<String, Serializable> detail = new LinkedHashMap<>();
+            detail.put(DETAIL_CONTROL_UID, control.getUid());
+            detail.put("auditCount", inboundAuditUids.size());
+            detail.put("auditUids", new ArrayList<>(inboundAuditUids));
+            throw new ConflictException(
+                    "Control " + control.getUid()
+                            + " cannot be deleted while inbound AuditLink references exist. Remove the"
+                            + " AuditLink references first, then retry.",
+                    "control_referenced",
+                    detail);
+        }
+
+        // ControlTest and ControlEffectivenessAssessment rows are audited evidence/rating records
+        // per ADR-039. Cascading them would destroy provenance silently; a database FK violation
+        // would surface as 500 internal_error. Reject the delete here with a clean 409 so the
+        // caller can either clean up the evidence rows or transition the control to a non-active
+        // status while preserving history. Count-only — full hydration of the TEXT-heavy
+        // evidence rows is unnecessary at this gate.
+        long testCount = controlTestRepository.countByProjectIdAndControlId(projectId, id);
+        long assessmentCount = effectivenessAssessmentRepository.countByProjectIdAndControlId(projectId, id);
+        if (testCount > 0 || assessmentCount > 0) {
+            Map<String, Serializable> detail = new LinkedHashMap<>();
+            detail.put(DETAIL_CONTROL_UID, control.getUid());
+            detail.put("controlTestCount", testCount);
+            detail.put("controlEffectivenessAssessmentCount", assessmentCount);
+            throw new ConflictException(
+                    "Control " + control.getUid()
+                            + " has dependent audit evidence and cannot be deleted."
+                            + " Remove the control_test and control_effectiveness_assessment rows first,"
+                            + " or transition the control to a non-active status to preserve history.",
+                    "control_referenced",
+                    detail);
+        }
+
+        // Delete outbound links through the repository before the parent so Envers
+        // writes delete revisions for each ControlLink. The migration's FK has
+        // ON DELETE CASCADE only as a defense-in-depth fallback; relying on it
+        // would bypass Hibernate and leave control_link_audit incomplete for the
+        // parent-delete path.
+        var outboundLinks = controlLinkRepository.findByControlId(id);
+        controlLinkRepository.deleteAll(outboundLinks);
         controlRepository.delete(control);
-        log.info("control_deleted: uid={} id={}", control.getUid(), id);
+        log.info("control_deleted: uid={} id={} outbound_links_deleted={}", control.getUid(), id, outboundLinks.size());
     }
 }

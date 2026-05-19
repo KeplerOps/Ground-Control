@@ -8,6 +8,8 @@ Proposed
 
 2026-05-09
 
+> **Amended by issue #906 (2026-05-13):** The "three pre-push cycles per issue" baseline this ADR builds on is now a **configurable default of 1 cycle**. The cap value lives on the MCP tool as `CODEX_REVIEW_PREPUSH_HARD_CAP` and is overridden per-repo via `.ground-control.yaml::workflow.codex_review.pre_push_cap` (bounds `[1, 10]`). Repos that want the historical 3-cycle baseline this ADR describes set the knob explicitly. The severity rubric, stopping model, and `override_cap` escape semantics this ADR proposes are **unchanged**; only the default-cap-value assumption shifts. Empirical observation behind the drop: cycles 2–3 historically compounded the agent's own fix-introduced bugs more than they caught net-new bugs (e.g., PR #903's 4-cycle run), and the catch-rate-vs-loop-cost tradeoff favors cycle-1 + CI / SonarCloud / human review for the typical diff. The "Sometimes a run goes 5+ cycles deep with real bugs every cycle" failure mode below still benefits from the `override_cap` escape; the "Sometimes a run reaches cycle 3 with all-Minor cosmetic findings" failure mode is moot under cap-1 (the cycle 3 boundary doesn't exist by default).
+
 ## Context
 
 GC-O007 (amended by ADR-029) caps `gc_codex_review` at three pre-push cycles
@@ -224,3 +226,17 @@ per-project knob; the initial implementation hard-codes them.
   boundary preserved)
 - ADR-027 Agent-Neutral Implement Workflow Packaging (reviewer-of-record
   invariant preserved)
+
+## Amendments
+
+**2026-05-19 (issue #931): verdict envelope replaces the findings-only tail.**
+Codex now emits a JSON object inside `===REVIEW===...===END===` containing
+`verdict` (`ship` | `ship-with-fixes` | `don't-ship`), required non-empty
+`architectural_read`, `blocking[]` (the validated finding objects this ADR
+documents, plus a required `sweep_evidence` field on one-off classifications
+and an optional `structural_blocker` boolean), and optional `notes[]` capped
+at 2. Cycle stopping and override semantics are unchanged. The principal-
+engineer motivation: a clean review now returns `verdict: ship` as a
+first-class outcome rather than the reviewer being structurally pushed to
+manufacture findings. See issue #931 and the preflight note at
+`architecture/notes/ai-review-recalibration-preflight.md`.

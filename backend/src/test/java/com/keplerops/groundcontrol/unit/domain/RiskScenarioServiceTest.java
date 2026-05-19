@@ -38,6 +38,16 @@ class RiskScenarioServiceTest {
     private RiskScenarioRepository riskScenarioRepository;
 
     @Mock
+    private com.keplerops.groundcontrol.domain.riskscenarios.repository.RiskScenarioLinkRepository
+            riskScenarioLinkRepository;
+
+    @Mock
+    private com.keplerops.groundcontrol.domain.findings.repository.FindingLinkRepository findingLinkRepository;
+
+    @Mock
+    private com.keplerops.groundcontrol.domain.audits.repository.AuditLinkRepository auditLinkRepository;
+
+    @Mock
     private ProjectService projectService;
 
     @SuppressWarnings("UnusedVariable") // needed by @InjectMocks for constructor injection
@@ -161,6 +171,106 @@ class RiskScenarioServiceTest {
             assertThatThrownBy(() -> riskScenarioService.update(projectId, id, command))
                     .isInstanceOf(NotFoundException.class);
         }
+
+        // Issue #876 (codex review cycle 1, class finding): partial update must not
+        // overwrite create-required fields with blank strings. RiskScenarioRequest
+        // marks title / threatSource / threatEvent / affectedObject / consequence /
+        // timeHorizon as @NotBlank; the update path must enforce the same contract
+        // when a value is supplied. Mirrors the rejectBlankIfPresent pattern in
+        // ThreatModelService.update.
+        @Test
+        void rejectsBlankTitle() {
+            var rs = makeScenario();
+            var rsId = rs.getId();
+            when(riskScenarioRepository.findByIdAndProjectId(rsId, projectId)).thenReturn(Optional.of(rs));
+
+            var command = new UpdateRiskScenarioCommand("   ", null, null, null, null, null, null);
+
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rsId, command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("title");
+        }
+
+        @Test
+        void rejectsBlankThreatSource() {
+            var rs = makeScenario();
+            var rsId = rs.getId();
+            when(riskScenarioRepository.findByIdAndProjectId(rsId, projectId)).thenReturn(Optional.of(rs));
+
+            var command = new UpdateRiskScenarioCommand(null, "", null, null, null, null, null);
+
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rsId, command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("threatSource");
+        }
+
+        @Test
+        void rejectsBlankThreatEvent() {
+            var rs = makeScenario();
+            var rsId = rs.getId();
+            when(riskScenarioRepository.findByIdAndProjectId(rsId, projectId)).thenReturn(Optional.of(rs));
+
+            var command = new UpdateRiskScenarioCommand(null, null, " ", null, null, null, null);
+
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rsId, command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("threatEvent");
+        }
+
+        @Test
+        void rejectsBlankAffectedObject() {
+            var rs = makeScenario();
+            var rsId = rs.getId();
+            when(riskScenarioRepository.findByIdAndProjectId(rsId, projectId)).thenReturn(Optional.of(rs));
+
+            var command = new UpdateRiskScenarioCommand(null, null, null, "", null, null, null);
+
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rsId, command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("affectedObject");
+        }
+
+        @Test
+        void rejectsBlankConsequence() {
+            var rs = makeScenario();
+            var rsId = rs.getId();
+            when(riskScenarioRepository.findByIdAndProjectId(rsId, projectId)).thenReturn(Optional.of(rs));
+
+            var command = new UpdateRiskScenarioCommand(null, null, null, null, null, "", null);
+
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rsId, command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("consequence");
+        }
+
+        @Test
+        void rejectsBlankTimeHorizon() {
+            var rs = makeScenario();
+            var rsId = rs.getId();
+            when(riskScenarioRepository.findByIdAndProjectId(rsId, projectId)).thenReturn(Optional.of(rs));
+
+            var command = new UpdateRiskScenarioCommand(null, null, null, null, null, null, "   ");
+
+            assertThatThrownBy(() -> riskScenarioService.update(projectId, rsId, command))
+                    .isInstanceOf(DomainValidationException.class)
+                    .hasMessageContaining("timeHorizon");
+        }
+
+        @Test
+        void allowsAbsentRequiredFields() {
+            // A partial update that touches only the optional vulnerability field
+            // must not be blocked by the new blank-if-present checks.
+            var rs = makeScenario();
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
+            when(riskScenarioRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            var command = new UpdateRiskScenarioCommand(null, null, null, null, "new vuln", null, null);
+            var result = riskScenarioService.update(projectId, rs.getId(), command);
+
+            assertThat(result.getVulnerability()).isEqualTo("new vuln");
+            assertThat(result.getTitle()).isEqualTo("Credential stuffing on customer portal");
+        }
     }
 
     @Nested
@@ -246,10 +356,105 @@ class RiskScenarioServiceTest {
             var rs = makeScenario();
             when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
                     .thenReturn(Optional.of(rs));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.RISK_SCENARIO,
+                            rs.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(riskScenarioLinkRepository.findByRiskScenarioId(rs.getId())).thenReturn(java.util.List.of());
 
             riskScenarioService.delete(projectId, rs.getId());
 
             verify(riskScenarioRepository).delete(rs);
+        }
+
+        @Test
+        void rejectsDeleteWhenInboundAuditLinkReferencesScenario() {
+            var rs = makeScenario();
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.RISK_SCENARIO,
+                            rs.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType.RISK_SCENARIO,
+                            rs.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of("AUDIT-001"));
+
+            var rsId = rs.getId();
+            var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
+                    ConflictException.class, () -> riskScenarioService.delete(projectId, rsId));
+            assertThat(thrown)
+                    .isNotNull()
+                    .hasMessageContaining("AuditLink references exist")
+                    .extracting("errorCode")
+                    .isEqualTo("risk_scenario_referenced");
+            assertThat(thrown.getDetail()).containsEntry("auditCount", 1);
+            org.mockito.Mockito.verifyNoInteractions(riskScenarioLinkRepository);
+            org.mockito.Mockito.verify(riskScenarioRepository, org.mockito.Mockito.never())
+                    .delete(rs);
+        }
+
+        @Test
+        void rejectsDeleteWhenInboundFindingLinkReferencesScenario() {
+            var rs = makeScenario();
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.RISK_SCENARIO,
+                            rs.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of("FIND-001"));
+
+            // FindingLink.targetEntityId is not an FK, so without this guard the
+            // delete would leave dangling FindingLink rows (cycle-3 pre-push codex
+            // review on issue #279, ADR-038).
+            var rsId = rs.getId();
+            var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
+                    ConflictException.class, () -> riskScenarioService.delete(projectId, rsId));
+            assertThat(thrown)
+                    .isNotNull()
+                    .hasMessageContaining("FindingLink references exist")
+                    .extracting("errorCode")
+                    .isEqualTo("risk_scenario_referenced");
+            assertThat(thrown.getDetail()).containsEntry("findingCount", 1);
+            // Parent + outbound-link cleanup must be skipped when the guard fires.
+            org.mockito.Mockito.verifyNoInteractions(riskScenarioLinkRepository);
+            org.mockito.Mockito.verify(riskScenarioRepository, org.mockito.Mockito.never())
+                    .delete(rs);
+        }
+
+        @Test
+        void deletesOutboundLinksThroughRepositoryBeforeParent() {
+            var rs = makeScenario();
+            var outboundLinks =
+                    java.util.List.of(new com.keplerops.groundcontrol.domain.riskscenarios.model.RiskScenarioLink(
+                            rs,
+                            com.keplerops.groundcontrol.domain.riskscenarios.state.RiskScenarioLinkTargetType.CONTROL,
+                            UUID.randomUUID(),
+                            null,
+                            com.keplerops.groundcontrol.domain.riskscenarios.state.RiskScenarioLinkType.MITIGATED_BY));
+            when(riskScenarioRepository.findByIdAndProjectId(rs.getId(), projectId))
+                    .thenReturn(Optional.of(rs));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.RISK_SCENARIO,
+                            rs.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(riskScenarioLinkRepository.findByRiskScenarioId(rs.getId())).thenReturn(outboundLinks);
+
+            riskScenarioService.delete(projectId, rs.getId());
+
+            // Envers writes delete revisions only when Hibernate sees the link
+            // delete. Driving outbound link deletes through the repository before
+            // deleting the parent closes the parent-delete audit-history gap
+            // (cycle-2 pre-push codex review on issue #279).
+            var inOrder = org.mockito.Mockito.inOrder(riskScenarioLinkRepository, riskScenarioRepository);
+            inOrder.verify(riskScenarioLinkRepository).deleteAll(outboundLinks);
+            inOrder.verify(riskScenarioRepository).delete(rs);
         }
     }
 }

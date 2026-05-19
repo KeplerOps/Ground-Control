@@ -1,6 +1,6 @@
 import { ProjectSwitcher } from "@/components/project-switcher";
 import { cn } from "@/lib/utils";
-import { Rocket } from "lucide-react";
+import { LogOut, Rocket } from "lucide-react";
 import {
   Link,
   NavLink,
@@ -36,6 +36,49 @@ function NavItem({
   );
 }
 
+/**
+ * Sign-out control wired to ADR-037's browser session chain. POSTs to {@code /logout} with the
+ * CSRF token cookie echoed via the {@code X-XSRF-TOKEN} header (Spring's double-submit-cookie
+ * contract). On a 204 success the server has invalidated the session; we then redirect to
+ * {@code /login} so the user lands on the form-login screen. A non-204 response stays on the
+ * page — there is no destructive state to roll back, and the on-page error surface is the most
+ * useful diagnostic for an unexpected condition.
+ */
+function SignOutButton() {
+  const handleSignOut = async () => {
+    const csrfCookie = document.cookie
+      .split(";")
+      .map((entry) => entry.trim())
+      .find((entry) => entry.startsWith("XSRF-TOKEN="));
+    const headers: Record<string, string> = {};
+    if (csrfCookie) {
+      headers["X-XSRF-TOKEN"] = decodeURIComponent(
+        csrfCookie.slice("XSRF-TOKEN=".length),
+      );
+    }
+    const response = await fetch("/logout", {
+      method: "POST",
+      credentials: "same-origin",
+      headers,
+    });
+    if (response.ok) {
+      window.location.assign("/login");
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleSignOut}
+      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+      aria-label="Sign out"
+    >
+      <LogOut className="h-4 w-4" />
+      <span>Sign out</span>
+    </button>
+  );
+}
+
 export function AppLayout() {
   const { projectId } = useParams<{ projectId: string }>();
   const location = useLocation();
@@ -62,6 +105,7 @@ export function AppLayout() {
                   Dashboard
                 </NavItem>
                 <NavItem to={`${base}/requirements`}>Requirements</NavItem>
+                <NavItem to={`${base}/test-runs`}>Test Runs</NavItem>
                 <NavItem to={`${base}/graph`}>Graph</NavItem>
                 <NavItem to={`${base}/analysis`}>Analysis</NavItem>
               </>
@@ -70,7 +114,10 @@ export function AppLayout() {
             {projectId && <NavItem to={`${base}/admin`}>Admin</NavItem>}
           </nav>
 
-          <div className="ml-auto">{projectId && <ProjectSwitcher />}</div>
+          <div className="ml-auto flex items-center gap-3">
+            {projectId && <ProjectSwitcher />}
+            <SignOutButton />
+          </div>
         </div>
       </header>
 

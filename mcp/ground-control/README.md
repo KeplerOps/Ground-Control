@@ -133,7 +133,7 @@ skills' SKILL.md prose, kept unchanged):
 | `gc_threat_model` | create, update, delete, transition, link_* |
 | `gc_control` | create, update, delete, transition, link_* |
 | `gc_risk_governance` | `{entity, action}` over methodology_profile, risk_register_record, risk_assessment_result, treatment_plan, verification_result |
-| `gc_analyze` | cycles, orphans, coverage_gaps, impact, cross_wave, consistency, completeness, status_drift, similarity, work_order |
+| `gc_analyze` | cycles, orphans, coverage_gaps, impact, cross_wave, consistency, completeness, status_drift, similarity, work_order, evidence_freshness, observation_exposure, control_state, vendor_risk_aggregation |
 | `gc_graph` | ancestors, descendants, paths, find_paths, subgraph, visualization, traverse |
 | `gc_baseline` | create, delete, snapshot, compare |
 | `gc_quality_gate` | create, update, delete, evaluate |
@@ -157,14 +157,16 @@ under the `workflow` catalog, so it is always available.
 - **Allowlist (canonical source: `GC_QUERY_PATH_ALLOWLIST` in
   `mcp/ground-control/gc-query.js`):**
   `/api/v1/adrs`, `/api/v1/analysis`, `/api/v1/assets`, `/api/v1/audit`,
-  `/api/v1/baselines`, `/api/v1/controls`, `/api/v1/dashboard`,
-  `/api/v1/documents`, `/api/v1/graph`, `/api/v1/methodology-profiles`,
+  `/api/v1/audits`, `/api/v1/baselines`, `/api/v1/control-effectiveness-assessments`,
+  `/api/v1/control-tests`, `/api/v1/controls`, `/api/v1/dashboard`,
+  `/api/v1/documents`, `/api/v1/evidence-artifacts`, `/api/v1/findings`, `/api/v1/graph`, `/api/v1/methodology-profiles`,
   `/api/v1/observations`, `/api/v1/projects`, `/api/v1/quality-gates`,
   `/api/v1/relations`, `/api/v1/requirements`,
   `/api/v1/risk-assessment-results`, `/api/v1/risk-register-records`,
-  `/api/v1/risk-scenarios`, `/api/v1/sections`, `/api/v1/threat-models`,
-  `/api/v1/timeline`, `/api/v1/traceability`, `/api/v1/treatment-plans`,
-  `/api/v1/verification-results`. A drift-catch test
+  `/api/v1/risk-scenarios`, `/api/v1/sections`, `/api/v1/test-cases`,
+  `/api/v1/test-plans`, `/api/v1/test-runs`, `/api/v1/test-suites`, `/api/v1/threat-models`, `/api/v1/timeline`,
+  `/api/v1/traceability`,
+  `/api/v1/treatment-plans`, `/api/v1/verification-results`. A drift-catch test
   (`gc-query.test.js`) compares this list against the implementation
   constant on every test run, so the README is the documentation surface
   but the constant in `gc-query.js` is the truth.
@@ -232,6 +234,7 @@ be related, linked, or analyzed.
 | `gc_sync_github` | `owner` (required), `repo` (required) | Sync GitHub issues as traceability links |
 | `gc_create_github_issue` | `uid` (required), `repo`, `labels`, `extra_body` | Create GitHub issue from requirement and auto-link |
 | `gc_get_repo_ground_control_context` | `repo_path` (required) | Read and validate the repo's `.ground-control.yaml` context (project, workflow, sonarcloud, rules, knowledge). Returns inlined plan_rules content and resolved knowledge paths when those sections are configured |
+| `gc_resolve_workflow_route` | `repo_path` (required), `stage` (required), `tier` (optional) | Resolve a workflow stage/purpose to configured provider, agent, canonical model id, tier, and fallback policy |
 | `gc_codex_architecture_preflight` | `requirement_uid` (required), `repo_path` (required), `project`, `issue_number`, `repo` | Run Codex architecture preflight, update ADR/design guidance when needed, and return guardrails plus changed files |
 | `gc_codex_review` | `repo_path` (required), `base_branch`, `uncommitted` | Run Codex review with an exhaustive no-triage production-quality prompt |
 | `gc_embed_requirement` | `requirement_id` (required) | Generate embedding for a requirement's text |
@@ -311,7 +314,7 @@ Common codes: `NOT_FOUND` (404), `CONFLICT` (409), `VALIDATION_ERROR` (422).
 e.g. `REQ-001`). All other tools use `id` (UUID, returned in create/list
 responses).
 
-For cross-repo workflow automation, define repo-local Ground Control context in a `.ground-control.yaml` file at the repo root. At minimum it must declare `schema_version: 1` and a `project` identifier; optional sections include `workflow`, `sonarcloud`, `rules`, `knowledge`, plus the workflow-packaging fields added in ADR-027: `docs.{adr_dir, architecture_overview, coding_standards, workflow_reference, knowledge_base}`, `example_paths.{source, test}`, `requirements.uid_examples`, and `cross_cutting_concerns.description`. The canonical `skills/implement/SKILL.md` renders prose against these fields via `{cfg.X|default Y}` placeholders so one source of truth serves every Ground-Control-aware repo. The `gc_get_repo_ground_control_context` MCP tool reads and validates this file and returns inlined `plan_rules` content plus resolved `knowledge` paths and the workflow-packaging blocks when those sections are present. See `docs/DEVELOPMENT_WORKFLOW.md` for the full convention and `buildSuggestedGroundControlYaml()` in `lib.js` for the canonical starter template.
+For cross-repo workflow automation, define repo-local Ground Control context in a `.ground-control.yaml` file at the repo root. At minimum it must declare `schema_version: 1` and a `project` identifier; optional sections include `workflow`, `sonarcloud`, `rules`, `knowledge`, `routing`, `telemetry`, plus the workflow-packaging fields added in ADR-027: `docs.{adr_dir, architecture_overview, coding_standards, workflow_reference, knowledge_base}`, `example_paths.{source, test}`, `requirements.uid_examples`, and `cross_cutting_concerns.description`. The canonical `skills/implement/SKILL.md` renders prose against these fields via `{cfg.X|default Y}` placeholders so one source of truth serves every Ground-Control-aware repo. The `gc_get_repo_ground_control_context` MCP tool reads and validates this file and returns inlined `plan_rules` content plus resolved `knowledge` paths and the workflow-packaging blocks when those sections are configured. `gc_resolve_workflow_route` reads the same config and resolves `routing.stages.<stage>` entries to executable provider/model/fallback decisions. See `docs/DEVELOPMENT_WORKFLOW.md` for the full accepted config shape, defaults, allowed routing values, and validation constraints. `buildSuggestedGroundControlYaml()` in `lib.js` is only the starter template.
 
 ## Codex review architecture (privileged side-effect boundary)
 

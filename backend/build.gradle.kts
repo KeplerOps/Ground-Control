@@ -8,6 +8,13 @@ plugins {
     id("com.github.spotbugs") version "6.0.27"
     id("net.ltgt.errorprone") version "4.1.0"
     id("org.sonarqube") version "6.0.1.5171"
+    // Pitest mutation testing (#931). The `make test-quality` Makefile target
+    // runs Pitest against the unit-test surface; the threshold is intentionally
+    // loose initially (60% on changed classes) and tightens after the first
+    // five PRs of data. Mutation testing directly measures whether the tests
+    // detect breakage, which is the gap `gc_test_quality_review` has been
+    // trying to close with an LLM pass.
+    id("info.solidsoft.pitest") version "1.15.0"
     checkstyle
     jacoco
 }
@@ -72,6 +79,14 @@ dependencies {
 
     // Export: PDF
     implementation("com.github.librepdf:openpdf:2.0.3")
+
+    // Gherkin parser (TC-004 / ADR-042). Pure parser library — no Cucumber
+    // runtime, no glue execution, no remote fetch. Pulls io.cucumber:messages
+    // transitively. Version pinned via a property so a future bump can be
+    // co-located with the rationale comment instead of inlined into the
+    // dependency string.
+    val gherkinVersion = "39.1.0"
+    implementation("io.cucumber:gherkin:$gherkinVersion")
 
     // Error Prone
     errorprone("com.google.errorprone:error_prone_core:2.36.0")
@@ -178,6 +193,35 @@ tasks.jacocoTestCoverageVerification {
 
 tasks.check {
     dependsOn(tasks.jacocoTestCoverageVerification)
+}
+
+// Pitest mutation testing configuration (#931). Wired but NOT in the default
+// `check` chain — invoked via `make test-quality`. The initial pass is
+// genuinely advisory: thresholds are 0 so any mutation score "passes" the
+// task and the score lands in build/reports/pitest as HTML + XML. After ~5
+// PRs of mutation-score data we tighten via the threshold knobs.
+//
+// Codex cycle-1 finding F2 (#931): mutationThreshold is a build-failing
+// threshold in Pitest — setting it to 60 was a hard gate before the
+// repository had calibration data, contradicting the "advisory" intent.
+// The fix sets BOTH thresholds to 0 so this run is truly score-reporting
+// only. targetClasses scope stays project-wide; the changed-class scoping
+// is a follow-on knob once we have a stable cadence for the score.
+pitest {
+    junit5PluginVersion.set("1.2.1")
+    pitestVersion.set("1.17.0")
+    targetClasses.set(listOf("com.keplerops.groundcontrol.*"))
+    // Mutators: default set is good enough for the initial calibration.
+    mutators.set(listOf("DEFAULTS"))
+    threads.set(4)
+    outputFormats.set(listOf("HTML", "XML"))
+    timestampedReports.set(false)
+    // Advisory-only thresholds (#931 codex F2). Score is in the report;
+    // build does not fail on low mutation/coverage during the calibration
+    // window. Tighten after the first ~5 PRs of evidence.
+    mutationThreshold.set(0)
+    coverageThreshold.set(0)
+    failWhenNoMutations.set(false)
 }
 
 // SpotBugs

@@ -6,13 +6,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.keplerops.groundcontrol.shared.security.ApiSecurityConfig;
+import com.keplerops.groundcontrol.shared.security.BrowserSecurityConfig;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.provisioning.JdbcUserDetailsManager;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -72,7 +79,7 @@ class ApiSecurityConfigTest {
 
     @Nested
     @WebMvcTest(controllers = StubController.class)
-    @Import({ApiSecurityConfig.class, StubController.class})
+    @Import({ApiSecurityConfig.class, BrowserSecurityConfig.class, StubController.class, StubJdbcBeans.class})
     @TestPropertySource(
             properties = {
                 "groundcontrol.security.enabled=true",
@@ -132,10 +139,15 @@ class ApiSecurityConfigTest {
         }
 
         @Test
-        void anonymousSpaShell_returns200() throws Exception {
+        void anonymousSpaShell_redirectsToLogin() throws Exception {
+            // ADR-037 §2: the SPA shell is no longer anonymously served. An unauthenticated
+            // browser navigating to "/" must be sent through /login first; after a successful
+            // form login Spring's request cache restores the original URL.
             mockMvc.perform(get("/"))
-                    .andExpect(status().isOk())
-                    .andExpect(content().string("spa-shell"));
+                    .andExpect(status().is3xxRedirection())
+                    .andExpect(result -> org.assertj.core.api.Assertions.assertThat(
+                                    result.getResponse().getRedirectedUrl())
+                            .endsWith("/login"));
         }
 
         @Test
@@ -154,7 +166,7 @@ class ApiSecurityConfigTest {
 
     @Nested
     @WebMvcTest(controllers = StubController.class)
-    @Import({ApiSecurityConfig.class, StubController.class})
+    @Import({ApiSecurityConfig.class, BrowserSecurityConfig.class, StubController.class, StubJdbcBeans.class})
     @TestPropertySource(properties = {"groundcontrol.security.enabled=false"})
     class WithSecurityDisabled {
 
@@ -178,7 +190,7 @@ class ApiSecurityConfigTest {
 
     @Nested
     @WebMvcTest(controllers = StubController.class)
-    @Import({ApiSecurityConfig.class, StubController.class})
+    @Import({ApiSecurityConfig.class, BrowserSecurityConfig.class, StubController.class, StubJdbcBeans.class})
     @TestPropertySource(
             properties = {
                 "groundcontrol.security.enabled=true",
@@ -195,6 +207,41 @@ class ApiSecurityConfigTest {
         @Test
         void apiV1_stillRequiresAuth() throws Exception {
             mockMvc.perform(get("/api/v1/echo")).andExpect(status().isUnauthorized());
+        }
+    }
+
+    /**
+     * Test-only stand-ins for the JDBC beans normally produced by {@link BrowserSecurityConfig}.
+     * The slice doesn't need real user storage — the bearer chain doesn't touch it — but the
+     * configuration class declares {@code DataSource}-backed bean methods, and Spring needs
+     * something to satisfy those types.
+     *
+     * <p>{@code @TestConfiguration} (not plain {@code @Configuration}) so this stub config is
+     * excluded from Spring Boot's default component scan — otherwise its mock {@code DataSource}
+     * leaks into every {@code @SpringBootTest} (notably {@code BrowserSessionIntegrationTest}),
+     * where Flyway then crashes trying to connect through it.
+     */
+    @TestConfiguration
+    static class StubJdbcBeans {
+
+        // Renamed to *Stub so {@code @ConditionalOnMissingBean} on
+        // {@link BrowserSecurityConfig#userDetailsManager}/{@code userAdminJdbcTemplate} sees a
+        // bean of the same type and skips its own definition. Without rename Spring Boot's
+        // default "no bean override" guard surfaces a {@code BeanDefinitionOverrideException}.
+
+        @Bean
+        DataSource dataSourceStub() {
+            return Mockito.mock(DataSource.class);
+        }
+
+        @Bean
+        JdbcUserDetailsManager userDetailsManagerStub() {
+            return Mockito.mock(JdbcUserDetailsManager.class);
+        }
+
+        @Bean
+        JdbcTemplate jdbcTemplateStub() {
+            return Mockito.mock(JdbcTemplate.class);
         }
     }
 }

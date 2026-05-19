@@ -193,3 +193,17 @@ engine.
 - ADR-021 Gated Agentic Development Loop (amended by ADR-029)
 - ADR-023 Plugin Architecture
 - ADR-029 Issue-Thread Gate Model (companion ADR landing in the same PR)
+
+## Amendments
+
+**2026-05-19 (issue #931): `architecture.vocabulary` schema extension.** The
+`.ground-control.yaml` schema gains an optional top-level `architecture` block
+with a `vocabulary` sub-block: `patterns[]`, `canonical_helpers[]`,
+`boundary_contract`, `binding_adrs[]`, `anti_recommendations[]`. Optional;
+strict unknown-key rejection; `example_path` and `path` values are repo-
+relative and validated via `resolveRepoRelativePath` + `assertRealpathInRepo`.
+`gc_get_repo_ground_control_context` returns the block as
+`cfg.architecture.vocabulary`. The block is per-repo content; the workflow
+ships the consumption machinery (Codex preflight + pre-push reviewers) and
+falls back to workflow-level defaults when absent. See issue #931 and the
+preflight note at `architecture/notes/ai-review-recalibration-preflight.md`.

@@ -33,6 +33,19 @@ server:
   port: ${GC_SERVER_PORT:8000}
   servlet:
     context-path: /
+    # ADR-037 §6: browser session cookie hardening. The name is renamed so a deployment can
+    # distinguish Ground Control's session from co-tenants on the same host without sniffing
+    # cookie contents; Secure / HttpOnly / SameSite are hardcoded to the production-safe
+    # settings. Dev and test profiles relax `secure` so HTTP MockMvc / localhost can read the
+    # cookie. There are no operator-facing knobs for these values — changing them needs an
+    # ADR and a security review, not a deploy-time env var.
+    session:
+      timeout: 60m
+      cookie:
+        name: GC_SESSION
+        http-only: true
+        secure: true
+        same-site: strict
 
 management:
   endpoints:

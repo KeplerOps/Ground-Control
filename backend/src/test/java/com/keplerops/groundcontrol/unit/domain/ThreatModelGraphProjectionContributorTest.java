@@ -272,4 +272,69 @@ class ThreatModelGraphProjectionContributorTest {
         assertThat(edges.get(0).targetId())
                 .isEqualTo(GraphIds.nodeId(GraphEntityType.RISK_SCENARIO, liveScenario.getId()));
     }
+
+    @Test
+    void contributesEdgeToFinding() {
+        // GC-H009: a vulnerability finding linked to a threat model must project a
+        // graph edge with targetEntityType=FINDING so automated threat validation
+        // and risk reassessment can traverse threat -> finding. Findings have no
+        // archival path of their own (FindingGraphProjectionContributor projects
+        // every status), so the liveness switch falls through to the default.
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var tm = new ThreatModel(project, "TM-1", "Threat", "Actor", "Event", "Effect");
+        setField(tm, "id", UUID.randomUUID());
+
+        var findingId = UUID.randomUUID();
+        var link = new ThreatModelLink(
+                tm, ThreatModelLinkTargetType.FINDING, findingId, null, ThreatModelLinkType.OBSERVED_IN);
+        setField(link, "id", UUID.randomUUID());
+
+        when(threatModelLinkRepository.findByProjectId(projectId)).thenReturn(List.of(link));
+        when(operationalAssetRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId))
+                .thenReturn(List.of());
+        when(requirementRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId))
+                .thenReturn(List.of());
+        when(riskScenarioRepository.findIdsByProjectIdAndStatusNot(projectId, RiskScenarioStatus.ARCHIVED))
+                .thenReturn(List.of());
+
+        var edges = contributor.contributeEdges(projectId);
+
+        assertThat(edges).hasSize(1);
+        assertThat(edges.get(0).sourceEntityType()).isEqualTo(GraphEntityType.THREAT_MODEL);
+        assertThat(edges.get(0).targetEntityType()).isEqualTo(GraphEntityType.FINDING);
+        assertThat(edges.get(0).targetId()).isEqualTo(GraphIds.nodeId(GraphEntityType.FINDING, findingId));
+        assertThat(edges.get(0).edgeType()).isEqualTo(ThreatModelLinkType.OBSERVED_IN.name());
+    }
+
+    @Test
+    void emitsEvidenceArtifactEdgeForEvidenceLink() {
+        var project = new Project("ground-control", "Ground Control");
+        var projectId = UUID.randomUUID();
+        setField(project, "id", projectId);
+
+        var tm = new ThreatModel(project, "TM-1", "Threat", "Actor", "Event", "Effect");
+        setField(tm, "id", UUID.randomUUID());
+
+        var evidenceId = UUID.randomUUID();
+        var link = new ThreatModelLink(
+                tm, ThreatModelLinkTargetType.EVIDENCE, evidenceId, null, ThreatModelLinkType.OBSERVED_IN);
+        setField(link, "id", UUID.randomUUID());
+
+        when(threatModelLinkRepository.findByProjectId(projectId)).thenReturn(List.of(link));
+        when(operationalAssetRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId))
+                .thenReturn(List.of());
+        when(requirementRepository.findIdsByProjectIdAndArchivedAtIsNull(projectId))
+                .thenReturn(List.of());
+        when(riskScenarioRepository.findIdsByProjectIdAndStatusNot(projectId, RiskScenarioStatus.ARCHIVED))
+                .thenReturn(List.of());
+
+        var edges = contributor.contributeEdges(projectId);
+
+        assertThat(edges).hasSize(1);
+        assertThat(edges.get(0).targetEntityType()).isEqualTo(GraphEntityType.EVIDENCE_ARTIFACT);
+        assertThat(edges.get(0).targetId()).isEqualTo(GraphIds.nodeId(GraphEntityType.EVIDENCE_ARTIFACT, evidenceId));
+    }
 }

@@ -43,6 +43,38 @@ public class AssetGraphProjectionContributor implements GraphProjectionContribut
                     properties.put("name", asset.getName());
                     properties.put("description", asset.getDescription());
                     properties.put("assetType", asset.getAssetType().name());
+                    properties.put("owner", asset.getOwner());
+                    properties.put("steward", asset.getSteward());
+                    properties.put(
+                            "environment",
+                            asset.getEnvironment() == null
+                                    ? null
+                                    : asset.getEnvironment().name());
+                    properties.put(
+                            "criticality",
+                            asset.getCriticality() == null
+                                    ? null
+                                    : asset.getCriticality().name());
+                    properties.put("businessContext", asset.getBusinessContext());
+                    properties.put(
+                            "scopeDesignation",
+                            asset.getScopeDesignation() == null
+                                    ? null
+                                    : asset.getScopeDesignation().name());
+                    // GC-M011: subtype is a queryable graph facet alongside
+                    // assetType. Metadata is intentionally NOT projected —
+                    // free-form, high-cardinality, and may carry per-record
+                    // detail unsafe for graph-wide indexing.
+                    properties.put("subtype", asset.getSubtype());
+                    // GC-M018: knowledge state — risk / threat / control
+                    // workflows reading the graph must be able to distinguish
+                    // CONFIRMED from PROVISIONAL from UNKNOWN without a
+                    // second persisted aggregate.
+                    properties.put(
+                            "knowledgeState",
+                            asset.getKnowledgeState() == null
+                                    ? null
+                                    : asset.getKnowledgeState().name());
                     properties.put("archivedAt", asset.getArchivedAt());
                     return new GraphNode(
                             GraphIds.nodeId(GraphEntityType.OPERATIONAL_ASSET, asset.getId()),
@@ -83,18 +115,32 @@ public class AssetGraphProjectionContributor implements GraphProjectionContribut
     @Override
     public List<GraphEdge> contributeEdges(UUID projectId) {
         var relationEdges = assetRelationRepository.findActiveByProjectId(projectId).stream()
-                .map(relation -> new GraphEdge(
-                        relation.getId().toString(),
-                        relation.getRelationType().name(),
-                        GraphIds.nodeId(
-                                GraphEntityType.OPERATIONAL_ASSET,
-                                relation.getSource().getId()),
-                        GraphIds.nodeId(
-                                GraphEntityType.OPERATIONAL_ASSET,
-                                relation.getTarget().getId()),
-                        GraphEntityType.OPERATIONAL_ASSET,
-                        GraphEntityType.OPERATIONAL_ASSET,
-                        Map.of("createdAt", relation.getCreatedAt())))
+                .map(relation -> {
+                    // LinkedHashMap because the GC-M018 edge property set is
+                    // open-ended ({@code knowledgeState} joins {@code
+                    // createdAt}, and a future edge attribute would extend
+                    // the same map). Map.of(...) is fixed-arity and would
+                    // need to be re-written for every new property.
+                    Map<String, Object> edgeProperties = new LinkedHashMap<>();
+                    edgeProperties.put("createdAt", relation.getCreatedAt());
+                    edgeProperties.put(
+                            "knowledgeState",
+                            relation.getKnowledgeState() == null
+                                    ? null
+                                    : relation.getKnowledgeState().name());
+                    return new GraphEdge(
+                            relation.getId().toString(),
+                            relation.getRelationType().name(),
+                            GraphIds.nodeId(
+                                    GraphEntityType.OPERATIONAL_ASSET,
+                                    relation.getSource().getId()),
+                            GraphIds.nodeId(
+                                    GraphEntityType.OPERATIONAL_ASSET,
+                                    relation.getTarget().getId()),
+                            GraphEntityType.OPERATIONAL_ASSET,
+                            GraphEntityType.OPERATIONAL_ASSET,
+                            edgeProperties);
+                })
                 .toList();
 
         var observationEdges = observationRepository.findByProjectId(projectId).stream()
@@ -145,7 +191,21 @@ public class AssetGraphProjectionContributor implements GraphProjectionContribut
                         // intentionally keeps archived threat-model nodes in the graph
                         // (see its contributeNodes javadoc) so this edge never dangles.
                     case THREAT_MODEL_ENTRY -> GraphEntityType.THREAT_MODEL;
-                    case FINDING, EVIDENCE, AUDIT, ISSUE, CODE, CONFIGURATION, EXTERNAL -> null;
+                        // Always emits an edge to the FINDING node regardless of the
+                        // finding's status. FindingGraphProjectionContributor intentionally
+                        // keeps VERIFIED_CLOSED finding nodes in the graph (see its
+                        // contributeNodes javadoc) so this edge never dangles.
+                    case FINDING -> GraphEntityType.FINDING;
+                        // Always emits an edge to the AUDIT node. AuditGraphProjectionContributor
+                        // keeps all audit nodes in the graph regardless of status so this edge
+                        // never dangles.
+                    case AUDIT -> GraphEntityType.AUDIT;
+                        // Always emits an edge to the EVIDENCE_ARTIFACT node.
+                        // EvidenceArtifactGraphProjectionContributor projects every
+                        // evidence artifact (current and superseded) so this edge
+                        // never dangles.
+                    case EVIDENCE -> GraphEntityType.EVIDENCE_ARTIFACT;
+                    case ISSUE, CODE, CONFIGURATION, EXTERNAL -> null;
                 };
         if (targetEntityType == null) {
             return null;

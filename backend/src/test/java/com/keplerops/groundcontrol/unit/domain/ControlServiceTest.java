@@ -36,6 +36,22 @@ class ControlServiceTest {
     private ControlRepository controlRepository;
 
     @Mock
+    private com.keplerops.groundcontrol.domain.controls.repository.ControlLinkRepository controlLinkRepository;
+
+    @Mock
+    private com.keplerops.groundcontrol.domain.controls.repository.ControlTestRepository controlTestRepository;
+
+    @Mock
+    private com.keplerops.groundcontrol.domain.controls.repository.ControlEffectivenessAssessmentRepository
+            effectivenessAssessmentRepository;
+
+    @Mock
+    private com.keplerops.groundcontrol.domain.findings.repository.FindingLinkRepository findingLinkRepository;
+
+    @Mock
+    private com.keplerops.groundcontrol.domain.audits.repository.AuditLinkRepository auditLinkRepository;
+
+    @Mock
     private ProjectService projectService;
 
     @InjectMocks
@@ -194,10 +210,158 @@ class ControlServiceTest {
             var control = makeControl();
             when(controlRepository.findByIdAndProjectId(control.getId(), projectId))
                     .thenReturn(Optional.of(control));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.CONTROL,
+                            control.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(controlTestRepository.countByProjectIdAndControlId(projectId, control.getId()))
+                    .thenReturn(0L);
+            when(effectivenessAssessmentRepository.countByProjectIdAndControlId(projectId, control.getId()))
+                    .thenReturn(0L);
+            when(controlLinkRepository.findByControlId(control.getId())).thenReturn(java.util.List.of());
 
             controlService.delete(projectId, control.getId());
 
             verify(controlRepository).delete(control);
+        }
+
+        @Test
+        void deletesOutboundLinksThroughRepositoryBeforeParent() {
+            var control = makeControl();
+            var outboundLinks = java.util.List.of(new com.keplerops.groundcontrol.domain.controls.model.ControlLink(
+                    control,
+                    com.keplerops.groundcontrol.domain.controls.state.ControlLinkTargetType.ASSET,
+                    UUID.randomUUID(),
+                    null,
+                    com.keplerops.groundcontrol.domain.controls.state.ControlLinkType.PROTECTS));
+            when(controlRepository.findByIdAndProjectId(control.getId(), projectId))
+                    .thenReturn(Optional.of(control));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.CONTROL,
+                            control.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(controlTestRepository.countByProjectIdAndControlId(projectId, control.getId()))
+                    .thenReturn(0L);
+            when(effectivenessAssessmentRepository.countByProjectIdAndControlId(projectId, control.getId()))
+                    .thenReturn(0L);
+            when(controlLinkRepository.findByControlId(control.getId())).thenReturn(outboundLinks);
+
+            controlService.delete(projectId, control.getId());
+
+            // Envers writes delete revisions only when Hibernate sees the link
+            // delete. Driving outbound link deletes through the repository before
+            // deleting the parent closes the parent-delete audit-history gap
+            // (cycle-2 pre-push codex review on issue #279).
+            var inOrder = org.mockito.Mockito.inOrder(controlLinkRepository, controlRepository);
+            inOrder.verify(controlLinkRepository).deleteAll(outboundLinks);
+            inOrder.verify(controlRepository).delete(control);
+        }
+
+        @Test
+        void rejectsDeleteWhenInboundAuditLinkReferencesControl() {
+            var control = makeControl();
+            when(controlRepository.findByIdAndProjectId(control.getId(), projectId))
+                    .thenReturn(Optional.of(control));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.CONTROL,
+                            control.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(auditLinkRepository.findAuditUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.audits.state.AuditLinkTargetType.CONTROL,
+                            control.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of("AUDIT-001"));
+
+            var controlId = control.getId();
+            var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
+                    com.keplerops.groundcontrol.domain.exception.ConflictException.class,
+                    () -> controlService.delete(projectId, controlId));
+            assertThat(thrown)
+                    .isNotNull()
+                    .hasMessageContaining("AuditLink references exist")
+                    .extracting("errorCode")
+                    .isEqualTo("control_referenced");
+            assertThat(thrown.getDetail()).containsEntry("auditCount", 1);
+            org.mockito.Mockito.verifyNoInteractions(controlLinkRepository);
+            org.mockito.Mockito.verify(controlRepository, org.mockito.Mockito.never())
+                    .delete(control);
+        }
+
+        @Test
+        void rejectsDeleteWhenInboundFindingLinkReferencesControl() {
+            var control = makeControl();
+            when(controlRepository.findByIdAndProjectId(control.getId(), projectId))
+                    .thenReturn(Optional.of(control));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.CONTROL,
+                            control.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of("FIND-001"));
+
+            // FindingLink.targetEntityId is not an FK, so without this guard the
+            // delete would leave dangling FindingLink rows (cycle-3 pre-push codex
+            // review on issue #279, ADR-038).
+            var controlId = control.getId();
+            var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
+                    com.keplerops.groundcontrol.domain.exception.ConflictException.class,
+                    () -> controlService.delete(projectId, controlId));
+            assertThat(thrown)
+                    .isNotNull()
+                    .hasMessageContaining("FindingLink references exist")
+                    .extracting("errorCode")
+                    .isEqualTo("control_referenced");
+            assertThat(thrown.getDetail())
+                    .containsEntry("findingCount", 1)
+                    .containsEntry("findingUids", (java.io.Serializable) java.util.List.of("FIND-001"));
+            // Parent + outbound-link cleanup must be skipped when the guard fires.
+            org.mockito.Mockito.verifyNoInteractions(controlLinkRepository);
+            org.mockito.Mockito.verify(controlRepository, org.mockito.Mockito.never())
+                    .delete(control);
+        }
+
+        @Test
+        void rejectsWhenDependentControlTestsExist() {
+            // ADR-039: ControlTest rows are audited evidence; cascading them on parent delete
+            // would destroy provenance silently, and a raw FK violation would surface as 500.
+            // The service uses count-only existence checks (no full-row hydration) and returns
+            // a clean 409 with the dependent counts so the caller can act.
+            var control = makeControl();
+            when(controlRepository.findByIdAndProjectId(control.getId(), projectId))
+                    .thenReturn(Optional.of(control));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.CONTROL,
+                            control.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(controlTestRepository.countByProjectIdAndControlId(projectId, control.getId()))
+                    .thenReturn(3L);
+
+            assertThatThrownBy(() -> controlService.delete(projectId, control.getId()))
+                    .isInstanceOf(com.keplerops.groundcontrol.domain.exception.ConflictException.class)
+                    .hasMessageContaining("dependent audit evidence");
+        }
+
+        @Test
+        void rejectsWhenDependentEffectivenessAssessmentsExist() {
+            var control = makeControl();
+            when(controlRepository.findByIdAndProjectId(control.getId(), projectId))
+                    .thenReturn(Optional.of(control));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.CONTROL,
+                            control.getId(),
+                            projectId))
+                    .thenReturn(java.util.List.of());
+            when(controlTestRepository.countByProjectIdAndControlId(projectId, control.getId()))
+                    .thenReturn(0L);
+            when(effectivenessAssessmentRepository.countByProjectIdAndControlId(projectId, control.getId()))
+                    .thenReturn(2L);
+
+            assertThatThrownBy(() -> controlService.delete(projectId, control.getId()))
+                    .isInstanceOf(com.keplerops.groundcontrol.domain.exception.ConflictException.class)
+                    .hasMessageContaining("dependent audit evidence");
         }
     }
 }

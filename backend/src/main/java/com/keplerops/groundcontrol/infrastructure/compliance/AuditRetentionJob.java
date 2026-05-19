@@ -40,7 +40,25 @@ public class AuditRetentionJob {
             "risk_register_record_scenario_audit",
             "risk_assessment_result_audit",
             "risk_assessment_result_observation_audit",
-            "treatment_plan_audit");
+            "treatment_plan_audit",
+            "control_test_audit",
+            "control_effectiveness_assessment_audit",
+            "test_case_audit",
+            "test_case_step_audit",
+            "test_case_gherkin_audit",
+            "asset_subtype_schema_audit",
+            "test_case_folder_audit",
+            "test_plan_audit",
+            "evidence_artifact_audit",
+            "test_suite_audit",
+            "test_suite_member_audit",
+            "test_suite_source_requirement_audit",
+            "audit_audit",
+            "audit_link_audit",
+            "test_run_audit",
+            "test_run_tester_assignment_audit",
+            "test_run_case_result_audit",
+            "test_run_step_result_audit");
 
     private final AuditRetentionProperties properties;
     private final EntityManager entityManager;

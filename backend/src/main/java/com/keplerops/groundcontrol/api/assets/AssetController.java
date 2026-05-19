@@ -9,8 +9,12 @@ import com.keplerops.groundcontrol.domain.assets.service.CreateAssetRelationComm
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetExternalIdCommand;
 import com.keplerops.groundcontrol.domain.assets.service.UpdateAssetRelationCommand;
+import com.keplerops.groundcontrol.domain.assets.state.AssetCriticality;
+import com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment;
 import com.keplerops.groundcontrol.domain.assets.state.AssetLinkTargetType;
+import com.keplerops.groundcontrol.domain.assets.state.AssetScope;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
+import com.keplerops.groundcontrol.domain.assets.state.KnowledgeState;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -48,16 +52,48 @@ public class AssetController {
             @Valid @RequestBody AssetRequest request, @RequestParam(required = false) String project) {
         var projectId = projectService.resolveProjectId(project);
         var command = new CreateAssetCommand(
-                projectId, request.uid(), request.name(), request.description(), request.assetType());
+                projectId,
+                request.uid(),
+                request.name(),
+                request.description(),
+                request.assetType(),
+                request.owner(),
+                request.steward(),
+                request.environment(),
+                request.criticality(),
+                request.businessContext(),
+                request.scopeDesignation(),
+                request.subtype(),
+                request.metadata(),
+                request.knowledgeState());
         return AssetResponse.from(assetService.create(command));
     }
 
     @GetMapping
     public List<AssetResponse> list(
-            @RequestParam(required = false) String project, @RequestParam(required = false) AssetType type) {
+            @RequestParam(required = false) String project,
+            @RequestParam(required = false) AssetType type,
+            @RequestParam(required = false) String owner,
+            @RequestParam(required = false) String steward,
+            @RequestParam(required = false) AssetEnvironment environment,
+            @RequestParam(required = false) AssetCriticality criticality,
+            @RequestParam(required = false) AssetScope scope,
+            @RequestParam(required = false) String subtype,
+            @RequestParam(required = false) KnowledgeState knowledgeState) {
         var projectId = projectService.resolveProjectId(project);
-        if (type != null) {
-            return assetService.listByProjectAndType(projectId, type).stream()
+        boolean anyFilter = type != null
+                || owner != null
+                || steward != null
+                || environment != null
+                || criticality != null
+                || scope != null
+                || subtype != null
+                || knowledgeState != null;
+        if (anyFilter) {
+            return assetService
+                    .listByProjectAndFilters(
+                            projectId, type, owner, steward, environment, criticality, scope, subtype, knowledgeState)
+                    .stream()
                     .map(AssetResponse::from)
                     .toList();
         }
@@ -84,7 +120,27 @@ public class AssetController {
             @Valid @RequestBody UpdateAssetRequest request,
             @RequestParam(required = false) String project) {
         var projectId = projectService.requireProjectId(project);
-        var command = new UpdateAssetCommand(request.name(), request.description(), request.assetType());
+        var command = new UpdateAssetCommand(
+                request.name(),
+                request.description(),
+                request.assetType(),
+                request.owner(),
+                request.steward(),
+                request.environment(),
+                request.criticality(),
+                request.businessContext(),
+                request.scopeDesignation(),
+                request.subtype(),
+                request.metadata(),
+                request.knowledgeState(),
+                request.clearOwner(),
+                request.clearSteward(),
+                request.clearEnvironment(),
+                request.clearCriticality(),
+                request.clearBusinessContext(),
+                request.clearScopeDesignation(),
+                request.clearSubtype(),
+                request.clearMetadata());
         return AssetResponse.from(assetService.update(projectId, id, command));
     }
 
@@ -115,7 +171,8 @@ public class AssetController {
                 request.sourceSystem(),
                 request.externalSourceId(),
                 request.collectedAt(),
-                request.confidence());
+                request.confidence(),
+                request.knowledgeState());
         return AssetRelationResponse.from(assetService.createRelation(projectId, command, id));
     }
 
@@ -131,7 +188,8 @@ public class AssetController {
                 request.sourceSystem(),
                 request.externalSourceId(),
                 request.collectedAt(),
-                request.confidence());
+                request.confidence(),
+                request.knowledgeState());
         return AssetRelationResponse.from(assetService.updateRelation(projectId, id, relationId, command));
     }
 

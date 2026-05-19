@@ -40,6 +40,9 @@ class ObservationServiceTest {
     @Mock
     private OperationalAssetRepository assetRepository;
 
+    @Mock
+    private com.keplerops.groundcontrol.domain.findings.repository.FindingLinkRepository findingLinkRepository;
+
     @InjectMocks
     private ObservationService observationService;
 
@@ -304,10 +307,42 @@ class ObservationServiceTest {
             var obs = makeObservation();
             var obsId = obs.getId();
             when(observationRepository.findByIdWithAsset(obsId)).thenReturn(Optional.of(obs));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.OBSERVATION,
+                            obsId,
+                            projectId))
+                    .thenReturn(java.util.List.of());
 
             observationService.delete(assetId, obsId);
 
             verify(observationRepository).delete(obs);
+        }
+
+        @Test
+        void rejectsDeleteWhenInboundFindingLinkReferencesObservation() {
+            var obs = makeObservation();
+            var obsId = obs.getId();
+            when(observationRepository.findByIdWithAsset(obsId)).thenReturn(Optional.of(obs));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.OBSERVATION,
+                            obsId,
+                            projectId))
+                    .thenReturn(java.util.List.of("FIND-001"));
+
+            // FindingLink.targetEntityId is not an FK, so without this guard the
+            // delete would leave dangling FindingLink rows (cycle-3 pre-push codex
+            // review on issue #279, ADR-038). The non-project-scoped overload is
+            // deprecated but its reverse-link guard must remain symmetric.
+            @SuppressWarnings("deprecation")
+            var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
+                    ConflictException.class, () -> observationService.delete(assetId, obsId));
+            assertThat(thrown)
+                    .isNotNull()
+                    .hasMessageContaining("FindingLink references exist")
+                    .extracting("errorCode")
+                    .isEqualTo("observation_referenced");
+            org.mockito.Mockito.verify(observationRepository, org.mockito.Mockito.never())
+                    .delete(obs);
         }
     }
 
@@ -620,10 +655,34 @@ class ObservationServiceTest {
             var obsId = obs.getId();
             when(observationRepository.findByIdWithAssetAndProjectId(obsId, projectId))
                     .thenReturn(Optional.of(obs));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.OBSERVATION,
+                            obsId,
+                            projectId))
+                    .thenReturn(java.util.List.of());
 
             observationService.delete(projectId, assetId, obsId);
 
             verify(observationRepository).delete(obs);
+        }
+
+        @Test
+        void rejectsProjectAwareDeleteWhenInboundFindingLinkReferencesObservation() {
+            var obs = makeObservation();
+            var obsId = obs.getId();
+            when(observationRepository.findByIdWithAssetAndProjectId(obsId, projectId))
+                    .thenReturn(Optional.of(obs));
+            when(findingLinkRepository.findFindingUidsByTargetTypeAndTargetEntityIdAndProjectId(
+                            com.keplerops.groundcontrol.domain.findings.state.FindingLinkTargetType.OBSERVATION,
+                            obsId,
+                            projectId))
+                    .thenReturn(java.util.List.of("FIND-001"));
+
+            var thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
+                    ConflictException.class, () -> observationService.delete(projectId, assetId, obsId));
+            assertThat(thrown).isNotNull().extracting("errorCode").isEqualTo("observation_referenced");
+            org.mockito.Mockito.verify(observationRepository, org.mockito.Mockito.never())
+                    .delete(obs);
         }
 
         @Test

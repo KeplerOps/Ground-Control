@@ -27,6 +27,17 @@ jobs:
           fetch-depth: 0
       - name: Show Python version
         run: python3 --version
+      # Policy tests include a renderer-vs-check_pr_body compose check
+      # (`test_gc_render_pr_body_*_output_passes_check_pr_body`) that spawns
+      # `node tools/render_pr_body_fixture.mjs`, which imports the MCP
+      # server's `mcp/ground-control/lib.js`. The fixture therefore needs the
+      # MCP server's node_modules (js-yaml, zod, @modelcontextprotocol/sdk)
+      # available — install them before running policy tests so the compose
+      # check binds the actual JS renderer against the Python policy. Per
+      # ADR-036 (issue #868 cycle-1 F3): the compose test must invoke the
+      # real renderer rather than a copied Markdown fixture.
+      - name: Install MCP server deps (for renderer compose check)
+        run: npm --prefix mcp/ground-control ci
       - name: Policy tool tests
         run: python3 -m unittest discover -s tools/tests -p 'test_*.py'
       - name: Repo policy checks
@@ -196,7 +207,38 @@ jobs:
             cat osv-scanner.sarif | head -20 >&2 || true
             exit 1
           fi
-          echo "OSV-scanner SARIF emitted at osv-scanner.sarif (advisory; findings do not fail the job)"
+          echo "OSV-scanner SARIF emitted at osv-scanner.sarif (advisory baseline; the gate step below fails on CRITICAL CVEs)"
+
+      # CRITICAL CVE gate (#931). Parses the SARIF that the advisory step
+      # produced and fails the job if any rule has severity CRITICAL. OSV
+      # encodes severity in two places per rule: `properties.severity` (CVSS
+      # category) and a `level` (note/warning/error). We match either
+      # CRITICAL-flagged property or `level=error` so the gate catches both
+      # cases. Building on the existing job (per #931 preflight) instead of
+      # adding a new scanner lane keeps secret-scope/permissions surface flat.
+      - name: Gate on CRITICAL CVEs
+        run: |
+          set -euo pipefail
+          # Best-effort jq install (Ubuntu runners ship with jq pre-installed,
+          # but we don't rely on it).
+          command -v jq >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq jq; }
+          # Count CRITICAL rules / results. The SARIF "level=error" mapping
+          # is OSV-scanner's signal for CRITICAL; we also look for the
+          # canonical CVSS severity field as a belt-and-suspenders check.
+          critical=$(jq '[
+            .runs[]?.results[]?
+            | select((.level == "error") or ((.properties?.severity // "") | ascii_upcase == "CRITICAL"))
+          ] | length' osv-scanner.sarif)
+          if [ "$critical" -gt 0 ]; then
+            echo "::error::OSV-scanner flagged $critical CRITICAL CVE(s). Update the affected dependency or pin to a patched version."
+            jq '[
+              .runs[]?.results[]?
+              | select((.level == "error") or ((.properties?.severity // "") | ascii_upcase == "CRITICAL"))
+              | { ruleId, message: (.message.text // ""), level }
+            ]' osv-scanner.sarif >&2 || true
+            exit 1
+          fi
+          echo "OSV-scanner: no CRITICAL CVEs."
 
       - name: Upload OSV-scanner SARIF artifact
         if: always()
@@ -330,7 +372,7 @@ jobs:
         uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5
         with:
           images: |
-            ghcr.io/keplerops/ground-control
+            ghcr.io/brad-edwards/ground-control
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}

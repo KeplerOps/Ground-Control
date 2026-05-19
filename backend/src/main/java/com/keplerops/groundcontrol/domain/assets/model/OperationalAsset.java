@@ -1,9 +1,15 @@
 package com.keplerops.groundcontrol.domain.assets.model;
 
 import com.keplerops.groundcontrol.domain.BaseEntity;
+import com.keplerops.groundcontrol.domain.assets.state.AssetCriticality;
+import com.keplerops.groundcontrol.domain.assets.state.AssetEnvironment;
+import com.keplerops.groundcontrol.domain.assets.state.AssetScope;
 import com.keplerops.groundcontrol.domain.assets.state.AssetType;
+import com.keplerops.groundcontrol.domain.assets.state.KnowledgeState;
 import com.keplerops.groundcontrol.domain.projects.model.Project;
+import com.keplerops.groundcontrol.shared.persistence.JacksonTextCollectionConverters;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -13,6 +19,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
+import java.util.Map;
 import org.hibernate.envers.Audited;
 import org.hibernate.envers.NotAudited;
 
@@ -38,6 +45,55 @@ public class OperationalAsset extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "asset_type", nullable = false, length = 20)
     private AssetType assetType = AssetType.OTHER;
+
+    @Column(length = 200)
+    private String owner;
+
+    @Column(length = 200)
+    private String steward;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private AssetEnvironment environment;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private AssetCriticality criticality;
+
+    @Column(name = "business_context", columnDefinition = "TEXT")
+    private String businessContext;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "scope_designation", length = 20)
+    private AssetScope scopeDesignation;
+
+    /**
+     * GC-M011 narrower classification under {@link AssetType}. Free-form,
+     * project-defined; a registered {@code AssetSubtypeSchema} may formalize
+     * the {@code (project, assetType, subtype)} contract.
+     */
+    @Column(length = 100)
+    private String subtype;
+
+    /**
+     * GC-M011 subtype-specific metadata bag. Bounded by
+     * {@code AssetSubtypeValidator}; schema-validated when a matching ACTIVE
+     * {@code AssetSubtypeSchema} exists.
+     */
+    @Convert(converter = JacksonTextCollectionConverters.StringObjectMapConverter.class)
+    @Column(columnDefinition = "TEXT")
+    private Map<String, Object> metadata;
+
+    /**
+     * GC-M018 knowledge / completeness dimension. CONFIRMED, PROVISIONAL,
+     * or UNKNOWN. NOT NULL because "unknown" is a first-class state, not a
+     * NULL-vs-something ambiguity — risk / threat / control workflows must
+     * be able to filter without coercing NULL into a state. The DB default
+     * back-fills legacy rows; new rows pick up the entity initializer.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "knowledge_state", nullable = false, length = 20)
+    private KnowledgeState knowledgeState = KnowledgeState.CONFIRMED;
 
     @Column(name = "archived_at")
     private Instant archivedAt;
@@ -92,6 +148,81 @@ public class OperationalAsset extends BaseEntity {
 
     public Instant getArchivedAt() {
         return archivedAt;
+    }
+
+    public String getOwner() {
+        return owner;
+    }
+
+    public void setOwner(String owner) {
+        this.owner = owner;
+    }
+
+    public String getSteward() {
+        return steward;
+    }
+
+    public void setSteward(String steward) {
+        this.steward = steward;
+    }
+
+    public AssetEnvironment getEnvironment() {
+        return environment;
+    }
+
+    public void setEnvironment(AssetEnvironment environment) {
+        this.environment = environment;
+    }
+
+    public AssetCriticality getCriticality() {
+        return criticality;
+    }
+
+    public void setCriticality(AssetCriticality criticality) {
+        this.criticality = criticality;
+    }
+
+    public String getBusinessContext() {
+        return businessContext;
+    }
+
+    public void setBusinessContext(String businessContext) {
+        this.businessContext = businessContext;
+    }
+
+    public AssetScope getScopeDesignation() {
+        return scopeDesignation;
+    }
+
+    public void setScopeDesignation(AssetScope scopeDesignation) {
+        this.scopeDesignation = scopeDesignation;
+    }
+
+    public String getSubtype() {
+        return subtype;
+    }
+
+    public void setSubtype(String subtype) {
+        this.subtype = subtype;
+    }
+
+    public Map<String, Object> getMetadata() {
+        return metadata;
+    }
+
+    public void setMetadata(Map<String, Object> metadata) {
+        this.metadata = metadata;
+    }
+
+    public KnowledgeState getKnowledgeState() {
+        return knowledgeState;
+    }
+
+    public void setKnowledgeState(KnowledgeState knowledgeState) {
+        if (knowledgeState == null) {
+            throw new IllegalArgumentException("knowledgeState must not be null");
+        }
+        this.knowledgeState = knowledgeState;
     }
 
     @Override

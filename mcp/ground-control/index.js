@@ -58,6 +58,8 @@ import {
   crossWaveValidation, detectConsistencyViolations, analyzeCompleteness,
   analyzeStatusDrift, analyzeSemanticSimilarity, getWorkOrder,
   getDashboardStats,
+  // ---- GC-L007 GRC analysis ----
+  analyzeEvidenceFreshness, analyzeObservationProjection, aggregateVendorRisk,
   // ---- history / exports (kept for completeness even though tools route to gc_query) ----
   getRequirementHistory, getRelationHistory, getTraceabilityLinkHistory,
   getRequirementTimeline, getRequirementDiff, getProjectTimeline,
@@ -70,7 +72,15 @@ import {
   runSweep, runSweepAll,
   getRepoGroundControlContext,
   runCodexArchitecturePreflight, runCodexReview, runCodexVerifyFinding,
+  runTestQualityReview, TEST_QUALITY_REVIEW_HARD_CAP,
   runPostImplementationPlan,
+  runPostDecisionRecord, runPostFinalReport, runRenderPrBody, runLogStepTelemetry,
+  runGetIssueThread, runWatchCiRun, runWatchSonarAnalysis,
+  runCodexReviewCycle, runTestQualityReviewCycle,
+  runResolveWorkflowRoute,
+  DECISION_RECORD_REVIEWERS, DECISION_RECORD_DECISIONS, DECISION_RECORD_CLASSIFICATIONS,
+  PR_BODY_CHANGE_CLASSES, PR_REQUIREMENT_RE, EXACT_REQUIREMENT_UID_RE,
+  TELEMETRY_TIERS, TELEMETRY_OUTCOMES,
   buildCodexReviewToolDescription, buildCodexReviewOverrideCapDescription,
   buildCodexReviewOverrideReasonDescription,
   CODEX_REVIEW_HARD_CAP, CODEX_REVIEW_PREPUSH_HARD_CAP,
@@ -99,6 +109,8 @@ import {
   createAssetLink, getAssetLinks, deleteAssetLink, getAssetLinksByTarget,
   createAssetExternalId, getAssetExternalIds, updateAssetExternalId,
   deleteAssetExternalId, findAssetByExternalId,
+  registerAssetSubtypeSchema, listAssetSubtypeSchemas, getAssetSubtypeSchema,
+  getActiveAssetSubtypeSchema, updateAssetSubtypeSchema, deprecateAssetSubtypeSchema,
   // ---- risk domain ----
   createObservation, listObservations, getObservation, updateObservation,
   deleteObservation, listLatestObservations,
@@ -108,8 +120,6 @@ import {
   createThreatModel, listThreatModels, getThreatModel, updateThreatModel,
   deleteThreatModel, transitionThreatModelStatus,
   createThreatModelLink, listThreatModelLinks, deleteThreatModelLink,
-  createControl, listControls, getControl, updateControl, deleteControl,
-  transitionControlStatus, createControlLink, listControlLinks, deleteControlLink,
   createMethodologyProfile, listMethodologyProfiles, getMethodologyProfile,
   updateMethodologyProfile, deleteMethodologyProfile,
   createRiskRegisterRecord, listRiskRegisterRecords, getRiskRegisterRecord,
@@ -134,11 +144,40 @@ import {
   deleteTrustPolicy,
   installPackFromRegistry, upgradePackFromRegistry, listPackInstallRecords,
   getPackInstallRecord,
+  // createAdminUser is intentionally NOT imported — passwords must not flow
+  // through MCP tool-call payloads (ADR-037, codex security finding).
+  listAdminUsers, updateAdminUserRole, updateAdminUserEnabled, deleteAdminUser,
+  // ---- test cases (TC-001 / ADR-040) ----
+  createTestCase, updateTestCase, deleteTestCase, transitionTestCaseStatus,
+  createTestCaseGherkin, updateTestCaseGherkin, deleteTestCaseGherkin,
+  TEST_CASE_STATUSES, TEST_CASE_TYPES, TEST_CASE_PRIORITIES, TEST_CASE_FORMATS,
+  // ---- test case steps (TC-002 / ADR-041) ----
+  createTestCaseStep, updateTestCaseStep, deleteTestCaseStep,
+  // ---- test case folders + move/copy/reorder (TC-005 / ADR-043) ----
+  createTestCaseFolder, updateTestCaseFolder, deleteTestCaseFolder,
+  moveTestCaseFolder, reorderTestCaseFolders,
+  moveTestCase, copyTestCase, reorderTestCases,
+  // ---- test plans (TC-006 / ADR-044) ----
+  createTestPlan, updateTestPlan, deleteTestPlan, transitionTestPlanStatus,
+  TEST_PLAN_STATUSES,
+  // ---- test suites (TC-007 / ADR-047) ----
+  createTestSuite, updateTestSuite, deleteTestSuite,
+  addTestSuiteMember, removeTestSuiteMember, reorderTestSuiteMembers,
+  addTestSuiteSourceRequirement, removeTestSuiteSourceRequirement,
+  resolveTestSuiteTestCases,
+  TEST_SUITE_POPULATION_MODES,
+  // ---- test runs (TC-008 / ADR-049) + runner (TC-009 / ADR-050) ----
+  createTestRun, updateTestRun, deleteTestRun, transitionTestRunStatus,
+  addTestRunTester, removeTestRunTester,
+  updateTestRunCaseResult,
+  listTestRunStepResults, updateTestRunStepResult, updateTestRunCursor,
+  TEST_RUN_STATUSES, TEST_RUN_CASE_RESULT_STATUSES,
   // ---- enums ----
   STATUSES, REQUIREMENT_TYPES, PRIORITIES, RELATION_TYPES,
   ARTIFACT_TYPES, LINK_TYPES, CHANGE_CATEGORIES, CONFIDENCE_LEVELS,
   METRIC_TYPES, COMPARISON_OPERATORS, ADR_STATUSES,
   ASSET_TYPES, ASSET_RELATION_TYPES, ASSET_LINK_TARGET_TYPES, ASSET_LINK_TYPES,
+  ASSET_CRITICALITIES, ASSET_ENVIRONMENTS, ASSET_SCOPES, KNOWLEDGE_STATES,
   OBSERVATION_CATEGORIES, RISK_SCENARIO_STATUSES,
   METHODOLOGY_FAMILIES, METHODOLOGY_PROFILE_STATUSES,
   RISK_REGISTER_STATUSES, RISK_ASSESSMENT_APPROVAL_STATUSES,
@@ -146,13 +185,15 @@ import {
   RISK_SCENARIO_LINK_TARGET_TYPES, RISK_SCENARIO_LINK_TYPES,
   THREAT_MODEL_STATUSES, STRIDE_CATEGORIES,
   THREAT_MODEL_LINK_TARGET_TYPES, THREAT_MODEL_LINK_TYPES,
-  CONTROL_STATUSES, CONTROL_FUNCTIONS, CONTROL_LINK_TARGET_TYPES, CONTROL_LINK_TYPES,
   VERIFICATION_STATUSES, ASSURANCE_LEVELS,
   PLUGIN_TYPES, PLUGIN_LIFECYCLE_STATES,
   CONTROL_PACK_LIFECYCLE_STATES, CONTROL_PACK_ENTRY_STATUSES,
   PACK_TYPES, PACK_IMPORT_FORMATS, CATALOG_STATUSES,
   TRUST_OUTCOMES, INSTALL_OUTCOMES,
   TRUST_POLICY_FIELDS, TRUST_POLICY_RULE_OPERATORS,
+  pick, reqArg,
+  validateGovernanceStatus,
+  GOVERNANCE_FIELDS,
 } from "./lib.js";
 import {
   executeGcQuery,
@@ -163,6 +204,45 @@ import {
   GC_QUERY_PATH_ALLOWLIST,
   GC_QUERY_PATH_DENYLIST,
 } from "./gc-query.js";
+import {
+  gcThreatModelZodShape,
+  gcThreatModelToolHandler,
+  GC_THREAT_MODEL_DESCRIPTION,
+} from "./gc-threat-model.js";
+import {
+  gcFindingZodShape,
+  gcFindingToolHandler,
+  GC_FINDING_DESCRIPTION,
+} from "./gc-finding.js";
+import {
+  gcEvidenceZodShape,
+  gcEvidenceToolHandler,
+  GC_EVIDENCE_DESCRIPTION,
+} from "./gc-evidence.js";
+import {
+  gcAuditZodShape,
+  gcAuditToolHandler,
+  GC_AUDIT_DESCRIPTION,
+} from "./gc-audit.js";
+import {
+  gcRiskScenarioZodShape,
+  gcRiskScenarioToolHandler,
+  GC_RISK_SCENARIO_DESCRIPTION,
+} from "./gc-risk-scenario.js";
+import {
+  gcRiskGovernanceZodShape,
+  gcRiskGovernanceToolHandler,
+  GC_RISK_GOVERNANCE_DESCRIPTION,
+} from "./gc-risk-governance.js";
+import {
+  gcControlZodShape,
+  gcControlToolHandler,
+  GC_CONTROL_DESCRIPTION,
+} from "./gc-control.js";
+import {
+  linkCreateOptionalSharedZodFields,
+  performLinkCreate,
+} from "./link-create.js";
 
 // Load .env from cwd before any auth header is composed.
 function loadDotenvFromCwd() {
@@ -206,27 +286,9 @@ function err(e) {
   return { content: [{ type: "text", text }], isError: true };
 }
 
-function reqArg(args, key, action) {
-  const v = args[key];
-  if (v === undefined || v === null || v === "") {
-    throw new Error(`'${key}' is required for action='${action}'`);
-  }
-  return v;
-}
-
-/**
- * Build the backend DTO for create/update actions by picking ONLY the listed
- * entity fields from the MCP args. This is the adapter boundary — MCP control
- * fields (action, kind, mode, subsystem, entity, id, project, paging filters,
- * etc.) must NOT leak into request bodies.
- */
-function pick(args, keys) {
-  const out = {};
-  for (const k of keys) {
-    if (args[k] !== undefined) out[k] = args[k];
-  }
-  return out;
-}
+// pick / reqArg moved to lib.js so the extracted per-tool modules
+// (gc-query.js, gc-threat-model.js, link-create.js) share the same helpers
+// without coupling to this module (which boots the MCP server at import).
 
 // Admin gating: gc_admin and gc_pack expose ROLE_ADMIN-only write/mutating
 // operations. They register only when GC_MCP_ADMIN is set, so a default MCP
@@ -243,14 +305,26 @@ const server = new McpServer({ name: "ground-control", version: "1.0.0" });
 // WORKFLOW PRIMITIVES — kept by name; /implement and /ship skills call these.
 // ============================================================================
 
-server.tool(
+// `gc_query` is the only tool in this file registered with a constructed
+// `z.object(...).strict()` (rather than a raw shape) so the SDK preserves
+// the strict-rejection contract. The deprecated `server.tool(name, desc,
+// schema, cb)` overload routes a constructed Zod object into the
+// `annotations` slot instead of `inputSchema`, which makes the SDK call
+// the handler with its `extra` object (containing `signal`) in the args
+// position — issue #874's root cause. `server.registerTool` takes
+// `inputSchema` explicitly, so the strict schema actually gates the call
+// and `signal` stays in `extra` where it belongs.
+server.registerTool(
   "gc_query",
-  `Read-only ad-hoc GET against the Ground Control REST API (ADR-035). Use this when no curated tool covers the read you need. ` +
-    `Path must be a relative '/api/v1/...' string under one of the allowlisted prefixes: ${GC_QUERY_PATH_ALLOWLIST.join(", ")}. ` +
-    `Admin prefixes (${GC_QUERY_PATH_DENYLIST.join(", ")}) are rejected. ` +
-    `GET only; pass query params via the structured 'params' object (flat, primitive values only). ` +
-    `Body cap: ${GC_QUERY_BODY_BYTE_CAP} bytes; timeout: ${GC_QUERY_TIMEOUT_MS}ms.`,
-  gcQuerySchema,
+  {
+    description:
+      `Read-only ad-hoc GET against the Ground Control REST API (ADR-035). Use this when no curated tool covers the read you need. ` +
+      `Path must be a relative '/api/v1/...' string under one of the allowlisted prefixes: ${GC_QUERY_PATH_ALLOWLIST.join(", ")}. ` +
+      `Admin prefixes (${GC_QUERY_PATH_DENYLIST.join(", ")}) are rejected. ` +
+      `GET only; pass query params via the structured 'params' object (flat, primitive values only). ` +
+      `Body cap: ${GC_QUERY_BODY_BYTE_CAP} bytes; timeout: ${GC_QUERY_TIMEOUT_MS}ms.`,
+    inputSchema: gcQuerySchema,
+  },
   async (args) => {
     try { return ok(JSON.stringify(await gcQueryToolHandler(args), null, 2)); }
     catch (e) { return err(e); }
@@ -456,6 +530,361 @@ server.tool(
         overrideReason: override_reason ?? null,
         overridePhaseGate: Boolean(override_phase_gate),
         overridePhaseReason: override_phase_reason ?? null,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_test_quality_review",
+  `Run the canonical /implement Step 6.6 pre-push test-quality review against the staged + unstaged + ` +
+    `untracked diff vs the base branch. (Issue #906 moved this from the former post-PR Step 13 to ` +
+    `pre-push Step 6.6 so the PR opens with both AI-assisted reviewers clean.) Shells out to the ` +
+    `\`claude\` CLI (Sonnet 4.6 by default) with the review-tests rubric and the ` +
+    `changed test-file paths, parses the structured JSON output (validated by --json-schema), posts ` +
+    `the durable findings record + cycle marker to the issue thread, and returns a structured ` +
+    `envelope: \`{ ok, finding_count, findings, cycle, cap, next_action, findings_comment_url, ... }\`. ` +
+    `The \`next_action\` field is "fix_findings_and_reinvoke" / "post_clean_decision_record_and_advance_to_phase_c" / ` +
+    `"fix_findings_then_summarize_and_escalate" / "post_summary_and_escalate_to_user" — the parent ` +
+    `/implement workflow reads it as a directive. "fix_findings_then_summarize_and_escalate" is the ` +
+    `last-in-cap action: fix the findings, post the decision record, then summarize and escalate to the ` +
+    `user; it is NOT a normal re-invoke path. Replaces the prior Skill("review-tests") boundary, ` +
+    `which produced prose findings that the autoregressive parent agent kept echoing back to the user ` +
+    `instead of fixing in-turn (issue #884 v1 regression). Default cycle cap: ${TEST_QUALITY_REVIEW_HARD_CAP} per ` +
+    `issue (issue #906; configurable per repo via \`workflow.test_quality_review.pre_push_cap\` in ` +
+    `.ground-control.yaml; bounds [1, 10]); cycle cap+1 requires override_cap=true + override_reason. ` +
+    `Authentication: the CLI invocation strips ANTHROPIC_API_KEY from the subprocess env so claude uses ` +
+    `the host's OAuth session — see docs/DEVELOPMENT_WORKFLOW.md "Test-quality review engine".`,
+  {
+    repo_path: z.string(),
+    base_branch: z.string().optional(),
+    issue_number: z.number().int().positive().optional(),
+    pr_number: z.number().int().positive().optional(),
+    override_cap: z.boolean().optional(),
+    override_reason: z.string().optional(),
+    model: z.string().optional(),
+  },
+  async ({ repo_path, base_branch, issue_number, pr_number, override_cap, override_reason, model }) => {
+    try {
+      return ok(JSON.stringify(await runTestQualityReview({
+        repoPath: repo_path,
+        // Pass null when not supplied so the runner resolves from
+        // .ground-control.yaml; the runner falls back to "dev" only if
+        // YAML doesn't declare workflow.base_branch.
+        baseBranch: base_branch ?? null,
+        issueNumber: issue_number != null ? issue_number : null,
+        prNumber: pr_number != null ? pr_number : null,
+        overrideCap: Boolean(override_cap),
+        overrideReason: override_reason ?? null,
+        ...(model ? { model } : {}),
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_post_decision_record",
+  "Post the canonical review-cycle decision record as a comment on the GitHub issue (per ADR-029, the issue thread is the durable record). Renders the verdict envelope (verdict, architectural_read, blocking, notes) into the standard decision-record Markdown layout; rejects 'defer' decisions and any body containing detected secrets. Replaces free-prose decision comments from the Step 6.5 / 6.6 review loops. The verdict + architectural_read fields are optional for back-compat; new callers (issue #931) populate them. Returns the posted comment's URL and id.",
+  {
+    repo_path: z.string(),
+    issue_number: z.number().int().positive(),
+    cycle: z.number().int().positive(),
+    reviewer: z.enum(DECISION_RECORD_REVIEWERS),
+    // Verdict envelope (#931). Optional for back-compat; required for the new
+    // principal-engineer contract.
+    verdict: z.enum(["ship", "ship-with-fixes", "don't-ship"]).optional(),
+    architectural_read: z.string().min(1).optional(),
+    notes: z.array(z.object({
+      text: z.string().min(1),
+    })).max(2).optional(),
+    findings: z.array(z.object({
+      id: z.string().min(1),
+      title: z.string().min(1),
+      classification: z.enum(DECISION_RECORD_CLASSIFICATIONS),
+      decision: z.enum(DECISION_RECORD_DECISIONS),
+      rationale: z.string().min(1),
+      // Required at runtime when decision === "wontfix" — see ADR-029. The
+      // Zod object cannot conditionally require a field, so the validator in
+      // lib.js performs the conditional check; expose the field here so MCP
+      // callers can supply it. Pass a URL to the user's authorization
+      // comment on the issue thread OR a verbatim quote with comment id.
+      user_authorization: z.string().optional(),
+      location: z.string().optional(),
+      comment_url: z.string().optional(),
+      instances: z.array(z.string().min(1)).optional(),
+    })),
+  },
+  async ({ repo_path, issue_number, cycle, reviewer, findings, verdict, architectural_read, notes }) => {
+    try {
+      return ok(JSON.stringify(await runPostDecisionRecord({
+        repoPath: repo_path, issueNumber: issue_number, cycle, reviewer, findings,
+        verdict, architectural_read, notes,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_post_final_report",
+  "Post the canonical /implement Step 19 final report (or the /quickfix Step Q19 slim close comment) as a comment on the GitHub issue. Renders structured input (in-scope requirements, files-by-change-kind, reviews, traceability reconciliation, CI/SonarCloud status) into the standard final-report Markdown layout. Pass lane='quickfix' (issue #906) to enable the slim payload — empty reviews[] and no codex-entry requirement — for the /quickfix lane where AI-assisted reviews are opt-in; every other gate (CI green, Sonar pass-or-legit-skipped, sensitive-content / no-defer / reserved-marker scrubs) still applies. Replaces free-prose Step 19 comments. Returns the posted comment's URL and id.",
+  {
+    repo_path: z.string(),
+    issue_number: z.number().int().positive(),
+    pr_number: z.number().int().positive(),
+    requirements: z.array(z.object({
+      // Anchored UID match — `requirements[].uid` must BE a UID (codex cycle-4 F2).
+      uid: z.string().regex(EXACT_REQUIREMENT_UID_RE),
+      title: z.string().min(1),
+      status: z.string().min(1),
+      note: z.string().optional(),
+    })),
+    files: z.object({
+      added: z.array(z.string().min(1)).optional(),
+      modified: z.array(z.string().min(1)).optional(),
+      renamed: z.array(z.string().min(1)).optional(),
+      deleted: z.array(z.string().min(1)).optional(),
+    }).optional(),
+    reviews: z.array(z.object({
+      reviewer: z.string().min(1),
+      summary: z.string().min(1),
+    })),
+    traceability: z.object({
+      added: z.array(z.string()).optional(),
+      updated: z.array(z.string()).optional(),
+      deleted: z.array(z.string()).optional(),
+      notes: z.string().optional(),
+    }).optional(),
+    ci_status: z.enum(["green", "red", "skipped"]),
+    sonar_status: z.enum(["passed", "failed", "skipped"]),
+    plan_comment_url: z.string().optional(),
+    summary: z.string().optional(),
+    lane: z.enum(["implement", "quickfix"]).optional(),
+  },
+  async ({ repo_path, issue_number, pr_number, requirements, files, reviews, traceability, ci_status, sonar_status, plan_comment_url, summary, lane }) => {
+    try {
+      return ok(JSON.stringify(await runPostFinalReport({
+        repoPath: repo_path,
+        issueNumber: issue_number,
+        prNumber: pr_number,
+        requirements,
+        files: files ?? {},
+        reviews,
+        traceability: traceability ?? {},
+        ciStatus: ci_status,
+        sonarStatus: sonar_status,
+        planCommentUrl: plan_comment_url ?? null,
+        lane: lane ?? null,
+        summary: summary ?? null,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_render_pr_body",
+  "Render a PR body that satisfies the Ground Control policy gates (template sections, requirement UIDs, ADR impact, three Ground Control Checks, IMPLEMENTS/TESTS markers, no defer language). Returns the rendered body string for the caller to pass to `gh pr create --body`. change_class shapes a few cells: doc-only marks integration tests / changelog fragment N/A; source requires changelog fragment; source+migration adds the MigrationSmokeTest reminder.",
+  {
+    repo_path: z.string(),
+    issue_number: z.number().int().positive(),
+    change_class: z.enum(PR_BODY_CHANGE_CLASSES),
+    // Use the ANCHORED EXACT_REQUIREMENT_UID_RE for structured UID fields
+    // (codex cycle-4 F2). The unanchored PR_REQUIREMENT_RE is a body-search
+    // predicate; here each array element must BE a UID, not contain one.
+    requirement_uids: z.array(z.string().regex(EXACT_REQUIREMENT_UID_RE)),
+    adr_refs: z.array(z.string().min(1)),
+    summary: z.string().min(1),
+    changes: z.array(z.string().min(1)),
+    traceability: z.object({
+      implements: z.array(z.string()),
+      tests: z.array(z.string()),
+    }),
+    changelog_fragment: z.string().optional(),
+    test_notes: z.string().optional(),
+  },
+  async ({ repo_path, issue_number, change_class, requirement_uids, adr_refs, summary, changes, traceability, changelog_fragment, test_notes }) => {
+    try {
+      return ok(JSON.stringify(await runRenderPrBody({
+        repoPath: repo_path,
+        issueNumber: issue_number,
+        changeClass: change_class,
+        requirementUids: requirement_uids,
+        adrRefs: adr_refs,
+        summary,
+        changes,
+        traceability,
+        changelogFragment: changelog_fragment ?? null,
+        testNotes: test_notes ?? null,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_log_step_telemetry",
+  "Append a single JSONL telemetry record for a /implement step to `.gc/telemetry/<issue>-<sanitized-branch>.jsonl`. Operational measurement only — NOT workflow state (per ADR-036). wall_time_ms is mandatory; input_tokens / output_tokens are optional. Path is repo-relative and validated for containment.",
+  {
+    repo_path: z.string(),
+    issue_number: z.number().int().positive(),
+    branch: z.string().min(1),
+    step: z.string().min(1),
+    tier: z.enum(TELEMETRY_TIERS),
+    model: z.string().min(1),
+    wall_time_ms: z.number().int().nonnegative(),
+    input_tokens: z.number().int().nonnegative().nullable().optional(),
+    output_tokens: z.number().int().nonnegative().nullable().optional(),
+    outcome: z.enum(TELEMETRY_OUTCOMES),
+    ts: z.string().optional(),
+  },
+  async ({ repo_path, issue_number, branch, step, tier, model, wall_time_ms, input_tokens, output_tokens, outcome, ts }) => {
+    try {
+      return ok(JSON.stringify(await runLogStepTelemetry({
+        repoPath: repo_path,
+        issueNumber: issue_number,
+        branch,
+        step,
+        tier,
+        model,
+        wallTimeMs: wall_time_ms,
+        inputTokens: input_tokens ?? null,
+        outputTokens: output_tokens ?? null,
+        outcome,
+        ts: ts ?? null,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_get_issue_thread",
+  "Fetch the GitHub issue body + comments with an in-memory content-addressed cache. First call returns the full payload + a sha256 hash; subsequent calls passing `expected_hash` return `{unchanged: true}` without re-fetching when the hash matches. Cache is keyed by (repo, issue_number) — NOT branch-keyed — and is operational only (the GitHub issue thread remains the durable record per ADR-029). Pass expected_hash=null to force a fresh fetch (use after a posting may have failed or when marker state is uncertain).",
+  {
+    repo_path: z.string(),
+    issue_number: z.number().int().positive(),
+    expected_hash: z.string().min(1).nullable().optional(),
+  },
+  async ({ repo_path, issue_number, expected_hash }) => {
+    try {
+      return ok(JSON.stringify(await runGetIssueThread({
+        repoPath: repo_path,
+        issueNumber: issue_number,
+        expectedHash: expected_hash ?? null,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_watch_ci_run",
+  "Poll a GitHub Actions run to a terminal state server-side and return one compact terminal envelope (conclusion, failed steps, bounded log summary). Designed for the /implement Step 10 monitor: the agent makes one tool call; the MCP server holds the connection while polling so the agent's context is not burned by per-poll turns. Defaults: queued cap 5 min, total cap 45 min, poll every 15s. On queued-too-long or timeout the tool returns ok=true with conclusion='queued_too_long' or 'timed_out' so the caller can decide policy. If run_id is omitted, the latest run for the branch is resolved via `gh run list`. Raw CI logs stay server-side; only a bounded UTF-8 summary (default 4096 bytes from the tail of `--log-failed`) reaches the caller.",
+  {
+    repo_path: z.string(),
+    branch: z.string().min(1),
+    run_id: z.number().int().positive().nullable().optional(),
+    queued_timeout_seconds: z.number().int().positive().optional(),
+    total_timeout_seconds: z.number().int().positive().optional(),
+    poll_interval_seconds: z.number().int().positive().optional(),
+  },
+  async ({ repo_path, branch, run_id, queued_timeout_seconds, total_timeout_seconds, poll_interval_seconds }) => {
+    try {
+      return ok(JSON.stringify(await runWatchCiRun({
+        repoPath: repo_path,
+        branch,
+        runId: run_id ?? null,
+        queuedTimeoutSeconds: queued_timeout_seconds ?? 300,
+        totalTimeoutSeconds: total_timeout_seconds ?? 2700,
+        pollIntervalSeconds: poll_interval_seconds ?? 15,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_codex_review_cycle",
+  "Pre-push codex-review cycle wrapper. Runs gc_codex_review (uncommitted=true) AND auto-posts the canonical per-cycle decision record (every finding gets decision='fix' with auto-rationale, the only decision the cycle tool can record without user authorization). Returns a compact envelope: {ok, reviewer, cycle, cap, status, next_action, findings_summary, findings_record_url, decision_record_url}. Verbatim review prose and per-finding bodies stay server-side via the underlying review's findings record — they never reach the agent through this tool. The subagent that drives the loop calls this tool once per cycle; on next_action='fix_findings_and_reinvoke' it fixes, self-verifies locally, re-stages, and re-invokes. wontfix / not-applicable decisions still require an explicit gc_post_decision_record call after user authorization.",
+  {
+    repo_path: z.string(),
+    issue_number: z.number().int().positive(),
+    base_branch: z.string().nullable().optional(),
+    uncommitted: z.boolean().optional(),
+    override_cap: z.boolean().optional(),
+    override_reason: z.string().nullable().optional(),
+  },
+  async ({ repo_path, issue_number, base_branch, uncommitted, override_cap, override_reason }) => {
+    try {
+      return ok(JSON.stringify(await runCodexReviewCycle({
+        repoPath: repo_path,
+        issueNumber: issue_number,
+        baseBranch: base_branch ?? null,
+        uncommitted: uncommitted ?? true,
+        overrideCap: Boolean(override_cap),
+        overrideReason: override_reason ?? null,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_test_quality_review_cycle",
+  "Pre-push test-quality review cycle wrapper. Runs gc_test_quality_review AND auto-posts the canonical per-cycle decision record (reviewer='test-quality', every finding decision='fix' with auto-rationale). Same compact envelope shape as gc_codex_review_cycle. Verbatim reviewer prose stays server-side. Skips automatically when the diff has no test files (the underlying review handles that).",
+  {
+    repo_path: z.string(),
+    issue_number: z.number().int().positive(),
+    base_branch: z.string().nullable().optional(),
+    override_cap: z.boolean().optional(),
+    override_reason: z.string().nullable().optional(),
+    model: z.string().optional(),
+  },
+  async ({ repo_path, issue_number, base_branch, override_cap, override_reason, model }) => {
+    try {
+      return ok(JSON.stringify(await runTestQualityReviewCycle({
+        repoPath: repo_path,
+        issueNumber: issue_number,
+        baseBranch: base_branch ?? null,
+        overrideCap: Boolean(override_cap),
+        overrideReason: override_reason ?? null,
+        model,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_watch_sonar_analysis",
+  "Poll SonarCloud for a PR's quality gate and open issues / hotspots server-side. Returns one compact terminal envelope: {quality_gate, issues_summary, hotspots_summary, full_issue_export_path}. Designed for /implement Step 11: the agent makes one tool call; the MCP server holds the connection through the analysis propagation wait (60s default) and quality-gate polling (30 min default). When the repo has no sonarcloud block in .ground-control.yaml the tool returns ok=true skipped=true quality_gate='NONE' (mirrors the existing skip behavior). SonarCloud REST authentication uses HTTP Basic with the SONAR_TOKEN env var as the username — the token is read at call time and passed only in the Authorization header (never argv, telemetry, export, or returned envelope). The full per-issue + per-hotspot payload is written server-side under `.gc/sonar/<pr>-<ts>.json` for on-demand drilldown; only summaries reach the caller.",
+  {
+    repo_path: z.string(),
+    pr_number: z.number().int().positive(),
+    initial_wait_seconds: z.number().int().nonnegative().optional(),
+    total_timeout_seconds: z.number().int().nonnegative().optional(),
+    poll_interval_seconds: z.number().int().nonnegative().optional(),
+  },
+  async ({ repo_path, pr_number, initial_wait_seconds, total_timeout_seconds, poll_interval_seconds }) => {
+    try {
+      return ok(JSON.stringify(await runWatchSonarAnalysis({
+        repoPath: repo_path,
+        prNumber: pr_number,
+        initialWaitSeconds: initial_wait_seconds ?? 60,
+        totalTimeoutSeconds: total_timeout_seconds ?? 1800,
+        pollIntervalSeconds: poll_interval_seconds ?? 30,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_resolve_workflow_route",
+  "Resolve the configured /implement route for a workflow stage or purpose. Returns the provider, agent, canonical model id, tier, fallback policy, and source, or a structured disabled/unavailable response. This is the executable routing contract; callers use it before delegated stages instead of relying on skill prose.",
+  {
+    repo_path: z.string(),
+    stage: z.string().min(1),
+    tier: z.enum(TELEMETRY_TIERS).optional(),
+  },
+  async ({ repo_path, stage, tier }) => {
+    try {
+      return ok(JSON.stringify(await runResolveWorkflowRoute({
+        repoPath: repo_path,
+        stage,
+        tier: tier ?? null,
       }), null, 2));
     } catch (e) { return err(e); }
   },
@@ -767,12 +1196,21 @@ server.tool(
 const ANALYZE_KINDS = [
   "cycles", "orphans", "coverage_gaps", "impact", "cross_wave",
   "consistency", "completeness", "status_drift", "similarity", "work_order",
+  // GC-L007 — GRC analyses on existing substrates. Methodology-execution
+  // engines (FAIR / FAIR-CAM / NIST) and compliance-framework analyses are
+  // tracked separately and ship their own kinds when those engines land.
+  "evidence_freshness", "observation_exposure", "control_state", "vendor_risk_aggregation",
 ];
 
 server.tool(
   "gc_analyze",
   `Compute-heavy analysis operations. Kinds: ${ANALYZE_KINDS.join(", ")}. ` +
-    `Required fields per kind: coverage_gaps→{link_type}; impact→{id}; status_drift→{minimum_confidence?}; similarity→{threshold?}. Others take {project?}.`,
+    `Required fields per kind: coverage_gaps→{link_type}; impact→{id}; status_drift→{minimum_confidence?}; similarity→{threshold?}; ` +
+    `evidence_freshness→{project?, as_of?, freshness_window_days?, include_superseded?, asset_id?, control_id?}; ` +
+    `observation_exposure→{project?, as_of?, asset_id?}; ` +
+    `control_state→{project?, as_of?, asset_id?, control_id?}; ` +
+    `vendor_risk_aggregation→{project?, as_of?, freshness_window_days?, vendor_asset_id?}. ` +
+    `Others take {project?}.`,
   {
     kind: z.enum(ANALYZE_KINDS),
     project: z.string().optional(),
@@ -780,6 +1218,13 @@ server.tool(
     link_type: z.enum(LINK_TYPES).optional(),
     minimum_confidence: z.enum(CONFIDENCE_LEVELS).optional(),
     threshold: z.number().optional(),
+    // GC-L007 GRC analysis params
+    as_of: z.string().datetime().optional(),
+    freshness_window_days: z.number().int().positive().optional(),
+    include_superseded: z.boolean().optional(),
+    asset_id: z.string().uuid().optional(),
+    control_id: z.string().uuid().optional(),
+    vendor_asset_id: z.string().uuid().optional(),
   },
   async (args) => {
     try {
@@ -800,6 +1245,37 @@ server.tool(
         case "status_drift": return ok(JSON.stringify(await analyzeStatusDrift({ project: args.project, minimumConfidence: args.minimum_confidence }), null, 2));
         case "similarity": return ok(JSON.stringify(await analyzeSemanticSimilarity({ project: args.project, threshold: args.threshold }), null, 2));
         case "work_order": return ok(JSON.stringify(await getWorkOrder(args.project), null, 2));
+        case "evidence_freshness":
+          return ok(JSON.stringify(await analyzeEvidenceFreshness({
+            project: args.project,
+            asOf: args.as_of,
+            freshnessWindowDays: args.freshness_window_days,
+            includeSuperseded: args.include_superseded,
+            assetId: args.asset_id,
+            controlId: args.control_id,
+          }), null, 2));
+        case "observation_exposure":
+          return ok(JSON.stringify(await analyzeObservationProjection({
+            project: args.project,
+            asOf: args.as_of,
+            mode: "ASSET_EXPOSURE",
+            assetId: args.asset_id,
+          }), null, 2));
+        case "control_state":
+          return ok(JSON.stringify(await analyzeObservationProjection({
+            project: args.project,
+            asOf: args.as_of,
+            mode: "CONTROL_STATE",
+            assetId: args.asset_id,
+            controlId: args.control_id,
+          }), null, 2));
+        case "vendor_risk_aggregation":
+          return ok(JSON.stringify(await aggregateVendorRisk({
+            project: args.project,
+            asOf: args.as_of,
+            freshnessWindowDays: args.freshness_window_days,
+            vendorAssetId: args.vendor_asset_id,
+          }), null, 2));
         default: return err(new Error(`Unknown kind: ${args.kind}`));
       }
     } catch (e) { return err(e); }
@@ -951,11 +1427,16 @@ const ASSET_ACTIONS = [
   "relation_create", "relation_delete", "detect_cycles", "impact_analysis", "extract_subgraph",
   "link_create", "link_delete",
   "external_id_create", "external_id_update", "external_id_delete",
+  // GC-M011 subtype-schema registry actions.
+  "subtype_schema_create", "subtype_schema_update", "subtype_schema_deprecate",
+  "subtype_schema_get", "subtype_schema_get_active", "subtype_schema_list",
 ];
 
 server.tool(
   "gc_asset",
   `Operational asset operations incl. relations, links, external IDs. Actions: ${ASSET_ACTIONS.join(", ")}. ` +
+    `link_create requires target_type + link_type; pass target_entity_id for internal target types ` +
+    `or target_identifier for external types. target_url / target_title are optional. ` +
     `Reads (list, get, get_by_uid, find_by_external_id, links, external_ids) route through gc_query.`,
   {
     action: z.enum(ASSET_ACTIONS),
@@ -965,6 +1446,43 @@ server.tool(
     name: z.string().optional(),
     description: z.string().optional(),
     asset_type: z.enum(ASSET_TYPES).optional(),
+    // GC-M012 metadata: ownership, stewardship, environment, criticality,
+    // business/mission context, and assurance scope.
+    owner: z.string().optional(),
+    steward: z.string().optional(),
+    environment: z.enum(ASSET_ENVIRONMENTS).optional(),
+    criticality: z.enum(ASSET_CRITICALITIES).optional(),
+    business_context: z.string().optional(),
+    scope_designation: z.enum(ASSET_SCOPES).optional(),
+    // GC-M012 clear flags: reset a previously-designated metadata field back
+    // to NULL ("not designated") on update. Clear wins over a same-payload
+    // assignment to keep the semantic unambiguous; see UpdateAssetCommand.
+    clear_owner: z.boolean().optional(),
+    clear_steward: z.boolean().optional(),
+    clear_environment: z.boolean().optional(),
+    clear_criticality: z.boolean().optional(),
+    clear_business_context: z.boolean().optional(),
+    clear_scope_designation: z.boolean().optional(),
+    // GC-M011: subtype discriminator + extensible metadata bag.
+    subtype: z.string().optional(),
+    metadata: z.record(z.any()).optional(),
+    clear_subtype: z.boolean().optional(),
+    clear_metadata: z.boolean().optional(),
+    // GC-M018: knowledge / completeness dimension on asset AND relation.
+    // Distinct from confidence; see the preflight note. There is no
+    // clear flag — the underlying column is NOT NULL and null on
+    // update means "leave unchanged".
+    knowledge_state: z.enum(KNOWLEDGE_STATES).optional(),
+    // GC-M011: subtype-schema registry parameters. Schema body is an
+    // any-shape object so callers can mint registry entries without the
+    // MCP enforcing the validator's wire shape — the backend validator is
+    // the authority.
+    schema_id: z.string().uuid().optional(),
+    schema_version: z.string().optional(),
+    schema_body: z.record(z.any()).optional(),
+    schema_description: z.string().optional(),
+    clear_schema_description: z.boolean().optional(),
+    clear_schema_body: z.boolean().optional(),
     parent_id: z.string().uuid().nullable().optional(),
     // relations
     source_id: z.string().uuid().optional(),
@@ -974,8 +1492,8 @@ server.tool(
     // links
     asset_id: z.string().uuid().optional(),
     target_type: z.enum(ASSET_LINK_TARGET_TYPES).optional(),
-    target_identifier: z.string().optional(),
     link_type: z.enum(ASSET_LINK_TYPES).optional(),
+    ...linkCreateOptionalSharedZodFields,
     link_id: z.string().uuid().optional(),
     // external IDs
     namespace: z.string().optional(),
@@ -986,13 +1504,44 @@ server.tool(
   },
   async (args) => {
     try {
-      const ASSET_FIELDS = ["name", "description", "asset_type", "parent_id"];
-      const RELATION_FIELDS = ["source_id", "target_id", "relation_type"];
-      const LINK_FIELDS = ["target_type", "target_identifier", "link_type"];
+      const ASSET_FIELDS = [
+        // `uid` is @NotBlank on the backend AssetRequest; without it on the
+        // forwarded field list, the create path drops the caller-supplied
+        // uid and the backend rejects the body (codex cycle-3 finding 1).
+        "uid",
+        "name",
+        "description",
+        "asset_type",
+        "parent_id",
+        // GC-M012 ownership/criticality/scope metadata + clear flags.
+        "owner",
+        "steward",
+        "environment",
+        "criticality",
+        "business_context",
+        "scope_designation",
+        "clear_owner",
+        "clear_steward",
+        "clear_environment",
+        "clear_criticality",
+        "clear_business_context",
+        "clear_scope_designation",
+        // GC-M011 subtype + metadata + clear flags.
+        "subtype",
+        "metadata",
+        "clear_subtype",
+        "clear_metadata",
+        // GC-M018 knowledge / completeness state. Pinned to the
+        // forwarded fields so create / update paths thread the value
+        // through to the backend's CreateAssetCommand /
+        // UpdateAssetCommand.
+        "knowledge_state",
+      ];
+      const RELATION_FIELDS = ["source_id", "target_id", "relation_type", "knowledge_state"];
       const EXT_ID_FIELDS = ["namespace", "external_id"];
       switch (args.action) {
         case "create": {
-          reqArg(args, "name", "create"); reqArg(args, "asset_type", "create");
+          reqArg(args, "uid", "create"); reqArg(args, "name", "create"); reqArg(args, "asset_type", "create");
           return ok(JSON.stringify(await createAsset(pick(args, ASSET_FIELDS), args.project), null, 2));
         }
         case "update": {
@@ -1029,9 +1578,12 @@ server.tool(
           return ok(JSON.stringify(await extractAssetSubgraph({ roots: args.roots, maxDepth: args.max_depth }, args.project), null, 2));
         }
         case "link_create": {
-          // lib.js: createAssetLink(assetId, data, project)
-          reqArg(args, "asset_id", "link_create"); reqArg(args, "target_type", "link_create"); reqArg(args, "target_identifier", "link_create"); reqArg(args, "link_type", "link_create");
-          return ok(JSON.stringify(await createAssetLink(args.asset_id, pick(args, LINK_FIELDS), args.project), null, 2));
+          // lib.js: createAssetLink(assetId, data, project). Body shape +
+          // target_type/link_type preconditions live in link-create.js so
+          // every consolidated link_create surface stays in sync with the
+          // backend link DTO (target_entity_id, target_identifier, target_url,
+          // target_title are all forwarded).
+          return ok(JSON.stringify(await performLinkCreate(args, "asset_id", createAssetLink), null, 2));
         }
         case "link_delete": {
           // lib.js: deleteAssetLink(assetId, linkId, project)
@@ -1054,6 +1606,63 @@ server.tool(
           reqArg(args, "asset_id", "external_id_delete"); reqArg(args, "external_id_record_id", "external_id_delete");
           await deleteAssetExternalId(args.asset_id, args.external_id_record_id, args.project);
           return ok("Deleted");
+        }
+        case "subtype_schema_create": {
+          reqArg(args, "asset_type", "subtype_schema_create");
+          reqArg(args, "subtype", "subtype_schema_create");
+          reqArg(args, "schema_version", "subtype_schema_create");
+          // schema_body is required at the MCP boundary too — the backend
+          // rejects ACTIVE registry rows without a non-empty `fields` map
+          // (AssetService.registerSubtypeSchema invokes validateSchemaBody
+          // with requireFields=true). Failing fast here surfaces the
+          // contract instead of round-tripping a 422 (codex cycle-3 #1).
+          reqArg(args, "schema_body", "subtype_schema_create");
+          const body = {
+            assetType: args.asset_type,
+            subtype: args.subtype,
+            schemaVersion: args.schema_version,
+            description: args.schema_description,
+            schemaBody: args.schema_body,
+          };
+          return ok(JSON.stringify(await registerAssetSubtypeSchema(body, args.project), null, 2));
+        }
+        case "subtype_schema_update": {
+          reqArg(args, "schema_id", "subtype_schema_update");
+          const body = {
+            description: args.schema_description,
+            schemaBody: args.schema_body,
+            clearDescription: args.clear_schema_description,
+            clearSchemaBody: args.clear_schema_body,
+          };
+          return ok(JSON.stringify(await updateAssetSubtypeSchema(args.schema_id, body, args.project), null, 2));
+        }
+        case "subtype_schema_deprecate": {
+          reqArg(args, "schema_id", "subtype_schema_deprecate");
+          return ok(JSON.stringify(await deprecateAssetSubtypeSchema(args.schema_id, args.project), null, 2));
+        }
+        case "subtype_schema_get": {
+          reqArg(args, "schema_id", "subtype_schema_get");
+          return ok(JSON.stringify(await getAssetSubtypeSchema(args.schema_id, args.project), null, 2));
+        }
+        case "subtype_schema_get_active": {
+          reqArg(args, "asset_type", "subtype_schema_get_active");
+          reqArg(args, "subtype", "subtype_schema_get_active");
+          return ok(JSON.stringify(
+            await getActiveAssetSubtypeSchema(args.asset_type, args.subtype, args.project),
+            null,
+            2,
+          ));
+        }
+        case "subtype_schema_list": {
+          return ok(JSON.stringify(
+            await listAssetSubtypeSchemas({
+              project: args.project,
+              assetType: args.asset_type,
+              subtype: args.subtype,
+            }),
+            null,
+            2,
+          ));
         }
         default: return err(new Error(`Unknown action: ${args.action}`));
       }
@@ -1110,184 +1719,366 @@ server.tool(
   },
 );
 
-const RISK_SCENARIO_ACTIONS = ["create", "update", "delete", "transition", "requirements", "link_create", "link_delete"];
-
 server.tool(
   "gc_risk_scenario",
-  `Risk scenarios + their links. Actions: ${RISK_SCENARIO_ACTIONS.join(", ")}. ` +
-    `Reads (list, get, links_list) route through gc_query.`,
-  {
-    action: z.enum(RISK_SCENARIO_ACTIONS),
-    id: z.string().uuid().optional(),
-    uid: z.string().optional(),
-    project: z.string().optional(),
-    title: z.string().optional(),
-    description: z.string().optional(),
-    status: z.enum(RISK_SCENARIO_STATUSES).optional(),
-    methodology_profile_id: z.string().uuid().nullable().optional(),
-    metadata: z.record(z.any()).optional(),
-    // links
-    scenario_id: z.string().uuid().optional(),
-    target_type: z.enum(RISK_SCENARIO_LINK_TARGET_TYPES).optional(),
-    target_identifier: z.string().optional(),
-    link_type: z.enum(RISK_SCENARIO_LINK_TYPES).optional(),
-    link_id: z.string().uuid().optional(),
-  },
+  GC_RISK_SCENARIO_DESCRIPTION,
+  gcRiskScenarioZodShape,
   async (args) => {
     try {
-      const ENTITY_FIELDS = ["uid", "title", "description", "status", "methodology_profile_id", "metadata"];
-      const LINK_FIELDS = ["target_type", "target_identifier", "link_type"];
-      switch (args.action) {
-        case "create": {
-          reqArg(args, "title", "create");
-          return ok(JSON.stringify(await createRiskScenario(pick(args, ENTITY_FIELDS), args.project), null, 2));
-        }
-        case "update": {
-          reqArg(args, "id", "update");
-          return ok(JSON.stringify(await updateRiskScenario(args.id, pick(args, ENTITY_FIELDS), args.project), null, 2));
-        }
-        case "delete": {
-          reqArg(args, "id", "delete");
-          await deleteRiskScenario(args.id, args.project);
-          return ok("Deleted");
-        }
-        case "transition": {
-          reqArg(args, "id", "transition"); reqArg(args, "status", "transition");
-          return ok(JSON.stringify(await transitionRiskScenarioStatus(args.id, args.status, args.project), null, 2));
-        }
-        case "requirements": {
-          reqArg(args, "id", "requirements");
-          return ok(JSON.stringify(await getRiskScenarioRequirements(args.id, args.project), null, 2));
-        }
-        case "link_create": {
-          // lib.js: createRiskScenarioLink takes (scenarioId, data, project) per consistency with asset patterns; verify by spot-check
-          reqArg(args, "scenario_id", "link_create"); reqArg(args, "target_type", "link_create"); reqArg(args, "target_identifier", "link_create"); reqArg(args, "link_type", "link_create");
-          return ok(JSON.stringify(await createRiskScenarioLink(args.scenario_id, pick(args, LINK_FIELDS), args.project), null, 2));
-        }
-        case "link_delete": {
-          reqArg(args, "scenario_id", "link_delete"); reqArg(args, "link_id", "link_delete");
-          await deleteRiskScenarioLink(args.scenario_id, args.link_id, args.project);
-          return ok("Deleted");
-        }
-        default: return err(new Error(`Unknown action: ${args.action}`));
-      }
+      const result = await gcRiskScenarioToolHandler(args);
+      return result === null ? ok("Deleted") : ok(JSON.stringify(result, null, 2));
     } catch (e) { return err(e); }
   },
 );
-
-const THREAT_MODEL_ACTIONS = ["create", "update", "delete", "transition", "link_create", "link_delete"];
 
 server.tool(
   "gc_threat_model",
-  `Threat models + their links. Actions: ${THREAT_MODEL_ACTIONS.join(", ")}. ` +
-    `Reads (list, get, links_list) route through gc_query.`,
-  {
-    action: z.enum(THREAT_MODEL_ACTIONS),
-    id: z.string().uuid().optional(),
-    uid: z.string().optional(),
-    project: z.string().optional(),
-    title: z.string().optional(),
-    description: z.string().optional(),
-    status: z.enum(THREAT_MODEL_STATUSES).optional(),
-    stride_category: z.enum(STRIDE_CATEGORIES).optional(),
-    metadata: z.record(z.any()).optional(),
-    // links
-    threat_model_id: z.string().uuid().optional(),
-    target_type: z.enum(THREAT_MODEL_LINK_TARGET_TYPES).optional(),
-    target_identifier: z.string().optional(),
-    link_type: z.enum(THREAT_MODEL_LINK_TYPES).optional(),
-    link_id: z.string().uuid().optional(),
-  },
+  GC_THREAT_MODEL_DESCRIPTION,
+  gcThreatModelZodShape,
   async (args) => {
     try {
-      const ENTITY_FIELDS = ["uid", "title", "description", "status", "stride_category", "metadata"];
-      const LINK_FIELDS = ["target_type", "target_identifier", "link_type"];
-      switch (args.action) {
-        case "create": {
-          reqArg(args, "title", "create");
-          return ok(JSON.stringify(await createThreatModel(pick(args, ENTITY_FIELDS), args.project), null, 2));
-        }
-        case "update": {
-          reqArg(args, "id", "update");
-          return ok(JSON.stringify(await updateThreatModel(args.id, pick(args, ENTITY_FIELDS), args.project), null, 2));
-        }
-        case "delete": {
-          reqArg(args, "id", "delete");
-          await deleteThreatModel(args.id, args.project);
-          return ok("Deleted");
-        }
-        case "transition": {
-          reqArg(args, "id", "transition"); reqArg(args, "status", "transition");
-          return ok(JSON.stringify(await transitionThreatModelStatus(args.id, args.status, args.project), null, 2));
-        }
-        case "link_create": {
-          reqArg(args, "threat_model_id", "link_create"); reqArg(args, "target_type", "link_create"); reqArg(args, "target_identifier", "link_create"); reqArg(args, "link_type", "link_create");
-          return ok(JSON.stringify(await createThreatModelLink(args.threat_model_id, pick(args, LINK_FIELDS), args.project), null, 2));
-        }
-        case "link_delete": {
-          reqArg(args, "threat_model_id", "link_delete"); reqArg(args, "link_id", "link_delete");
-          await deleteThreatModelLink(args.threat_model_id, args.link_id, args.project);
-          return ok("Deleted");
-        }
-        default: return err(new Error(`Unknown action: ${args.action}`));
-      }
+      const result = await gcThreatModelToolHandler(args);
+      return result === null ? ok("Deleted") : ok(JSON.stringify(result, null, 2));
     } catch (e) { return err(e); }
   },
 );
 
-const CONTROL_ACTIONS = ["create", "update", "delete", "transition", "link_create", "link_delete"];
+server.tool(
+  "gc_finding",
+  GC_FINDING_DESCRIPTION,
+  gcFindingZodShape,
+  async (args) => {
+    try {
+      const result = await gcFindingToolHandler(args);
+      return result === null ? ok("Deleted") : ok(JSON.stringify(result, null, 2));
+    } catch (e) { return err(e); }
+  },
+);
 
+// gc_audit: GC-U001 / ADR-048. Full lifecycle audit management.
+server.tool(
+  "gc_audit",
+  GC_AUDIT_DESCRIPTION,
+  gcAuditZodShape,
+  async (args) => {
+    try {
+      const result = await gcAuditToolHandler(args);
+      return result === null ? ok("Deleted") : ok(JSON.stringify(result, null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+// gc_evidence: GC-M016 / ADR-045. Append-only — create / supersede only;
+// reads (list, get) route through gc_query at /api/v1/evidence-artifacts.
+server.tool(
+  "gc_evidence",
+  GC_EVIDENCE_DESCRIPTION,
+  gcEvidenceZodShape,
+  async (args) => {
+    try {
+      const result = await gcEvidenceToolHandler(args);
+      return ok(JSON.stringify(result, null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+// gc_control: control + control_test (GC-I012) + control_effectiveness_assessment
+// (GC-I013). Handler logic (Zod shape, per-entity per-action allowlist dispatch
+// via lib.js CONTROL_FIELDS) lives in gc-control.js so the adapter is testable
+// in isolation. The entity discriminator defaults to "control" so callers from
+// before the GC-I012/GC-I013 split keep working unchanged.
 server.tool(
   "gc_control",
-  `Controls + their links. Actions: ${CONTROL_ACTIONS.join(", ")}. ` +
-    `Reads (list, get, links_list) route through gc_query.`,
+  GC_CONTROL_DESCRIPTION,
+  gcControlZodShape,
+  async (args) => {
+    try {
+      const result = await gcControlToolHandler(args);
+      return result === null ? ok("Deleted") : ok(JSON.stringify(result, null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+// gc_test_case: TC-001 / ADR-040 + TC-002 / ADR-041 + TC-004 / ADR-042.
+// Reusable test-definition aggregate at /api/v1/test-cases, its ordered child
+// step aggregate at /api/v1/test-cases/{id}/steps, and the BDD/Gherkin
+// singleton sub-resource at /api/v1/test-cases/{id}/gherkin. Reads (list, get,
+// get-by-uid, step-list, step-get, gherkin-get) route through gc_query.
+const TEST_CASE_ACTIONS = [
+  "create", "update", "delete", "transition",
+  "step-create", "step-update", "step-delete",
+  "gherkin-create", "gherkin-update", "gherkin-delete",
+  // TC-005 / ADR-043 — Hierarchical organisation actions.
+  "folder-create", "folder-update", "folder-delete", "folder-move", "folder-reorder",
+  "move", "copy", "reorder",
+];
+
+server.tool(
+  "gc_test_case",
+  `Test case operations (TC-001 / ADR-040 + TC-002 / ADR-041 + TC-004 / ADR-042). ` +
+    `Actions: ${TEST_CASE_ACTIONS.join(", ")}. ` +
+    `Reads (list, get, get-by-uid, step-list, step-get, gherkin-get) route through gc_query.`,
   {
-    action: z.enum(CONTROL_ACTIONS),
+    action: z.enum(TEST_CASE_ACTIONS),
     id: z.string().uuid().optional(),
-    uid: z.string().optional(),
     project: z.string().optional(),
+    uid: z.string().optional(),
     title: z.string().optional(),
+    type: z.enum(TEST_CASE_TYPES).optional(),
+    priority: z.enum(TEST_CASE_PRIORITIES).optional(),
+    // TC-004 / ADR-042 — authored format axis. Optional on create (defaults to
+    // STEP_BASED server-side). Immutable after create.
+    format: z.enum(TEST_CASE_FORMATS).optional(),
     description: z.string().optional(),
-    status: z.enum(CONTROL_STATUSES).optional(),
-    control_function: z.enum(CONTROL_FUNCTIONS).optional(),
-    metadata: z.record(z.any()).optional(),
-    // links
-    control_id: z.string().uuid().optional(),
-    target_type: z.enum(CONTROL_LINK_TARGET_TYPES).optional(),
-    target_identifier: z.string().optional(),
-    link_type: z.enum(CONTROL_LINK_TYPES).optional(),
-    link_id: z.string().uuid().optional(),
+    preconditions: z.string().optional(),
+    postconditions: z.string().optional(),
+    estimated_duration_seconds: z.number().int().nonnegative().nullable().optional(),
+    status: z.enum(TEST_CASE_STATUSES).optional(),
+    // Partial-update clear flags (TC-001 codex cycle 1) — UpdateTestCaseRequest
+    // accepts these on update so a client can wipe a nullable text/duration
+    // field. Sending clearX=true overrides any non-null value in the same body.
+    clear_description: z.boolean().optional(),
+    clear_preconditions: z.boolean().optional(),
+    clear_postconditions: z.boolean().optional(),
+    clear_estimated_duration: z.boolean().optional(),
+    // TC-002 step actions. test_case_id is the parent test case; step_id is the
+    // step itself (step-update / step-delete). step_number is the per-test-case
+    // ordering value. action / expected_result / actual_result are the step's
+    // rich-text fields (CommonMark Markdown by convention per ADR-041).
+    test_case_id: z.string().uuid().optional(),
+    step_id: z.string().uuid().optional(),
+    step_number: z.number().int().positive().optional(),
+    step_action: z.string().optional(),
+    expected_result: z.string().optional(),
+    actual_result: z.string().nullable().optional(),
+    clear_actual_result: z.boolean().optional(),
+    // TC-004 Gherkin action body — `gherkin_source` is the MCP arg (namespaced
+    // to avoid clashing with any other "source" field on future test_case
+    // sub-resources); handler maps it to backend body `{ source }`.
+    gherkin_source: z.string().optional(),
+    // TC-005 / ADR-043 — folder + move/copy/reorder action fields.
+    folder_id: z.string().uuid().optional(),
+    parent_folder_id: z.string().uuid().nullable().optional(),
+    sort_order: z.number().int().nonnegative().nullable().optional(),
+    folder_title: z.string().optional(),
+    folder_description: z.string().nullable().optional(),
+    clear_folder_description: z.boolean().optional(),
+    new_uid: z.string().optional(),
+    ordered_folder_ids: z.array(z.string().uuid()).optional(),
+    ordered_test_case_ids: z.array(z.string().uuid()).optional(),
   },
   async (args) => {
     try {
-      const ENTITY_FIELDS = ["uid", "title", "description", "status", "control_function", "metadata"];
-      const LINK_FIELDS = ["target_type", "target_identifier", "link_type"];
+      const ENTITY_FIELDS = [
+        "uid", "title", "type", "priority", "format", "description",
+        "preconditions", "postconditions", "estimated_duration_seconds",
+        "clear_description", "clear_preconditions", "clear_postconditions",
+        "clear_estimated_duration",
+        // TC-005 / ADR-043 — Placement fields on create only. The
+        // backend's UpdateTestCaseRequest does NOT carry parent_folder_id
+        // or sort_order; if those were in the update allowlist the MCP
+        // call would accept them silently and Spring would drop them at
+        // deserialization (codex cycle-2 finding). Update uses a separate
+        // allowlist below; move/copy/reorder are dedicated actions.
+        "parent_folder_id", "sort_order",
+      ];
+      const UPDATE_ENTITY_FIELDS = [
+        "title", "type", "priority", "description",
+        "preconditions", "postconditions", "estimated_duration_seconds",
+        "clear_description", "clear_preconditions", "clear_postconditions",
+        "clear_estimated_duration",
+      ];
+      // TC-005 / ADR-043 — TestCaseFolder request bodies. `folder_title` and
+      // `folder_description` are MCP-side names that map to the backend's
+      // `title` / `description` via lib.js FIELD_NAME_MAP; on update,
+      // `clear_folder_description` maps to `clearDescription`.
+      const folderCreateBody = () => {
+        const body = pick(args, ["parent_folder_id", "sort_order"]);
+        if (args.folder_title !== undefined) body.title = args.folder_title;
+        if (args.folder_description !== undefined) body.description = args.folder_description;
+        return body;
+      };
+      const folderUpdateBody = () => {
+        const body = {};
+        if (args.folder_title !== undefined) body.title = args.folder_title;
+        if (args.folder_description !== undefined) body.description = args.folder_description;
+        if (args.clear_folder_description !== undefined) body.clearDescription = args.clear_folder_description;
+        return body;
+      };
+      const STEP_FIELDS = [
+        "step_number", "expected_result", "actual_result", "clear_actual_result",
+      ];
+      // Map step_action → action so the MCP arg shape (which uses step_action
+      // to avoid clashing with the existing action discriminator) lines up with
+      // the backend's TestCaseStepRequest.action / .expectedResult / .actualResult.
+      const stepBody = (extra) => {
+        const body = pick(args, STEP_FIELDS);
+        if (extra && extra.includeAction && args.step_action !== undefined) {
+          body.action = args.step_action;
+        }
+        return body;
+      };
       switch (args.action) {
         case "create": {
+          reqArg(args, "uid", "create");
           reqArg(args, "title", "create");
-          return ok(JSON.stringify(await createControl(pick(args, ENTITY_FIELDS), args.project), null, 2));
+          reqArg(args, "type", "create");
+          reqArg(args, "priority", "create");
+          return ok(JSON.stringify(await createTestCase(pick(args, ENTITY_FIELDS), args.project), null, 2));
         }
         case "update": {
           reqArg(args, "id", "update");
-          return ok(JSON.stringify(await updateControl(args.id, pick(args, ENTITY_FIELDS), args.project), null, 2));
+          return ok(JSON.stringify(
+            await updateTestCase(args.id, pick(args, UPDATE_ENTITY_FIELDS), args.project),
+            null,
+            2,
+          ));
         }
         case "delete": {
           reqArg(args, "id", "delete");
-          await deleteControl(args.id, args.project);
+          await deleteTestCase(args.id, args.project);
           return ok("Deleted");
         }
         case "transition": {
-          reqArg(args, "id", "transition"); reqArg(args, "status", "transition");
-          return ok(JSON.stringify(await transitionControlStatus(args.id, args.status, args.project), null, 2));
+          reqArg(args, "id", "transition");
+          reqArg(args, "status", "transition");
+          return ok(JSON.stringify(
+            await transitionTestCaseStatus(args.id, args.status, args.project),
+            null,
+            2,
+          ));
         }
-        case "link_create": {
-          reqArg(args, "control_id", "link_create"); reqArg(args, "target_type", "link_create"); reqArg(args, "target_identifier", "link_create"); reqArg(args, "link_type", "link_create");
-          return ok(JSON.stringify(await createControlLink(args.control_id, pick(args, LINK_FIELDS), args.project), null, 2));
+        case "step-create": {
+          reqArg(args, "test_case_id", "step-create");
+          reqArg(args, "step_number", "step-create");
+          reqArg(args, "step_action", "step-create");
+          reqArg(args, "expected_result", "step-create");
+          return ok(JSON.stringify(
+            await createTestCaseStep(args.test_case_id, stepBody({ includeAction: true }), args.project),
+            null,
+            2,
+          ));
         }
-        case "link_delete": {
-          reqArg(args, "control_id", "link_delete"); reqArg(args, "link_id", "link_delete");
-          await deleteControlLink(args.control_id, args.link_id, args.project);
+        case "step-update": {
+          reqArg(args, "test_case_id", "step-update");
+          reqArg(args, "step_id", "step-update");
+          return ok(JSON.stringify(
+            await updateTestCaseStep(
+              args.test_case_id,
+              args.step_id,
+              stepBody({ includeAction: true }),
+              args.project,
+            ),
+            null,
+            2,
+          ));
+        }
+        case "step-delete": {
+          reqArg(args, "test_case_id", "step-delete");
+          reqArg(args, "step_id", "step-delete");
+          await deleteTestCaseStep(args.test_case_id, args.step_id, args.project);
           return ok("Deleted");
+        }
+        case "gherkin-create": {
+          reqArg(args, "test_case_id", "gherkin-create");
+          reqArg(args, "gherkin_source", "gherkin-create");
+          return ok(JSON.stringify(
+            await createTestCaseGherkin(args.test_case_id, { source: args.gherkin_source }, args.project),
+            null,
+            2,
+          ));
+        }
+        case "gherkin-update": {
+          reqArg(args, "test_case_id", "gherkin-update");
+          reqArg(args, "gherkin_source", "gherkin-update");
+          return ok(JSON.stringify(
+            await updateTestCaseGherkin(args.test_case_id, { source: args.gherkin_source }, args.project),
+            null,
+            2,
+          ));
+        }
+        case "gherkin-delete": {
+          reqArg(args, "test_case_id", "gherkin-delete");
+          await deleteTestCaseGherkin(args.test_case_id, args.project);
+          return ok("Deleted");
+        }
+        case "folder-create": {
+          reqArg(args, "folder_title", "folder-create");
+          return ok(JSON.stringify(
+            await createTestCaseFolder(folderCreateBody(), args.project),
+            null,
+            2,
+          ));
+        }
+        case "folder-update": {
+          reqArg(args, "folder_id", "folder-update");
+          return ok(JSON.stringify(
+            await updateTestCaseFolder(args.folder_id, folderUpdateBody(), args.project),
+            null,
+            2,
+          ));
+        }
+        case "folder-delete": {
+          reqArg(args, "folder_id", "folder-delete");
+          await deleteTestCaseFolder(args.folder_id, args.project);
+          return ok("Deleted");
+        }
+        case "folder-move": {
+          reqArg(args, "folder_id", "folder-move");
+          return ok(JSON.stringify(
+            await moveTestCaseFolder(
+              args.folder_id,
+              { parentFolderId: args.parent_folder_id ?? null, sortOrder: args.sort_order ?? null },
+              args.project,
+            ),
+            null,
+            2,
+          ));
+        }
+        case "folder-reorder": {
+          reqArg(args, "ordered_folder_ids", "folder-reorder");
+          await reorderTestCaseFolders(
+            { parentFolderId: args.parent_folder_id ?? null, orderedFolderIds: args.ordered_folder_ids },
+            args.project,
+          );
+          return ok("Reordered");
+        }
+        case "move": {
+          reqArg(args, "id", "move");
+          return ok(JSON.stringify(
+            await moveTestCase(
+              args.id,
+              { parentFolderId: args.parent_folder_id ?? null, sortOrder: args.sort_order ?? null },
+              args.project,
+            ),
+            null,
+            2,
+          ));
+        }
+        case "copy": {
+          reqArg(args, "id", "copy");
+          reqArg(args, "new_uid", "copy");
+          return ok(JSON.stringify(
+            await copyTestCase(
+              args.id,
+              {
+                newUid: args.new_uid,
+                parentFolderId: args.parent_folder_id ?? null,
+                sortOrder: args.sort_order ?? null,
+              },
+              args.project,
+            ),
+            null,
+            2,
+          ));
+        }
+        case "reorder": {
+          reqArg(args, "ordered_test_case_ids", "reorder");
+          await reorderTestCases(
+            { parentFolderId: args.parent_folder_id ?? null, orderedTestCaseIds: args.ordered_test_case_ids },
+            args.project,
+          );
+          return ok("Reordered");
         }
         default: return err(new Error(`Unknown action: ${args.action}`));
       }
@@ -1295,104 +2086,459 @@ server.tool(
   },
 );
 
-const RISK_GOVERNANCE_ENTITIES = [
-  "methodology_profile", "risk_register_record", "risk_assessment_result",
-  "treatment_plan", "verification_result",
-];
-const RISK_GOVERNANCE_ACTIONS = ["create", "update", "delete", "transition", "transition_approval"];
-
-// Per-entity field allowlists for gc_risk_governance create/update DTOs.
-const GOVERNANCE_FIELDS = {
-  methodology_profile: ["name", "description", "family", "status", "metadata"],
-  risk_register_record: ["uid", "title", "description", "scenario_id", "owner", "status", "review_cadence", "next_review_at", "metadata"],
-  risk_assessment_result: ["uid", "title", "description", "scenario_id", "approval_state", "quantitative_value", "qualitative_value", "metadata"],
-  treatment_plan: ["uid", "title", "description", "scenario_id", "risk_register_record_id", "status", "strategy", "owner", "due_at", "metadata"],
-  verification_result: ["uid", "title", "description", "outcome", "status", "assurance_level", "verified_at", "metadata"],
-};
+// gc_test_plan: TC-006 / ADR-044. Top-level planning aggregate at
+// /api/v1/test-plans. Plans are flat (no hierarchy) and carry release
+// coordinates (product / version / build) plus a planned schedule
+// (start_date / end_date). Reads (list, get, get-by-uid) route through
+// gc_query.
+const TEST_PLAN_ACTIONS = ["create", "update", "delete", "transition"];
 
 server.tool(
-  "gc_risk_governance",
-  `Methodology profiles, risk register records, risk assessments, treatment plans, verification results. ` +
-    `Entity: ${RISK_GOVERNANCE_ENTITIES.join(", ")}. Actions: ${RISK_GOVERNANCE_ACTIONS.join(", ")}. ` +
-    `Reads (list, get) route through gc_query. Entity-specific fields are validated against the per-entity allowlist; unknown fields are dropped (NOT forwarded to the backend).`,
+  "gc_test_plan",
+  `Test plan operations (TC-006 / ADR-044). ` +
+    `Actions: ${TEST_PLAN_ACTIONS.join(", ")}. ` +
+    `Reads (list, get, get-by-uid) route through gc_query.`,
   {
-    entity: z.enum(RISK_GOVERNANCE_ENTITIES),
-    action: z.enum(RISK_GOVERNANCE_ACTIONS),
+    action: z.enum(TEST_PLAN_ACTIONS),
     id: z.string().uuid().optional(),
     project: z.string().optional(),
-    status: z.string().optional(),
-    approval_state: z.enum(RISK_ASSESSMENT_APPROVAL_STATUSES).optional(),
-    // Shared entity fields. Per-entity allowlist (GOVERNANCE_FIELDS) gates which
-    // ones reach the backend on create/update, so unrelated MCP control fields
-    // (action, entity, id, project) don't leak into the DTO.
     uid: z.string().optional(),
     name: z.string().optional(),
-    title: z.string().optional(),
     description: z.string().optional(),
-    family: z.enum(METHODOLOGY_FAMILIES).optional(),
-    scenario_id: z.string().uuid().optional(),
-    risk_register_record_id: z.string().uuid().optional(),
-    owner: z.string().optional(),
-    review_cadence: z.string().optional(),
-    next_review_at: z.string().optional(),
-    quantitative_value: z.number().optional(),
-    qualitative_value: z.string().optional(),
-    strategy: z.enum(TREATMENT_STRATEGIES).optional(),
-    due_at: z.string().optional(),
-    outcome: z.string().optional(),
-    assurance_level: z.enum(ASSURANCE_LEVELS).optional(),
-    verified_at: z.string().optional(),
-    metadata: z.record(z.any()).optional(),
+    product: z.string().optional(),
+    version: z.string().optional(),
+    build: z.string().optional(),
+    status: z.enum(TEST_PLAN_STATUSES).optional(),
+    // Dates accepted as ISO-8601 strings (YYYY-MM-DD); Jackson binds them to
+    // LocalDate on the backend.
+    start_date: z.string().optional(),
+    end_date: z.string().optional(),
+    // Partial-update clear flags. Sending clear_*: true overrides any non-null
+    // value for the same field in the same request body.
+    clear_description: z.boolean().optional(),
+    clear_product: z.boolean().optional(),
+    clear_version: z.boolean().optional(),
+    clear_build: z.boolean().optional(),
+    clear_start_date: z.boolean().optional(),
+    clear_end_date: z.boolean().optional(),
   },
   async (args) => {
     try {
-      const data = pick(args, GOVERNANCE_FIELDS[args.entity] ?? []);
-      switch (args.entity) {
-        case "methodology_profile": {
-          switch (args.action) {
-            case "create": return ok(JSON.stringify(await createMethodologyProfile(data, args.project), null, 2));
-            case "update": reqArg(args, "id", "update"); return ok(JSON.stringify(await updateMethodologyProfile(args.id, data, args.project), null, 2));
-            case "delete": reqArg(args, "id", "delete"); await deleteMethodologyProfile(args.id, args.project); return ok("Deleted");
-            default: return err(new Error(`Action '${args.action}' not valid for methodology_profile`));
-          }
+      const TEST_PLAN_CREATE_FIELDS = [
+        "uid", "name", "description", "product", "version", "build",
+        "start_date", "end_date",
+      ];
+      const TEST_PLAN_UPDATE_FIELDS = [
+        "name", "description", "product", "version", "build",
+        "start_date", "end_date",
+        "clear_description", "clear_product", "clear_version", "clear_build",
+        "clear_start_date", "clear_end_date",
+      ];
+      switch (args.action) {
+        case "create": {
+          reqArg(args, "uid", "create");
+          reqArg(args, "name", "create");
+          return ok(JSON.stringify(
+            await createTestPlan(pick(args, TEST_PLAN_CREATE_FIELDS), args.project),
+            null,
+            2,
+          ));
         }
-        case "risk_register_record": {
-          switch (args.action) {
-            case "create": return ok(JSON.stringify(await createRiskRegisterRecord(data, args.project), null, 2));
-            case "update": reqArg(args, "id", "update"); return ok(JSON.stringify(await updateRiskRegisterRecord(args.id, data, args.project), null, 2));
-            case "delete": reqArg(args, "id", "delete"); await deleteRiskRegisterRecord(args.id, args.project); return ok("Deleted");
-            case "transition": reqArg(args, "id", "transition"); reqArg(args, "status", "transition"); return ok(JSON.stringify(await transitionRiskRegisterRecordStatus(args.id, args.status, args.project), null, 2));
-            default: return err(new Error(`Action '${args.action}' not valid for risk_register_record`));
-          }
+        case "update": {
+          reqArg(args, "id", "update");
+          return ok(JSON.stringify(
+            await updateTestPlan(args.id, pick(args, TEST_PLAN_UPDATE_FIELDS), args.project),
+            null,
+            2,
+          ));
         }
-        case "risk_assessment_result": {
-          switch (args.action) {
-            case "create": return ok(JSON.stringify(await createRiskAssessmentResult(data, args.project), null, 2));
-            case "update": reqArg(args, "id", "update"); return ok(JSON.stringify(await updateRiskAssessmentResult(args.id, data, args.project), null, 2));
-            case "delete": reqArg(args, "id", "delete"); await deleteRiskAssessmentResult(args.id, args.project); return ok("Deleted");
-            case "transition_approval": reqArg(args, "id", "transition_approval"); reqArg(args, "approval_state", "transition_approval"); return ok(JSON.stringify(await transitionRiskAssessmentApprovalState(args.id, args.approval_state, args.project), null, 2));
-            default: return err(new Error(`Action '${args.action}' not valid for risk_assessment_result`));
-          }
+        case "delete": {
+          reqArg(args, "id", "delete");
+          await deleteTestPlan(args.id, args.project);
+          return ok("Deleted");
         }
-        case "treatment_plan": {
-          switch (args.action) {
-            case "create": return ok(JSON.stringify(await createTreatmentPlan(data, args.project), null, 2));
-            case "update": reqArg(args, "id", "update"); return ok(JSON.stringify(await updateTreatmentPlan(args.id, data, args.project), null, 2));
-            case "delete": reqArg(args, "id", "delete"); await deleteTreatmentPlan(args.id, args.project); return ok("Deleted");
-            case "transition": reqArg(args, "id", "transition"); reqArg(args, "status", "transition"); return ok(JSON.stringify(await transitionTreatmentPlanStatus(args.id, args.status, args.project), null, 2));
-            default: return err(new Error(`Action '${args.action}' not valid for treatment_plan`));
-          }
+        case "transition": {
+          reqArg(args, "id", "transition");
+          reqArg(args, "status", "transition");
+          return ok(JSON.stringify(
+            await transitionTestPlanStatus(args.id, args.status, args.project),
+            null,
+            2,
+          ));
         }
-        case "verification_result": {
-          switch (args.action) {
-            case "create": return ok(JSON.stringify(await createVerificationResult(data, args.project), null, 2));
-            case "update": reqArg(args, "id", "update"); return ok(JSON.stringify(await updateVerificationResult(args.id, data, args.project), null, 2));
-            case "delete": reqArg(args, "id", "delete"); await deleteVerificationResult(args.id, args.project); return ok("Deleted");
-            default: return err(new Error(`Action '${args.action}' not valid for verification_result`));
-          }
-        }
-        default: return err(new Error(`Unknown entity: ${args.entity}`));
+        default: return err(new Error(`Unknown action: ${args.action}`));
       }
+    } catch (e) { return err(e); }
+  },
+);
+
+// gc_test_suite: TC-007 / ADR-047. Selection container for test cases inside a
+// project, with three population modes (STATIC, REQUIREMENTS_BASED,
+// QUERY_BASED). Mode is set on create and immutable; resolve dispatches on
+// mode at read time. Reads (list, get, get-by-uid) route through gc_query.
+const TEST_SUITE_ACTIONS = [
+  "create",
+  "update",
+  "delete",
+  "resolve",
+  "add_member",
+  "remove_member",
+  "reorder_members",
+  "add_source_requirement",
+  "remove_source_requirement",
+];
+
+server.tool(
+  "gc_test_suite",
+  `Test suite operations (TC-007 / ADR-047). ` +
+    `Actions: ${TEST_SUITE_ACTIONS.join(", ")}. ` +
+    `Reads (list, get, get-by-uid) route through gc_query.`,
+  {
+    action: z.enum(TEST_SUITE_ACTIONS),
+    id: z.string().uuid().optional(),
+    project: z.string().optional(),
+    uid: z.string().optional(),
+    name: z.string().optional(),
+    description: z.string().optional(),
+    population_mode: z.enum(TEST_SUITE_POPULATION_MODES).optional(),
+    // QUERY_BASED criteria (only valid for QUERY_BASED suites — backend
+    // rejects with 422 invalid_test_suite_mode_field on other modes).
+    // Codex pre-push cycle 1 F6: use the test-case enum mirrors (not the
+    // requirements `STATUSES` mirror, which would let "ACTIVE" reach the
+    // backend and miss "APPROVED").
+    criteria_status: z.enum(TEST_CASE_STATUSES).optional(),
+    criteria_type: z.enum(TEST_CASE_TYPES).optional(),
+    criteria_priority: z.enum(TEST_CASE_PRIORITIES).optional(),
+    criteria_format: z.enum(TEST_CASE_FORMATS).optional(),
+    criteria_folder_id: z.string().uuid().optional(),
+    criteria_text_search: z.string().optional(),
+    // Partial-update clear flags for the criteria block.
+    clear_description: z.boolean().optional(),
+    clear_criteria_status: z.boolean().optional(),
+    clear_criteria_type: z.boolean().optional(),
+    clear_criteria_priority: z.boolean().optional(),
+    clear_criteria_format: z.boolean().optional(),
+    clear_criteria_folder_id: z.boolean().optional(),
+    clear_criteria_text_search: z.boolean().optional(),
+    // STATIC-mode member ops.
+    test_case_id: z.string().uuid().optional(),
+    position: z.number().int().nonnegative().optional(),
+    ordered_test_case_ids: z.array(z.string().uuid()).optional(),
+    // REQUIREMENTS_BASED-mode source ops.
+    requirement_id: z.string().uuid().optional(),
+  },
+  async (args) => {
+    try {
+      const TEST_SUITE_CREATE_FIELDS = [
+        "uid", "name", "description", "population_mode",
+        "criteria_status", "criteria_type", "criteria_priority",
+        "criteria_format", "criteria_folder_id", "criteria_text_search",
+      ];
+      const TEST_SUITE_UPDATE_FIELDS = [
+        "name", "description",
+        "criteria_status", "criteria_type", "criteria_priority",
+        "criteria_format", "criteria_folder_id", "criteria_text_search",
+        "clear_description",
+        "clear_criteria_status", "clear_criteria_type", "clear_criteria_priority",
+        "clear_criteria_format", "clear_criteria_folder_id", "clear_criteria_text_search",
+      ];
+      switch (args.action) {
+        case "create": {
+          reqArg(args, "uid", "create");
+          reqArg(args, "name", "create");
+          reqArg(args, "population_mode", "create");
+          return ok(JSON.stringify(
+            await createTestSuite(pick(args, TEST_SUITE_CREATE_FIELDS), args.project),
+            null,
+            2,
+          ));
+        }
+        case "update": {
+          reqArg(args, "id", "update");
+          return ok(JSON.stringify(
+            await updateTestSuite(args.id, pick(args, TEST_SUITE_UPDATE_FIELDS), args.project),
+            null,
+            2,
+          ));
+        }
+        case "delete": {
+          reqArg(args, "id", "delete");
+          await deleteTestSuite(args.id, args.project);
+          return ok("Deleted");
+        }
+        case "resolve": {
+          reqArg(args, "id", "resolve");
+          return ok(JSON.stringify(
+            await resolveTestSuiteTestCases(args.id, args.project),
+            null,
+            2,
+          ));
+        }
+        case "add_member": {
+          reqArg(args, "id", "add_member");
+          reqArg(args, "test_case_id", "add_member");
+          return ok(JSON.stringify(
+            await addTestSuiteMember(
+              args.id,
+              pick(args, ["test_case_id", "position"]),
+              args.project,
+            ),
+            null,
+            2,
+          ));
+        }
+        case "remove_member": {
+          reqArg(args, "id", "remove_member");
+          reqArg(args, "test_case_id", "remove_member");
+          await removeTestSuiteMember(args.id, args.test_case_id, args.project);
+          return ok("Removed");
+        }
+        case "reorder_members": {
+          reqArg(args, "id", "reorder_members");
+          reqArg(args, "ordered_test_case_ids", "reorder_members");
+          return ok(JSON.stringify(
+            await reorderTestSuiteMembers(args.id, args.ordered_test_case_ids, args.project),
+            null,
+            2,
+          ));
+        }
+        case "add_source_requirement": {
+          reqArg(args, "id", "add_source_requirement");
+          reqArg(args, "requirement_id", "add_source_requirement");
+          return ok(JSON.stringify(
+            await addTestSuiteSourceRequirement(
+              args.id,
+              { requirement_id: args.requirement_id },
+              args.project,
+            ),
+            null,
+            2,
+          ));
+        }
+        case "remove_source_requirement": {
+          reqArg(args, "id", "remove_source_requirement");
+          reqArg(args, "requirement_id", "remove_source_requirement");
+          await removeTestSuiteSourceRequirement(args.id, args.requirement_id, args.project);
+          return ok("Removed");
+        }
+        default: return err(new Error(`Unknown action: ${args.action}`));
+      }
+    } catch (e) { return err(e); }
+  },
+);
+
+// gc_test_run: TC-008 / ADR-049. Execution-time record for one pass through
+// a TestSuite against a TestPlan; references plan + suite via FK, snapshots
+// resolved test cases as child rows on create, and owns assigned-tester and
+// per-case result child rows. Reads (list, get, get-by-uid, list testers,
+// list results) route through gc_query.
+const TEST_RUN_ACTIONS = [
+  "create",
+  "update",
+  "delete",
+  "transition",
+  "add_tester",
+  "remove_tester",
+  "update_result",
+  // TC-009 / ADR-050 — runner ops.
+  "list_step_results",
+  "update_step_result",
+  "update_cursor",
+];
+
+server.tool(
+  "gc_test_run",
+  `Test run operations (TC-008 / ADR-049). ` +
+    `Actions: ${TEST_RUN_ACTIONS.join(", ")}. ` +
+    `Reads (list, get, get-by-uid, testers, results) route through gc_query.`,
+  {
+    action: z.enum(TEST_RUN_ACTIONS),
+    id: z.string().uuid().optional(),
+    project: z.string().optional(),
+    uid: z.string().optional(),
+    name: z.string().optional(),
+    test_plan_id: z.string().uuid().optional(),
+    test_suite_id: z.string().uuid().optional(),
+    environment: z.string().optional(),
+    version: z.string().optional(),
+    build: z.string().optional(),
+    status: z.enum(TEST_RUN_STATUSES).optional(),
+    // Timestamps accepted as ISO-8601 strings (e.g. "2026-06-01T00:00:00Z");
+    // Jackson binds them to Instant on the backend.
+    start_at: z.string().optional(),
+    end_at: z.string().optional(),
+    // Partial-update clear flags.
+    clear_environment: z.boolean().optional(),
+    clear_version: z.boolean().optional(),
+    clear_build: z.boolean().optional(),
+    clear_start_at: z.boolean().optional(),
+    clear_end_at: z.boolean().optional(),
+    // Tester ops.
+    tester_name: z.string().optional(),
+    // Per-case result ops.
+    test_case_id: z.string().uuid().optional(),
+    result_status: z.enum(TEST_RUN_CASE_RESULT_STATUSES).optional(),
+    notes: z.string().optional(),
+    clear_notes: z.boolean().optional(),
+    // TC-009 / ADR-050 — runner ops.
+    case_result_id: z.string().uuid().optional(),
+    step_result_id: z.string().uuid().optional(),
+    step_status: z.enum(TEST_RUN_CASE_RESULT_STATUSES).optional(),
+    comment: z.string().optional(),
+    clear_comment: z.boolean().optional(),
+    executed_at: z.string().optional(),
+    clear_executed_at: z.boolean().optional(),
+    current_case_result_id: z.string().uuid().optional(),
+    current_step_result_id: z.string().uuid().optional(),
+    clear_cursor: z.boolean().optional(),
+  },
+  async (args) => {
+    try {
+      const TEST_RUN_CREATE_FIELDS = [
+        "uid", "name", "test_plan_id", "test_suite_id",
+        "environment", "version", "build", "start_at", "end_at",
+      ];
+      const TEST_RUN_UPDATE_FIELDS = [
+        "name", "environment", "version", "build", "start_at", "end_at",
+        "clear_environment", "clear_version", "clear_build",
+        "clear_start_at", "clear_end_at",
+      ];
+      switch (args.action) {
+        case "create": {
+          reqArg(args, "uid", "create");
+          reqArg(args, "name", "create");
+          reqArg(args, "test_plan_id", "create");
+          reqArg(args, "test_suite_id", "create");
+          return ok(JSON.stringify(
+            await createTestRun(pick(args, TEST_RUN_CREATE_FIELDS), args.project),
+            null,
+            2,
+          ));
+        }
+        case "update": {
+          reqArg(args, "id", "update");
+          return ok(JSON.stringify(
+            await updateTestRun(args.id, pick(args, TEST_RUN_UPDATE_FIELDS), args.project),
+            null,
+            2,
+          ));
+        }
+        case "delete": {
+          reqArg(args, "id", "delete");
+          await deleteTestRun(args.id, args.project);
+          return ok("Deleted");
+        }
+        case "transition": {
+          reqArg(args, "id", "transition");
+          reqArg(args, "status", "transition");
+          return ok(JSON.stringify(
+            await transitionTestRunStatus(args.id, args.status, args.project),
+            null,
+            2,
+          ));
+        }
+        case "add_tester": {
+          reqArg(args, "id", "add_tester");
+          reqArg(args, "tester_name", "add_tester");
+          return ok(JSON.stringify(
+            await addTestRunTester(args.id, args.tester_name, args.project),
+            null,
+            2,
+          ));
+        }
+        case "remove_tester": {
+          reqArg(args, "id", "remove_tester");
+          reqArg(args, "tester_name", "remove_tester");
+          await removeTestRunTester(args.id, args.tester_name, args.project);
+          return ok("Removed");
+        }
+        case "update_result": {
+          reqArg(args, "id", "update_result");
+          reqArg(args, "test_case_id", "update_result");
+          reqArg(args, "result_status", "update_result");
+          // Field renaming: the MCP surface exposes `result_status` to keep
+          // it disambiguated from the run-level `status`; the backend DTO
+          // takes `status`. Build the payload explicitly so toCamelCase
+          // does the snake-camel mapping for the rest of the body.
+          const payload = { status: args.result_status };
+          if (args.notes !== undefined) payload.notes = args.notes;
+          if (args.clear_notes !== undefined) payload.clearNotes = args.clear_notes;
+          return ok(JSON.stringify(
+            await updateTestRunCaseResult(args.id, args.test_case_id, payload, args.project),
+            null,
+            2,
+          ));
+        }
+        case "list_step_results": {
+          // TC-009 — explicit MCP surface for the step-result read. The same
+          // GET is reachable via gc_query under the /api/v1/test-runs
+          // allow-list, but exposing it as a discoverable action makes the
+          // runner end-to-end usable without callers having to know the URL
+          // shape.
+          reqArg(args, "id", "list_step_results");
+          reqArg(args, "case_result_id", "list_step_results");
+          return ok(JSON.stringify(
+            await listTestRunStepResults(args.id, args.case_result_id, args.project),
+            null,
+            2,
+          ));
+        }
+        case "update_step_result": {
+          reqArg(args, "id", "update_step_result");
+          reqArg(args, "case_result_id", "update_step_result");
+          reqArg(args, "step_result_id", "update_step_result");
+          reqArg(args, "step_status", "update_step_result");
+          // Same `result_status`-style disambiguation: the runner-side
+          // status is exposed as `step_status` so it never collides with
+          // the run-level enum; the backend DTO field is plain `status`.
+          const payload = { status: args.step_status };
+          if (args.comment !== undefined) payload.comment = args.comment;
+          if (args.clear_comment !== undefined) payload.clearComment = args.clear_comment;
+          if (args.executed_at !== undefined) payload.executedAt = args.executed_at;
+          if (args.clear_executed_at !== undefined) payload.clearExecutedAt = args.clear_executed_at;
+          return ok(JSON.stringify(
+            await updateTestRunStepResult(
+              args.id,
+              args.case_result_id,
+              args.step_result_id,
+              payload,
+              args.project,
+            ),
+            null,
+            2,
+          ));
+        }
+        case "update_cursor": {
+          reqArg(args, "id", "update_cursor");
+          const payload = {};
+          if (args.current_case_result_id !== undefined) payload.currentCaseResultId = args.current_case_result_id;
+          if (args.current_step_result_id !== undefined) payload.currentStepResultId = args.current_step_result_id;
+          if (args.clear_cursor !== undefined) payload.clearCursor = args.clear_cursor;
+          return ok(JSON.stringify(
+            await updateTestRunCursor(args.id, payload, args.project),
+            null,
+            2,
+          ));
+        }
+        default: return err(new Error(`Unknown action: ${args.action}`));
+      }
+    } catch (e) { return err(e); }
+  },
+);
+
+// gc_risk_governance: methodology profile / risk register record / risk
+// assessment result / treatment plan / verification result. Handler logic
+// (Zod shape, per-entity per-action allowlist dispatch via lib.js
+// GOVERNANCE_FIELDS, backend dispatch) lives in gc-risk-governance.js so the
+// adapter is testable in isolation; index.js just registers it.
+server.tool(
+  "gc_risk_governance",
+  GC_RISK_GOVERNANCE_DESCRIPTION,
+  gcRiskGovernanceZodShape,
+  async (args) => {
+    try {
+      const result = await gcRiskGovernanceToolHandler(args);
+      return ok(result === null ? "Deleted" : JSON.stringify(result, null, 2));
     } catch (e) { return err(e); }
   },
 );
@@ -1452,6 +2598,62 @@ if (ADMIN_TOOLS_ENABLED) {
           default: return err(new Error(`Unknown action: ${args.action}`));
         }
       } catch (e) { return err(e); }
+    },
+  );
+
+  // ADR-037 admin-user lifecycle. Registered alongside gc_admin so an
+  // ADMIN-role bearer token can drive user management programmatically.
+  // Humans manage users via the curl/session flow documented in
+  // DEPLOYMENT.md — this PR does not ship a SPA user-management page.
+  //
+  // **`create_user` is intentionally NOT exposed via MCP.** Passing a new
+  // account password as a JSON-RPC tool argument means the password lands in
+  // agent transcripts, client logs, debug output, and any observability trace
+  // that captures tool-call payloads. Create users via the DEPLOYMENT.md
+  // curl flow where the password stays in a mode-600 file. The actions
+  // surfaced here mutate state but never accept password material;
+  // createAdminUser is exported from lib.js for callers that have an
+  // out-of-band secret channel, not for agents.
+  const USER_ADMIN_ACTIONS = [
+    "list_users", "update_role", "update_enabled", "delete_user",
+  ];
+  server.tool(
+    "gc_user_admin",
+    `Admin user lifecycle (ADR-037): list / change-role / enable-disable / delete. ` +
+      `Registered only when GC_MCP_ADMIN=1; backend enforces ROLE_ADMIN. ` +
+      `User CREATION is intentionally not exposed here — see DEPLOYMENT.md. ` +
+      `Actions: ${USER_ADMIN_ACTIONS.join(", ")}.`,
+    {
+      action: z.enum(USER_ADMIN_ACTIONS),
+      username: z.string().optional(),
+      role: z.enum(["USER", "ADMIN"]).optional(),
+      enabled: z.boolean().optional(),
+    },
+    async (args) => {
+      try {
+        switch (args.action) {
+          case "list_users":
+            return ok(JSON.stringify(await listAdminUsers(), null, 2));
+          case "update_role":
+            reqArg(args, "username", "update_role");
+            reqArg(args, "role", "update_role");
+            return ok(JSON.stringify(await updateAdminUserRole(args.username, args.role), null, 2));
+          case "update_enabled":
+            reqArg(args, "username", "update_enabled");
+            if (typeof args.enabled !== "boolean") {
+              return err(new Error("update_enabled requires boolean 'enabled'"));
+            }
+            return ok(JSON.stringify(await updateAdminUserEnabled(args.username, args.enabled), null, 2));
+          case "delete_user":
+            reqArg(args, "username", "delete_user");
+            await deleteAdminUser(args.username);
+            return ok(`Deleted user '${args.username}'`);
+          default:
+            return err(new Error(`Unknown action: ${args.action}`));
+        }
+      } catch (e) {
+        return err(e);
+      }
     },
   );
 }

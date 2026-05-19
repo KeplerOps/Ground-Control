@@ -1,5 +1,6 @@
 package com.keplerops.groundcontrol.integration;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -104,11 +105,13 @@ class SyncIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.issuesUpdated", is(0)));
 
         var sync1 = issueSyncRepository.findByIssueNumber(1);
-        assert sync1.isPresent();
-        assert sync1.get().getIssueTitle().equals("Setup CI");
-        assert sync1.get().getPhase() == 0;
-        assert sync1.get().getPriorityLabel().equals("P0");
-        assert sync1.get().getCrossReferences().contains(2);
+        // AssertJ instead of Java assert so the checks run without -ea
+        // (codex pre-push cycle 3 class finding F3).
+        assertThat(sync1).isPresent();
+        assertThat(sync1.get().getIssueTitle()).isEqualTo("Setup CI");
+        assertThat(sync1.get().getPhase()).isZero();
+        assertThat(sync1.get().getPriorityLabel()).isEqualTo("P0");
+        assertThat(sync1.get().getCrossReferences()).contains(2);
     }
 
     @Test
@@ -137,8 +140,10 @@ class SyncIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.linksUpdated", is(1)));
 
         var updatedLinks = traceabilityLinkRepository.findByRequirementId(requirement.getId());
-        assert updatedLinks.size() == 1;
-        assert updatedLinks.get(0).getArtifactUrl().equals("https://github.com/test/repo/issues/1");
-        assert updatedLinks.get(0).getArtifactTitle().equals("#1 - Setup CI [CLOSED]");
+        // AssertJ instead of Java assert so the checks run without -ea
+        // (codex pre-push cycle 3 class finding F3).
+        assertThat(updatedLinks).hasSize(1);
+        assertThat(updatedLinks.get(0).getArtifactUrl()).isEqualTo("https://github.com/test/repo/issues/1");
+        assertThat(updatedLinks.get(0).getArtifactTitle()).isEqualTo("#1 - Setup CI [CLOSED]");
     }
 }
