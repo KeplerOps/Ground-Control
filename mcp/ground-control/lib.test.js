@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, readFileSync, realpathSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -8940,5 +8940,249 @@ describe("resolveReviewerPrePushCap config validation surfacing", () => {
       () => resolveReviewerPrePushCap(dir, "test_quality_review", 7),
       (err) => err instanceof ReviewerCapConfigError,
     );
+  });
+});
+
+// =============================================================================
+// gc_get_issue_thread (issue #934)
+// =============================================================================
+//
+// runGetIssueThread caches issue body + comments keyed by {repoRoot, issueNumber}.
+// On a hit with matching expected_hash it returns {unchanged: true} without
+// re-fetching from GitHub. Cache miss falls back to a fresh `gh` fetch.
+//
+// Tests here cover input validation, the cache short-circuit, and the
+// hash builder's determinism / sensitivity. The live `gh` fetch path is
+// covered by the end-to-end run (Phase 5) rather than mocked here, matching
+// the existing codebase's "no exec mocking" convention.
+
+describe("hashIssueThreadPayload (issue #934)", () => {
+  it("is deterministic for identical inputs", async () => {
+    const { hashIssueThreadPayload } = await import("./lib.js");
+    const body = "issue body text";
+    const comments = [
+      { id: 1, body: "first" },
+      { id: 2, body: "second" },
+    ];
+    assert.equal(hashIssueThreadPayload(body, comments), hashIssueThreadPayload(body, comments));
+  });
+
+  it("changes when body changes", async () => {
+    const { hashIssueThreadPayload } = await import("./lib.js");
+    const comments = [{ id: 1, body: "x" }];
+    assert.notEqual(hashIssueThreadPayload("a", comments), hashIssueThreadPayload("b", comments));
+  });
+
+  it("changes when a comment body changes", async () => {
+    const { hashIssueThreadPayload } = await import("./lib.js");
+    const a = [{ id: 1, body: "x" }];
+    const b = [{ id: 1, body: "y" }];
+    assert.notEqual(hashIssueThreadPayload("body", a), hashIssueThreadPayload("body", b));
+  });
+
+  it("changes when a comment is appended", async () => {
+    const { hashIssueThreadPayload } = await import("./lib.js");
+    const a = [{ id: 1, body: "x" }];
+    const b = [{ id: 1, body: "x" }, { id: 2, body: "y" }];
+    assert.notEqual(hashIssueThreadPayload("body", a), hashIssueThreadPayload("body", b));
+  });
+
+  it("does not collide between body and comment text at the same position", async () => {
+    const { hashIssueThreadPayload } = await import("./lib.js");
+    // Naive concatenation would make these collide. A delimiter must
+    // separate the body from the comment list.
+    const h1 = hashIssueThreadPayload("ab", [{ id: 1, body: "c" }]);
+    const h2 = hashIssueThreadPayload("a", [{ id: 1, body: "bc" }]);
+    assert.notEqual(h1, h2);
+  });
+
+  it("treats comment id and body as separate fields", async () => {
+    const { hashIssueThreadPayload } = await import("./lib.js");
+    // Without a delimiter between id and body, these could hash the same.
+    const h1 = hashIssueThreadPayload("", [{ id: 12, body: "34" }]);
+    const h2 = hashIssueThreadPayload("", [{ id: 1, body: "234" }]);
+    assert.notEqual(h1, h2);
+  });
+});
+
+describe("runGetIssueThread input validation (issue #934)", () => {
+  it("refuses when repo_path is missing or empty", async () => {
+    const { runGetIssueThread } = await import("./lib.js");
+    const r = await runGetIssueThread({ repoPath: "", issueNumber: 1 });
+    assert.equal(r.ok, false);
+    assert.equal(r.error, "issue_thread_input_invalid");
+  });
+
+  it("refuses when issue_number is not a positive integer", async () => {
+    const { runGetIssueThread } = await import("./lib.js");
+    for (const bad of [0, -1, 1.5, "1", null, undefined]) {
+      const r = await runGetIssueThread({ repoPath: "/tmp", issueNumber: bad });
+      assert.equal(r.ok, false, `bad=${bad}`);
+      assert.equal(r.error, "issue_thread_input_invalid");
+    }
+  });
+
+  it("refuses when repo_path is not a git repository", async () => {
+    const { runGetIssueThread } = await import("./lib.js");
+    const dir = mkdtempSync(join(tmpdir(), "gc-issue-thread-not-git-"));
+    try {
+      const r = await runGetIssueThread({ repoPath: dir, issueNumber: 1 });
+      assert.equal(r.ok, false);
+      // ensureGitRepo failure surfaces as a repo-not-found envelope.
+      assert.equal(r.error, "issue_thread_repo_not_found");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("runGetIssueThread cache short-circuit (issue #934)", () => {
+  function makeGitRepo() {
+    const dir = mkdtempSync(join(tmpdir(), "gc-issue-thread-cache-"));
+    execFileSync("git", ["-C", dir, "init", "-q"]);
+    execFileSync("git", ["-C", dir, "config", "user.email", "t@example.com"]);
+    execFileSync("git", ["-C", dir, "config", "user.name", "t"]);
+    writeFileSync(join(dir, "README"), "x\n");
+    execFileSync("git", ["-C", dir, "add", "README"]);
+    execFileSync("git", ["-C", dir, "commit", "-q", "-m", "init"]);
+    return dir;
+  }
+
+  it("returns {unchanged: true} when expected_hash matches the cached entry", async () => {
+    const {
+      runGetIssueThread,
+      seedIssueThreadCacheForTest,
+      resetIssueThreadCacheForTest,
+    } = await import("./lib.js");
+    const dir = makeGitRepo();
+    try {
+      resetIssueThreadCacheForTest();
+      // Resolve the real path the cache will key on, so the lookup matches.
+      const realDir = realpathSync(dir);
+      seedIssueThreadCacheForTest(realDir, 42, "deadbeef");
+      const r = await runGetIssueThread({
+        repoPath: dir,
+        issueNumber: 42,
+        expectedHash: "deadbeef",
+      });
+      assert.equal(r.ok, true);
+      assert.equal(r.unchanged, true);
+      assert.equal(r.hash, "deadbeef");
+      assert.equal(r.body, null);
+      assert.equal(r.comments, null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns ok=true unchanged=true and does not surface non-cache fields when the cache hits", async () => {
+    const {
+      runGetIssueThread,
+      seedIssueThreadCacheForTest,
+      resetIssueThreadCacheForTest,
+    } = await import("./lib.js");
+    const dir = makeGitRepo();
+    try {
+      resetIssueThreadCacheForTest();
+      const realDir = realpathSync(dir);
+      seedIssueThreadCacheForTest(realDir, 7, "abc123");
+      const r = await runGetIssueThread({
+        repoPath: dir,
+        issueNumber: 7,
+        expectedHash: "abc123",
+      });
+      assert.equal(r.ok, true);
+      assert.equal(r.unchanged, true);
+      // Cache-hit envelope nulls payload fields so callers know to use
+      // their prior state — the cache never serves stale data, only a
+      // confirmation that the hash is still current.
+      assert.equal(r.body, null);
+      assert.equal(r.title, null);
+      assert.equal(r.labels, null);
+      assert.equal(r.state, null);
+      assert.equal(r.url, null);
+      assert.equal(r.comments, null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not short-circuit when expected_hash is null", async () => {
+    // We can't run the fetch path without `gh`, but we can verify the
+    // cache short-circuit is NOT taken when expected_hash is null — the
+    // tool must move past the cache check and attempt a real fetch
+    // (which will fail in the test env, surfacing a fetch error envelope
+    // rather than {unchanged: true}).
+    const {
+      runGetIssueThread,
+      seedIssueThreadCacheForTest,
+      resetIssueThreadCacheForTest,
+    } = await import("./lib.js");
+    const dir = makeGitRepo();
+    try {
+      resetIssueThreadCacheForTest();
+      const realDir = realpathSync(dir);
+      seedIssueThreadCacheForTest(realDir, 9, "cachedhash");
+      const r = await runGetIssueThread({
+        repoPath: dir,
+        issueNumber: 9,
+        expectedHash: null,
+      });
+      // Did NOT short-circuit: either it failed at `gh repo view` (no remote)
+      // or at the issue fetch. Either way, ok=false and not unchanged.
+      assert.equal(r.ok, false);
+      assert.notEqual(r.error, undefined);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not short-circuit when expected_hash does not match the cache", async () => {
+    const {
+      runGetIssueThread,
+      seedIssueThreadCacheForTest,
+      resetIssueThreadCacheForTest,
+    } = await import("./lib.js");
+    const dir = makeGitRepo();
+    try {
+      resetIssueThreadCacheForTest();
+      const realDir = realpathSync(dir);
+      seedIssueThreadCacheForTest(realDir, 11, "cachedhash");
+      const r = await runGetIssueThread({
+        repoPath: dir,
+        issueNumber: 11,
+        expectedHash: "different",
+      });
+      // Hash mismatch falls through to a fresh fetch (which fails in test
+      // env). The cache must NEVER serve a payload it doesn't have a
+      // matching hash for.
+      assert.equal(r.ok, false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not return a cached entry across distinct (repo, issue) keys", async () => {
+    const {
+      runGetIssueThread,
+      seedIssueThreadCacheForTest,
+      resetIssueThreadCacheForTest,
+    } = await import("./lib.js");
+    const dir = makeGitRepo();
+    try {
+      resetIssueThreadCacheForTest();
+      const realDir = realpathSync(dir);
+      // Seed a different issue number under the same repo.
+      seedIssueThreadCacheForTest(realDir, 100, "h100");
+      const r = await runGetIssueThread({
+        repoPath: dir,
+        issueNumber: 101,
+        expectedHash: "h100",
+      });
+      // Hash matches a DIFFERENT issue's cache entry — must NOT short-circuit.
+      assert.equal(r.ok, false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

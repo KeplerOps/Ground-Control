@@ -75,6 +75,7 @@ import {
   runTestQualityReview, TEST_QUALITY_REVIEW_HARD_CAP,
   runPostImplementationPlan,
   runPostDecisionRecord, runPostFinalReport, runRenderPrBody, runLogStepTelemetry,
+  runGetIssueThread,
   runResolveWorkflowRoute,
   DECISION_RECORD_REVIEWERS, DECISION_RECORD_DECISIONS, DECISION_RECORD_CLASSIFICATIONS,
   PR_BODY_CHANGE_CLASSES, PR_REQUIREMENT_RE, EXACT_REQUIREMENT_UID_RE,
@@ -747,6 +748,25 @@ server.tool(
         outputTokens: output_tokens ?? null,
         outcome,
         ts: ts ?? null,
+      }), null, 2));
+    } catch (e) { return err(e); }
+  },
+);
+
+server.tool(
+  "gc_get_issue_thread",
+  "Fetch the GitHub issue body + comments with an in-memory content-addressed cache. First call returns the full payload + a sha256 hash; subsequent calls passing `expected_hash` return `{unchanged: true}` without re-fetching when the hash matches. Cache is keyed by (repo, issue_number) — NOT branch-keyed — and is operational only (the GitHub issue thread remains the durable record per ADR-029). Pass expected_hash=null to force a fresh fetch (use after a posting may have failed or when marker state is uncertain).",
+  {
+    repo_path: z.string(),
+    issue_number: z.number().int().positive(),
+    expected_hash: z.string().min(1).nullable().optional(),
+  },
+  async ({ repo_path, issue_number, expected_hash }) => {
+    try {
+      return ok(JSON.stringify(await runGetIssueThread({
+        repoPath: repo_path,
+        issueNumber: issue_number,
+        expectedHash: expected_hash ?? null,
       }), null, 2));
     } catch (e) { return err(e); }
   },

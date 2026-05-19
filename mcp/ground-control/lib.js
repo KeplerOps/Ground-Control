@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
+import { createHash } from "node:crypto";
 import { load as parseYaml } from "js-yaml";
 
 const execFile = promisify(execFileCb);
@@ -10844,6 +10845,218 @@ export async function runRenderPrBody(input) {
     change_class: input.changeClass,
     body,
     byte_length: Buffer.byteLength(body, "utf8"),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Issue-thread cache (gc_get_issue_thread, issue #934)
+// ---------------------------------------------------------------------------
+//
+// Operational cache for the GitHub issue thread (body + comments).
+// Content-addressed by sha256 over (body, [comment.id, comment.body]...).
+// Cache key is {repoRoot, issueNumber} — explicitly NOT branch-keyed
+// (a branch rename on the same issue does not invalidate the entry).
+//
+// Contract (per the issue #934 preflight binding guardrails):
+// - The GitHub issue thread on github.com is the durable workflow record
+//   (ADR-029). This cache is operational only; correctness never depends
+//   on it. A cache miss falls back to a fresh fetch.
+// - A caller with expected_hash=null always gets a fresh fetch. Callers
+//   use this path after a posting may have failed or when marker state
+//   is uncertain — the cache MUST NOT be used to paper over those cases.
+// - In-memory only. Process restart invalidates the cache, which is
+//   acceptable: subsequent hash-mismatch falls back to a fresh fetch.
+
+const _issueThreadCache = new Map();
+
+function _issueThreadCacheKey(repoRoot, issueNumber) {
+  return `${repoRoot}::${issueNumber}`;
+}
+
+export function hashIssueThreadPayload(body, comments) {
+  const h = createHash("sha256");
+  h.update("body:");
+  h.update(String(body ?? ""));
+  // Use ASCII Record Separator (0x1E) between fields so body text can never
+  // collide with comment text at a field boundary, and so id can never
+  // collide with body inside a single comment entry.
+  for (const c of Array.isArray(comments) ? comments : []) {
+    h.update("\x1e");
+    h.update(String(c?.id ?? ""));
+    h.update("\x1e");
+    h.update(String(c?.body ?? ""));
+  }
+  return h.digest("hex");
+}
+
+// Test-only helpers. Exported so lib.test.js can prime and inspect the cache
+// without driving `gh`. Production callers should not depend on these.
+export function resetIssueThreadCacheForTest() {
+  _issueThreadCache.clear();
+}
+
+export function seedIssueThreadCacheForTest(repoRoot, issueNumber, hash) {
+  _issueThreadCache.set(_issueThreadCacheKey(repoRoot, issueNumber), { hash });
+}
+
+export function peekIssueThreadCacheForTest(repoRoot, issueNumber) {
+  return _issueThreadCache.get(_issueThreadCacheKey(repoRoot, issueNumber)) ?? null;
+}
+
+async function _fetchIssueThread(repoRoot, owner, name, issueNumber) {
+  const { stdout: issueStdout } = await execFile(
+    "gh",
+    ["api", `/repos/${owner}/${name}/issues/${issueNumber}`],
+    { cwd: repoRoot },
+  );
+  const issue = JSON.parse(issueStdout);
+  const { stdout: commentsStdout } = await execFile(
+    "gh",
+    [
+      "api",
+      "--method",
+      "GET",
+      "--paginate",
+      "--slurp",
+      `/repos/${owner}/${name}/issues/${issueNumber}/comments`,
+      "-F",
+      "per_page=100",
+    ],
+    { cwd: repoRoot },
+  );
+  const pages = JSON.parse(commentsStdout);
+  const rawComments =
+    Array.isArray(pages) && pages.length > 0 && Array.isArray(pages[0])
+      ? pages.flat()
+      : Array.isArray(pages)
+        ? pages
+        : [];
+  const comments = rawComments
+    .map((c) => ({
+      id: c?.id ?? null,
+      author: c?.user?.login ?? null,
+      created_at: c?.created_at ?? null,
+      body: typeof c?.body === "string" ? c.body : null,
+    }))
+    .filter((c) => c.body != null);
+  return {
+    body: typeof issue?.body === "string" ? issue.body : "",
+    title: typeof issue?.title === "string" ? issue.title : "",
+    labels: Array.isArray(issue?.labels)
+      ? issue.labels.map((l) => (typeof l?.name === "string" ? l.name : "")).filter((s) => s.length > 0)
+      : [],
+    state: typeof issue?.state === "string" ? issue.state : "unknown",
+    url: typeof issue?.html_url === "string" ? issue.html_url : "",
+    comments,
+  };
+}
+
+export async function runGetIssueThread({ repoPath, issueNumber, expectedHash = null }) {
+  if (typeof repoPath !== "string" || repoPath.length === 0) {
+    return {
+      ok: false,
+      error: "issue_thread_input_invalid",
+      message: "repo_path is required",
+      issue_number: typeof issueNumber === "number" ? issueNumber : null,
+    };
+  }
+  if (
+    typeof issueNumber !== "number" ||
+    !Number.isInteger(issueNumber) ||
+    issueNumber <= 0
+  ) {
+    return {
+      ok: false,
+      error: "issue_thread_input_invalid",
+      message: "issue_number must be a positive integer",
+      issue_number: null,
+    };
+  }
+  if (expectedHash != null && typeof expectedHash !== "string") {
+    return {
+      ok: false,
+      error: "issue_thread_input_invalid",
+      message: "expected_hash must be a string when provided",
+      issue_number: issueNumber,
+    };
+  }
+
+  let repoRoot;
+  try {
+    repoRoot = await ensureGitRepo(repoPath);
+  } catch (e) {
+    return {
+      ok: false,
+      error: "issue_thread_repo_not_found",
+      message: e?.message ?? "ensureGitRepo failed",
+      issue_number: issueNumber,
+    };
+  }
+
+  const cacheKey = _issueThreadCacheKey(repoRoot, issueNumber);
+
+  // Cache short-circuit. Three predicates must hold simultaneously:
+  // (a) caller supplied a non-empty expected_hash,
+  // (b) we have a cached entry for this exact (repoRoot, issueNumber) key,
+  // (c) the cached hash matches the caller's expected_hash.
+  // Any uncertainty falls through to a fresh fetch.
+  if (typeof expectedHash === "string" && expectedHash.length > 0) {
+    const cached = _issueThreadCache.get(cacheKey);
+    if (cached && cached.hash === expectedHash) {
+      return {
+        ok: true,
+        issue_number: issueNumber,
+        unchanged: true,
+        hash: cached.hash,
+        body: null,
+        title: null,
+        labels: null,
+        state: null,
+        url: null,
+        comments: null,
+      };
+    }
+  }
+
+  let owner;
+  let name;
+  try {
+    ({ owner, name } = await getOwnerRepo(repoRoot));
+  } catch (e) {
+    return {
+      ok: false,
+      error: "issue_thread_repo_lookup_failed",
+      message: e?.message ?? "getOwnerRepo failed",
+      issue_number: issueNumber,
+    };
+  }
+
+  let thread;
+  try {
+    thread = await _fetchIssueThread(repoRoot, owner, name, issueNumber);
+  } catch (e) {
+    return {
+      ok: false,
+      error: "issue_thread_fetch_failed",
+      message: e?.message ?? "gh api fetch failed",
+      issue_number: issueNumber,
+    };
+  }
+
+  const hash = hashIssueThreadPayload(thread.body, thread.comments);
+  _issueThreadCache.set(cacheKey, { hash });
+
+  return {
+    ok: true,
+    issue_number: issueNumber,
+    unchanged: false,
+    hash,
+    body: thread.body,
+    title: thread.title,
+    labels: thread.labels,
+    state: thread.state,
+    url: thread.url,
+    comments: thread.comments,
   };
 }
 
