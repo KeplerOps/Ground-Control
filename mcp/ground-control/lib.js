@@ -1,4 +1,4 @@
-import { appendFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { execFile as execFileCb } from "node:child_process";
@@ -10946,10 +10946,34 @@ export async function runRenderPrBody(input) {
 // - In-memory only. Process restart invalidates the cache, which is
 //   acceptable: subsequent hash-mismatch falls back to a fresh fetch.
 
+// LRU cache for issue threads. Capped to bound memory on long-running
+// MCP server processes. A typical /implement run touches one issue
+// thread; concurrent runs across many issues are also reasonable. 256
+// entries leaves generous headroom (each entry is a small hash + key)
+// while preventing unbounded growth. JS Map preserves insertion order,
+// so eviction is "delete the oldest insertion" — promote-on-read keeps
+// recently-accessed entries warm.
+export const ISSUE_THREAD_CACHE_MAX_ENTRIES = 256;
+
 const _issueThreadCache = new Map();
 
 function _issueThreadCacheKey(repoRoot, issueNumber) {
   return `${repoRoot}::${issueNumber}`;
+}
+
+function _evictIssueThreadCacheIfNeeded() {
+  while (_issueThreadCache.size > ISSUE_THREAD_CACHE_MAX_ENTRIES) {
+    const oldestKey = _issueThreadCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    _issueThreadCache.delete(oldestKey);
+  }
+}
+
+function _promoteIssueThreadCacheEntry(cacheKey, entry) {
+  // Re-insert moves the key to the end of insertion order, marking it
+  // as most-recently-used for the eviction policy.
+  _issueThreadCache.delete(cacheKey);
+  _issueThreadCache.set(cacheKey, entry);
 }
 
 export function hashIssueThreadPayload(body, comments) {
@@ -11082,6 +11106,9 @@ export async function runGetIssueThread({ repoPath, issueNumber, expectedHash = 
   if (typeof expectedHash === "string" && expectedHash.length > 0) {
     const cached = _issueThreadCache.get(cacheKey);
     if (cached && cached.hash === expectedHash) {
+      // Promote the entry on a successful hit so LRU eviction picks
+      // off truly cold entries first.
+      _promoteIssueThreadCacheEntry(cacheKey, cached);
       return {
         ok: true,
         issue_number: issueNumber,
@@ -11124,6 +11151,7 @@ export async function runGetIssueThread({ repoPath, issueNumber, expectedHash = 
 
   const hash = hashIssueThreadPayload(thread.body, thread.comments);
   _issueThreadCache.set(cacheKey, { hash });
+  _evictIssueThreadCacheIfNeeded();
 
   return {
     ok: true,
@@ -11615,9 +11643,54 @@ function _sonarAuthHeader(token) {
   return `Basic ${b64}`;
 }
 
+// Predicate for fetch responses that warrant a retry. The intent is to
+// retry only transient server-side conditions (5xx, 429) and let
+// permanent failures (401/403/404/400 bad request) fail fast — retrying
+// an auth failure or a not-found just wastes time.
+//
+// Exported for tests so the retry policy is pinned at the boundary.
+export function shouldRetrySonarStatus(status) {
+  if (typeof status !== "number") return false;
+  if (status === 429) return true;
+  return status >= 500 && status < 600;
+}
+
+const SONAR_RETRY_DELAYS_MS = [1000, 2000, 4000]; // 3 retries; total worst-case ~7s
+
+// Wraps `fetch` with bounded exponential backoff on transient failures.
+// Returns the final fetch Response; throws only when the network itself
+// fails on every attempt. The caller is responsible for interpreting
+// 4xx as the documented error (404 quality-gate not-found, etc.) — this
+// helper does not interpret status, only decides whether to retry.
+async function _sonarFetchWithRetry(url, init) {
+  let lastErr = null;
+  for (let attempt = 0; attempt <= SONAR_RETRY_DELAYS_MS.length; attempt++) {
+    let resp;
+    try {
+      resp = await fetch(url, init);
+    } catch (err) {
+      // Network failure (DNS, connection reset, timeout). Treated as
+      // transient at the same retry tier as 5xx.
+      lastErr = err;
+      if (attempt < SONAR_RETRY_DELAYS_MS.length) {
+        await _sleepMs(SONAR_RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      throw err;
+    }
+    if (!shouldRetrySonarStatus(resp.status)) return resp;
+    if (attempt >= SONAR_RETRY_DELAYS_MS.length) return resp;
+    await _sleepMs(SONAR_RETRY_DELAYS_MS[attempt]);
+  }
+  // Unreachable — loop above always returns or throws. Keep the throw
+  // as a sentinel so a future refactor that breaks the loop semantics
+  // surfaces cleanly.
+  throw lastErr ?? new Error("sonar fetch retry exhausted");
+}
+
 async function _fetchSonarQualityGate({ projectKey, prNumber, token }) {
   const url = `${SONAR_BASE_URL}/api/qualitygates/project_status?projectKey=${encodeURIComponent(projectKey)}&pullRequest=${encodeURIComponent(String(prNumber))}`;
-  const resp = await fetch(url, {
+  const resp = await _sonarFetchWithRetry(url, {
     headers: { Authorization: _sonarAuthHeader(token), Accept: "application/json" },
   });
   if (resp.status === 404) return { available: false };
@@ -11636,7 +11709,7 @@ async function _fetchSonarIssues({ projectKey, prNumber, token, maxPages = 20 })
   const out = [];
   for (let page = 1; page <= maxPages; page++) {
     const url = `${SONAR_BASE_URL}/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&pullRequest=${encodeURIComponent(String(prNumber))}&resolved=false&ps=500&p=${page}`;
-    const resp = await fetch(url, {
+    const resp = await _sonarFetchWithRetry(url, {
       headers: { Authorization: _sonarAuthHeader(token), Accept: "application/json" },
     });
     if (!resp.ok) {
@@ -11656,7 +11729,7 @@ async function _fetchSonarHotspots({ projectKey, prNumber, token, maxPages = 20 
   const out = [];
   for (let page = 1; page <= maxPages; page++) {
     const url = `${SONAR_BASE_URL}/api/hotspots/search?projectKey=${encodeURIComponent(projectKey)}&pullRequest=${encodeURIComponent(String(prNumber))}&status=TO_REVIEW&ps=500&p=${page}`;
-    const resp = await fetch(url, {
+    const resp = await _sonarFetchWithRetry(url, {
       headers: { Authorization: _sonarAuthHeader(token), Accept: "application/json" },
     });
     if (!resp.ok) {
@@ -11671,6 +11744,45 @@ async function _fetchSonarHotspots({ projectKey, prNumber, token, maxPages = 20 
     if (hotspots.length === 0) break;
   }
   return out;
+}
+
+// Cap on .gc/sonar/*.json files retained per repo. Older files are
+// pruned (oldest-mtime first) before each new export is written so a
+// long-running MCP host or a busy /implement cadence does not let the
+// export directory grow unbounded. Exposed for tests.
+export const SONAR_EXPORT_RETENTION = 50;
+
+function _pruneSonarExports(absSonarDir, retention) {
+  // Best-effort prune. Failure to read the directory or stat individual
+  // files is non-fatal — the export itself is operational, not workflow
+  // state, so a broken prune just leaves more files than intended.
+  try {
+    const entries = readdirSync(absSonarDir)
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => {
+        const abs = join(absSonarDir, name);
+        try {
+          return { name, abs, mtimeMs: statSync(abs).mtimeMs };
+        } catch {
+          return null;
+        }
+      })
+      .filter((e) => e !== null);
+    if (entries.length <= retention) return;
+    entries.sort((a, b) => a.mtimeMs - b.mtimeMs);
+    const toDelete = entries.slice(0, entries.length - retention);
+    for (const entry of toDelete) {
+      try {
+        rmSync(entry.abs, { force: true });
+      } catch {
+        // Best-effort. If a delete fails (permissions, concurrent run),
+        // skip and let the next pass clean up.
+      }
+    }
+  } catch {
+    // Directory doesn't exist yet or unreadable. The mkdirSync below
+    // handles creation; nothing to prune.
+  }
 }
 
 function _writeSonarExport(repoRoot, prNumber, payload) {
@@ -11689,6 +11801,11 @@ function _writeSonarExport(repoRoot, prNumber, payload) {
     const realRepo = realpathSync(repoRoot);
     const contain = assertRealpathInRepo(realRepo, abs, "sonar_export_path");
     if (!contain.ok) return null;
+    // Prune older exports before writing to cap directory size. Runs
+    // BEFORE the write so a transient OOM (unlikely) doesn't leave
+    // both the new file and the now-deleted old files in an
+    // intermediate state.
+    _pruneSonarExports(dirname(abs), SONAR_EXPORT_RETENTION);
     writeFileSync(abs, JSON.stringify(payload, null, 2));
     return rel;
   } catch {
