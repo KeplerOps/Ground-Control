@@ -15,6 +15,7 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.Map;
+import java.util.UUID;
 import org.hibernate.envers.Audited;
 import org.hibernate.envers.NotAudited;
 
@@ -79,6 +80,20 @@ public class TestRun extends BaseEntity {
 
     @Column(name = "end_at")
     private Instant endAt;
+
+    // TC-009 / ADR-050 — Pause/resume cursor. Ephemeral UI state, not
+    // historical evidence: @NotAudited keeps Envers from recording one
+    // TestRun revision per step recorded. The columns reference
+    // test_run_case_result(id) / test_run_step_result(id) by identity
+    // only — no FK constraint, no entity mapping. The service layer
+    // null-handles a stale pointer.
+    @NotAudited
+    @Column(name = "current_case_result_id")
+    private UUID currentCaseResultId;
+
+    @NotAudited
+    @Column(name = "current_step_result_id")
+    private UUID currentStepResultId;
 
     protected TestRun() {
         // JPA
@@ -198,5 +213,21 @@ public class TestRun extends BaseEntity {
                     Map.of("start_at", this.startAt.toString(), "end_at", endAt.toString()));
         }
         this.endAt = endAt;
+    }
+
+    public UUID getCurrentCaseResultId() {
+        return currentCaseResultId;
+    }
+
+    public void setCurrentCaseResultId(UUID currentCaseResultId) {
+        this.currentCaseResultId = currentCaseResultId;
+    }
+
+    public UUID getCurrentStepResultId() {
+        return currentStepResultId;
+    }
+
+    public void setCurrentStepResultId(UUID currentStepResultId) {
+        this.currentStepResultId = currentStepResultId;
     }
 }

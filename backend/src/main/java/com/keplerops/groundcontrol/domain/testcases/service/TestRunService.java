@@ -5,16 +5,21 @@ import com.keplerops.groundcontrol.domain.exception.DomainValidationException;
 import com.keplerops.groundcontrol.domain.exception.NotFoundException;
 import com.keplerops.groundcontrol.domain.projects.service.ProjectService;
 import com.keplerops.groundcontrol.domain.testcases.model.TestCase;
+import com.keplerops.groundcontrol.domain.testcases.model.TestCaseStep;
 import com.keplerops.groundcontrol.domain.testcases.model.TestPlan;
 import com.keplerops.groundcontrol.domain.testcases.model.TestRun;
 import com.keplerops.groundcontrol.domain.testcases.model.TestRunCaseResult;
+import com.keplerops.groundcontrol.domain.testcases.model.TestRunStepResult;
 import com.keplerops.groundcontrol.domain.testcases.model.TestRunTesterAssignment;
 import com.keplerops.groundcontrol.domain.testcases.model.TestSuite;
+import com.keplerops.groundcontrol.domain.testcases.repository.TestCaseStepRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestPlanRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestRunCaseResultRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestRunRepository;
+import com.keplerops.groundcontrol.domain.testcases.repository.TestRunStepResultRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestRunTesterAssignmentRepository;
 import com.keplerops.groundcontrol.domain.testcases.repository.TestSuiteRepository;
+import com.keplerops.groundcontrol.domain.testcases.state.TestRunCaseResultStatus;
 import com.keplerops.groundcontrol.domain.testcases.state.TestRunStatus;
 import java.time.Instant;
 import java.util.List;
@@ -49,6 +54,8 @@ public class TestRunService {
     private final TestRunRepository testRunRepository;
     private final TestRunTesterAssignmentRepository testerAssignmentRepository;
     private final TestRunCaseResultRepository caseResultRepository;
+    private final TestRunStepResultRepository stepResultRepository;
+    private final TestCaseStepRepository testCaseStepRepository;
     private final TestPlanRepository testPlanRepository;
     private final TestSuiteRepository testSuiteRepository;
     private final TestSuiteService testSuiteService;
@@ -58,6 +65,8 @@ public class TestRunService {
             TestRunRepository testRunRepository,
             TestRunTesterAssignmentRepository testerAssignmentRepository,
             TestRunCaseResultRepository caseResultRepository,
+            TestRunStepResultRepository stepResultRepository,
+            TestCaseStepRepository testCaseStepRepository,
             TestPlanRepository testPlanRepository,
             TestSuiteRepository testSuiteRepository,
             TestSuiteService testSuiteService,
@@ -65,6 +74,8 @@ public class TestRunService {
         this.testRunRepository = testRunRepository;
         this.testerAssignmentRepository = testerAssignmentRepository;
         this.caseResultRepository = caseResultRepository;
+        this.stepResultRepository = stepResultRepository;
+        this.testCaseStepRepository = testCaseStepRepository;
         this.testPlanRepository = testPlanRepository;
         this.testSuiteRepository = testSuiteRepository;
         this.testSuiteService = testSuiteService;
@@ -101,19 +112,31 @@ public class TestRunService {
         // contract replays the resolved-at-create sequence even after the
         // source suite is edited.
         List<TestCase> resolved = testSuiteService.resolveTestCases(project.getId(), suite.getId());
+        int totalStepResults = 0;
         for (int i = 0; i < resolved.size(); i++) {
             TestCase tc = resolved.get(i);
-            var resultRow = new TestRunCaseResult(run, tc, tc.getUid(), tc.getTitle(), i);
-            caseResultRepository.save(resultRow);
+            var resultRow = caseResultRepository.save(new TestRunCaseResult(run, tc, tc.getUid(), tc.getTitle(), i));
+            // TC-009 / ADR-050 — Snapshot the authored steps so later edits
+            // to TestCaseStep (or a renumbering) never rewrite this run's
+            // historical evidence. Same transactional moment as the
+            // case-result snapshot; cases with zero steps yield zero rows.
+            List<TestCaseStep> steps = testCaseStepRepository.findByTestCaseIdOrderByStepNumberAsc(tc.getId());
+            for (int j = 0; j < steps.size(); j++) {
+                TestCaseStep step = steps.get(j);
+                stepResultRepository.save(new TestRunStepResult(
+                        resultRow, step, step.getStepNumber(), step.getAction(), step.getExpectedResult(), j));
+            }
+            totalStepResults += steps.size();
         }
         log.info(
-                "test_run_created: uid={} project={} id={} plan_id={} suite_id={} snapshot_size={}",
+                "test_run_created: uid={} project={} id={} plan_id={} suite_id={} snapshot_size={} step_snapshot_size={}",
                 run.getUid(),
                 project.getIdentifier(),
                 run.getId(),
                 plan.getId(),
                 suite.getId(),
-                resolved.size());
+                resolved.size(),
+                totalStepResults);
         return run;
     }
 
@@ -165,6 +188,13 @@ public class TestRunService {
         var assignments = testerAssignmentRepository.findByTestRunId(run.getId());
         if (!assignments.isEmpty()) {
             testerAssignmentRepository.deleteAll(assignments);
+        }
+        /* TC-009 / ADR-050. Step-result rows are FK-bound to case results,
+         * so they have to leave the database before their parents.
+         * Querying once at run scope avoids an N+1 per case-result. */
+        var stepResults = stepResultRepository.findByTestRunId(run.getId());
+        if (!stepResults.isEmpty()) {
+            stepResultRepository.deleteAll(stepResults);
         }
         var results = caseResultRepository.findByTestRunId(run.getId());
         if (!results.isEmpty()) {
@@ -223,14 +253,23 @@ public class TestRunService {
     public TestRunCaseResult updateResult(
             UUID projectId, UUID runId, UUID testCaseId, UpdateTestRunCaseResultCommand command) {
         var run = requireRunInProject(projectId, runId);
+        // TC-009 / ADR-050 — Lifecycle guard. Once a run is COMPLETED,
+        // ABORTED, or ARCHIVED, its execution record is closed and must not
+        // be rewritten — the preflight names "terminal/archived runs cannot
+        // be mutated" as a binding service invariant. This guard applies to
+        // every evidence-mutation path (updateResult, updateStepResult,
+        // updateCursor).
+        requireMutableRun(run);
         var result = caseResultRepository
                 .findByTestRunIdAndTestCaseId(run.getId(), testCaseId)
                 .orElseThrow(
                         () -> new NotFoundException("Test case " + testCaseId + " is not part of run " + run.getId()));
-        if (command.status() == null) {
-            throw new DomainValidationException("Status must not be null", "invalid_test_run_case_result", Map.of());
+        // Optional-status protocol: when the caller omits status (null), the
+        // existing value is preserved so a notes-only autosave from the UI
+        // never overwrites a status the tester has flipped concurrently.
+        if (command.status() != null) {
+            result.setStatus(command.status());
         }
-        result.setStatus(command.status());
         result.setNotes(resolveNullable(command.clearNotes(), command.notes(), result.getNotes()));
         result = caseResultRepository.save(result);
         log.info(
@@ -245,6 +284,89 @@ public class TestRunService {
     public List<TestRunCaseResult> listResults(UUID projectId, UUID runId) {
         var run = requireRunInProject(projectId, runId);
         return caseResultRepository.findByTestRunIdOrderBySnapshotOrder(run.getId());
+    }
+
+    // ------------------------------------------------------------------
+    // Per-step results (TC-009 / ADR-050)
+    // ------------------------------------------------------------------
+
+    @Transactional(readOnly = true)
+    public List<TestRunStepResult> listStepResults(UUID projectId, UUID runId, UUID caseResultId) {
+        var run = requireRunInProject(projectId, runId);
+        var caseResult = requireCaseResultInRun(run, caseResultId);
+        return stepResultRepository.findByTestRunCaseResultIdOrderBySnapshotOrder(caseResult.getId());
+    }
+
+    public TestRunStepResult updateStepResult(
+            UUID projectId, UUID runId, UUID caseResultId, UUID stepResultId, UpdateTestRunStepResultCommand command) {
+        var run = requireRunInProject(projectId, runId);
+        requireMutableRun(run);
+        var caseResult = requireCaseResultInRun(run, caseResultId);
+        var stepResult = requireStepResultInCaseResult(caseResult, stepResultId);
+        // Optional-status protocol: null preserves the existing value so a
+        // comment-only autosave can't revert a concurrent status flip.
+        if (command.status() != null) {
+            stepResult.setStatus(command.status());
+        }
+        stepResult.setComment(resolveNullable(command.clearComment(), command.comment(), stepResult.getComment()));
+        // Execution timestamp resolution:
+        //   1. clearExecutedAt=true   → null (explicit reset).
+        //   2. executedAt supplied    → use it.
+        //   3. status is non-NOT_RUN AND existing is null AND no explicit
+        //      value supplied → default to Instant.now() server-side so
+        //      every executed step carries a timestamp regardless of which
+        //      client (SPA, MCP, raw REST) drove the update — TC-009
+        //      requires execution timestamps for every observed step.
+        //   4. otherwise preserve existing.
+        if (command.clearExecutedAt()) {
+            stepResult.setExecutedAt(null);
+        } else if (command.executedAt() != null) {
+            stepResult.setExecutedAt(command.executedAt());
+        } else if (stepResult.getStatus() != TestRunCaseResultStatus.NOT_RUN && stepResult.getExecutedAt() == null) {
+            stepResult.setExecutedAt(Instant.now());
+        }
+        stepResult = stepResultRepository.save(stepResult);
+        // Comment text is user evidence and may carry PII; log identity and
+        // status only, never the raw comment body.
+        log.info(
+                "test_run_step_result_updated: run_id={} case_result_id={} step_result_id={} status={}",
+                run.getId(),
+                caseResult.getId(),
+                stepResult.getId(),
+                stepResult.getStatus());
+        return stepResult;
+    }
+
+    public TestRun updateCursor(UUID projectId, UUID runId, UpdateTestRunCursorCommand command) {
+        var run = requireRunInProject(projectId, runId);
+        requireMutableRun(run);
+        if (command.clearCursor()) {
+            run.setCurrentCaseResultId(null);
+            run.setCurrentStepResultId(null);
+        } else {
+            TestRunCaseResult caseResult = null;
+            if (command.currentCaseResultId() != null) {
+                caseResult = requireCaseResultInRun(run, command.currentCaseResultId());
+            }
+            if (command.currentStepResultId() != null) {
+                if (caseResult == null) {
+                    throw new DomainValidationException(
+                            "current_case_result_id must be set when current_step_result_id is set",
+                            "invalid_test_run_cursor",
+                            Map.of());
+                }
+                requireStepResultInCaseResult(caseResult, command.currentStepResultId());
+            }
+            run.setCurrentCaseResultId(command.currentCaseResultId());
+            run.setCurrentStepResultId(command.currentStepResultId());
+        }
+        run = testRunRepository.save(run);
+        log.info(
+                "test_run_cursor_updated: run_id={} current_case_result_id={} current_step_result_id={}",
+                run.getId(),
+                run.getCurrentCaseResultId(),
+                run.getCurrentStepResultId());
+        return run;
     }
 
     // ------------------------------------------------------------------
@@ -287,6 +409,24 @@ public class TestRunService {
                 .orElseThrow(() -> new NotFoundException("Test run not found: " + id));
     }
 
+    /**
+     * TC-009 / ADR-050 — Reject execution-evidence and cursor writes on
+     * runs whose lifecycle has closed. Once a run is COMPLETED, ABORTED, or
+     * ARCHIVED, its execution record is the historical artifact of that pass
+     * and must not be rewritten. The preflight names this as a binding
+     * service-layer invariant; without the guard, an authenticated project
+     * user can PUT step-result evidence on a closed run after the fact.
+     */
+    private static void requireMutableRun(TestRun run) {
+        var status = run.getStatus();
+        if (status == TestRunStatus.COMPLETED || status == TestRunStatus.ABORTED || status == TestRunStatus.ARCHIVED) {
+            throw new DomainValidationException(
+                    "Test run " + run.getId() + " is " + status + " and cannot be mutated",
+                    "invalid_test_run_state",
+                    Map.of("status", status.name()));
+        }
+    }
+
     private TestPlan requirePlanInProject(UUID projectId, UUID planId) {
         if (planId == null) {
             throw new DomainValidationException("test_plan_id must not be null", "invalid_test_run", Map.of());
@@ -303,5 +443,33 @@ public class TestRunService {
         return testSuiteRepository
                 .findByIdAndProjectId(suiteId, projectId)
                 .orElseThrow(() -> new NotFoundException("Test suite not found: " + suiteId));
+    }
+
+    private TestRunCaseResult requireCaseResultInRun(TestRun run, UUID caseResultId) {
+        if (caseResultId == null) {
+            throw new DomainValidationException(
+                    "case_result_id must not be null", "invalid_test_run_case_result", Map.of());
+        }
+        var caseResult = caseResultRepository
+                .findById(caseResultId)
+                .orElseThrow(() ->
+                        new NotFoundException("Case result " + caseResultId + " is not part of run " + run.getId()));
+        // Concealment: a case result that belongs to a different run is
+        // indistinguishable from a not-found one.
+        if (!caseResult.getTestRun().getId().equals(run.getId())) {
+            throw new NotFoundException("Case result " + caseResultId + " is not part of run " + run.getId());
+        }
+        return caseResult;
+    }
+
+    private TestRunStepResult requireStepResultInCaseResult(TestRunCaseResult caseResult, UUID stepResultId) {
+        if (stepResultId == null) {
+            throw new DomainValidationException(
+                    "step_result_id must not be null", "invalid_test_run_step_result", Map.of());
+        }
+        return stepResultRepository
+                .findByIdAndTestRunCaseResultId(stepResultId, caseResult.getId())
+                .orElseThrow(() -> new NotFoundException(
+                        "Step result " + stepResultId + " is not part of case result " + caseResult.getId()));
     }
 }

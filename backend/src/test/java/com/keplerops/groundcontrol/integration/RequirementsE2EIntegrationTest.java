@@ -508,6 +508,9 @@ class RequirementsE2EIntegrationTest extends BaseIntegrationTest {
                         "112", // V112: create test_run_tester_assignment
                         "113", // V113: create test_run_tester_assignment_audit
                         "114", // V114: create test_run_case_result
-                        "115"); // V115: create test_run_case_result_audit
+                        "115", // V115: create test_run_case_result_audit
+                        "116", // V116: create test_run_step_result (TC-009 / ADR-050)
+                        "117", // V117: create test_run_step_result_audit
+                        "118"); // V118: add test_run cursor columns
     }
 }

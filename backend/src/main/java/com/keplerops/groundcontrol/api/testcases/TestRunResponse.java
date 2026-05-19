@@ -20,6 +20,9 @@ public record TestRunResponse(
         TestRunStatus status,
         Instant startAt,
         Instant endAt,
+        // TC-009 / ADR-050 — pause/resume cursor; nullable in both axes.
+        UUID currentCaseResultId,
+        UUID currentStepResultId,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -39,6 +42,8 @@ public record TestRunResponse(
                 run.getStatus(),
                 run.getStartAt(),
                 run.getEndAt(),
+                run.getCurrentCaseResultId(),
+                run.getCurrentStepResultId(),
                 run.getCreatedAt(),
                 run.getUpdatedAt());
     }

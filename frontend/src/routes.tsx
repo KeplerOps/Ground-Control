@@ -27,6 +27,12 @@ const RequirementDetail = lazy(() =>
 const Requirements = lazy(() =>
   import("@/pages/requirements").then((m) => ({ default: m.Requirements })),
 );
+const TestRuns = lazy(() =>
+  import("@/pages/test-runs").then((m) => ({ default: m.TestRuns })),
+);
+const TestRunRunner = lazy(() =>
+  import("@/pages/test-run-runner").then((m) => ({ default: m.TestRunRunner })),
+);
 
 function PageSkeleton() {
   return (
@@ -85,6 +91,8 @@ export function AppRoutes() {
           <Route index element={<Dashboard />} />
           <Route path="requirements" element={<Requirements />} />
           <Route path="requirements/:id" element={<RequirementDetail />} />
+          <Route path="test-runs" element={<TestRuns />} />
+          <Route path="test-runs/:runId/run" element={<TestRunRunner />} />
           <Route path="graph" element={<Graph />} />
           <Route path="analysis" element={<Analysis />} />
           <Route path="admin" element={<Admin />} />

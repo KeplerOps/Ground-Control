@@ -5,6 +5,8 @@ import com.keplerops.groundcontrol.domain.testcases.service.CreateTestRunCommand
 import com.keplerops.groundcontrol.domain.testcases.service.TestRunService;
 import com.keplerops.groundcontrol.domain.testcases.service.UpdateTestRunCaseResultCommand;
 import com.keplerops.groundcontrol.domain.testcases.service.UpdateTestRunCommand;
+import com.keplerops.groundcontrol.domain.testcases.service.UpdateTestRunCursorCommand;
+import com.keplerops.groundcontrol.domain.testcases.service.UpdateTestRunStepResultCommand;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -176,5 +178,54 @@ public class TestRunController {
                 testCaseId,
                 new UpdateTestRunCaseResultCommand(
                         request.status(), request.notes(), Boolean.TRUE.equals(request.clearNotes()))));
+    }
+
+    // ------------------------------------------------------------------
+    // Per-step results (TC-009 / ADR-050)
+    // ------------------------------------------------------------------
+
+    @GetMapping("/{id}/results/{caseResultId}/steps")
+    public List<TestRunStepResultResponse> listStepResults(
+            @PathVariable UUID id, @PathVariable UUID caseResultId, @RequestParam(required = false) String project) {
+        var projectId = projectService.requireProjectId(project);
+        return testRunService.listStepResults(projectId, id, caseResultId).stream()
+                .map(TestRunStepResultResponse::from)
+                .toList();
+    }
+
+    @PutMapping("/{id}/results/{caseResultId}/steps/{stepResultId}")
+    public TestRunStepResultResponse updateStepResult(
+            @PathVariable UUID id,
+            @PathVariable UUID caseResultId,
+            @PathVariable UUID stepResultId,
+            @Valid @RequestBody UpdateTestRunStepResultRequest request,
+            @RequestParam(required = false) String project) {
+        var projectId = projectService.requireProjectId(project);
+        return TestRunStepResultResponse.from(testRunService.updateStepResult(
+                projectId,
+                id,
+                caseResultId,
+                stepResultId,
+                new UpdateTestRunStepResultCommand(
+                        request.status(),
+                        request.comment(),
+                        Boolean.TRUE.equals(request.clearComment()),
+                        request.executedAt(),
+                        Boolean.TRUE.equals(request.clearExecutedAt()))));
+    }
+
+    @PutMapping("/{id}/cursor")
+    public TestRunResponse updateCursor(
+            @PathVariable UUID id,
+            @Valid @RequestBody UpdateTestRunCursorRequest request,
+            @RequestParam(required = false) String project) {
+        var projectId = projectService.requireProjectId(project);
+        return TestRunResponse.from(testRunService.updateCursor(
+                projectId,
+                id,
+                new UpdateTestRunCursorCommand(
+                        request.currentCaseResultId(),
+                        request.currentStepResultId(),
+                        Boolean.TRUE.equals(request.clearCursor()))));
     }
 }
