@@ -53,6 +53,16 @@ When the subagent returns:
 
 This step file IS the subagent's instruction set. The orchestrator receives the envelope above directly from the subagent.
 
+## Underlying contract (issue #884 / #906)
+
+The cycle wrapper (`gc_test_quality_review_cycle`) wraps the underlying `gc_test_quality_review` tool AND `gc_post_decision_record`. The contract this step is required to honor — enforced by `tools/policy/checks.py::run_test_quality_decision_record_contract`, regression target for issue #884 — is preserved verbatim because the cycle wrapper implements it internally:
+
+- The underlying `gc_test_quality_review` tool returns an envelope including `next_action`. The cycle wrapper forwards `next_action` through its envelope so dispatch is structured, not free-prose.
+- After every cycle the cycle wrapper auto-posts the canonical durable-record marker via `gc_post_decision_record` with `reviewer: "test-quality"` (the enum literal that disjoint marker families anchor on).
+- On a clean cycle the wrapper posts `gc_post_decision_record` with `findings: []` — a clean cycle MUST still post a decision record (issue #884: silent advance is the regression target). The `decision_record_url` in the wrapper's return envelope MUST be non-null before the workflow proceeds.
+- **Success precondition.** Advance to Phase C ONLY after the cycle wrapper's envelope reports the decision-record post returned `ok: true`. On `ok: false` (sensitive-content rejection, body-size cap, `gh` posting failure, network), fix the underlying tooling issue and retry the post — do not advance with the durable marker missing.
+- **Fix findings in the same turn.** When the cycle envelope returns `fix_findings_and_reinvoke` (the subagent reads this as a directive, not as prose to echo), the agent MUST fix the findings in the same agent turn — do not stop, do not echo the findings back as a status report. The whole point of the review is to fix the tests; agents MUST NOT echo findings to the user without fixing them — that is the issue #884 regression in a different shape.
+
 ## Notes
 
 - **Cap source**: the cycle tool reads `workflow.test_quality_review.pre_push_cap` from `.ground-control.yaml`; default 1. The cap is enforced at the MCP layer.
