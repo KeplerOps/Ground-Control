@@ -9765,6 +9765,15 @@ describe("buildAutoFixDecisionFindings (issue #934)", () => {
       typeof out[0].sweep_evidence === "string" && out[0].sweep_evidence.length > 0,
       "sweep_evidence must be non-empty for one-off decision entries",
     );
+    // The synthesized text names the structural sweep mechanism (the cycle
+    // loop itself) rather than a placeholder. This prevents "auto-fix-cycle"
+    // showing up in the durable issue-thread record where it would read as
+    // an opaque magic string to a human reviewer.
+    assert.match(
+      out[0].sweep_evidence,
+      /cycle loop|next.*review|sweep/i,
+      "synthesized sweep_evidence should name the structural mechanism",
+    );
   });
 
   it("falls back to id=F{idx+1} when the source finding has no id", async () => {
@@ -9850,6 +9859,61 @@ describe("summarizeReviewFindings (issue #934)", () => {
     assert.equal(r.top_categories[0].shape, "missing helper");
     assert.equal(r.top_categories[0].instance_count, 3);
     assert.equal(r.top_categories[0].finding_count, 2);
+  });
+});
+
+describe("normalizeReviewCycleNextAction (issue #934 fix-list)", () => {
+  it("maps proceed_clean (underlying tool vocabulary) to the canonical clean action", async () => {
+    const { normalizeReviewCycleNextAction } = await import("./lib.js");
+    assert.equal(
+      normalizeReviewCycleNextAction("proceed_clean", "clean"),
+      "post_clean_decision_record_and_advance_to_phase_c",
+    );
+  });
+
+  it("preserves the canonical clean action when the underlying tool already emits it", async () => {
+    const { normalizeReviewCycleNextAction } = await import("./lib.js");
+    assert.equal(
+      normalizeReviewCycleNextAction(
+        "post_clean_decision_record_and_advance_to_phase_c",
+        "clean",
+      ),
+      "post_clean_decision_record_and_advance_to_phase_c",
+    );
+  });
+
+  it("normalizes capped status to post_summary_and_escalate_to_user", async () => {
+    const { normalizeReviewCycleNextAction } = await import("./lib.js");
+    assert.equal(
+      normalizeReviewCycleNextAction("anything", "capped"),
+      "post_summary_and_escalate_to_user",
+    );
+  });
+
+  it("passes findings actions through unchanged (vocabulary already matches)", async () => {
+    const { normalizeReviewCycleNextAction } = await import("./lib.js");
+    assert.equal(
+      normalizeReviewCycleNextAction("fix_findings_and_reinvoke", "findings"),
+      "fix_findings_and_reinvoke",
+    );
+    assert.equal(
+      normalizeReviewCycleNextAction(
+        "fix_findings_then_summarize_and_escalate",
+        "findings",
+      ),
+      "fix_findings_then_summarize_and_escalate",
+    );
+  });
+
+  it("passes post_failed-status actions through (the wrapper builds its own error envelope)", async () => {
+    const { normalizeReviewCycleNextAction } = await import("./lib.js");
+    // post_failed status: the cycle wrapper returns an error envelope before
+    // this normalizer is reached in practice, but pass-through here keeps
+    // the function pure and prevents surprise.
+    assert.equal(
+      normalizeReviewCycleNextAction("some_post_failure_action", "post_failed"),
+      "some_post_failure_action",
+    );
   });
 });
 

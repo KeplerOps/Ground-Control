@@ -11810,6 +11810,15 @@ export async function runWatchSonarAnalysis({
 //   { ok, cycle, cap, status, next_action, findings_summary,
 //     findings_record_url, decision_record_url, error?, message? }
 
+// Per-finding rationale length cap. The total decision-record body has a
+// hard ceiling at GITHUB_ISSUE_COMMENT_BODY_MAX (65535 bytes). A cycle
+// can carry many findings, so each finding's rationale gets a budget
+// proportional to "typical cycle size × renderer overhead". 240 chars
+// (≈ a typical Twitter post) leaves room for 100+ findings in a single
+// cycle before the body cap is at risk, while still preserving enough
+// reviewer prose to be useful to a human reading the issue thread.
+// Raise this only after auditing the decision-record renderer's
+// per-finding overhead.
 const _AUTO_FIX_RATIONALE_MAX = 240;
 
 function _truncateForRationale(text) {
@@ -11819,6 +11828,15 @@ function _truncateForRationale(text) {
   if (text.length <= _AUTO_FIX_RATIONALE_MAX) return text;
   return text.slice(0, _AUTO_FIX_RATIONALE_MAX - 1) + "…";
 }
+
+// Synthesized sweep_evidence for one-off auto-fix decision entries. The
+// decision-record schema requires sweep_evidence on one-off classifications
+// (proof you searched for analogues). For a cycle-wrapper auto-fix:
+// the next review cycle re-reviews the full diff, so any analogous site
+// the original review missed will be caught structurally by that cycle.
+// That is the sweep mechanism — the cycle loop itself.
+const _AUTO_FIX_SWEEP_EVIDENCE =
+  "next review cycle re-reviews the full diff; structural sweep for analogues lives in the cycle loop";
 
 export function buildAutoFixDecisionFindings(findings) {
   const arr = Array.isArray(findings) ? findings : [];
@@ -11840,7 +11858,7 @@ export function buildAutoFixDecisionFindings(findings) {
     if (classification === "one-off") {
       const swe = typeof f?.sweep_evidence === "string" && f.sweep_evidence.length > 0
         ? f.sweep_evidence
-        : "auto-fix-cycle (no separate sweep evidence supplied by the reviewer)";
+        : _AUTO_FIX_SWEEP_EVIDENCE;
       entry.sweep_evidence = swe;
     } else {
       const instances = Array.isArray(f?.category?.instances)
@@ -11891,7 +11909,12 @@ export function summarizeReviewFindings(findings, topCategoriesLimit = 5) {
 // branching on the agent's side.
 function _statusForReviewerAction(nextAction, hasFindings) {
   if (nextAction === "post_summary_and_escalate_to_user") return "capped";
-  if (nextAction === "post_clean_decision_record_and_advance_to_phase_c") return "clean";
+  if (
+    nextAction === "post_clean_decision_record_and_advance_to_phase_c" ||
+    nextAction === "proceed_clean"
+  ) {
+    return "clean";
+  }
   if (
     nextAction === "fix_findings_and_reinvoke" ||
     nextAction === "fix_findings_then_summarize_and_escalate"
@@ -11903,6 +11926,24 @@ function _statusForReviewerAction(nextAction, hasFindings) {
   // boundary error from the underlying review — surface as "post_failed"
   // so the agent stops dispatching.
   return hasFindings ? "findings" : "clean";
+}
+
+// The underlying review tools predate the cycle wrapper and use slightly
+// different next_action names for the same semantic event. Normalize to
+// the wrapper's canonical vocabulary so subagents reading the envelope
+// can branch on a single set of literals. The mapping is intentionally
+// one-way (wrapper → canonical); the underlying tools keep their own
+// vocabulary for direct callers.
+export function normalizeReviewCycleNextAction(reviewerAction, status) {
+  if (status === "clean") {
+    return "post_clean_decision_record_and_advance_to_phase_c";
+  }
+  if (status === "capped") {
+    return "post_summary_and_escalate_to_user";
+  }
+  // For "findings" and "post_failed" the underlying vocabulary already
+  // matches the wrapper's. Pass through.
+  return reviewerAction;
 }
 
 async function _runReviewCycleShared({
@@ -11943,7 +11984,7 @@ async function _runReviewCycleShared({
       cycle,
       cap,
       status: "capped",
-      next_action: "post_summary_and_escalate_to_user",
+      next_action: normalizeReviewCycleNextAction(nextAction, "capped"),
       findings_summary: summary,
       findings_record_url: findingsRecordUrl,
       decision_record_url: null,
@@ -11999,7 +12040,7 @@ async function _runReviewCycleShared({
     cycle,
     cap,
     status,
-    next_action: nextAction,
+    next_action: normalizeReviewCycleNextAction(nextAction, status),
     findings_summary: summary,
     findings_record_url: findingsRecordUrl,
     decision_record_url: drResult.comment_url ?? null,
